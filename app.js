@@ -91,12 +91,21 @@ const MENU_ROLE = {
 };
 
 // ---------------------------------------------------------------------
-// 1b. PANEL SARAN / AUTOCOMPLETE SANTRI
+// 1b. MESIN PANEL SARAN / AUTOCOMPLETE
 //     Menggantikan <datalist> bawaan browser (tak bisa diberi gaya,
 //     tampil kecil & polos) dengan panel kartu yang senada dengan tema.
+//     Dipakai untuk SEMUA input yang mengacu ke data master: santri,
+//     jenis pelanggaran, bidang, dan kelas — bukan hanya nama santri.
 // ---------------------------------------------------------------------
 
-/** Ambil daftar santri ringkas untuk saran pencarian. */
+/** Cari lokal (client-side) di sebuah array, cocokkan beberapa field, tanpa peduli huruf besar/kecil. */
+function cariLokal(list, q, fields, limit = 30) {
+  const s = (q || '').trim().toLowerCase();
+  const hasil = !s ? list : list.filter(it => fields.some(f => String(it[f] || '').toLowerCase().includes(s)));
+  return hasil.slice(0, limit);
+}
+
+/** Ambil daftar santri ringkas dari Supabase untuk saran pencarian. */
 async function cariSiswaRingkas(s) {
   const bersih = s.trim().replace(/[%,()]/g, '');
   if (bersih.length < 2) return [];
@@ -108,12 +117,21 @@ async function cariSiswaRingkas(s) {
 }
 
 /**
- * Lampirkan panel saran bergaya ke sebuah <input>.
- * @param {HTMLInputElement} input   input pencarian
- * @param {(s:string)=>Promise<any[]>} cariFn  fungsi pencarian, terima kata kunci, kembalikan array {nisn,nama_siswa,kelas}
- * @param {(item:any)=>void} [onPilih] dipanggil saat satu saran dipilih
+ * Lampirkan panel saran bergaya ke sebuah <input>. Mesin generik —
+ * bentuk tampilan tiap baris saran dan cara mengambil datanya bisa diatur.
+ *
+ * @param {HTMLInputElement} input
+ * @param {Object} opsi
+ * @param {(q:string)=>Promise<any[]>|any[]} opsi.ambil  fungsi pencarian: terima kata kunci, kembalikan array data (boleh async)
+ * @param {(item:any)=>{huruf:string,judul:string,sub?:string,warna?:string}} opsi.keItem  bentuk satu baris saran
+ * @param {(item:any)=>string} opsi.keTeks  teks yang ditulis ke input saat sebuah saran dipilih
+ * @param {(item:any)=>void} [opsi.onPilih] dipanggil setelah sebuah saran dipilih
+ * @param {number} [opsi.minKetik=0] jumlah huruf minimum sebelum pencarian jalan (0 = boleh tampil begitu fokus)
+ * @param {string} [opsi.kosong] pesan saat tidak ada hasil
  */
-function lampirkanAutocomplete(input, cariFn, onPilih) {
+function lampirkanSaran(input, opsi) {
+  const { ambil, keItem, keTeks, onPilih, minKetik = 0, kosong = 'Tidak ditemukan.' } = opsi;
+
   const wrap = document.createElement('div');
   wrap.className = 'ac-wrap';
   input.parentNode.insertBefore(wrap, input);
@@ -141,8 +159,7 @@ function lampirkanAutocomplete(input, cariFn, onPilih) {
   }
 
   function pilih(item) {
-    input.value = `${item.nisn} - ${item.nama_siswa} (${item.kelas || '-'})`;
-    input.dataset.picked = item.nisn;
+    input.value = keTeks(item);
     tutup();
     if (onPilih) onPilih(item);
   }
@@ -151,44 +168,43 @@ function lampirkanAutocomplete(input, cariFn, onPilih) {
     items = list;
     activeIdx = -1;
     if (!list.length) {
-      panel.innerHTML = '<div class="ac-empty"><i class="fa-solid fa-user-magnifying-glass"></i> Santri tidak ditemukan.</div>';
+      panel.innerHTML = `<div class="ac-empty"><i class="fa-solid fa-magnifying-glass"></i> ${esc(kosong)}</div>`;
       panel.classList.remove('hidden');
       return;
     }
-    panel.innerHTML = list.map((it, i) => `
-      <div class="ac-item" data-i="${i}">
-        <div class="ac-avatar">${esc((it.nama_siswa || '?').charAt(0).toUpperCase())}</div>
+    panel.innerHTML = list.map((it, i) => {
+      const v = keItem(it);
+      return `<div class="ac-item" data-i="${i}">
+        <div class="ac-avatar${v.warna ? ' ' + v.warna : ''}">${v.huruf}</div>
         <div class="ac-body">
-          <div class="ac-name">${esc(it.nama_siswa)}</div>
-          <div class="ac-meta">${esc(it.nisn)} · ${esc(it.kelas || '-')}</div>
+          <div class="ac-name">${v.judul}</div>
+          ${v.sub ? `<div class="ac-meta">${v.sub}</div>` : ''}
         </div>
         <i class="fa-solid fa-chevron-right"></i>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     panel.classList.remove('hidden');
   }
 
-  const cariDebounced = debounce(async () => {
+  const prosesDebounced = debounce(async () => {
     const s = input.value.trim();
-    if (s.length < 2) { tutup(); return; }
-    panel.innerHTML = '<div class="ac-loading"><i class="fa-solid fa-circle-notch fa-spin"></i>Mencari santri...</div>';
+    if (s.length < minKetik) { tutup(); return; }
+    panel.innerHTML = '<div class="ac-loading"><i class="fa-solid fa-circle-notch fa-spin"></i>Mencari...</div>';
     panel.classList.remove('hidden');
     try {
-      const list = await cariFn(s);
+      const list = await ambil(s);
       render(list);
     } catch (err) {
       panel.innerHTML = '<div class="ac-empty">Gagal memuat data.</div>';
     }
-  }, 250);
+  }, 220);
 
   input.addEventListener('input', () => {
     delete input.dataset.picked;
-    cariDebounced();
+    prosesDebounced();
   });
 
-  input.addEventListener('focus', () => {
-    if (input.value.trim().length >= 2 && !panel.classList.contains('hidden')) return;
-    if (input.value.trim().length >= 2) cariDebounced();
-  });
+  input.addEventListener('focus', () => { prosesDebounced(); });
 
   input.addEventListener('keydown', (e) => {
     if (panel.classList.contains('hidden') || !items.length) return;
@@ -208,6 +224,77 @@ function lampirkanAutocomplete(input, cariFn, onPilih) {
   document.addEventListener('click', (e) => {
     if (!wrap.contains(e.target)) tutup();
   }, true);
+}
+
+/** Saran nama santri (dipakai di form Catat Pelanggaran & Ajukan Izin). */
+function saranSantri(input, onPilih) {
+  lampirkanSaran(input, {
+    ambil: cariSiswaRingkas,
+    minKetik: 2,
+    kosong: 'Santri tidak ditemukan.',
+    keItem: (it) => ({
+      huruf: esc((it.nama_siswa || '?').charAt(0).toUpperCase()),
+      judul: esc(it.nama_siswa),
+      sub: `${esc(it.nisn)} · ${esc(it.kelas || '-')}`
+    }),
+    keTeks: (it) => `${it.nisn} - ${it.nama_siswa} (${it.kelas || '-'})`,
+    onPilih: (it) => { input.dataset.picked = it.nisn; if (onPilih) onPilih(it); }
+  });
+}
+
+/** Saran jenis pelanggaran dari Master Pelanggaran (kode / nama / kategori). */
+function saranPelanggaran(input, onPilih) {
+  const warnaKategori = (k) => k === 'Ringan' ? 'kat-ringan' : k === 'Sedang' ? 'kat-sedang' : 'kat-berat';
+  lampirkanSaran(input, {
+    ambil: async (q) => {
+      const master = await muatMaster();
+      return cariLokal(master, q, ['kode_pelanggaran', 'nama_pelanggaran'], 30);
+    },
+    minKetik: 0,
+    kosong: 'Jenis pelanggaran tidak ditemukan.',
+    keItem: (m) => ({
+      huruf: esc((m.kategori || '?').charAt(0)),
+      warna: warnaKategori(m.kategori),
+      judul: `${esc(m.kode_pelanggaran)} — ${esc(m.nama_pelanggaran)}`,
+      sub: `${esc(m.kategori)} · ${m.bobot_poin} poin · ${esc(m.bidang || '-')}`
+    }),
+    keTeks: (m) => `${m.kode_pelanggaran} — ${m.nama_pelanggaran}`,
+    onPilih: (m) => { input.dataset.kode = m.kode_pelanggaran; if (onPilih) onPilih(m); }
+  });
+}
+
+/** Saran bidang dari Master Bidang. */
+function saranBidang(input, onPilih) {
+  lampirkanSaran(input, {
+    ambil: async (q) => cariLokal(APP.cache.bidang, q, ['nama_bidang'], 30),
+    minKetik: 0,
+    kosong: 'Bidang tidak ditemukan.',
+    keItem: (b) => ({
+      huruf: esc((b.nama_bidang || '?').charAt(0).toUpperCase()),
+      judul: esc(b.nama_bidang)
+    }),
+    keTeks: (b) => b.nama_bidang,
+    onPilih: (b) => { input.dataset.picked = b.nama_bidang; if (onPilih) onPilih(b); }
+  });
+}
+
+/** Saran kelas, diambil dari data santri yang sudah ada (dipakai untuk filter tabel). */
+function saranKelas(input, onPilih) {
+  lampirkanSaran(input, {
+    ambil: async (q) => {
+      const semua = await muatDaftarKelas();
+      const daftar = [{ nilai: '', label: 'Semua Kelas' }, ...semua.map(k => ({ nilai: k, label: k }))];
+      return cariLokal(daftar, q, ['label'], 30);
+    },
+    minKetik: 0,
+    kosong: 'Kelas tidak ditemukan.',
+    keItem: (k) => ({
+      huruf: k.nilai ? esc(k.nilai.charAt(0).toUpperCase()) : '∗',
+      judul: esc(k.label)
+    }),
+    keTeks: (k) => k.label,
+    onPilih: (k) => { input.dataset.picked = k.nilai; if (onPilih) onPilih(k.nilai); }
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -472,10 +559,8 @@ async function viewSiswa() {
     <div class="p-4 flex flex-col sm:flex-row gap-2">
       <input id="cariSiswa" class="form-input sm:max-w-xs" placeholder="Cari nama atau NISN..."
              value="${esc(stSiswa.cari)}">
-      <select id="filterKelas" class="form-input sm:max-w-[180px]">
-        <option value="">Semua Kelas</option>
-        ${kelasList.map(k => `<option ${k===stSiswa.kelas?'selected':''}>${esc(k)}</option>`).join('')}
-      </select>
+      <input id="filterKelas" class="form-input sm:max-w-[180px]" autocomplete="off"
+             placeholder="Semua Kelas" value="${esc(stSiswa.kelas)}">
     </div>
     <div class="table-wrap"><table>
       <thead><tr><th>NISN</th><th>Nama Santri</th><th>Kelas</th><th>Status</th>
@@ -499,8 +584,8 @@ async function viewSiswa() {
   $('cariSiswa').addEventListener('input', debounce(e => {
     stSiswa.cari = e.target.value.trim(); stSiswa.page = 1; viewSiswa();
   }, 300));
-  $('filterKelas').addEventListener('change', e => {
-    stSiswa.kelas = e.target.value; stSiswa.page = 1; viewSiswa();
+  saranKelas($('filterKelas'), (nilai) => {
+    stSiswa.kelas = nilai; stSiswa.page = 1; viewSiswa();
   });
   $('viewRoot').addEventListener('click', e => {
     const d = e.target.closest('[data-detail]');
@@ -619,10 +704,8 @@ async function viewPelanggaran() {
         <option value="">Semua Unit</option>
         ${['Pengasuhan','Madrasah'].map(k=>`<option ${k===stPlg.sumber?'selected':''}>${k}</option>`).join('')}
       </select>
-      <select id="plgKelas" class="form-input">
-        <option value="">Semua Kelas</option>
-        ${kelasList.map(k=>`<option ${k===stPlg.kelas?'selected':''}>${esc(k)}</option>`).join('')}
-      </select>
+      <input id="plgKelas" class="form-input" autocomplete="off"
+             placeholder="Semua Kelas" value="${esc(stPlg.kelas)}">
       <div class="flex gap-1">
         <input id="plgDari" type="date" class="form-input !px-2 text-xs" value="${stPlg.dari}">
         <input id="plgSampai" type="date" class="form-input !px-2 text-xs" value="${stPlg.sampai}">
@@ -653,13 +736,13 @@ async function viewPelanggaran() {
 
   $('plgCari').addEventListener('input', debounce(e => {
     stPlg.cari = e.target.value.trim(); stPlg.page=1; viewPelanggaran(); }, 300));
-  ['plgKategori','plgSumber','plgKelas','plgDari','plgSampai'].forEach(id => {
+  ['plgKategori','plgSumber','plgDari','plgSampai'].forEach(id => {
     $(id).addEventListener('change', e => {
-      const map = { plgKategori:'kategori', plgSumber:'sumber', plgKelas:'kelas',
-                    plgDari:'dari', plgSampai:'sampai' };
+      const map = { plgKategori:'kategori', plgSumber:'sumber', plgDari:'dari', plgSampai:'sampai' };
       stPlg[map[id]] = e.target.value; stPlg.page=1; viewPelanggaran();
     });
   });
+  saranKelas($('plgKelas'), (nilai) => { stPlg.kelas = nilai; stPlg.page = 1; viewPelanggaran(); });
   if ($('btnAddPlg')) $('btnAddPlg').addEventListener('click', modalCatatPelanggaran);
 
   $('viewRoot').addEventListener('click', e => {
@@ -686,12 +769,8 @@ async function modalCatatPelanggaran(prefill) {
       </div>
       <div>
         <label class="form-label">Jenis Pelanggaran</label>
-        <select id="fKode" class="form-input">
-          <option value="">— pilih —</option>
-          ${master.map(m => `<option value="${esc(m.kode_pelanggaran)}" ${p.kode===m.kode_pelanggaran?'selected':''}>
-            ${esc(m.kode_pelanggaran)} — ${esc(m.nama_pelanggaran)} (${esc(m.kategori)}, ${m.bobot_poin} poin)
-          </option>`).join('')}
-        </select>
+        <input id="fKode" class="form-input" autocomplete="off"
+               placeholder="Ketik kode atau nama pelanggaran..." value="${esc(p.kodeLabel||'')}">
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div><label class="form-label">Tanggal</label>
