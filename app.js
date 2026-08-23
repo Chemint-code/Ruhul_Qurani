@@ -91,6 +91,126 @@ const MENU_ROLE = {
 };
 
 // ---------------------------------------------------------------------
+// 1b. PANEL SARAN / AUTOCOMPLETE SANTRI
+//     Menggantikan <datalist> bawaan browser (tak bisa diberi gaya,
+//     tampil kecil & polos) dengan panel kartu yang senada dengan tema.
+// ---------------------------------------------------------------------
+
+/** Ambil daftar santri ringkas untuk saran pencarian. */
+async function cariSiswaRingkas(s) {
+  const bersih = s.trim().replace(/[%,()]/g, '');
+  if (bersih.length < 2) return [];
+  const { data } = await db.from('siswa')
+    .select('nisn,nama_siswa,kelas')
+    .or(`nama_siswa.ilike.%${bersih}%,nisn.ilike.%${bersih}%`)
+    .limit(15);
+  return data || [];
+}
+
+/**
+ * Lampirkan panel saran bergaya ke sebuah <input>.
+ * @param {HTMLInputElement} input   input pencarian
+ * @param {(s:string)=>Promise<any[]>} cariFn  fungsi pencarian, terima kata kunci, kembalikan array {nisn,nama_siswa,kelas}
+ * @param {(item:any)=>void} [onPilih] dipanggil saat satu saran dipilih
+ */
+function lampirkanAutocomplete(input, cariFn, onPilih) {
+  const wrap = document.createElement('div');
+  wrap.className = 'ac-wrap';
+  input.parentNode.insertBefore(wrap, input);
+  wrap.appendChild(input);
+
+  const panel = document.createElement('div');
+  panel.className = 'ac-panel hidden';
+  wrap.appendChild(panel);
+
+  let items = [];
+  let activeIdx = -1;
+
+  function tutup() {
+    panel.classList.add('hidden');
+    panel.innerHTML = '';
+    activeIdx = -1;
+  }
+
+  function tandaiAktif() {
+    panel.querySelectorAll('.ac-item').forEach(el => {
+      el.classList.toggle('active', Number(el.dataset.i) === activeIdx);
+    });
+    const aktif = panel.querySelector('.ac-item.active');
+    if (aktif) aktif.scrollIntoView({ block: 'nearest' });
+  }
+
+  function pilih(item) {
+    input.value = `${item.nisn} - ${item.nama_siswa} (${item.kelas || '-'})`;
+    input.dataset.picked = item.nisn;
+    tutup();
+    if (onPilih) onPilih(item);
+  }
+
+  function render(list) {
+    items = list;
+    activeIdx = -1;
+    if (!list.length) {
+      panel.innerHTML = '<div class="ac-empty"><i class="fa-solid fa-user-magnifying-glass"></i> Santri tidak ditemukan.</div>';
+      panel.classList.remove('hidden');
+      return;
+    }
+    panel.innerHTML = list.map((it, i) => `
+      <div class="ac-item" data-i="${i}">
+        <div class="ac-avatar">${esc((it.nama_siswa || '?').charAt(0).toUpperCase())}</div>
+        <div class="ac-body">
+          <div class="ac-name">${esc(it.nama_siswa)}</div>
+          <div class="ac-meta">${esc(it.nisn)} · ${esc(it.kelas || '-')}</div>
+        </div>
+        <i class="fa-solid fa-chevron-right"></i>
+      </div>`).join('');
+    panel.classList.remove('hidden');
+  }
+
+  const cariDebounced = debounce(async () => {
+    const s = input.value.trim();
+    if (s.length < 2) { tutup(); return; }
+    panel.innerHTML = '<div class="ac-loading"><i class="fa-solid fa-circle-notch fa-spin"></i>Mencari santri...</div>';
+    panel.classList.remove('hidden');
+    try {
+      const list = await cariFn(s);
+      render(list);
+    } catch (err) {
+      panel.innerHTML = '<div class="ac-empty">Gagal memuat data.</div>';
+    }
+  }, 250);
+
+  input.addEventListener('input', () => {
+    delete input.dataset.picked;
+    cariDebounced();
+  });
+
+  input.addEventListener('focus', () => {
+    if (input.value.trim().length >= 2 && !panel.classList.contains('hidden')) return;
+    if (input.value.trim().length >= 2) cariDebounced();
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (panel.classList.contains('hidden') || !items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, items.length - 1); tandaiAktif(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); tandaiAktif(); }
+    else if (e.key === 'Enter') { if (activeIdx >= 0) { e.preventDefault(); pilih(items[activeIdx]); } }
+    else if (e.key === 'Escape') { tutup(); }
+  });
+
+  panel.addEventListener('mousedown', (e) => {
+    const it = e.target.closest('.ac-item');
+    if (!it) return;
+    e.preventDefault();
+    pilih(items[Number(it.dataset.i)]);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!wrap.contains(e.target)) tutup();
+  }, true);
+}
+
+// ---------------------------------------------------------------------
 // 2. AUTENTIKASI
 // ---------------------------------------------------------------------
 $('formLogin').addEventListener('submit', async (e) => {
@@ -561,9 +681,8 @@ async function modalCatatPelanggaran(prefill) {
     html: `<div class="text-left space-y-3">
       <div>
         <label class="form-label">Santri (ketik nama / NISN)</label>
-        <input id="fNisn" class="form-input" list="dlSiswa" autocomplete="off"
+        <input id="fNisn" class="form-input" autocomplete="off"
                placeholder="Ketik minimal 2 huruf..." value="${esc(p.nisnLabel||'')}">
-        <datalist id="dlSiswa"></datalist>
       </div>
       <div>
         <label class="form-label">Jenis Pelanggaran</label>
@@ -581,20 +700,11 @@ async function modalCatatPelanggaran(prefill) {
           <input id="fCatatan" class="form-input" placeholder="opsional" value="${esc(p.catatan||'')}"></div>
       </div></div>`,
     didOpen: () => {
-      const input = document.getElementById('fNisn');
-      const dl = document.getElementById('dlSiswa');
-      input.addEventListener('input', debounce(async () => {
-        const s = input.value.trim().replace(/[%,()]/g,'');
-        if (s.length < 2) return;
-        const { data } = await db.from('siswa')
-          .select('nisn,nama_siswa,kelas')
-          .or(`nama_siswa.ilike.%${s}%,nisn.ilike.%${s}%`).limit(15);
-        dl.innerHTML = (data||[]).map(x =>
-          `<option value="${x.nisn} - ${x.nama_siswa} (${x.kelas||'-'})">`).join('');
-      }, 250));
+      lampirkanAutocomplete(document.getElementById('fNisn'), cariSiswaRingkas);
     },
     preConfirm: async () => {
-      const nisn = document.getElementById('fNisn').value.split(' - ')[0].trim();
+      const fNisn = document.getElementById('fNisn');
+      const nisn = fNisn.dataset.picked || fNisn.value.split(' - ')[0].trim();
       const kode = document.getElementById('fKode').value;
       if (!nisn) { Swal.showValidationMessage('Santri belum dipilih.'); return false; }
       if (!kode) { Swal.showValidationMessage('Jenis pelanggaran belum dipilih.'); return false; }
@@ -606,7 +716,7 @@ async function modalCatatPelanggaran(prefill) {
       };
       const { data, error } = await db.rpc('catat_pelanggaran', payload);
       if (error) { Swal.showValidationMessage(error.message); return false; }
-      return { hasil: data, payload, label: document.getElementById('fNisn').value };
+      return { hasil: data, payload, label: fNisn.value };
     }
   });
 
@@ -724,8 +834,8 @@ async function modalAjukanIzin() {
     showLoaderOnConfirm:true, allowOutsideClick:()=>!Swal.isLoading(),
     html:`<div class="text-left space-y-3">
       <div><label class="form-label">Santri</label>
-        <input id="zNisn" class="form-input" list="dlIzin" autocomplete="off"
-               placeholder="Ketik nama / NISN..."><datalist id="dlIzin"></datalist></div>
+        <input id="zNisn" class="form-input" autocomplete="off"
+               placeholder="Ketik nama / NISN..."></div>
       <div class="grid grid-cols-2 gap-3">
         <div><label class="form-label">Tanggal Mulai</label>
           <input id="zMulai" type="date" class="form-input" value="${hariIni()}"></div>
@@ -740,18 +850,11 @@ async function modalAjukanIzin() {
         <textarea id="zAlasan" class="form-input" rows="2"></textarea></div>
     </div>`,
     didOpen: () => {
-      const inp = document.getElementById('zNisn'), dl = document.getElementById('dlIzin');
-      inp.addEventListener('input', debounce(async () => {
-        const s = inp.value.trim().replace(/[%,()]/g,'');
-        if (s.length < 2) return;
-        const { data } = await db.from('siswa').select('nisn,nama_siswa,kelas')
-          .or(`nama_siswa.ilike.%${s}%,nisn.ilike.%${s}%`).limit(15);
-        dl.innerHTML = (data||[]).map(x =>
-          `<option value="${x.nisn} - ${x.nama_siswa} (${x.kelas||'-'})">`).join('');
-      }, 250));
+      lampirkanAutocomplete(document.getElementById('zNisn'), cariSiswaRingkas);
     },
     preConfirm: async () => {
-      const nisn = document.getElementById('zNisn').value.split(' - ')[0].trim();
+      const zNisn = document.getElementById('zNisn');
+      const nisn = zNisn.dataset.picked || zNisn.value.split(' - ')[0].trim();
       if (!nisn) { Swal.showValidationMessage('Santri belum dipilih.'); return false; }
       const { error } = await db.rpc('ajukan_perizinan', {
         p_nisn: nisn,
