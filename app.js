@@ -11,6 +11,7 @@
 const SUPABASE_URL      = 'https://tuthhfdpcknocebliuhq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1dGhoZmRwY2tub2NlYmxpdWhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4NDY2NzUsImV4cCI6MjEwMjQyMjY3NX0.E3Jq7I5YWdO7zzZvRH6l4F0o-wV-hfCDJbRGHtYOrUk';
 
+
 // Username tanpa "@" akan dilengkapi dengan domain ini saat login.
 const DOMAIN_INTERNAL = 'ruhulqurani.local';
 
@@ -46,7 +47,7 @@ function tgl(v) {
 
 function hariIni() { return new Date().toISOString().slice(0, 10); }
 
-function loading(on) { $('loadingBar').classList.toggle('hidden', !on); }
+function loading(on) { $('bar').classList.toggle('hidden', !on); }
 
 function toast(icon, title) {
   Swal.mixin({ toast:true, position:'top-end', showConfirmButton:false,
@@ -173,14 +174,14 @@ $('navMenu').addEventListener('click', (e) => {
   tutupSidebar();
 });
 
-$('btnToggleSidebar').addEventListener('click', () => {
-  $('sidebar').classList.toggle('-translate-x-full');
-  $('sidebarOverlay').classList.toggle('hidden');
+$('btnBurger').addEventListener('click', () => {
+  $('sidebar').classList.toggle('open');
+  $('scrim').classList.toggle('hidden');
 });
-$('sidebarOverlay').addEventListener('click', tutupSidebar);
+$('scrim').addEventListener('click', tutupSidebar);
 function tutupSidebar() {
-  $('sidebar').classList.add('-translate-x-full');
-  $('sidebarOverlay').classList.add('hidden');
+  $('sidebar').classList.remove('open');
+  $('scrim').classList.add('hidden');
 }
 
 async function navigateTo(view) {
