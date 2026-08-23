@@ -7,7 +7,7 @@
 // 0. KONFIGURASI — isi dua nilai ini
 //    Dashboard > Project Settings > API
 // ---------------------------------------------------------------------
-const SUPABASE_URL      = 'https://tuthhfdpcknocebliuhq.supabase.co/rest/v1/';
+const SUPABASE_URL      = 'https://tuthhfdpcknocebliuhq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1dGhoZmRwY2tub2NlYmxpdWhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4NDY2NzUsImV4cCI6MjEwMjQyMjY3NX0.E3Jq7I5YWdO7zzZvRH6l4F0o-wV-hfCDJbRGHtYOrUk';
 
 // Username tanpa "@" akan dilengkapi dengan domain ini saat login.
