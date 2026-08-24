@@ -2798,10 +2798,9 @@ function bagianPembinaanCetak(pembinaan, perkembangan) {
 
   return blok.map(g => {
     const ket = g.kategori === 'Tanpa Kategori'
-      ? 'Catatan pembinaan tanpa kategori.'
-      : `Total pelanggaran ${g.kategori}: <b>${g.totalPelanggaran} kali</b> ·
-         instrumen tercatat sampai pengulangan ke-${g.tercatat || 0} ·
-         belum diselesaikan: <b>${g.belum}</b>.`;
+      ? 'Tanpa kategori'
+      : `${g.kategori} · ${g.totalPelanggaran} pelanggaran · sampai ke-${g.tercatat || 0}`
+        + (g.belum ? ` · ${g.belum} belum selesai` : '');
 
     const isi = g.baris.length
       ? g.baris.map(r => `<tr>
@@ -2869,7 +2868,7 @@ function bangunLaporanHTML(data) {
       <thead><tr>${['Bulan','Hadir','Izin','Sakit','Alpa'].map(th).join('')}</tr></thead>
       <tbody>${baris(data.presensi, p =>
         `<tr>${td(p.bulan)}${td(p.hadir,'text-align:center')}${td(p.izin,'text-align:center')}${td(p.sakit,'text-align:center')}${td(p.alpa,'text-align:center')}</tr>`,
-        'Masih menunggu data presensi dari Madrasah.', 5)}</tbody>
+        'Belum ada data presensi.', 5)}</tbody>
     </table>
 
     <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">2. Akumulasi Perkembangan</h3>
@@ -2897,12 +2896,6 @@ function bangunLaporanHTML(data) {
     </table>
 
     <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">5. Instrumen Pembinaan</h3>
-    <p style="font-size:10.5px;color:#64748b;margin:6px 0 8px;">
-      Nomor pengulangan dihitung dari jumlah nyata pelanggaran per kategori
-      (tanpa konversi 5x Ringan menjadi 1 Sedang), sehingga selalu sama dengan
-      angka pada bagian 3. Yang ditampilkan: pembinaan terakhir yang sudah
-      diselesaikan beserta seluruh pembinaan yang belum diselesaikan.
-    </p>
     <div style="margin-bottom:24px;">
       ${bagianPembinaanCetak(data.pembinaan, perkembangan)}
     </div>
@@ -2917,9 +2910,48 @@ function bangunLaporanHTML(data) {
   </div>`;
 }
 
+/** Agregasi data_presensi mingguan → baris bulanan untuk lembar cetak. */
+function agregatPresensiCetak(rows) {
+  const namaBulan = ['Januari','Februari','Maret','April','Mei','Juni',
+                     'Juli','Agustus','September','Oktober','November','Desember'];
+  const peta = new Map();
+  (rows || []).forEach(r => {
+    const b = Number(r.bulan) || 0;
+    const th = Number(r.tahun) || 0;
+    if (!b || !th) return;
+    const kunci = `${th}-${String(b).padStart(2, '0')}`;
+    if (!peta.has(kunci)) {
+      peta.set(kunci, {
+        bulan: `${namaBulan[b - 1] || b} ${th}`,
+        hadir: 0, izin: 0, sakit: 0, alpa: 0
+      });
+    }
+    const o = peta.get(kunci);
+    o.hadir += Number(r.hadir) || 0;
+    o.izin  += Number(r.izin)  || 0;
+    o.sakit += Number(r.sakit) || 0;
+    o.alpa  += Number(r.alpa)  || 0;
+  });
+  return [...peta.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([, v]) => v);
+}
+
 async function ambilLaporan(nisn) {
   const { data } = await q(db.rpc('laporan_santri', { p_nisn: nisn }), 'laporan_santri');
   if (!data || !data.siswa) throw new Error('Data laporan santri tidak ditemukan.');
+
+  // RPC lama belum mengembalikan data_presensi — ambil langsung dari tabel bila ada.
+  if (!data.presensi || !data.presensi.length) {
+    try {
+      const { data: rows, error } = await db.from('data_presensi')
+        .select('tahun,bulan,hadir,izin,sakit,alpa,semester')
+        .eq('nisn', String(nisn));
+      if (!error && rows?.length) data.presensi = agregatPresensiCetak(rows);
+    } catch (e) {
+      console.warn('Presensi cetak tidak tersedia:', e?.message || e);
+    }
+  }
   return data;
 }
 
