@@ -1455,6 +1455,8 @@ async function viewPimpinan() {
         backgroundColor:['#0F766E','#B45309'], borderWidth:0 }]},
     options:{ responsive:true, maintainAspectRatio:false, cutout:'66%',
       plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:9}}} }});
+   
+     await panelKinerjaGuru();
 }
 
 // ---------------------------------------------------------------------
@@ -3810,6 +3812,272 @@ function mdEksporRekapPresensi() {
   unduhCsv(`presensi-${r.kelas}-${r.semester}-${r.tahun}.csv`, [kepala, ...baris]);
 }
 
+
+// ---------------------------------------------------------------------
+// 24. PANEL KINERJA GURU — pelengkap Dashboard Pimpinan
+//
+//     CARA PASANG (2 langkah):
+//
+//     1) Tempel SELURUH isi berkas ini di bagian bawah app.js,
+//        tepat SEBELUM blok "22. START".
+//
+//     2) Di dalam fungsi viewPimpinan(), tambahkan satu baris di
+//        paling akhir (setelah buatChart('pBina', ...)):
+//
+//            await panelKinerjaGuru();
+//
+//     Panel menempel sendiri ke #viewRoot, jadi template HTML besar
+//     di viewPimpinan() tidak perlu disentuh sama sekali.
+// ---------------------------------------------------------------------
+
+const stKg = { dari: '', sampai: '', role: '', cari: '', data: null };
+
+/** Rentang bawaan: 90 hari terakhir, sejalan dengan dashboard pimpinan. */
+function rentangKg() {
+  const akhir = new Date();
+  return { dari: kunciTgl(tambahHari(akhir, -89)), sampai: kunciTgl(akhir) };
+}
+
+async function panelKinerjaGuru() {
+  if (!stKg.dari) Object.assign(stKg, rentangKg());
+  const root = $('viewRoot'); if (!root) return;
+  if (!$('kgWrap')) root.insertAdjacentHTML('beforeend', '<div id="kgWrap"></div>');
+  await muatKinerjaGuru();
+}
+
+async function muatKinerjaGuru() {
+  const wrap = $('kgWrap'); if (!wrap) return;
+  wrap.innerHTML = `<section class="card"><div class="card-body"
+    style="text-align:center;color:var(--text-3);padding:34px">
+    <i class="fa-solid fa-circle-notch fa-spin"></i> Menghitung kinerja guru…
+  </div></section>`;
+
+  try {
+    const { data } = await q(db.rpc('dashboard_kinerja_guru_rpc', {
+      p_dari:    stKg.dari,
+      p_sampai:  stKg.sampai,
+      p_role:    stKg.role || null,
+      p_jenjang: 'Semua',
+      p_cari:    stKg.cari || null
+    }), 'kinerja_guru');
+
+    stKg.data = data;
+    gambarKinerjaGuru();
+  } catch (err) {
+    console.error('[kinerja guru]', err);
+    wrap.innerHTML = kartu('Aktivitas & Kinerja Guru', `
+      <div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
+        Data kinerja guru tidak dapat dimuat: <b>${esc(err?.message || String(err))}</b></div>
+      <div class="card-body">
+        <p style="margin:0;font-size:12.5px;color:var(--text-2)">
+          Pastikan berkas <b>monitoring_kinerja_guru.sql</b> sudah dijalankan di
+          Supabase, dan akun yang dipakai ber-role <b>Admin</b> atau
+          <b>Pimpinan</b>.</p>
+      </div>`);
+  }
+}
+
+function gambarKinerjaGuru() {
+  const d = stKg.data || {};
+  const r = d.ringkasan || {};
+  const rank = d.ranking || [];
+  const belum = Number(d.belum_terpetakan || 0);
+
+  const medali = (n) => n === 1 ? 'background:#FBF4DC;color:#8A6D0B'
+    : n === 2 ? 'background:#EEF2F5;color:#5A6C7B'
+    : n === 3 ? 'background:#F7EDE3;color:#8A5A2B'
+    : 'background:#EFF3F6;color:var(--text-3)';
+
+  const baris = rank.map(g => `<tr>
+    <td class="center" style="width:56px">
+      <span class="tag" style="${medali(g.peringkat)};min-width:30px;justify-content:center">
+        ${g.peringkat}</span></td>
+    <td><div class="primary">${esc(g.nama)}</div>
+        <div class="secondary">${esc(g.username || '-')}</div></td>
+    <td><span class="tag ${g.role === 'Admin' ? 'tag-ok'
+        : g.role === 'Pimpinan' ? 'tag-violet' : 'tag-sea'}">${esc(g.role)}</span>
+        ${(g.kelas_binaan || []).length
+          ? `<div class="secondary">${esc(g.kelas_binaan.join(', '))}</div>` : ''}</td>
+    <td class="num center" style="color:var(--maroon)">${angka(g.pelanggaran_dicatat)}</td>
+    <td class="num center" style="color:var(--violet)">${angka(g.pembinaan_selesai)}</td>
+    <td class="num center" style="color:var(--teal)">${angka(g.perizinan_diajukan + g.perizinan_diproses)}</td>
+    <td class="num center">${angka(g.hari_aktif)}</td>
+    <td class="num center" style="font-size:15px;font-weight:700">${angka(g.skor_kinerja)}</td>
+    <td class="secondary nowrap" style="padding-top:14px">
+      ${g.aktivitas_terakhir ? tgl(g.aktivitas_terakhir) : '—'}</td>
+    <td class="right"><button class="btn-link" data-kg="${esc(g.guru_id)}">
+      <i class="fa-solid fa-eye"></i> Detail</button></td>
+  </tr>`).join('') || barisKosong(10, 'Belum ada aktivitas pada rentang ini.',
+    'Ubah rentang tanggal atau periksa pemetaan akun guru.');
+
+  $('kgWrap').innerHTML = `
+    <div class="stats" style="margin-top:4px">
+      ${stat('Guru Beraktivitas', angka(r.guru_beraktivitas || 0), 'fa-solid fa-chalkboard-user',
+        'background:#E7F1F7;color:var(--sea)', 'var(--sea)',
+        `${angka(r.guru_pasif || 0)} akun tanpa aktivitas`)}
+      ${stat('Total Aktivitas', angka(r.total_aktivitas || 0), 'fa-solid fa-bolt',
+        'background:var(--amber-bg);color:var(--amber)', 'var(--amber)',
+        `${angka(r.total_pembinaan_selesai || 0)} pembinaan diselesaikan`)}
+      ${stat('Pelanggaran Dicatat', angka(r.total_pelanggaran || 0), 'fa-solid fa-pen-to-square',
+        'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)',
+        `${angka(r.total_perizinan || 0)} transaksi perizinan`)}
+      ${stat('Skor Rata-rata', angka(r.skor_rata2 || 0), 'fa-solid fa-ranking-star',
+        'background:var(--teal-bg);color:var(--teal)', 'var(--teal)',
+        `Tertinggi ${angka(r.skor_tertinggi || 0)}`)}
+    </div>
+
+    ${kartu('Aktivitas & Kinerja Guru', `
+      ${belum ? `<div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
+        <b>${angka(belum)}</b> aktivitas pada rentang ini belum terpetakan ke akun guru
+        mana pun — biasanya data impor lama tanpa nama penindak.</div>` : ''}
+      <div class="filters">
+        <input id="kgCari" class="input grow" placeholder="Cari nama atau username guru…"
+               value="${esc(stKg.cari)}">
+        <select id="kgRole" class="input">
+          <option value="">Semua Peran</option>
+          ${['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis']
+            .map(x => `<option ${x === stKg.role ? 'selected' : ''}>${x}</option>`).join('')}
+        </select>
+        <input id="kgDari" type="date" class="input" value="${stKg.dari}" title="Tanggal mulai">
+        <input id="kgSampai" type="date" class="input" value="${stKg.sampai}" title="Tanggal akhir">
+        <span class="sep"></span>
+        <button class="btn btn-ghost btn-sm" id="kgReset">
+          <i class="fa-solid fa-rotate-left"></i>90 Hari</button>
+      </div>
+      <div class="tbl"><table>
+        <thead><tr><th class="center">#</th><th>Guru</th><th>Peran</th>
+          <th class="center">Pelanggaran</th><th class="center">Pembinaan</th>
+          <th class="center">Perizinan</th><th class="center">Hari Aktif</th>
+          <th class="center">Skor</th><th>Terakhir</th><th class="right">Aksi</th></tr></thead>
+        <tbody>${baris}</tbody>
+      </table></div>
+      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>`,
+      `<button class="btn btn-ghost btn-sm" id="kgCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>`,
+      `Skor: pembinaan selesai ×${(d.bobot || {}).pembinaan_selesai ?? 10} · `
+      + `pelanggaran ×${(d.bobot || {}).pelanggaran_dicatat ?? 3} · `
+      + `perizinan ×${(d.bobot || {}).perizinan_diajukan ?? 2}. Ranking aktivitas, bukan penilaian mutu.`)}`;
+
+  pasangKinerjaGuru();
+  tandaiTabelBisaGeser();
+}
+
+function pasangKinerjaGuru() {
+  $('kgCari').addEventListener('input', debounce(e => {
+    stKg.cari = e.target.value.trim(); muatKinerjaGuru();
+  }, 320));
+  $('kgRole').addEventListener('change', e => { stKg.role = e.target.value; muatKinerjaGuru(); });
+  $('kgDari').addEventListener('change', e => { stKg.dari = e.target.value; muatKinerjaGuru(); });
+  $('kgSampai').addEventListener('change', e => { stKg.sampai = e.target.value; muatKinerjaGuru(); });
+  $('kgReset').addEventListener('click', () => {
+    Object.assign(stKg, rentangKg(), { role: '', cari: '' });
+    muatKinerjaGuru();
+  });
+
+  $('kgCsv').addEventListener('click', () => {
+    const rows = (stKg.data?.ranking) || [];
+    if (!rows.length) return toast('error', 'Belum ada data untuk diekspor.');
+    unduhCsv(`kinerja-guru-${stKg.dari}_sd_${stKg.sampai}.csv`, [
+      ['Peringkat','Nama','Username','Peran','Kelas Binaan','Pelanggaran Dicatat',
+       'Pembinaan Selesai','Perizinan Diajukan','Perizinan Diproses',
+       'Total Aktivitas','Santri Ditangani','Hari Aktif','Skor','Aktivitas Terakhir'],
+      ...rows.map(g => [g.peringkat, g.nama, g.username, g.role,
+        (g.kelas_binaan || []).join(', '), g.pelanggaran_dicatat, g.pembinaan_selesai,
+        g.perizinan_diajukan, g.perizinan_diproses, g.total_aktivitas,
+        g.santri_ditangani, g.hari_aktif, g.skor_kinerja, g.aktivitas_terakhir || ''])
+    ]);
+  });
+
+  $('kgWrap').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-kg]');
+    if (b) bukaDetailKinerjaGuru(b.dataset.kg);
+  });
+}
+
+async function bukaDetailKinerjaGuru(guruId) {
+  loading(true);
+  try {
+    const { data } = await q(db.rpc('detail_aktivitas_guru', {
+      p_guru_id: guruId, p_dari: stKg.dari, p_sampai: stKg.sampai
+    }), 'detail_guru');
+
+    const g = data.guru || {};
+    const r = data.ringkasan || {};
+
+    const item = (mark, warna, judul, tag, when, catatan) => `
+      <div class="tl-item">
+        <div class="mark" style="${warna}"><i class="fa-solid ${mark}"></i></div>
+        <div class="body">
+          <div class="row1"><p class="ttl" style="margin:0">${judul}</p>${tag || ''}</div>
+          <div class="when">${when}</div>
+          ${catatan ? `<div class="note">${catatan}</div>` : ''}
+        </div></div>`;
+
+    const daftar = {
+      pembinaan: (data.pembinaan || []).map(b => item(
+        'fa-hands-praying', 'background:var(--violet-bg);color:var(--violet)',
+        esc(b.bentuk || 'Pembinaan'),
+        `<span class="tag ${b.status_pembinaan === 'Selesai' ? 'tag-ok' : 'tag-wait'}">${esc(b.status_pembinaan)}</span>`,
+        `${tgl(b.tanggal)} · ${esc(b.nama_siswa)} · ${esc(b.kelas)}`,
+        esc(b.deskripsi_pelanggaran || ''))).join(''),
+
+      pelanggaran: (data.pelanggaran || []).map(p => item(
+        'fa-triangle-exclamation', 'background:var(--maroon-bg);color:var(--maroon)',
+        esc(p.nama_pelanggaran),
+        `<span class="tag ${tagKategori(p.kategori)}">${esc(p.kategori)} · ${p.bobot_pelanggaran}</span>`,
+        `${tgl(p.tanggal)} · ${esc(p.nama_siswa)} · ${esc(p.kelas)}`,
+        esc(p.catatan || ''))).join(''),
+
+      perizinan: (data.perizinan || []).map(z => item(
+        'fa-door-open', 'background:var(--teal-bg);color:var(--teal)',
+        `Izin ${esc(z.jenis_izin || '-')}`,
+        `<span class="tag ${tagIzin(z.status_persetujuan)}">${esc(z.status_persetujuan)}</span>`,
+        `${tgl(z.tanggal)} · ${esc(z.nama_siswa)} · ${esc(z.peran)}`,
+        esc(z.alasan || ''))).join('')
+    };
+
+    const kosongTeks = '<p style="text-align:center;color:var(--text-3);padding:28px 0">Belum ada catatan pada rentang ini.</p>';
+
+    await Swal.fire({
+      width: 820, showConfirmButton: false, showCloseButton: true,
+      html: `<div style="text-align:left">
+        <div class="santri-head">
+          <div>
+            <p class="nm">${esc(g.nama || '-')}</p>
+            <p class="id">${esc(g.username || '-')} · ${esc(g.role || '-')}${
+              (g.kelas_binaan || []).length ? ' · ' + esc(g.kelas_binaan.join(', ')) : ''}</p>
+          </div>
+          <div class="poin-badge">
+            <p class="v">${angka(r.total_aktivitas || 0)}</p>
+            <p class="k">Aktivitas</p>
+          </div>
+        </div>
+
+        <div class="minis" style="padding:16px 0 4px">
+          <div class="mini m"><span>Pelanggaran</span><b>${angka(r.pelanggaran_dicatat || 0)}</b></div>
+          <div class="mini v"><span>Pembinaan</span><b>${angka(r.pembinaan_selesai || 0)}</b></div>
+          <div class="mini t"><span>Perizinan</span><b>${angka((r.perizinan_diajukan || 0) + (r.perizinan_diproses || 0))}</b></div>
+          <div class="mini s"><span>Hari Aktif</span><b>${angka(r.hari_aktif || 0)}</b></div>
+        </div>
+
+        <div class="chips" style="padding:14px 0;border:none">
+          <button class="chip on" data-tab="pembinaan">Pembinaan</button>
+          <button class="chip" data-tab="pelanggaran">Pelanggaran</button>
+          <button class="chip" data-tab="perizinan">Perizinan</button>
+        </div>
+
+        <div class="tl" id="kgTl">${daftar.pembinaan || kosongTeks}</div>
+      </div>`,
+      didOpen: () => {
+        document.querySelectorAll('[data-tab]').forEach(c =>
+          c.addEventListener('click', () => {
+            document.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('on', x === c));
+            $('kgTl').innerHTML = daftar[c.dataset.tab] || kosongTeks;
+          }));
+      }
+    });
+  } catch (err) { fireError(err); }
+  finally { loading(false); }
+}
 // ---------------------------------------------------------------------
 // 22. START — pulihkan sesi bila masih berlaku
 // ---------------------------------------------------------------------
