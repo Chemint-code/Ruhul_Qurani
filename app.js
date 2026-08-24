@@ -196,8 +196,8 @@ const MENU_ROLE = {
   dashboard:   ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
   pimpinan:    ['Admin','Pimpinan'],
   siswa:       ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
-  pelanggaran: ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
-  rekap:       ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
+  pelanggaran: ['Admin'],
+  rekap:       ['Admin'],
   pengasuhan:  ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'], 
   madrasah:    ['Admin','Guru','Walas','Guru BK','Guru Piket','Osis'],
   perizinan:   ['Admin','Guru','Guru Piket','Osis'],
@@ -807,8 +807,8 @@ async function navigateTo(view) {
     if (view === 'dashboard')        await viewDashboard();
     else if (view === 'pimpinan')    await viewPimpinan();
     else if (view === 'siswa')       await viewSiswa();
-    // else if (view === 'pelanggaran') await viewPelanggaran();
-    // else if (view === 'rekap')       await viewRekap();
+    else if (view === 'pelanggaran') await viewPelanggaran();
+    else if (view === 'rekap')       await viewRekap();
     else if (view === 'pengasuhan') await viewPengasuhan();
     else if (view === 'madrasah')    await viewMadrasah();     // <— baris baru
     else if (view === 'perizinan')   await viewPerizinan();
