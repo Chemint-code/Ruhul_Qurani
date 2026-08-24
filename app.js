@@ -199,7 +199,7 @@ const MENU_ROLE = {
   pelanggaran: ['Admin'],
   rekap:       ['Admin'],
   pengasuhan:  ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'], 
-  madrasah:    ['Admin','Guru','Walas','Guru BK','Guru Piket','Osis'],
+  madrasah:    ['Admin','Guru','Walas','Guru BK','Guru Piket','Osis','Ustadz GEN-Z'],
   perizinan:   ['Admin','Guru','Guru Piket'],
   pembinaan:   ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z'],
   rekapbina:   ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z'],
