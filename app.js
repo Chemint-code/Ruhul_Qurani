@@ -198,6 +198,7 @@ const MENU_ROLE = {
   siswa:       ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
   pelanggaran: ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
   rekap:       ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
+  madrasah:    ['Admin','Guru','Walas','Guru BK','Guru Piket','Osis'],
   perizinan:   ['Admin','Guru','Guru Piket','Osis'],
   pembinaan:   ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z'],
   rekapbina:   ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z'],
@@ -211,6 +212,7 @@ const JUDUL = {
   siswa:      { lat:'Santri',              ar:'بيانات الطلاب',      teks:'Profil Santri' },
   pelanggaran:{ lat:'Pelanggaran',         ar:'المخالفات',          teks:'Catatan Pelanggaran' },
   rekap:      { lat:'Rekap',               ar:'حصر المخالفات',      teks:'Rekap Pelanggaran' },
+  madrasah:   { lat:'Madrasah',            ar:'المدرسة',            teks:'Modul Madrasah' },
   perizinan:  { lat:'Perizinan',           ar:'الاستئذان',          teks:'Pusat Perizinan' },
   pembinaan:  { lat:'Pembinaan',           ar:'التوجيه',            teks:'Pembinaan' },
   rekapbina:  { lat:'Rekap Pembinaan',     ar:'حصر التوجيه',        teks:'Rekap Pembinaan' },
@@ -805,6 +807,7 @@ async function navigateTo(view) {
     else if (view === 'siswa')       await viewSiswa();
     else if (view === 'pelanggaran') await viewPelanggaran();
     else if (view === 'rekap')       await viewRekap();
+    else if (view === 'madrasah')    await viewMadrasah();     // <— baris baru
     else if (view === 'perizinan')   await viewPerizinan();
     else if (view === 'pembinaan')   await viewPembinaan();
     else if (view === 'rekapbina')   await viewRekapPembinaan();
@@ -1457,7 +1460,7 @@ async function viewPimpinan() {
 // ---------------------------------------------------------------------
 // 12. PROFIL SANTRI
 // ---------------------------------------------------------------------
-const stSiswa = { page:1, size:25, cari:'', kelas:'', jenjang:'' };
+const stSiswa = { page:1, size:30, cari:'', kelas:'', jenjang:'' };
 
 async function viewSiswa() {
   $('viewRoot').innerHTML = kartu('Daftar Santri', `
@@ -1534,6 +1537,8 @@ function angkatanJenjang(kelas) {
 async function muatTabelSiswa() {
   const all = await muatSiswa();
   const rows = saringSiswa(all);
+  const pages = Math.max(1, Math.ceil(rows.length / stSiswa.size));
+  if (stSiswa.page > pages) stSiswa.page = pages;
   const from = (stSiswa.page - 1) * stSiswa.size;
   const hal = rows.slice(from, from + stSiswa.size);
   $('queryTime').textContent = `santri · ${angka(rows.length)} baris`;
@@ -1648,7 +1653,7 @@ async function resetStatus(nisn) {
 // ---------------------------------------------------------------------
 // 13. CATATAN PELANGGARAN
 // ---------------------------------------------------------------------
-const stPlg = { page:1, size:25, cari:'', kategori:'', bidang:'', kelas:'', dari:'', sampai:'' };
+const stPlg = { page:1, size:30, cari:'', kategori:'', bidang:'', kelas:'', dari:'', sampai:'' };
 
 async function viewPelanggaran() {
   $('viewRoot').innerHTML = kartu('Catatan Pelanggaran', `
@@ -1730,6 +1735,8 @@ function saringPlg(all) {
 
 async function muatTabelPlg() {
   const rows = saringPlg(await muatDetail());
+  const pages = Math.max(1, Math.ceil(rows.length / stPlg.size));
+  if (stPlg.page > pages) stPlg.page = pages;
   const from = (stPlg.page - 1) * stPlg.size;
   const hal = rows.slice(from, from + stPlg.size);
   $('queryTime').textContent = `pelanggaran · ${angka(rows.length)} baris`;
@@ -1868,7 +1875,7 @@ async function arsipkanPelanggaran(idLog) {
 // ---------------------------------------------------------------------
 // 14. REKAP PELANGGARAN (kaskade konversi) — port FilterPelanggaranView
 // ---------------------------------------------------------------------
-const stRekap = { kategori:'Semua', kelas:'', cari:'' };
+const stRekap = { kategori:'Semua', kelas:'', cari:'', page:1, size:30 };
 
 async function viewRekap() {
   const kelasList = await muatDaftarKelas();
@@ -1889,12 +1896,14 @@ async function viewRekap() {
       <span class="sep"></span>
       <button class="btn btn-ghost btn-sm" id="rkCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>
     </div>
-    <div id="rkHasil"><div style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</div></div>`,
+    <div id="rkHasil"><div style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</div></div>
+    <div id="pgRk"></div>`,
     `<span class="tag tag-sea">${esc(labelKonteks())}</span>`);
 
-  $('rkCari').addEventListener('input', debounce(e => { stRekap.cari = e.target.value.trim(); gambarRekap(); }, 250));
-  $('rkKategori').addEventListener('change', e => { stRekap.kategori = e.target.value; gambarRekap(); });
-  $('rkKelas').addEventListener('change', e => { stRekap.kelas = e.target.value; gambarRekap(); });
+  $('rkCari').addEventListener('input', debounce(e => {
+    stRekap.cari = e.target.value.trim(); stRekap.page = 1; gambarRekap(); }, 250));
+  $('rkKategori').addEventListener('change', e => { stRekap.kategori = e.target.value; stRekap.page = 1; gambarRekap(); });
+  $('rkKelas').addEventListener('change', e => { stRekap.kelas = e.target.value; stRekap.page = 1; gambarRekap(); });
   $('rkCsv').addEventListener('click', async () => {
     const rows = await hitungRekap();
     const baris = [['NISN','Nama','Kelas','Kategori','Catatan','Jumlah']];
@@ -1904,7 +1913,12 @@ async function viewRekap() {
 
   onKlik((e) => {
     const d = e.target.closest('[data-detail]');
-    if (d) bukaDetailSantri(d.dataset.detail);
+    if (d) return bukaDetailSantri(d.dataset.detail);
+    const p = e.target.closest('[data-pg]');
+    if (p && p.dataset.pg.startsWith('rk:')) {
+      stRekap.page = Number(p.dataset.pg.split(':')[1]); gambarRekap();
+      $('rkHasil').scrollIntoView({ block:'start', behavior:'smooth' });
+    }
   });
 
   await gambarRekap();
@@ -1925,13 +1939,21 @@ async function hitungRekap() {
 
 async function gambarRekap() {
   const rows = await hitungRekap();
+  const pages = Math.max(1, Math.ceil(rows.length / stRekap.size));
+  if (stRekap.page > pages) stRekap.page = pages;
+  const from = (stRekap.page - 1) * stRekap.size;
+  const hal = rows.slice(from, from + stRekap.size);
+
   $('queryTime').textContent = `rekap · ${angka(rows.length)} santri`;
+
   if (!rows.length) {
     $('rkHasil').innerHTML = kosong('Tidak ditemukan santri dengan kriteria ini.',
       'Ubah kategori, kelas, atau kata kunci pencarian.', 'fa-layer-group');
+    $('pgRk').innerHTML = '';
     return;
   }
-  $('rkHasil').innerHTML = rows.map(s => {
+
+  $('rkHasil').innerHTML = hal.map(s => {
     const total = s.daftar.reduce((a,d) => a + d.jumlah, 0);
     return `<div class="rekap-item">
       <div class="hd">
@@ -1950,12 +1972,12 @@ async function gambarRekap() {
         <span class="qty">${d.jumlah}x</span></li>`).join('')}</ul>
     </div>`;
   }).join('');
+
+  $('pgRk').innerHTML = pager('rk', stRekap.page, rows.length, stRekap.size);
 }
 
 // ---------------------------------------------------------------------
-// 15. PUSAT PERIZINAN
-// ---------------------------------------------------------------------
-const stIzin = { filter:'Semua', cari:'' };
+const stIzin = { filter:'Semua', cari:'', page:1, size:30 };
 
 async function viewPerizinan() {
   $('viewRoot').innerHTML = kartu('Pusat Perizinan', `
@@ -1966,19 +1988,28 @@ async function viewPerizinan() {
     <div class="filters">
       <input id="izCari" class="input grow" placeholder="Cari santri, kelas, atau alasan…" value="${esc(stIzin.cari)}">
     </div>
-    <div id="izinGrid" class="izin-grid"><div style="padding:20px;color:var(--text-3)">Memuat…</div></div>`,
+    <div id="izinGrid" class="izin-grid"><div style="padding:20px;color:var(--text-3)">Memuat…</div></div>
+    <div id="pgIzin"></div>`,
     bolehTulis() && bolehPerizinan()
       ? `<button class="btn btn-primary btn-sm" id="btnAddIzin"><i class="fa-solid fa-plus"></i>Ajukan Izin</button>` : '');
 
-  $('izCari').addEventListener('input', debounce(e => { stIzin.cari = e.target.value.trim(); gambarIzin(); }, 250));
+  $('izCari').addEventListener('input', debounce(e => {
+    stIzin.cari = e.target.value.trim(); stIzin.page = 1; gambarIzin(); }, 250));
   $('btnAddIzin')?.addEventListener('click', modalAjukanIzin);
 
   onKlik(async (e) => {
     const f = e.target.closest('[data-filter]');
     if (f) {
-      stIzin.filter = f.dataset.filter;
+      stIzin.filter = f.dataset.filter; stIzin.page = 1;
       document.querySelectorAll('#izinChips .chip').forEach(c => c.classList.toggle('on', c === f));
       return gambarIzin();
+    }
+    const p = e.target.closest('[data-pg]');
+    if (p && p.dataset.pg.startsWith('izin:')) {
+      stIzin.page = Number(p.dataset.pg.split(':')[1]);
+      gambarIzin();
+      $('izinGrid').scrollIntoView({ block:'start', behavior:'smooth' });
+      return;
     }
     const i = e.target.closest('[data-izin]');
     if (i) return prosesIzin(...i.dataset.izin.split('|'));
@@ -1999,10 +2030,15 @@ async function gambarIzin() {
     rows = rows.filter(p => [p.siswa?.nama_siswa, p.siswa?.kelas, p.alasan, p.nisn, p.pemberi_izin]
       .some(v => String(v||'').toLowerCase().includes(k)));
   }
-  rows = rows.slice(0, 120);
+
+  const pages = Math.max(1, Math.ceil(rows.length / stIzin.size));
+  if (stIzin.page > pages) stIzin.page = pages;
+  const from = (stIzin.page - 1) * stIzin.size;
+  const hal = rows.slice(from, from + stIzin.size);
+
   $('queryTime').textContent = `perizinan · ${angka(rows.length)} kartu`;
 
-  $('izinGrid').innerHTML = rows.map(p => `
+  $('izinGrid').innerHTML = hal.map(p => `
     <div class="izin">
       <div class="top">
         <div style="min-width:0">
@@ -2027,26 +2063,8 @@ async function gambarIzin() {
             <i class="fa-solid fa-check"></i>Sesuai Waktu</button>
         </div>` : ''}
     </div>`).join('') || kosong('Tidak ada data perizinan.', 'Ubah filter status atau kata kunci.', 'fa-door-open');
-}
 
-async function prosesIzin(id, keputusan) {
-  const r = await Swal.fire({
-    icon: keputusan === 'Sesuai Waktu' ? 'question' : 'warning',
-    title: `Tandai "${keputusan}"?`,
-    text: keputusan === 'Sesuai Waktu'
-      ? 'Status keberadaan santri akan diperbarui otomatis.'
-      : 'Catatan izin akan ditandai Telat Balik.',
-    showCancelButton:true, confirmButtonText:'Ya', cancelButtonText:'Batal',
-    confirmButtonColor: keputusan === 'Sesuai Waktu' ? '#14618B' : '#B45309' });
-  if (!r.isConfirmed) return;
-  sync('saving', 'Menyimpan status izin…');
-  try {
-    await q(db.rpc('proses_perizinan', { p_id_izin:id, p_keputusan:keputusan }), 'proses_izin');
-    cacheHapus('izin','siswa');
-    sync('done', 'Status izin tersimpan');
-    toast('success', 'Status izin: ' + keputusan);
-    gambarIzin(); refreshBadgePending();
-  } catch (err) { sync('warn', 'Gagal menyimpan'); fireError(err); }
+  $('pgIzin').innerHTML = rows.length ? pager('izin', stIzin.page, rows.length, stIzin.size) : '';
 }
 
 async function modalAjukanIzin() {
@@ -2105,10 +2123,7 @@ async function refreshBadgePending() {
   b.title = count ? `${count} izin menunggu keterangan balik` : '';
 }
 
-// ---------------------------------------------------------------------
-// 16. PEMBINAAN
-// ---------------------------------------------------------------------
-const stBina = { cari:'', kategori:'', status:'', mode:'' };
+const stBina = { cari:'', kategori:'', status:'', mode:'', page:1, size:30 };
 
 function tahapBina(r) { const t = Number(r.pengulangan_ke) || 0; return t > 0 ? t : null; }
 function bentukBina(r) { return r.instrumen_pembinaan || r.bentuk_pembinaan || '-'; }
@@ -2133,17 +2148,28 @@ async function viewPembinaan() {
           <th>Bentuk Pembinaan</th><th>Pemicu</th><th>Mode</th><th>Status</th><th class="right">Aksi</th></tr></thead>
         <tbody id="tbBina"><tr><td colspan="9" style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</td></tr></tbody>
       </table></div>
-      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>`,
+      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
+      <div id="pgBina"></div>`,
       `<button class="btn btn-ghost btn-sm" id="pbRefresh"><i class="fa-solid fa-rotate"></i>Muat Ulang</button>`,
       'Instrumen ditentukan otomatis oleh aturan Master Pembinaan di backend.')}`;
 
   ['pbKategori','pbStatus','pbMode'].forEach(id => $(id).addEventListener('change', e => {
-    stBina[{pbKategori:'kategori', pbStatus:'status', pbMode:'mode'}[id]] = e.target.value; gambarBina();
+    stBina[{pbKategori:'kategori', pbStatus:'status', pbMode:'mode'}[id]] = e.target.value;
+    stBina.page = 1; gambarBina();
   }));
-  $('pbCari').addEventListener('input', debounce(e => { stBina.cari = e.target.value.trim(); gambarBina(); }, 220));
-  $('pbRefresh').addEventListener('click', async () => { cacheHapus('pembinaan'); await gambarBina(); toast('success','Data dimuat ulang'); });
+  $('pbCari').addEventListener('input', debounce(e => {
+    stBina.cari = e.target.value.trim(); stBina.page = 1; gambarBina(); }, 220));
+  $('pbRefresh').addEventListener('click', async () => {
+    cacheHapus('pembinaan'); await gambarBina(); toast('success','Data dimuat ulang'); });
 
   onKlik(async (e) => {
+    const p = e.target.closest('[data-pg]');
+    if (p && p.dataset.pg.startsWith('bina:')) {
+      stBina.page = Number(p.dataset.pg.split(':')[1]);
+      await gambarBina();
+      $('tbBina').scrollIntoView({ block:'start', behavior:'smooth' });
+      return;
+    }
     const b = e.target.closest('[data-pbn]');
     if (!b) return;
     const [id, status] = b.dataset.pbn.split('|');
@@ -2185,11 +2211,16 @@ async function gambarBina() {
       .some(v => String(v||'').toLowerCase().includes(k));
   });
 
+  const pages = Math.max(1, Math.ceil(rows.length / stBina.size));
+  if (stBina.page > pages) stBina.page = pages;
+  const from = (stBina.page - 1) * stBina.size;
+  const hal = rows.slice(from, from + stBina.size);
+
   $('pbCount').textContent = `${angka(rows.length)} dari ${angka(semua.length)} data`;
   $('queryTime').textContent = `pembinaan · ${angka(rows.length)} baris`;
 
   const editable = bolehPembinaan() && !hanyaBaca();
-  $('tbBina').innerHTML = rows.map(r => {
+  $('tbBina').innerHTML = hal.map(r => {
     const selesai = String(r.status_pembinaan) === 'Selesai';
     const tahap = tahapBina(r);
     const catatan = String(r.catatan_pembinaan || '').trim();
@@ -2214,6 +2245,7 @@ async function gambarBina() {
     </tr>`;
   }).join('') || barisKosong(9, 'Belum ada instruksi pembinaan.', 'Pembinaan otomatis terbentuk setelah pelanggaran dicatat.');
 
+  $('pgBina').innerHTML = rows.length ? pager('bina', stBina.page, rows.length, stBina.size) : '';
   tandaiTabelBisaGeser();
 }
 
@@ -2237,11 +2269,6 @@ async function ubahStatusPembinaan(id, status, btn) {
   } catch (err) { selesaiSimpan(btn, asli, false); fireError(err); }
 }
 
-// ---------------------------------------------------------------------
-// 17. REKAP PEMBINAAN PER SANTRI
-// ---------------------------------------------------------------------
-const stRb = { cari:'', kelas:'', status:'' };
-
 function rekapPembinaanPerSantri(rows) {
   const peta = new Map();
   rows.forEach(r => {
@@ -2262,6 +2289,11 @@ function rekapPembinaanPerSantri(rows) {
   });
   return [...peta.values()].sort((a,b) => (b.proses - a.proses) || (b.total - a.total));
 }
+
+// ---------------------------------------------------------------------
+// 17. REKAP PEMBINAAN PER SANTRI
+// ---------------------------------------------------------------------
+const stRb = { cari:'', kelas:'', status:'', page:1, size:30 };
 
 async function viewRekapPembinaan() {
   const kelasList = await muatDaftarKelas();
@@ -2285,12 +2317,25 @@ async function viewRekapPembinaan() {
           <th>Instrumen Terakhir</th></tr></thead>
         <tbody id="tbRb"><tr><td colspan="8" style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</td></tr></tbody>
       </table></div>
-      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>`)}`;
+      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
+      <div id="pgRb"></div>`)}`;
 
-  $('rbCari').addEventListener('input', debounce(e => { stRb.cari = e.target.value.trim(); gambarRb(); }, 220));
-  $('rbKelas').addEventListener('change', e => { stRb.kelas = e.target.value; gambarRb(); });
-  $('rbStatus').addEventListener('change', e => { stRb.status = e.target.value; gambarRb(); });
-  onKlik(e => { const d = e.target.closest('[data-detail]'); if (d) bukaDetailSantri(d.dataset.detail); });
+  $('rbCari').addEventListener('input', debounce(e => {
+    stRb.cari = e.target.value.trim(); stRb.page = 1; gambarRb(); }, 220));
+  $('rbKelas').addEventListener('change', e => { stRb.kelas = e.target.value; stRb.page = 1; gambarRb(); });
+  $('rbStatus').addEventListener('change', e => { stRb.status = e.target.value; stRb.page = 1; gambarRb(); });
+
+  onKlik(e => {
+    const p = e.target.closest('[data-pg]');
+    if (p && p.dataset.pg.startsWith('rb:')) {
+      stRb.page = Number(p.dataset.pg.split(':')[1]);
+      gambarRb();
+      $('tbRb').scrollIntoView({ block:'start', behavior:'smooth' });
+      return;
+    }
+    const d = e.target.closest('[data-detail]');
+    if (d) bukaDetailSantri(d.dataset.detail);
+  });
 
   await gambarRb();
 }
@@ -2315,8 +2360,13 @@ async function gambarRb() {
       .some(v => String(v||'').toLowerCase().includes(k));
   });
 
+  const pages = Math.max(1, Math.ceil(rows.length / stRb.size));
+  if (stRb.page > pages) stRb.page = pages;
+  const from = (stRb.page - 1) * stRb.size;
+  const hal = rows.slice(from, from + stRb.size);
+
   $('rbCount').textContent = `${angka(rows.length)} santri`;
-  $('tbRb').innerHTML = rows.map(r => `<tr>
+  $('tbRb').innerHTML = hal.map(r => `<tr>
     <td><div class="primary">${esc(r.nama)}</div>
         <div class="secondary">${esc(r.nisn)}</div></td>
     <td class="nowrap">${esc(r.kelas)}</td>
@@ -2336,6 +2386,7 @@ async function gambarRb() {
     </td>
   </tr>`).join('') || barisKosong(8, 'Belum ada rekap pembinaan.', 'Rekap terbentuk otomatis dari instruksi pembinaan.');
 
+  $('pgRb').innerHTML = rows.length ? pager('rb', stRb.page, rows.length, stRb.size) : '';
   tandaiTabelBisaGeser();
 }
 
@@ -2627,6 +2678,151 @@ async function viewPengguna() {
 // ---------------------------------------------------------------------
 // 20. LAPORAN TERPADU: CETAK & UNDUH PDF
 // ---------------------------------------------------------------------
+/**
+ * Hitung pengulangan NYATA per kategori dari riwayat perkembangan santri.
+ *
+ * Penting: fungsi ini TIDAK memakai kaskade konversi (5x Ringan -> 1 Sedang).
+ * Angka "ke-N" di sini adalah jumlah sebenarnya pelanggaran pada kategori
+ * tersebut, diurutkan dari tanggal terlama, sehingga selalu sinkron dengan
+ * bagian "3. Riwayat Perkembangan" pada lembar cetak yang sama.
+ */
+function urutanPengulanganKategori(perkembangan) {
+  const urut = (perkembangan || []).slice().sort((a, b) =>
+    String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal))));
+
+  const total = { Ringan:0, Sedang:0, Berat:0 };
+  const peta  = { Ringan:new Map(), Sedang:new Map(), Berat:new Map() };
+
+  urut.forEach(p => {
+    const kat = ['Ringan','Sedang','Berat'].includes(p.kategori) ? p.kategori : null;
+    if (!kat) return;
+    total[kat]++;
+    peta[kat].set(total[kat], {
+      tanggal: kunciTgl(p.tanggal),
+      judul: p.judul || p.nama_pelanggaran || '-'
+    });
+  });
+
+  return { total, peta };
+}
+
+/**
+ * Susun instrumen pembinaan untuk lembar cetak.
+ *
+ * Aturan tampilan per kategori:
+ *   1. Nomor pengulangan diambil dari kolom pengulangan_ke; bila kosong
+ *      (data lama), nomor dihitung ulang dari urutan tanggal pembinaan.
+ *   2. Yang dicetak hanya: pembinaan TERAKHIR yang berstatus Selesai,
+ *      lalu SELURUH pembinaan yang belum diselesaikan.
+ *   3. Sisanya (pembinaan lama yang sudah tertutup) tidak ikut dicetak.
+ * Contoh: Ringan 10 kali, selesai s/d ke-7 -> tercetak ke-7, 8, 9, 10.
+ */
+function susunPembinaanCetak(pembinaan, perkembangan) {
+  const KAT = ['Ringan','Sedang','Berat'];
+  const { total, peta } = urutanPengulanganKategori(perkembangan);
+
+  const bucket = new Map();
+  KAT.forEach(k => bucket.set(k, []));
+  (pembinaan || []).forEach(b => {
+    const k = String(b.kategori || '').trim();
+    const kunci = KAT.includes(k) ? k : 'Tanpa Kategori';
+    if (!bucket.has(kunci)) bucket.set(kunci, []);
+    bucket.get(kunci).push(b);
+  });
+
+  const hasil = [];
+
+  bucket.forEach((list, kat) => {
+    const jumlahPelanggaran = total[kat] || 0;
+    if (!list.length && !jumlahPelanggaran) return;
+
+    // Urutkan: nomor pengulangan dulu, baru tanggal.
+    const urut = list.slice().sort((a, b) => {
+      const ua = Number(a.pengulangan_ke) || 0, ub = Number(b.pengulangan_ke) || 0;
+      if (ua && ub && ua !== ub) return ua - ub;
+      return String(kunciTgl(a.tanggal_pembinaan)).localeCompare(String(kunciTgl(b.tanggal_pembinaan)));
+    });
+
+    let jalan = 0;
+    const bernomor = urut.map(b => {
+      const p = Number(b.pengulangan_ke) || 0;
+      jalan = p > 0 ? p : jalan + 1;
+      return { ...b, urutan: jalan, selesai: String(b.status_pembinaan || '').trim() === 'Selesai' };
+    });
+
+    // Satu nomor pengulangan = satu baris; catatan berstatus Selesai diutamakan.
+    const unik = new Map();
+    bernomor.forEach(b => {
+      const ada = unik.get(b.urutan);
+      if (!ada || (b.selesai && !ada.selesai)) unik.set(b.urutan, b);
+    });
+    const semua = [...unik.values()].sort((a, b) => a.urutan - b.urutan);
+
+    const selesai = semua.filter(b => b.selesai);
+    const terakhirSelesai = selesai.length ? selesai[selesai.length - 1] : null;
+
+    const tampil = [];
+    if (terakhirSelesai) tampil.push(terakhirSelesai);
+    semua.filter(b => !b.selesai).forEach(b => { if (!tampil.includes(b)) tampil.push(b); });
+    tampil.sort((a, b) => a.urutan - b.urutan);
+
+    hasil.push({
+      kategori: kat,
+      totalPelanggaran: jumlahPelanggaran,
+      tercatat: semua.length ? semua[semua.length - 1].urutan : 0,
+      belum: semua.filter(b => !b.selesai).length,
+      baris: tampil.map(b => ({
+        urutan: b.urutan,
+        tanggal: b.tanggal_pembinaan,
+        bentuk: b.instrumen_pembinaan || b.bentuk_pembinaan || '-',
+        status: b.selesai ? 'Selesai' : (b.status_pembinaan || 'Dalam Proses'),
+        pemicu: (peta[kat] && peta[kat].get(b.urutan) ? peta[kat].get(b.urutan).judul : '-')
+      }))
+    });
+  });
+
+  const bobot = { Ringan:1, Sedang:2, Berat:3, 'Tanpa Kategori':4 };
+  return hasil.sort((a, b) => (bobot[a.kategori] || 9) - (bobot[b.kategori] || 9));
+}
+
+/** Render bagian 5 laporan cetak. */
+function bagianPembinaanCetak(pembinaan, perkembangan) {
+  const th = (t) => `<th style="border:1px solid #cbd5e1;padding:5px;background:#f1f5f9;">${esc(t)}</th>`;
+  const td = (t, c) => `<td style="border:1px solid #cbd5e1;padding:5px;${c||''}">${esc(t)}</td>`;
+
+  const blok = susunPembinaanCetak(pembinaan, perkembangan);
+  if (!blok.length) {
+    return `<p style="font-size:11px;color:#94a3b8;text-align:center;padding:10px 0;">
+      Belum ada instrumen pembinaan.</p>`;
+  }
+
+  return blok.map(g => {
+    const ket = g.kategori === 'Tanpa Kategori'
+      ? 'Catatan pembinaan tanpa kategori.'
+      : `Total pelanggaran ${g.kategori}: <b>${g.totalPelanggaran} kali</b> ·
+         instrumen tercatat sampai pengulangan ke-${g.tercatat || 0} ·
+         belum diselesaikan: <b>${g.belum}</b>.`;
+
+    const isi = g.baris.length
+      ? g.baris.map(r => `<tr>
+          ${td('Ke-' + r.urutan, 'text-align:center;font-weight:bold')}
+          ${td(tgl(r.tanggal))}
+          ${td(r.pemicu)}
+          ${td(r.bentuk)}
+          ${td(r.status, r.status === 'Selesai' ? '' : 'font-weight:bold')}
+        </tr>`).join('')
+      : `<tr><td colspan="5" style="border:1px solid #cbd5e1;text-align:center;padding:8px;color:#94a3b8;">
+          Belum ada instrumen pembinaan yang tercatat untuk kategori ini.</td></tr>`;
+
+    return `
+      <p style="font-size:11px;margin:0 0 4px;color:#475569;">${ket}</p>
+      <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:14px;">
+        <thead><tr>${['Pengulangan','Tanggal Pembinaan','Pemicu (Pelanggaran)','Bentuk / Instrumen','Status'].map(th).join('')}</tr></thead>
+        <tbody>${isi}</tbody>
+      </table>`;
+  }).join('');
+}
+
 function bangunLaporanHTML(data) {
   const s = data.siswa || {};
   const dicetak = new Date().toLocaleDateString('id-ID', { day:'2-digit', month:'long', year:'numeric' });
@@ -2701,12 +2897,15 @@ function bangunLaporanHTML(data) {
     </table>
 
     <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">5. Instrumen Pembinaan</h3>
-    <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:24px;">
-      <thead><tr>${['Tanggal','Kategori','Tahap','Bentuk Pembinaan','Status'].map(th).join('')}</tr></thead>
-      <tbody>${baris(data.pembinaan, b =>
-        `<tr>${td(tgl(b.tanggal_pembinaan))}${td(b.kategori||'-')}${td(b.pengulangan_ke?'Ke-'+b.pengulangan_ke:'-','text-align:center')}${td(b.bentuk_pembinaan||'-')}${td(b.status_pembinaan||'-')}</tr>`,
-        'Belum ada instrumen pembinaan.', 5)}</tbody>
-    </table>
+    <p style="font-size:10.5px;color:#64748b;margin:6px 0 8px;">
+      Nomor pengulangan dihitung dari jumlah nyata pelanggaran per kategori
+      (tanpa konversi 5x Ringan menjadi 1 Sedang), sehingga selalu sama dengan
+      angka pada bagian 3. Yang ditampilkan: pembinaan terakhir yang sudah
+      diselesaikan beserta seluruh pembinaan yang belum diselesaikan.
+    </p>
+    <div style="margin-bottom:24px;">
+      ${bagianPembinaanCetak(data.pembinaan, perkembangan)}
+    </div>
 
     <table style="width:100%;font-size:12px;margin-top:36px;page-break-inside:avoid;break-inside:avoid;">
       <tr><td style="width:50%;text-align:center;">Musyrif Asrama</td>
@@ -2819,6 +3018,749 @@ function aktifkanRealtime() {
 // Perbarui badge izin saat pengguna kembali ke tab.
 window.addEventListener('focus', () => refreshBadgePending());
 setInterval(() => { if (APP.profil) refreshBadgePending(); }, 60_000);
+
+// ---------------------------------------------------------------------
+// 23. MODUL MADRASAH — Pemeriksaan Atribut · Pelanggaran · Presensi
+//     Port dari View Madrasah Apps Script, dijalankan di atas Supabase
+//     tanpa menambah tabel maupun RPC baru.
+// ---------------------------------------------------------------------
+const ATRIBUT_MADRASAH = [
+  'Baju tidak dimasukkan',
+  'Tidak memakai ikat pinggang',
+  'Tidak memakai kopiah / jilbab',
+  'Tidak memakai sepatu hitam',
+  'Tidak memakai kaos kaki',
+  'Seragam tidak sesuai jadwal',
+  'Tidak memakai badge / lokasi',
+  'Rambut tidak rapi',
+  'Kuku panjang',
+  'Tidak membawa buku peraturan'
+];
+
+const BULAN_ID = ['Januari','Februari','Maret','April','Mei','Juni',
+                  'Juli','Agustus','September','Oktober','November','Desember'];
+const bulanSemester = (s) => s === 'Genap' ? [1,2,3,4,5,6] : [7,8,9,10,11,12];
+
+const SQL_PRESENSI = `create table public.data_presensi (
+  id         bigserial primary key,
+  nisn       text    not null,
+  nama_siswa text,
+  kelas      text,
+  jenjang    text,
+  semester   text    not null,
+  tahun      int     not null,
+  bulan      int     not null,
+  minggu     int     not null,
+  hadir      int     default 0,
+  izin       int     default 0,
+  sakit      int     default 0,
+  alpa       int     default 0,
+  diperbarui timestamptz default now()
+);
+
+create index data_presensi_periode_idx
+  on public.data_presensi (kelas, semester, tahun, bulan, minggu);
+
+alter table public.data_presensi enable row level security;
+
+create policy "presensi baca"  on public.data_presensi
+  for select to authenticated using (true);
+create policy "presensi tulis" on public.data_presensi
+  for all    to authenticated using (true) with check (true);`;
+
+/** Data pendukung tampilan Madrasah untuk render ulang panel. */
+const MDS = { kelas:[], atribut:null, siapPresensi:false, hari:'', rekap:null };
+const stMd = { panel:'atribut', santriAtr:null, santriPlg:null, masterPlg:null };
+
+/** Santri pada jenjang madrasah yang sedang aktif (ikut kelas binaan). */
+async function siswaMadrasah() {
+  const j = APP.ctx.jenjang;
+  const rows = filterBinaan((await muatSiswa()).filter(aktifSantri), 'kelas');
+  if (!['MTs','MA'].includes(j)) return rows;
+  return rows.filter(s => (s.jenjang || angkatanJenjang(s.kelas)) === j);
+}
+
+/** Cari master pelanggaran untuk pemeriksaan atribut (P220 atau bernama atribut). */
+function masterAtributAktif(list) {
+  return list.find(m => /220/.test(String(m.kode_pelanggaran || ''))) ||
+         list.find(m => /atribut/i.test(String(m.nama_pelanggaran || ''))) || null;
+}
+
+/** Tabel data_presensi bersifat opsional; keberadaannya diperiksa sekali saja. */
+let PRESENSI_SIAP = null;
+async function cekTabelPresensi() {
+  if (PRESENSI_SIAP !== null) return PRESENSI_SIAP;
+  try {
+    const { error } = await db.from('data_presensi').select('nisn').limit(1);
+    PRESENSI_SIAP = !error;
+  } catch (e) { PRESENSI_SIAP = false; }
+  return PRESENSI_SIAP;
+}
+
+/** Panel saran santri, dibatasi pada jenjang madrasah yang aktif. */
+function mdSaranSantri(input, onPilih) {
+  lampirkanSaran(input, {
+    ambil: async (kata) => cariLokal(await siswaMadrasah(), kata,
+      ['nama_siswa','nisn','kelas'], 25),
+    minKetik: 2,
+    kosong: 'Santri tidak ditemukan pada jenjang ini.',
+    keItem: (it) => ({
+      huruf: esc((it.nama_siswa || '?').charAt(0).toUpperCase()),
+      judul: esc(it.nama_siswa),
+      sub: `${esc(it.nisn)} · ${esc(it.kelas || '-')}`
+    }),
+    keTeks: (it) => `${it.nisn} - ${it.nama_siswa}`,
+    onPilih: (it) => { input.dataset.picked = it.nisn; onPilih?.(it); }
+  });
+}
+
+function kartuPick(judul, isi) {
+  return `<div class="ico"><i class="fa-solid fa-user-graduate"></i></div>
+    <div><small>${esc(judul)}</small><b>${esc(isi)}</b></div>`;
+}
+
+// ---------- Tampilan utama ----------
+async function viewMadrasah() {
+  if (APP.ctx.unit !== 'Madrasah' || !['MTs','MA'].includes(APP.ctx.jenjang)) {
+    $('viewRoot').innerHTML = kartu('Pilih jenjang madrasah', `
+      <div class="card-note"><i class="fa-solid fa-circle-info"></i>
+        Modul ini bekerja pada satu jenjang. Pilih MTs atau MA agar daftar santri,
+        kelas, dan master pelanggaran yang tampil sudah tersaring.</div>
+      <div class="card-body">
+        <div class="unit-grid">
+          <button class="unit-card mts" data-ctx="Madrasah|MTs">
+            <div class="ico"><i class="fa-solid fa-school"></i></div>
+            <span class="ar">التعليم والتعلّم</span><b>Madrasah MTs</b>
+            <small>Atribut · Pelanggaran · Presensi kelas</small>
+            <span class="go">Aktifkan unit <i class="fa-solid fa-arrow-right"></i></span>
+          </button>
+          <button class="unit-card ma" data-ctx="Madrasah|MA">
+            <div class="ico"><i class="fa-solid fa-graduation-cap"></i></div>
+            <span class="ar">التعليم والتعلّم</span><b>Madrasah MA</b>
+            <small>Atribut · Pelanggaran · Presensi kelas</small>
+            <span class="go">Aktifkan unit <i class="fa-solid fa-arrow-right"></i></span>
+          </button>
+        </div>
+      </div>`);
+    onKlik((e) => {
+      const c = e.target.closest('[data-ctx]');
+      if (c) { const [u, j] = c.dataset.ctx.split('|'); setKonteks(u, j, 'madrasah'); }
+    });
+    return;
+  }
+
+  const [siswa, detailAll, masterAll, siapPresensi] = await Promise.all([
+    siswaMadrasah(),
+    amanKosong(muatDetail, 'pelanggaran'),
+    amanKosong(muatMaster, 'master pelanggaran'),
+    cekTabelPresensi()
+  ]);
+
+  const detail = lingkupDetail(detailAll);
+  const master = lingkupMaster(masterAll);
+  const hari = hariIni();
+
+  MDS.hari = hari;
+  MDS.kelas = [...new Set(siswa.map(s => s.kelas).filter(Boolean))].sort();
+  MDS.atribut = masterAtributAktif(master);
+  MDS.siapPresensi = siapPresensi;
+
+  const plgHari = detail.filter(r => kunciTgl(r.tanggal) === hari).length;
+  const lawan = APP.ctx.jenjang === 'MTs' ? 'MA' : 'MTs';
+
+  $('viewRoot').innerHTML = `
+    <section class="hero" style="padding:24px">
+      <div class="eyebrow"><span class="ar">المدرسة</span><span class="rule"></span>
+        <span class="lat">Unit Madrasah</span></div>
+      <h2 style="font-size:clamp(24px,3vw,32px)">Madrasah ${esc(APP.ctx.jenjang)}</h2>
+      <p>Pemeriksaan atribut, pencatatan pelanggaran, dan rekap presensi kelas
+         dalam satu basis data yang sama dengan laporan perkembangan santri.</p>
+      <div class="meta">
+        <span><i class="fa-solid fa-user-tie"></i>${esc(APP.profil?.nama || '')}</span>
+        <span><i class="fa-solid fa-id-badge"></i>${esc(role())}</span>
+        <span><i class="fa-regular fa-calendar"></i>${tgl(hari)}</span>
+        ${bolehKonteks('Madrasah', lawan)
+          ? `<span style="cursor:pointer" data-ctx="Madrasah|${lawan}">
+               <i class="fa-solid fa-right-left"></i>Pindah ke ${lawan}</span>` : ''}
+      </div>
+    </section>
+
+    <div class="stats">
+      ${stat('Santri Jenjang Ini', angka(siswa.length), 'fa-solid fa-user-group',
+        'background:#E7F1F7;color:var(--sea)', 'var(--sea)',
+        perluFilterKelas() ? 'Kelas binaan Anda' : `Madrasah ${APP.ctx.jenjang}`)}
+      ${stat('Kelas Terdata', angka(MDS.kelas.length), 'fa-solid fa-chalkboard',
+        'background:var(--violet-bg);color:var(--violet)', 'var(--violet)', 'Sumber: data santri')}
+      ${stat('Pelanggaran Hari Ini', angka(plgHari), 'fa-solid fa-triangle-exclamation',
+        'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)', tgl(hari))}
+      ${stat('Jenis Pelanggaran', angka(master.length), 'fa-solid fa-book-open',
+        'background:var(--amber-bg);color:var(--amber)', 'var(--amber)', 'Master unit ini')}
+    </div>
+
+    <div class="mod-grid">
+      <button class="mod-card ${stMd.panel==='atribut'?'on':''}" data-mdpanel="atribut">
+        <div class="ico" style="background:#E7F1F7;color:var(--sea)"><i class="fa-solid fa-shirt"></i></div>
+        <div class="k">Pemeriksaan</div><b>Atribut Santri</b>
+        <p>Centang atribut yang tidak lengkap; tersimpan sebagai satu catatan pelanggaran.</p>
+        <span class="go">Buka panel <i class="fa-solid fa-arrow-right"></i></span>
+      </button>
+      <button class="mod-card ${stMd.panel==='pelanggaran'?'on':''}" data-mdpanel="pelanggaran">
+        <div class="ico" style="background:var(--maroon-bg);color:var(--maroon)"><i class="fa-solid fa-file-circle-plus"></i></div>
+        <div class="k">Pencatatan</div><b>Tambah Pelanggaran</b>
+        <p>Cari jenis pelanggaran dari Master Pelanggaran madrasah, lengkap dengan catatan.</p>
+        <span class="go">Buka panel <i class="fa-solid fa-arrow-right"></i></span>
+      </button>
+      <button class="mod-card ${stMd.panel==='presensi'?'on':''}" data-mdpanel="presensi">
+        <div class="ico" style="background:var(--teal-bg);color:var(--teal)"><i class="fa-solid fa-calendar-check"></i></div>
+        <div class="k">Kehadiran</div><b>Rekap Presensi Kelas</b>
+        <p>Input mingguan H/I/S/A dan rekapitulasi bulanan satu semester.</p>
+        <span class="go">Buka panel <i class="fa-solid fa-arrow-right"></i></span>
+      </button>
+    </div>
+
+    <div id="mdPanel"></div>`;
+
+  onKlik((e) => {
+    const p = e.target.closest('[data-mdpanel]');
+    if (p) {
+      stMd.panel = p.dataset.mdpanel;
+      document.querySelectorAll('[data-mdpanel]').forEach(b =>
+        b.classList.toggle('on', b.dataset.mdpanel === stMd.panel));
+      return mdGambarPanel();
+    }
+    const c = e.target.closest('[data-ctx]');
+    if (c) { const [u, j] = c.dataset.ctx.split('|'); setKonteks(u, j, 'madrasah'); }
+  });
+
+  mdGambarPanel();
+}
+
+function mdGambarPanel() {
+  const el = $('mdPanel'); if (!el) return;
+  if (stMd.panel === 'pelanggaran') { el.innerHTML = mdPanelPelanggaran(); mdPasangPelanggaran(); }
+  else if (stMd.panel === 'presensi') { el.innerHTML = mdPanelPresensi(); mdPasangPresensi(); }
+  else { el.innerHTML = mdPanelAtribut(); mdPasangAtribut(); }
+  tandaiTabelBisaGeser();
+}
+
+/** Simpan pelanggaran lewat RPC catat_pelanggaran + alur konfirmasi izin. */
+async function mdSimpanPelanggaran(payload, btn, label) {
+  const asli = mulaiSimpan(btn, label);
+  try {
+    let { data, error } = await db.rpc('catat_pelanggaran', payload);
+    if (error) throw error;
+
+    if (data?.conflict) {
+      selesaiSimpan(btn, asli, true, 'Menunggu konfirmasi');
+      if (role() === 'Osis') {
+        await Swal.fire({ icon:'error', title:'Tidak berwenang',
+          text:'Osis tidak dapat menimpa izin yang sudah berstatus Sesuai Waktu. Hubungi Admin/Guru.',
+          confirmButtonColor:'#9F1239' });
+        return null;
+      }
+      const konf = await Swal.fire({
+        icon:'warning', title:'Terdeteksi izin yang sesuai waktu',
+        html:`<p style="text-align:left;font-size:13.5px">${esc(data.message || '')}</p>`,
+        showCancelButton:true, confirmButtonText:'Tetap catat pelanggaran',
+        cancelButtonText:'Batalkan', confirmButtonColor:'#9F1239' });
+      if (!konf.isConfirmed) return null;
+
+      const ulang = mulaiSimpan(btn, label);
+      const r2 = await db.rpc('catat_pelanggaran', { ...payload, p_force: true });
+      if (r2.error) { selesaiSimpan(btn, ulang, false, 'Gagal menyimpan'); throw r2.error; }
+      selesaiSimpan(btn, ulang, true, 'Pelanggaran tersimpan');
+      data = r2.data;
+    } else {
+      selesaiSimpan(btn, asli, true, 'Pelanggaran tersimpan');
+    }
+
+    cacheHapus('detail','siswa','pembinaan');
+    return data || {};
+  } catch (err) {
+    selesaiSimpan(btn, asli, false, 'Gagal menyimpan');
+    fireError(err);
+    return null;
+  }
+}
+
+// ---------- Panel 1: pemeriksaan atribut ----------
+function mdPanelAtribut() {
+  const m = MDS.atribut;
+  const bisa = bolehTulis();
+
+  return kartu('Pemeriksaan Atribut Santri', `
+    ${m
+      ? `<div class="card-note"><i class="fa-solid fa-circle-info"></i>
+          Memakai master <b>${esc(m.kode_pelanggaran)} — ${esc(m.nama_pelanggaran)}</b>
+          (${esc(m.kategori)} · ${m.bobot_poin} poin · ${esc(m.bidang || '-')}).
+          Atribut yang dicentang ditulis pada kolom catatan.</div>`
+      : `<div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
+          Belum ada jenis pelanggaran atribut (kode <b>P220</b> atau nama mengandung
+          “atribut”) pada Master Pelanggaran unit ini. Tambahkan lebih dulu di
+          menu <b>Master &amp; Bidang</b>.</div>`}
+
+    <div class="md-form">
+      <div class="field"><label class="label">Tanggal Pemeriksaan</label>
+        <input id="atrTanggal" type="date" class="input" value="${MDS.hari}"></div>
+      <div class="field"><label class="label">Cari Santri</label>
+        <input id="atrSantri" class="input" autocomplete="off"
+               placeholder="Nama atau NISN (min. 2 huruf)…">
+        <p class="hint">Pilih dari daftar saran agar NISN terbaca dengan benar.</p></div>
+    </div>
+
+    <div class="pick" id="atrPick">${kartuPick('Santri Terpilih','Belum ada santri dipilih')}</div>
+
+    <div class="atr-grid">
+      ${ATRIBUT_MADRASAH.map(a => `<label class="atr-item">
+        <input type="checkbox" value="${esc(a)}"><span>${esc(a)}</span></label>`).join('')}
+    </div>
+
+    <div class="md-bar">
+      <span class="note-min"><i class="fa-solid fa-shield-halved"></i>
+        Penindak dan poin diproses otomatis oleh sistem.</span>
+      ${bisa && m
+        ? `<button class="btn btn-primary btn-sm" id="atrSimpan">
+             <i class="fa-solid fa-floppy-disk"></i>Simpan Pemeriksaan</button>`
+        : `<span class="tag tag-off">Hanya baca</span>`}
+    </div>`,
+    `<span class="tag tag-sea">${esc(labelKonteks())}</span>`,
+    'Satu kali simpan menghasilkan satu catatan pelanggaran.');
+}
+
+function mdPasangAtribut() {
+  stMd.santriAtr = null;
+  const inp = $('atrSantri'); if (!inp) return;
+
+  mdSaranSantri(inp, (s) => {
+    stMd.santriAtr = s;
+    $('atrPick').innerHTML = kartuPick('Santri Terpilih',
+      `${s.nama_siswa} · ${s.kelas || '-'} · ${s.nisn}`);
+  });
+
+  document.querySelectorAll('.atr-item input').forEach(c =>
+    c.addEventListener('change', () => c.closest('.atr-item').classList.toggle('on', c.checked)));
+
+  $('atrSimpan')?.addEventListener('click', mdSimpanAtribut);
+}
+
+async function mdSimpanAtribut() {
+  const m = MDS.atribut;
+  if (!m) return toast('error', 'Master pelanggaran atribut belum tersedia.');
+  if (!stMd.santriAtr) return toast('error', 'Pilih santri terlebih dahulu.');
+
+  const attrs = [...document.querySelectorAll('.atr-item input:checked')].map(x => x.value);
+  if (!attrs.length) return toast('error', 'Centang minimal satu atribut yang tidak lengkap.');
+
+  const hasil = await mdSimpanPelanggaran({
+    p_nisn: stMd.santriAtr.nisn,
+    p_kode: m.kode_pelanggaran,
+    p_tanggal: $('atrTanggal').value || hariIni(),
+    p_catatan: 'Atribut tidak lengkap: ' + attrs.join(', '),
+    p_force: false
+  }, $('atrSimpan'), 'Menyimpan Pemeriksaan…');
+
+  if (!hasil) return;
+  toast('success', `Pemeriksaan tersimpan. Total poin santri: ${hasil.poin_baru ?? '-'}`);
+  navigateTo('madrasah');
+}
+
+// ---------- Panel 2: tambah pelanggaran ----------
+function mdPanelPelanggaran() {
+  const bisa = bolehTulis();
+
+  return kartu('Tambah Pelanggaran Santri', `
+    <div class="card-note"><i class="fa-solid fa-circle-info"></i>
+      Jenis pelanggaran diambil dari Master Pelanggaran unit <b>${esc(labelKonteks())}</b>.
+      Ketik kode, nama, kategori, atau bidang untuk mencari.</div>
+
+    <div class="step"><span>01</span>
+      <div><b>Identitas kejadian</b><small>Tentukan tanggal dan santri yang dicatat.</small></div></div>
+    <div class="md-form">
+      <div class="field"><label class="label">Tanggal Kejadian</label>
+        <input id="mpTanggal" type="date" class="input" value="${MDS.hari}"></div>
+      <div class="field"><label class="label">Cari Santri</label>
+        <input id="mpSantri" class="input" autocomplete="off" placeholder="Nama atau NISN…"></div>
+    </div>
+    <div class="pick" id="mpPick">${kartuPick('Santri Terpilih','Belum ada santri dipilih')}</div>
+
+    <div class="step"><span>02</span>
+      <div><b>Jenis pelanggaran</b><small>Pilih dari daftar saran agar kode terbaca.</small></div></div>
+    <div class="md-form">
+      <div class="field wide"><label class="label">Kode / Nama Pelanggaran</label>
+        <input id="mpKode" class="input" autocomplete="off"
+               placeholder="Contoh: P220, atribut, terlambat, bahasa…">
+        <div id="mpInfo" class="hint">Belum ada jenis pelanggaran dipilih.</div></div>
+    </div>
+
+    <div class="step"><span>03</span>
+      <div><b>Catatan kejadian</b><small>Opsional, maksimal 500 karakter.</small></div></div>
+    <div class="md-form">
+      <div class="field wide">
+        <textarea id="mpCatatan" class="input" rows="3" maxlength="500"
+          placeholder="Contoh: santri terlambat masuk kelas setelah jam istirahat."></textarea>
+        <div style="display:flex;justify-content:space-between;gap:10px">
+          <span class="hint">Poin mengikuti Master Pelanggaran.</span>
+          <span class="hint mono" id="mpHitung">0 / 500</span>
+        </div></div>
+    </div>
+
+    <div class="md-bar">
+      <span class="note-min"><i class="fa-solid fa-user-shield"></i>
+        Penindak: ${esc(APP.profil?.nama || '-')}</span>
+      ${bisa
+        ? `<button class="btn btn-primary btn-sm" id="mpSimpan">
+             <i class="fa-solid fa-floppy-disk"></i>Simpan Pelanggaran</button>`
+        : `<span class="tag tag-off">Hanya baca</span>`}
+    </div>`,
+    `<span class="tag tag-sea">${esc(labelKonteks())}</span>`);
+}
+
+function mdPasangPelanggaran() {
+  stMd.santriPlg = null; stMd.masterPlg = null;
+  const inp = $('mpSantri'); if (!inp) return;
+
+  mdSaranSantri(inp, (s) => {
+    stMd.santriPlg = s;
+    $('mpPick').innerHTML = kartuPick('Santri Terpilih',
+      `${s.nama_siswa} · ${s.kelas || '-'} · ${s.nisn}`);
+  });
+
+  saranPelanggaran($('mpKode'), (m) => {
+    stMd.masterPlg = m;
+    $('mpInfo').innerHTML =
+      `<span class="tag ${tagKategori(m.kategori)}">${esc(m.kategori)}</span>
+       <b>${m.bobot_poin} poin</b> · ${esc(m.bidang || '-')} · ${esc(m.jenjang || 'Semua')}`;
+  });
+  $('mpKode').addEventListener('input', () => {
+    if (!$('mpKode').dataset.kode) {
+      stMd.masterPlg = null;
+      $('mpInfo').textContent = 'Belum ada jenis pelanggaran dipilih.';
+    }
+  });
+
+  $('mpCatatan').addEventListener('input', (e) => {
+    $('mpHitung').textContent = `${e.target.value.length} / 500`;
+  });
+
+  $('mpSimpan')?.addEventListener('click', mdSimpanPelanggaranUmum);
+}
+
+async function mdSimpanPelanggaranUmum() {
+  if (!stMd.santriPlg) return toast('error', 'Pilih santri terlebih dahulu.');
+  if (!stMd.masterPlg) {
+    $('mpKode').focus();
+    return toast('error', 'Pilih jenis pelanggaran dari daftar saran.');
+  }
+
+  const hasil = await mdSimpanPelanggaran({
+    p_nisn: stMd.santriPlg.nisn,
+    p_kode: stMd.masterPlg.kode_pelanggaran,
+    p_tanggal: $('mpTanggal').value || hariIni(),
+    p_catatan: $('mpCatatan').value.trim(),
+    p_force: false
+  }, $('mpSimpan'), 'Menyimpan Pelanggaran…');
+
+  if (!hasil) return;
+  toast('success', `Tersimpan. Total poin santri: ${hasil.poin_baru ?? '-'}`);
+  navigateTo('madrasah');
+}
+
+// ---------- Panel 3: presensi kelas ----------
+function mdPanelPresensi() {
+  if (!MDS.siapPresensi) {
+    return kartu('Rekap Presensi Kelas', `
+      <div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
+        Tabel <b>data_presensi</b> belum tersedia di Supabase, jadi input dan rekap
+        presensi belum bisa dijalankan. Modul lain tetap berjalan normal.</div>
+      <div class="card-body">
+        <p style="margin:0 0 11px;font-size:12.5px;color:var(--text-2)">
+          Bila nanti hendak diaktifkan, jalankan skrip berikut di
+          <b>SQL Editor Supabase</b>. Struktur inilah yang dibaca aplikasi —
+          tidak ada perubahan lain di sisi kode.</p>
+        <div class="sql-note">${esc(SQL_PRESENSI)}</div>
+      </div>`,
+      '<span class="tag tag-off">Belum aktif</span>');
+  }
+
+  const th = new Date().getFullYear();
+  const smt = (new Date().getMonth() + 1) >= 7 ? 'Ganjil' : 'Genap';
+  const opsiKelas = (id) => `<select id="${id}" class="input">
+      <option value="">— Pilih Kelas —</option>
+      ${MDS.kelas.map(k => `<option>${esc(k)}</option>`).join('')}</select>`;
+  const opsiTahun = (id) => `<select id="${id}" class="input">
+      ${[th-1, th, th+1].map(y => `<option ${y===th?'selected':''}>${y}</option>`).join('')}</select>`;
+  const opsiSmt = (id) => `<select id="${id}" class="input">
+      <option ${smt==='Ganjil'?'selected':''}>Ganjil</option>
+      <option ${smt==='Genap'?'selected':''}>Genap</option></select>`;
+
+  return `
+    ${kartu('Input Presensi Mingguan', `
+      <div class="md-form">
+        <div class="field"><label class="label">Kelas</label>${opsiKelas('prKelas')}</div>
+        <div class="field"><label class="label">Semester</label>${opsiSmt('prSemester')}</div>
+        <div class="field"><label class="label">Tahun</label>${opsiTahun('prTahun')}</div>
+        <div class="field"><label class="label">Bulan</label><select id="prBulan" class="input"></select></div>
+        <div class="field"><label class="label">Minggu Ke</label>
+          <select id="prMinggu" class="input">
+            ${[1,2,3,4,5].map(m => `<option value="${m}">Minggu ke-${m}</option>`).join('')}</select></div>
+        <div class="field"><label class="label">&nbsp;</label>
+          <button class="btn btn-ghost btn-sm" id="prMuat">
+            <i class="fa-solid fa-list-check"></i>Muat Siswa</button></div>
+      </div>
+
+      <div class="minis">
+        <div class="mini t"><span>Hadir</span><b id="prH">0</b></div>
+        <div class="mini s"><span>Izin</span><b id="prI">0</b></div>
+        <div class="mini a"><span>Sakit</span><b id="prS">0</b></div>
+        <div class="mini m"><span>Alpa</span><b id="prA">0</b></div>
+      </div>
+
+      <div class="tbl" style="margin-top:16px"><table>
+        <thead><tr><th>Nama Santri</th><th class="center">Hadir</th><th class="center">Izin</th>
+          <th class="center">Sakit</th><th class="center">Alpa</th></tr></thead>
+        <tbody id="prBody">${barisKosong(5, 'Belum ada daftar santri.',
+          'Pilih kelas dan periode, lalu tekan “Muat Siswa”.')}</tbody>
+      </table></div>
+      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
+
+      <div class="md-bar">
+        <span class="note-min"><i class="fa-solid fa-circle-info"></i>
+          Menyimpan ulang periode yang sama akan memperbarui data lama.</span>
+        ${bolehTulis()
+          ? `<button class="btn btn-primary btn-sm" id="prSimpan">
+               <i class="fa-solid fa-floppy-disk"></i>Simpan Presensi Minggu Ini</button>`
+          : `<span class="tag tag-off">Hanya baca</span>`}
+      </div>`,
+      `<span class="tag tag-ok" id="prBadge">Periode baru</span>`,
+      'Isi total Hadir, Izin, Sakit, dan Alpa setiap santri pada minggu terpilih.')}
+
+    ${kartu('Rekap Bulanan Satu Semester', `
+      <div class="md-form">
+        <div class="field"><label class="label">Kelas</label>${opsiKelas('rpKelas')}</div>
+        <div class="field"><label class="label">Semester</label>${opsiSmt('rpSemester')}</div>
+        <div class="field"><label class="label">Tahun</label>${opsiTahun('rpTahun')}</div>
+        <div class="field"><label class="label">&nbsp;</label>
+          <button class="btn btn-ghost btn-sm" id="rpTampil">
+            <i class="fa-solid fa-table"></i>Tampilkan Rekap</button></div>
+      </div>
+      <div id="rpSummary"></div>
+      <div class="tbl"><table>
+        <thead id="rpHead"></thead>
+        <tbody id="rpBody">${barisKosong(3, 'Rekap belum ditampilkan.',
+          'Pilih kelas, semester, dan tahun.')}</tbody>
+      </table></div>
+      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>`,
+      `<button class="btn btn-ghost btn-sm" id="rpCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>`,
+      'Setiap kolom bulan berisi ringkasan H/I/S/A dari seluruh minggu yang sudah diinput.')}`;
+}
+
+function mdPasangPresensi() {
+  if (!MDS.siapPresensi) return;
+
+  const isiBulan = () => {
+    const bulan = bulanSemester($('prSemester').value);
+    const kini = new Date().getMonth() + 1;
+    $('prBulan').innerHTML = bulan.map(b =>
+      `<option value="${b}" ${b===kini?'selected':''}>${BULAN_ID[b-1]}</option>`).join('');
+  };
+  isiBulan();
+  $('prSemester').addEventListener('change', isiBulan);
+
+  $('prMuat').addEventListener('click', mdMuatPresensi);
+  $('prSimpan')?.addEventListener('click', mdSimpanPresensi);
+  $('rpTampil').addEventListener('click', mdTampilkanRekapPresensi);
+  $('rpCsv').addEventListener('click', mdEksporRekapPresensi);
+}
+
+function mdPeriodePresensi() {
+  return {
+    kelas: $('prKelas').value,
+    semester: $('prSemester').value,
+    tahun: Number($('prTahun').value),
+    bulan: Number($('prBulan').value),
+    minggu: Number($('prMinggu').value)
+  };
+}
+
+function mdTotalPresensi() {
+  const jml = { hadir:0, izin:0, sakit:0, alpa:0 };
+  document.querySelectorAll('#prBody tr[data-nisn]').forEach(tr => {
+    ['hadir','izin','sakit','alpa'].forEach(k => {
+      jml[k] += Number(tr.querySelector('.pr-' + k).value) || 0;
+    });
+  });
+  $('prH').textContent = angka(jml.hadir);
+  $('prI').textContent = angka(jml.izin);
+  $('prS').textContent = angka(jml.sakit);
+  $('prA').textContent = angka(jml.alpa);
+}
+
+async function mdMuatPresensi() {
+  const p = mdPeriodePresensi();
+  if (!p.kelas) return toast('error', 'Pilih kelas terlebih dahulu.');
+
+  loading(true);
+  try {
+    const siswa = (await siswaMadrasah()).filter(s => s.kelas === p.kelas);
+    const { data, error } = await q(db.from('data_presensi').select('*')
+      .eq('kelas', p.kelas).eq('semester', p.semester).eq('tahun', p.tahun)
+      .eq('bulan', p.bulan).eq('minggu', p.minggu), 'presensi');
+    if (error) throw error;
+
+    const peta = Object.fromEntries((data || []).map(r => [String(r.nisn), r]));
+    const ada = (data || []).length > 0;
+    $('prBadge').textContent = ada ? 'Data tersimpan · mode perbarui' : 'Periode baru';
+    $('prBadge').className = 'tag ' + (ada ? 'tag-sea' : 'tag-ok');
+
+    $('prBody').innerHTML = siswa.map((s, i) => {
+      const r = peta[String(s.nisn)] || {};
+      return `<tr data-nisn="${esc(s.nisn)}" data-nama="${esc(s.nama_siswa)}">
+        <td><div class="primary">${i+1}. ${esc(s.nama_siswa)}</div>
+            <div class="secondary">${esc(s.nisn)} · ${esc(s.kelas || '-')}</div></td>
+        ${['hadir','izin','sakit','alpa'].map(k =>
+          `<td class="center"><input class="num-in pr-${k}" type="number" min="0"
+             value="${Number(r[k] || 0)}"></td>`).join('')}
+      </tr>`;
+    }).join('') || barisKosong(5, 'Tidak ada santri pada kelas ini.',
+      'Periksa data santri atau cakupan kelas binaan Anda.');
+
+    document.querySelectorAll('#prBody .num-in')
+      .forEach(i => i.addEventListener('input', mdTotalPresensi));
+    mdTotalPresensi();
+    tandaiTabelBisaGeser();
+  } catch (err) { fireError(err); }
+  finally { loading(false); }
+}
+
+async function mdSimpanPresensi() {
+  const p = mdPeriodePresensi();
+  const baris = [...document.querySelectorAll('#prBody tr[data-nisn]')];
+  if (!p.kelas || !baris.length) return toast('error', 'Muat daftar santri terlebih dahulu.');
+
+  const rows = baris.map(tr => ({
+    nisn: tr.dataset.nisn,
+    nama_siswa: tr.dataset.nama,
+    kelas: p.kelas,
+    jenjang: APP.ctx.jenjang,
+    semester: p.semester,
+    tahun: p.tahun,
+    bulan: p.bulan,
+    minggu: p.minggu,
+    hadir: Number(tr.querySelector('.pr-hadir').value) || 0,
+    izin:  Number(tr.querySelector('.pr-izin').value)  || 0,
+    sakit: Number(tr.querySelector('.pr-sakit').value) || 0,
+    alpa:  Number(tr.querySelector('.pr-alpa').value)  || 0
+  }));
+
+  const btn = $('prSimpan');
+  const asli = mulaiSimpan(btn, 'Menyimpan Presensi…');
+  try {
+    // Periode ditulis ulang seluruhnya agar tidak ada baris ganda.
+    const hapus = await db.from('data_presensi').delete()
+      .eq('kelas', p.kelas).eq('semester', p.semester).eq('tahun', p.tahun)
+      .eq('bulan', p.bulan).eq('minggu', p.minggu);
+    if (hapus.error) throw hapus.error;
+
+    const { error } = await db.from('data_presensi').insert(rows);
+    if (error) throw error;
+
+    selesaiSimpan(btn, asli, true, 'Presensi tersimpan');
+    toast('success', `Presensi ${p.kelas} · ${BULAN_ID[p.bulan-1]} minggu ke-${p.minggu} tersimpan.`);
+    $('prBadge').textContent = 'Data tersimpan · mode perbarui';
+    $('prBadge').className = 'tag tag-sea';
+  } catch (err) {
+    selesaiSimpan(btn, asli, false, 'Gagal menyimpan');
+    fireError(err);
+  }
+}
+
+async function mdTampilkanRekapPresensi() {
+  const kelas = $('rpKelas').value;
+  const semester = $('rpSemester').value;
+  const tahun = Number($('rpTahun').value);
+  if (!kelas) return toast('error', 'Pilih kelas untuk rekap.');
+
+  loading(true);
+  try {
+    const { data, error } = await q(db.from('data_presensi').select('*')
+      .eq('kelas', kelas).eq('semester', semester).eq('tahun', tahun), 'rekap presensi');
+    if (error) throw error;
+
+    const bulan = bulanSemester(semester);
+    const peta = new Map();
+    (data || []).forEach(r => {
+      const k = String(r.nisn);
+      if (!peta.has(k)) peta.set(k, {
+        nisn: k, nama: r.nama_siswa || '(tidak ditemukan)',
+        bulan: {}, total: { hadir:0, izin:0, sakit:0, alpa:0 }
+      });
+      const o = peta.get(k);
+      const b = Number(r.bulan);
+      o.bulan[b] = o.bulan[b] || { hadir:0, izin:0, sakit:0, alpa:0 };
+      ['hadir','izin','sakit','alpa'].forEach(x => {
+        const v = Number(r[x]) || 0;
+        o.bulan[b][x] += v;
+        o.total[x] += v;
+      });
+    });
+
+    const rows = [...peta.values()].sort((a, b) => a.nama.localeCompare(b.nama));
+    MDS.rekap = { kelas, semester, tahun, bulan, rows };
+
+    const sel = (t) => `<span class="md-cell">
+      <i style="color:var(--teal)">H</i>${t.hadir||0}
+      <i style="color:var(--sea)">I</i>${t.izin||0}
+      <i style="color:var(--amber)">S</i>${t.sakit||0}
+      <i style="color:var(--maroon)">A</i>${t.alpa||0}</span>`;
+
+    $('rpHead').innerHTML = `<tr><th>Nama Santri</th>
+      ${bulan.map(b => `<th>${BULAN_ID[b-1]}</th>`).join('')}
+      <th>Total Semester</th></tr>`;
+
+    $('rpBody').innerHTML = rows.map((r, i) => `<tr>
+      <td><div class="primary">${i+1}. ${esc(r.nama)}</div>
+          <div class="secondary">${esc(r.nisn)}</div></td>
+      ${bulan.map(b => `<td>${sel(r.bulan[b] || {})}</td>`).join('')}
+      <td>${sel(r.total)}</td>
+    </tr>`).join('') || barisKosong(bulan.length + 2, 'Belum ada data presensi.',
+      'Isi presensi mingguan terlebih dahulu pada periode ini.');
+
+    const jml = rows.reduce((a, r) => {
+      ['hadir','izin','sakit','alpa'].forEach(x => a[x] += r.total[x]); return a;
+    }, { hadir:0, izin:0, sakit:0, alpa:0 });
+
+    $('rpSummary').innerHTML = `<div class="minis" style="padding:0 20px 6px">
+      <div class="mini t"><span>Total Hadir</span><b>${angka(jml.hadir)}</b></div>
+      <div class="mini s"><span>Total Izin</span><b>${angka(jml.izin)}</b></div>
+      <div class="mini a"><span>Total Sakit</span><b>${angka(jml.sakit)}</b></div>
+      <div class="mini m"><span>Total Alpa</span><b>${angka(jml.alpa)}</b></div></div>`;
+
+    tandaiTabelBisaGeser();
+  } catch (err) { fireError(err); }
+  finally { loading(false); }
+}
+
+function mdEksporRekapPresensi() {
+  const r = MDS.rekap;
+  if (!r || !r.rows.length) return toast('error', 'Tampilkan rekap terlebih dahulu.');
+
+  const kepala = ['NISN','Nama'];
+  r.bulan.forEach(b => kepala.push(
+    `${BULAN_ID[b-1]} H`, `${BULAN_ID[b-1]} I`, `${BULAN_ID[b-1]} S`, `${BULAN_ID[b-1]} A`));
+  kepala.push('Total H','Total I','Total S','Total A');
+
+  const baris = r.rows.map(x => {
+    const kolom = [x.nisn, x.nama];
+    r.bulan.forEach(b => {
+      const t = x.bulan[b] || {};
+      kolom.push(t.hadir||0, t.izin||0, t.sakit||0, t.alpa||0);
+    });
+    kolom.push(x.total.hadir, x.total.izin, x.total.sakit, x.total.alpa);
+    return kolom;
+  });
+
+  unduhCsv(`presensi-${r.kelas}-${r.semester}-${r.tahun}.csv`, [kepala, ...baris]);
+}
 
 // ---------------------------------------------------------------------
 // 22. START — pulihkan sesi bila masih berlaku
