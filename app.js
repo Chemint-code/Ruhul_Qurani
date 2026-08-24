@@ -2123,6 +2123,22 @@ async function refreshBadgePending() {
   b.title = count ? `${count} izin menunggu keterangan balik` : '';
 }
 
+async function prosesIzin(idIzin, keputusan) {
+  const r = await Swal.fire({ icon:'question', title:`Tandai "${keputusan}"?`,
+    showCancelButton:true, confirmButtonText:'Ya, simpan', cancelButtonText:'Batal',
+    confirmButtonColor: keputusan === 'Sesuai Waktu' ? '#0F766E' : '#9F1239' });
+  if (!r.isConfirmed) return;
+  sync('saving', 'Memproses izin…');
+  try {
+    await q(db.rpc('proses_perizinan', { p_id_izin: idIzin, p_keputusan: keputusan }), 'proses_izin');
+    cacheHapus('izin', 'siswa');
+    sync('done', 'Izin diperbarui');
+    toast('success', 'Status izin: ' + keputusan);
+    gambarIzin(); refreshBadgePending();
+  } catch (err) { sync('warn', 'Gagal memproses'); fireError(err); }
+}
+
+
 const stBina = { cari:'', kategori:'', status:'', mode:'', page:1, size:30 };
 
 function tahapBina(r) { const t = Number(r.pengulangan_ke) || 0; return t > 0 ? t : null; }
