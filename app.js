@@ -1049,7 +1049,10 @@ async function viewDashboard() {
 
   onKlik(async (e) => {
     const c = e.target.closest('[data-ctx]');
-    if (c) { const [u, j] = c.dataset.ctx.split('|'); setKonteks(u, j); }
+    if (c) {
+      const [u, j] = c.dataset.ctx.split('|');
+      setKonteks(u, j, u === 'Pengasuhan' ? 'pengasuhan' : u === 'Madrasah' ? 'madrasah' : null);
+    }
   });
 
   // ---- Charts ----
@@ -3045,12 +3048,12 @@ const segarkan = debounce(async (tabel) => {
   if (tabel === 'log_perizinan') {
     cacheHapus('izin'); refreshBadgePending();
     if (APP.view === 'perizinan') gambarIzin();
-    if (APP.view === 'dashboard' || APP.view === 'pimpinan') navigateTo(APP.view);
+    if (['dashboard','pimpinan','pengasuhan'].includes(APP.view)) navigateTo(APP.view);
   } else if (tabel === 'log_pelanggaran' || tabel === 'detail_data') {
     cacheHapus('detail','siswa');
     if (APP.view === 'pelanggaran') muatTabelPlg();
     else if (APP.view === 'rekap') gambarRekap();
-    else if (APP.view === 'dashboard' || APP.view === 'pimpinan') navigateTo(APP.view);
+    else if (['dashboard','pimpinan','pengasuhan'].includes(APP.view)) navigateTo(APP.view);
   } else if (tabel === 'log_pembinaan') {
     cacheHapus('pembinaan');
     if (APP.view === 'pembinaan') gambarBina();
