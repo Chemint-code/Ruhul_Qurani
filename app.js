@@ -226,7 +226,12 @@ const TTL = 90_000;
 
 function cacheGet(k) { const c = CACHE[k]; return (c && Date.now() - c.at < TTL) ? c.v : null; }
 function cacheSet(k, v) { CACHE[k] = { v, at: Date.now() }; return v; }
-function cacheHapus(...ks) { ks.forEach(k => delete CACHE[k]); }
+function cacheHapus(...ks) {
+  ks.forEach(k => {
+    delete CACHE[k];
+    if (k === 'siswa') { delete CACHE.petaSiswa; delete CACHE.kelas; }
+  });
+}
 
 /** PostgREST membatasi 1000 baris per request; ambil bertahap. */
 async function ambilSemua(tabel, select, atur) {
@@ -246,17 +251,57 @@ async function muatSiswa() {
   return cacheGet('siswa') || cacheSet('siswa',
     await ambilSemua('siswa', '*', { order: 'nama_siswa' }));
 }
+
+/** Peta NISN -> baris siswa, untuk menggabungkan data tanpa relasi PostgREST. */
+async function petaSiswa() {
+  const c = cacheGet('petaSiswa'); if (c) return c;
+  const s = await muatSiswa();
+  return cacheSet('petaSiswa', Object.fromEntries(s.map(x => [String(x.nisn), x])));
+}
+
+/**
+ * Lengkapi kolom `siswa` di sisi klien.
+ * Dipakai untuk tabel yang belum memiliki foreign key ke `siswa`,
+ * sehingga PostgREST tidak bisa melakukan embed otomatis.
+ */
+async function lengkapiSiswa(rows) {
+  if (!rows?.length || rows[0].siswa) return rows;
+  const peta = await petaSiswa();
+  return rows.map(r => ({ ...r, siswa: peta[String(r.nisn)] || null }));
+}
+
+/**
+ * Coba ambil dengan relasi; bila relasi belum ada di skema, ulangi tanpa embed.
+ * Membuat aplikasi tetap hidup meski FK belum dipasang di database.
+ */
+async function ambilDenganRelasi(tabel, selectRelasi, atur) {
+  try {
+    return await lengkapiSiswa(await ambilSemua(tabel, selectRelasi, atur));
+  } catch (e) {
+    if (!/relationship|schema cache/i.test(e.message || '')) throw e;
+    console.warn(`[${tabel}] relasi ke siswa belum ada — digabungkan di sisi klien.`);
+    return lengkapiSiswa(await ambilSemua(tabel, '*', atur));
+  }
+}
+
+/** Jalankan loader; bila tabelnya belum ada, kembalikan array kosong. */
+async function amanKosong(fn, nama) {
+  try { return await fn(); }
+  catch (e) { console.warn(`Data ${nama} tidak dapat dibaca:`, e.message); return []; }
+}
 async function muatDetail() {
   return cacheGet('detail') || cacheSet('detail',
     await ambilSemua('detail_data', '*', { order: 'tanggal', asc: false }));
 }
 async function muatIzin() {
   return cacheGet('izin') || cacheSet('izin',
-    await ambilSemua('log_perizinan', '*, siswa(nama_siswa,kelas,jenjang)', { order: 'tanggal_mulai', asc: false }));
+    await ambilDenganRelasi('log_perizinan', '*, siswa(nama_siswa,kelas,jenjang)',
+      { order: 'tanggal_mulai', asc: false }));
 }
 async function muatPembinaan() {
   return cacheGet('pembinaan') || cacheSet('pembinaan',
-    await ambilSemua('log_pembinaan', '*, siswa(nama_siswa,kelas,jenjang)', { order: 'tanggal_pembinaan', asc: false }));
+    await ambilDenganRelasi('log_pembinaan', '*, siswa(nama_siswa,kelas,jenjang)',
+      { order: 'tanggal_pembinaan', asc: false }));
 }
 async function muatMaster() {
   return cacheGet('master') || cacheSet('master',
@@ -895,8 +940,12 @@ function kartuUnit() {
 }
 
 async function viewDashboard() {
-  const [siswaAll, detailAll, izinAll, pembinaanAll] =
-    await Promise.all([muatSiswa(), muatDetail(), muatIzin(), muatPembinaan()]);
+  const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
+    amanKosong(muatSiswa, 'santri'),
+    amanKosong(muatDetail, 'pelanggaran'),
+    amanKosong(muatIzin, 'perizinan'),
+    amanKosong(muatPembinaan, 'pembinaan')
+  ]);
 
   const siswa = filterBinaan(siswaAll.filter(aktifSantri), 'kelas');
   const detail = lingkupDetail(detailAll);
@@ -1118,11 +1167,15 @@ function analisisEksekutif({ detail30, detailPrev30, bidangUrut, angkatan, izinS
 }
 
 async function viewPimpinan() {
-  const [siswaAll, detailAll, izinAll, pembinaanAll] =
-    await Promise.all([muatSiswa(), muatDetail(), muatIzin(), muatPembinaan()]);
+  const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
+    amanKosong(muatSiswa, 'santri'),
+    amanKosong(muatDetail, 'pelanggaran'),
+    amanKosong(muatIzin, 'perizinan'),
+    amanKosong(muatPembinaan, 'pembinaan')
+  ]);
 
   const siswa = siswaAll.filter(aktifSantri);
-  const petaSiswa = Object.fromEntries(siswa.map(s => [String(s.nisn), s]));
+  const mapSiswa = Object.fromEntries(siswa.map(s => [String(s.nisn), s]));
   const detailAktif = detailAll.filter(aktifDetail);
 
   const akhir = new Date(); akhir.setHours(23,59,59,999);
@@ -1207,7 +1260,7 @@ async function viewPimpinan() {
   const prio = {};
   const entri = (nisn) => {
     if (!prio[nisn]) {
-      const s = petaSiswa[nisn] || {};
+      const s = mapSiswa[nisn] || {};
       prio[nisn] = { nisn, nama: s.nama_siswa || '(tidak ditemukan)', kelas: s.kelas || '-',
         kasus90:0, kasus30:0, poin90:0, ringan:0, sedang:0, berat:0, bidang:{},
         telat: telatPer[nisn] || 0, bina: binaPer[nisn] || 0 };
