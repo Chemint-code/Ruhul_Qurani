@@ -182,7 +182,7 @@ const bolehPerizinan = () => ['Admin','Guru','Guru Piket','Osis'].includes(role(
 const bolehCetak     = () => !['Guru Piket','Ustadz GEN-Z','Walas'].includes(role());
 const bolehPdf       = () => !['Guru Piket','Ustadz GEN-Z','Guru BK','Walas'].includes(role());
 const bolehMaster    = () => !['Ustadz GEN-Z'].includes(role());
-const bolehPembinaan = () => !['Osis','Guru Piket'].includes(role());
+const bolehPembinaan = () => !['Osis','Guru Piket','Ustadz GEN-Z','Guru BK','Walas'].includes(role());
 const perluFilterKelas = () => ['Guru','Guru BK','Walas'].includes(role());
 
 /** Guru/Walas/Guru BK hanya melihat kelas binaannya. */
