@@ -178,7 +178,7 @@ const SEMUA_ROLE = ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z'
 const isAdmin        = () => role() === 'Admin';
 const hanyaBaca      = () => role() === 'Guru Piket';                 // Guru Piket read-only di modul umum
 const bolehTulis     = () => !hanyaBaca() && ['Admin','Guru','Walas','Guru BK','Ustadz GEN-Z','Osis'].includes(role());
-const bolehPerizinan = () => ['Admin','Guru','Guru Piket','Osis'].includes(role());
+const bolehPerizinan = () => ['Admin','Guru','Guru Piket'].includes(role());
 const bolehCetak     = () => !['Guru Piket','Ustadz GEN-Z','Walas'].includes(role());
 const bolehPdf       = () => !['Guru Piket','Ustadz GEN-Z','Guru BK','Walas'].includes(role());
 const bolehMaster    = () => !['Ustadz GEN-Z'].includes(role());
