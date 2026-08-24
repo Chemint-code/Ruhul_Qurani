@@ -3882,33 +3882,37 @@ function gambarKinerjaGuru() {
   const r = d.ringkasan || {};
   const rank = d.ranking || [];
   const belum = Number(d.belum_terpetakan || 0);
+  const b = d.bobot || {};
+  const maks = Math.max(1, ...rank.map(g => Number(g.skor_kinerja) || 0));
 
-  const medali = (n) => n === 1 ? 'background:#FBF4DC;color:#8A6D0B'
-    : n === 2 ? 'background:#EEF2F5;color:#5A6C7B'
-    : n === 3 ? 'background:#F7EDE3;color:#8A5A2B'
-    : 'background:#EFF3F6;color:var(--text-3)';
+  const ROLE = ['Semua','Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'];
+  const num = (v, warna) => `<td class="kg-num ${v ? '' : 'nol'}"
+    ${v && warna ? `style="color:${warna}"` : ''}>${angka(v)}</td>`;
 
-  const baris = rank.map(g => `<tr>
-    <td class="center" style="width:56px">
-      <span class="tag" style="${medali(g.peringkat)};min-width:30px;justify-content:center">
-        ${g.peringkat}</span></td>
-    <td><div class="primary">${esc(g.nama)}</div>
-        <div class="secondary">${esc(g.username || '-')}</div></td>
-    <td><span class="tag ${g.role === 'Admin' ? 'tag-ok'
-        : g.role === 'Pimpinan' ? 'tag-violet' : 'tag-sea'}">${esc(g.role)}</span>
-        ${(g.kelas_binaan || []).length
-          ? `<div class="secondary">${esc(g.kelas_binaan.join(', '))}</div>` : ''}</td>
-    <td class="num center" style="color:var(--maroon)">${angka(g.pelanggaran_dicatat)}</td>
-    <td class="num center" style="color:var(--violet)">${angka(g.pembinaan_selesai)}</td>
-    <td class="num center" style="color:var(--teal)">${angka(g.perizinan_diajukan + g.perizinan_diproses)}</td>
-    <td class="num center">${angka(g.hari_aktif)}</td>
-    <td class="num center" style="font-size:15px;font-weight:700">${angka(g.skor_kinerja)}</td>
-    <td class="secondary nowrap" style="padding-top:14px">
-      ${g.aktivitas_terakhir ? tgl(g.aktivitas_terakhir) : '—'}</td>
-    <td class="right"><button class="btn-link" data-kg="${esc(g.guru_id)}">
-      <i class="fa-solid fa-eye"></i> Detail</button></td>
-  </tr>`).join('') || barisKosong(10, 'Belum ada aktivitas pada rentang ini.',
-    'Ubah rentang tanggal atau periksa pemetaan akun guru.');
+  const baris = rank.map(g => {
+    const skor = Number(g.skor_kinerja) || 0;
+    const kelas = [g.peringkat <= 3 && skor > 0 ? 'top' : '',
+                   g.total_aktivitas ? '' : 'pasif'].filter(Boolean).join(' ');
+    return `<tr class="${kelas}">
+      <td class="center" style="width:58px">
+        <span class="kg-rank ${skor > 0 && g.peringkat <= 3 ? 'g' + g.peringkat : ''}">${g.peringkat}</span></td>
+      <td><div class="kg-guru">
+        <div class="kg-av">${esc((g.nama || '?').charAt(0).toUpperCase())}</div>
+        <div class="kg-nm">${esc(g.nama)}</div></div></td>
+      <td><span class="tag ${g.role === 'Admin' ? 'tag-ok'
+        : g.role === 'Pimpinan' ? 'tag-violet' : 'tag-sea'}">${esc(g.role)}</span></td>
+      ${num(g.pelanggaran_dicatat, 'var(--maroon)')}
+      ${num(g.pembinaan_selesai, 'var(--violet)')}
+      ${num(g.perizinan_diajukan + g.perizinan_diproses, 'var(--teal)')}
+      ${num(g.hari_aktif)}
+      <td><div class="kg-skor"><b>${angka(skor)}</b>
+        <span class="kg-bar"><i style="width:${Math.round(skor / maks * 100)}%"></i></span></div></td>
+      <td class="secondary nowrap">${g.aktivitas_terakhir ? tgl(g.aktivitas_terakhir) : '—'}</td>
+      <td class="right"><button class="btn-link" data-kg="${esc(g.guru_id)}">
+        <i class="fa-solid fa-eye"></i> Detail</button></td>
+    </tr>`;
+  }).join('') || barisKosong(10, 'Belum ada aktivitas pada rentang ini.',
+    'Ubah rentang tanggal, peran, atau kata kunci pencarian.');
 
   $('kgWrap').innerHTML = `
     <div class="stats" style="margin-top:4px">
@@ -3930,32 +3934,37 @@ function gambarKinerjaGuru() {
       ${belum ? `<div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
         <b>${angka(belum)}</b> aktivitas pada rentang ini belum terpetakan ke akun guru
         mana pun — biasanya data impor lama tanpa nama penindak.</div>` : ''}
+      <div class="kg-roles" id="kgRoles">
+        ${ROLE.map(x => `<button class="chip ${
+          (stKg.role || 'Semua') === x ? 'on' : ''}" data-kgrole="${x}">${x}</button>`).join('')}
+      </div>
       <div class="filters">
-        <input id="kgCari" class="input grow" placeholder="Cari nama atau username guru…"
-               value="${esc(stKg.cari)}">
-        <select id="kgRole" class="input">
-          <option value="">Semua Peran</option>
-          ${['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis']
-            .map(x => `<option ${x === stKg.role ? 'selected' : ''}>${x}</option>`).join('')}
-        </select>
+        <input id="kgCari" class="input grow" placeholder="Cari nama guru…" value="${esc(stKg.cari)}">
         <input id="kgDari" type="date" class="input" value="${stKg.dari}" title="Tanggal mulai">
         <input id="kgSampai" type="date" class="input" value="${stKg.sampai}" title="Tanggal akhir">
         <span class="sep"></span>
+        <span class="tag tag-off">${angka(rank.length)} guru</span>
         <button class="btn btn-ghost btn-sm" id="kgReset">
           <i class="fa-solid fa-rotate-left"></i>90 Hari</button>
       </div>
-      <div class="tbl"><table>
+      <div class="tbl"><table class="kg-tbl">
         <thead><tr><th class="center">#</th><th>Guru</th><th>Peran</th>
           <th class="center">Pelanggaran</th><th class="center">Pembinaan</th>
           <th class="center">Perizinan</th><th class="center">Hari Aktif</th>
-          <th class="center">Skor</th><th>Terakhir</th><th class="right">Aksi</th></tr></thead>
+          <th>Skor</th><th>Terakhir</th><th class="right">Aksi</th></tr></thead>
         <tbody>${baris}</tbody>
       </table></div>
-      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>`,
+      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
+      <div class="kg-formula">
+        <span>Formula skor:</span>
+        <b><i class="fa-solid fa-hands-praying" style="color:var(--violet)"></i>Pembinaan selesai ×${b.pembinaan_selesai ?? 10}</b>
+        <b><i class="fa-solid fa-scale-balanced" style="color:var(--maroon)"></i>Pelanggaran ×${b.pelanggaran_dicatat ?? 3}</b>
+        <b><i class="fa-solid fa-door-open" style="color:var(--teal)"></i>Perizinan ×${b.perizinan_diajukan ?? 2}</b>
+        <span style="flex:1"></span>
+        <span>Ranking aktivitas, bukan penilaian mutu kerja.</span>
+      </div>`,
       `<button class="btn btn-ghost btn-sm" id="kgCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>`,
-      `Skor: pembinaan selesai ×${(d.bobot || {}).pembinaan_selesai ?? 10} · `
-      + `pelanggaran ×${(d.bobot || {}).pelanggaran_dicatat ?? 3} · `
-      + `perizinan ×${(d.bobot || {}).perizinan_diajukan ?? 2}. Ranking aktivitas, bukan penilaian mutu.`)}`;
+      `Periode ${tgl(stKg.dari)} – ${tgl(stKg.sampai)}`)}`;
 
   pasangKinerjaGuru();
   tandaiTabelBisaGeser();
@@ -3965,29 +3974,34 @@ function pasangKinerjaGuru() {
   $('kgCari').addEventListener('input', debounce(e => {
     stKg.cari = e.target.value.trim(); muatKinerjaGuru();
   }, 320));
-  $('kgRole').addEventListener('change', e => { stKg.role = e.target.value; muatKinerjaGuru(); });
   $('kgDari').addEventListener('change', e => { stKg.dari = e.target.value; muatKinerjaGuru(); });
   $('kgSampai').addEventListener('change', e => { stKg.sampai = e.target.value; muatKinerjaGuru(); });
   $('kgReset').addEventListener('click', () => {
-    Object.assign(stKg, rentangKg(), { role: '', cari: '' });
-    muatKinerjaGuru();
+    Object.assign(stKg, rentangKg(), { role: '', cari: '' }); muatKinerjaGuru();
   });
 
   $('kgCsv').addEventListener('click', () => {
     const rows = (stKg.data?.ranking) || [];
     if (!rows.length) return toast('error', 'Belum ada data untuk diekspor.');
     unduhCsv(`kinerja-guru-${stKg.dari}_sd_${stKg.sampai}.csv`, [
-      ['Peringkat','Nama','Username','Peran','Kelas Binaan','Pelanggaran Dicatat',
-       'Pembinaan Selesai','Perizinan Diajukan','Perizinan Diproses',
-       'Total Aktivitas','Santri Ditangani','Hari Aktif','Skor','Aktivitas Terakhir'],
-      ...rows.map(g => [g.peringkat, g.nama, g.username, g.role,
-        (g.kelas_binaan || []).join(', '), g.pelanggaran_dicatat, g.pembinaan_selesai,
-        g.perizinan_diajukan, g.perizinan_diproses, g.total_aktivitas,
-        g.santri_ditangani, g.hari_aktif, g.skor_kinerja, g.aktivitas_terakhir || ''])
+      ['Peringkat','Nama','Peran','Pelanggaran Dicatat','Pembinaan Selesai',
+       'Perizinan Diajukan','Perizinan Diproses','Total Aktivitas',
+       'Santri Ditangani','Hari Aktif','Skor','Aktivitas Terakhir'],
+      ...rows.map(g => [g.peringkat, g.nama, g.role, g.pelanggaran_dicatat,
+        g.pembinaan_selesai, g.perizinan_diajukan, g.perizinan_diproses,
+        g.total_aktivitas, g.santri_ditangani, g.hari_aktif, g.skor_kinerja,
+        g.aktivitas_terakhir || ''])
     ]);
   });
 
   $('kgWrap').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-kgrole]');
+    if (c) {
+      const v = c.dataset.kgrole;
+      stKg.role = v === 'Semua' ? '' : v;
+      document.querySelectorAll('#kgRoles .chip').forEach(x => x.classList.toggle('on', x === c));
+      return muatKinerjaGuru();
+    }
     const b = e.target.closest('[data-kg]');
     if (b) bukaDetailKinerjaGuru(b.dataset.kg);
   });
