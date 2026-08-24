@@ -198,6 +198,7 @@ const MENU_ROLE = {
   siswa:       ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
   pelanggaran: ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
   rekap:       ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
+  pengasuhan:  ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'], 
   madrasah:    ['Admin','Guru','Walas','Guru BK','Guru Piket','Osis'],
   perizinan:   ['Admin','Guru','Guru Piket','Osis'],
   pembinaan:   ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z'],
@@ -212,6 +213,7 @@ const JUDUL = {
   siswa:      { lat:'Santri',              ar:'بيانات الطلاب',      teks:'Profil Santri' },
   pelanggaran:{ lat:'Pelanggaran',         ar:'المخالفات',          teks:'Catatan Pelanggaran' },
   rekap:      { lat:'Rekap',               ar:'حصر المخالفات',      teks:'Rekap Pelanggaran' },
+   pengasuhan: { lat:'Pengasuhan', ar:'التربية والانضباط', teks:'Unit Pengasuhan' }, 
   madrasah:   { lat:'Madrasah',            ar:'المدرسة',            teks:'Modul Madrasah' },
   perizinan:  { lat:'Perizinan',           ar:'الاستئذان',          teks:'Pusat Perizinan' },
   pembinaan:  { lat:'Pembinaan',           ar:'التوجيه',            teks:'Pembinaan' },
@@ -807,6 +809,7 @@ async function navigateTo(view) {
     else if (view === 'siswa')       await viewSiswa();
     else if (view === 'pelanggaran') await viewPelanggaran();
     else if (view === 'rekap')       await viewRekap();
+    else if (view === 'pengasuhan') await viewPengasuhan();
     else if (view === 'madrasah')    await viewMadrasah();     // <— baris baru
     else if (view === 'perizinan')   await viewPerizinan();
     else if (view === 'pembinaan')   await viewPembinaan();
@@ -4092,6 +4095,620 @@ async function bukaDetailKinerjaGuru(guruId) {
   } catch (err) { fireError(err); }
   finally { loading(false); }
 }
+
+// ---------------------------------------------------------------------
+// 25. MODUL PENGASUHAN — Catat Pelanggaran · Rekap · Perizinan
+//
+//     CARA PASANG (4 langkah, lihat PETUNJUK-PASANG.md):
+//     1) Tempel seluruh isi berkas ini di app.js, tepat SEBELUM blok
+//        "22. START — pulihkan sesi bila masih berlaku".
+//     2) Tambahkan 'pengasuhan' pada MENU_ROLE dan JUDUL.
+//     3) Tambahkan satu baris rute di navigateTo().
+//     4) Tambahkan tombol menu di index.html + tempel pengasuhan.css.
+//
+//     Modul ini tidak menambah tabel maupun RPC baru: semuanya berjalan
+//     di atas catat_pelanggaran, ajukan_perizinan, dan proses_perizinan
+//     yang sudah dipakai modul lain.
+// ---------------------------------------------------------------------
+
+const PGS = {
+  panel: 'catat',
+  hari: '',
+  master: [],
+  cepat: [],
+  recent: [],
+  izinData: [],
+  santri: null,
+  pilih: null,
+  rk: { cari: '', kategori: 'Semua', kelas: '', page: 1, size: 20 },
+  iz: { filter: 'Semua', cari: '', page: 1, size: 12 }
+};
+
+/** Tiga gerbang layanan pengasuhan. Urutan = alur kerja musyrif harian. */
+const PGS_FITUR = [
+  { id:'catat', rum:'I', ikon:'fa-feather-pointed', ar:'تسجيل المخالفة',
+    judul:'Catat Pelanggaran',
+    sub:'Rekam kejadian santri lengkap dengan bidang, bobot poin, dan catatan penindak.' },
+  { id:'rekap', rum:'II', ikon:'fa-layer-group', ar:'حصر المخالفات',
+    judul:'Rekap Pelanggaran',
+    sub:'Akumulasi berjenjang sesuai buku peraturan dayah, per santri dan siap diekspor.' },
+  { id:'izin', rum:'III', ikon:'fa-door-open', ar:'الاستئذان',
+    judul:'Perizinan Santri',
+    sub:'Ajukan izin, pantau santri yang sedang di luar, dan tutup dengan keterangan balik.' }
+];
+
+/** Modul selalu bekerja pada unit Pengasuhan; konteks disetel otomatis. */
+function pgsSetelKonteks() {
+  if (APP.ctx.unit === 'Pengasuhan') return true;
+  if (!bolehKonteks('Pengasuhan', 'Semua')) return false;
+  APP.ctx = { unit: 'Pengasuhan', jenjang: 'Semua' };
+  try { sessionStorage.setItem('rq_ctx', JSON.stringify(APP.ctx)); } catch (e) {}
+  gambarBadgeKonteks();
+  return true;
+}
+
+/** Santri aktif pada cakupan pengguna. */
+async function pgsSantri() {
+  return filterBinaan((await muatSiswa()).filter(aktifSantri), 'kelas');
+}
+
+/** Perizinan pada cakupan pengguna. */
+async function pgsAmbilIzin() {
+  const semua = await amanKosong(muatIzin, 'perizinan');
+  if (!perluFilterKelas()) return semua;
+  const boleh = new Set((await pgsSantri()).map(s => String(s.nisn)));
+  return semua.filter(z => boleh.has(String(z.nisn)));
+}
+
+/** Enam jenis pelanggaran yang paling sering dicatat 30 hari terakhir. */
+function pgsJenisCepat(detail, master) {
+  const batas = kunciTgl(tambahHari(new Date(), -30));
+  const hitung = {};
+  detail.forEach(r => {
+    const k = kunciTgl(r.tanggal);
+    if (k < batas) return;
+    const kode = String(r.kode_pelanggaran || '').trim();
+    if (kode) hitung[kode] = (hitung[kode] || 0) + 1;
+  });
+  const urut = Object.entries(hitung).sort((a, b) => b[1] - a[1]).map(x => x[0]);
+  const peta = Object.fromEntries(master.map(m => [String(m.kode_pelanggaran), m]));
+  const out = urut.map(k => peta[k]).filter(Boolean).slice(0, 6);
+  if (out.length < 6) {
+    master.forEach(m => { if (out.length < 6 && !out.includes(m)) out.push(m); });
+  }
+  return out;
+}
+
+// ---------- Tampilan utama ----------
+async function viewPengasuhan() {
+  if (!pgsSetelKonteks()) {
+    $('viewRoot').innerHTML = kartu('Unit Pengasuhan', `
+      <div class="card-note"><i class="fa-solid fa-lock"></i>
+        Akun Anda dibatasi pada unit <b>${esc(APP.profil?.unit_akses || 'Semua')}</b>,
+        sehingga modul Pengasuhan tidak dapat dibuka. Hubungi Admin bila cakupan
+        akun perlu diperluas.</div>`);
+    return;
+  }
+
+  const [siswa, detailAll, masterAll, izin] = await Promise.all([
+    pgsSantri(),
+    amanKosong(muatDetail, 'pelanggaran'),
+    amanKosong(muatMaster, 'master pelanggaran'),
+    pgsAmbilIzin()
+  ]);
+
+  const detail = lingkupDetail(detailAll);
+  const master = lingkupMaster(masterAll);
+
+  PGS.hari = hariIni();
+  PGS.master = master;
+  PGS.cepat = pgsJenisCepat(detail, master);
+  PGS.izinData = izin;
+  PGS.recent = detail.slice(0, 8);
+
+  const pekan = kunciTgl(tambahHari(new Date(), -6));
+  const plgHari = detail.filter(r => kunciTgl(r.tanggal) === PGS.hari).length;
+  const plgPekan = detail.filter(r => kunciTgl(r.tanggal) >= pekan).length;
+  const izinPending = izin.filter(z => z.status_persetujuan === 'Pending').length;
+
+  $('viewRoot').innerHTML = `
+    <section class="pgs-hero">
+      <div class="eyebrow"><span class="ar">التربية والانضباط</span><span class="rule"></span>
+        <span class="lat">Unit Pengasuhan</span></div>
+      <span class="ar pgs-ayat">وَأْمُرْ أَهْلَكَ بِالصَّلَاةِ وَاصْطَبِرْ عَلَيْهَا</span>
+      <h2>Pengasuhan Santri</h2>
+      <p>Ubudiyah, bahasa, kebersihan, dan keamanan asrama dicatat di satu tempat.
+         Tiga layanan di bawah ini memakai basis data yang sama dengan laporan
+         perkembangan santri, sehingga hasil catatan hari ini langsung terbaca
+         pada rapor pembinaan.</p>
+      <div class="meta">
+        <span><i class="fa-solid fa-user-tie"></i>${esc(APP.profil?.nama || '')}</span>
+        <span><i class="fa-solid fa-id-badge"></i>${esc(role())}</span>
+        <span><i class="fa-regular fa-calendar"></i>${tgl(PGS.hari)}</span>
+        ${bolehKonteks('Madrasah', 'Semua')
+          ? `<span class="link" data-pgsgo="madrasah">
+               <i class="fa-solid fa-right-left"></i>Pindah ke Madrasah</span>` : ''}
+      </div>
+    </section>
+
+    <div class="stats">
+      ${stat('Santri Diasuh', angka(siswa.length), 'fa-solid fa-user-group',
+        'background:#E7F1F7;color:var(--sea)', 'var(--sea)',
+        perluFilterKelas() ? 'Kelas binaan Anda' : 'Seluruh dayah')}
+      ${stat('Dicatat Hari Ini', angka(plgHari), 'fa-solid fa-feather-pointed',
+        'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)', tgl(PGS.hari))}
+      ${stat('Sepekan Terakhir', angka(plgPekan), 'fa-solid fa-chart-simple',
+        'background:var(--amber-bg);color:var(--amber)', 'var(--amber)', '7 hari ke belakang')}
+      ${stat('Izin Menunggu', angka(izinPending), 'fa-solid fa-hourglass-half',
+        'background:var(--teal-bg);color:var(--teal)', 'var(--teal)', 'Belum ada keterangan balik')}
+    </div>
+
+    <div class="pgs-rail" id="pgsRail">${pgsRail()}</div>
+    <div id="pgsPanel" class="pgs-panel"></div>`;
+
+  onKlik(async (e) => {
+    const go = e.target.closest('[data-pgsgo]');
+    if (go) return setKonteks('Madrasah', 'MTs', 'madrasah');
+
+    const p = e.target.closest('[data-pgs]');
+    if (p) {
+      PGS.panel = p.dataset.pgs;
+      $('pgsRail').innerHTML = pgsRail();
+      $('pgsPanel').scrollIntoView({ block: 'start', behavior: 'smooth' });
+      return pgsGambarPanel();
+    }
+
+    const q = e.target.closest('[data-pgquick]');
+    if (q) return pgsPilihCepat(q.dataset.pgquick);
+
+    const d = e.target.closest('[data-detail]');
+    if (d) return bukaDetailSantri(d.dataset.detail);
+
+    const f = e.target.closest('[data-pgizfilter]');
+    if (f) {
+      PGS.iz.filter = f.dataset.pgizfilter; PGS.iz.page = 1;
+      document.querySelectorAll('[data-pgizfilter]').forEach(c => c.classList.toggle('on', c === f));
+      return pgsGambarIzin();
+    }
+
+    const z = e.target.closest('[data-pgizin]');
+    if (z) return pgsProsesIzin(...z.dataset.pgizin.split('|'));
+
+    const g = e.target.closest('[data-pg]');
+    if (!g) return;
+    const [tanda, hal] = g.dataset.pg.split(':');
+    if (tanda === 'pgrk') { PGS.rk.page = Number(hal); pgsGambarRekap(); }
+    if (tanda === 'pgiz') { PGS.iz.page = Number(hal); pgsGambarIzin(); }
+  });
+
+  pgsGambarPanel();
+}
+
+function pgsRail() {
+  return PGS_FITUR.map(f => {
+    const on = PGS.panel === f.id;
+    return `<button class="pgs-portal${on ? ' on' : ''}" data-pgs="${f.id}"
+              aria-pressed="${on}">
+      <span class="rum">${f.rum}</span>
+      <span class="seal"><i class="fa-solid ${f.ikon}"></i></span>
+      <span class="ar">${f.ar}</span>
+      <b>${esc(f.judul)}</b>
+      <small>${esc(f.sub)}</small>
+      <span class="go">${on ? 'Sedang dibuka' : 'Buka layanan'}
+        <i class="fa-solid ${on ? 'fa-circle-dot' : 'fa-arrow-right'}"></i></span>
+    </button>`;
+  }).join('');
+}
+
+function pgsGambarPanel() {
+  const el = $('pgsPanel'); if (!el) return;
+  if (PGS.panel === 'rekap') { el.innerHTML = pgsPanelRekap(); pgsPasangRekap(); }
+  else if (PGS.panel === 'izin') { el.innerHTML = pgsPanelIzin(); pgsPasangIzin(); }
+  else { el.innerHTML = pgsPanelCatat(); pgsPasangCatat(); }
+  tandaiTabelBisaGeser();
+}
+
+// ---------- Layanan I: catat pelanggaran ----------
+function pgsPanelCatat() {
+  const bisa = bolehTulis();
+  const cepat = PGS.cepat || [];
+
+  return kartu('Catat Pelanggaran Santri', `
+    <div class="card-note"><i class="fa-solid fa-circle-info"></i>
+      Jenis pelanggaran diambil dari Master Pelanggaran unit <b>Pengasuhan</b>.
+      Poin, bidang, dan instruksi pembinaan diproses otomatis setelah disimpan.</div>
+
+    ${cepat.length ? `<div class="pgs-quick">
+      <span class="lbl"><i class="fa-solid fa-bolt"></i>Sering dicatat</span>
+      ${cepat.map(m => `<button class="pgs-chip" data-pgquick="${esc(m.kode_pelanggaran)}"
+          title="${esc(m.nama_pelanggaran)}">
+        <span class="dot ${m.kategori === 'Ringan' ? 'r' : m.kategori === 'Sedang' ? 's' : 'b'}"></span>
+        ${esc(m.nama_pelanggaran)}<b>${m.bobot_poin}</b></button>`).join('')}
+    </div>` : ''}
+
+    <div class="pgs-form">
+      <div class="field"><label class="label">Tanggal Kejadian</label>
+        <input id="pgTanggal" type="date" class="input" value="${PGS.hari}"></div>
+      <div class="field"><label class="label">Cari Santri</label>
+        <input id="pgSantri" class="input" autocomplete="off"
+               placeholder="Nama atau NISN (min. 2 huruf)…">
+        <p class="hint">Pilih dari daftar saran agar NISN terbaca dengan benar.</p></div>
+    </div>
+
+    <div class="pgs-pick" id="pgPick">
+      <div class="ico"><i class="fa-solid fa-user-graduate"></i></div>
+      <div><small>Santri Terpilih</small><b>Belum ada santri dipilih</b></div>
+    </div>
+
+    <div class="pgs-form">
+      <div class="field wide"><label class="label">Jenis Pelanggaran</label>
+        <input id="pgKode" class="input" autocomplete="off"
+               placeholder="Ketik kode, nama, kategori, atau bidang…">
+        <div id="pgInfo" class="hint">Belum ada jenis pelanggaran dipilih.</div></div>
+      <div class="field wide"><label class="label">Catatan Kejadian</label>
+        <textarea id="pgCatatan" class="input" rows="3" maxlength="500"
+          placeholder="Contoh: tidak ikut shalat berjamaah subuh tanpa keterangan."></textarea>
+        <div class="pgs-meter"><span class="hint">Opsional — membantu wali kelas memahami konteks.</span>
+          <span class="hint mono" id="pgHitung">0 / 500</span></div></div>
+    </div>
+
+    <div class="pgs-bar">
+      <span class="note"><i class="fa-solid fa-user-shield"></i>
+        Penindak: ${esc(APP.profil?.nama || '-')}</span>
+      ${bisa
+        ? `<button class="btn btn-primary btn-sm" id="pgSimpan">
+             <i class="fa-solid fa-floppy-disk"></i>Simpan Pelanggaran</button>`
+        : `<span class="tag tag-off">Hanya baca</span>`}
+    </div>`,
+    `<span class="tag tag-sea">${angka(PGS.master.length)} jenis aktif</span>`,
+    'Satu kali simpan menghasilkan satu catatan perkembangan santri.')
+
+  + kartu('Catatan Terakhir di Pengasuhan', `
+    <div class="tbl"><table>
+      <thead><tr><th>Tanggal</th><th>Santri</th><th>Pelanggaran</th>
+        <th>Kategori</th><th class="center">Poin</th><th class="right">Aksi</th></tr></thead>
+      <tbody>${PGS.recent.map(r => `<tr>
+        <td class="secondary nowrap" style="padding-top:14px">${tgl(r.tanggal)}</td>
+        <td><div class="primary">${esc(r.nama_siswa)}</div>
+            <div class="secondary">${esc(r.nisn)} · ${esc(r.kelas || '-')}</div></td>
+        <td>${esc(r.nama_pelanggaran)}<div class="secondary">${esc(r.bidang || '-')}</div></td>
+        <td><span class="tag ${tagKategori(r.kategori)}">${esc(r.kategori)}</span></td>
+        <td class="num center" style="color:var(--maroon)">${r.bobot_pelanggaran}</td>
+        <td class="right"><button class="btn-link" data-detail="${esc(r.nisn)}">
+          <i class="fa-solid fa-eye"></i> Riwayat</button></td>
+      </tr>`).join('') || barisKosong(6, 'Belum ada catatan pengasuhan.',
+        'Catatan pertama akan muncul di sini setelah disimpan.')}
+      </tbody></table></div>
+    <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>`,
+    '', 'Delapan catatan terbaru pada cakupan Anda.');
+}
+
+function pgsPasangCatat() {
+  PGS.santri = null; PGS.pilih = null;
+  const inp = $('pgSantri'); if (!inp) return;
+
+  saranSantri(inp, (s) => {
+    PGS.santri = s;
+    $('pgPick').classList.add('on');
+    $('pgPick').innerHTML = `
+      <div class="ico"><i class="fa-solid fa-user-graduate"></i></div>
+      <div><small>Santri Terpilih</small>
+        <b>${esc(s.nama_siswa)} · ${esc(s.kelas || '-')} · ${esc(s.nisn)}</b></div>`;
+  });
+
+  saranPelanggaran($('pgKode'), (m) => pgsPasangMaster(m));
+  $('pgKode').addEventListener('input', () => {
+    if (!$('pgKode').dataset.kode) {
+      PGS.pilih = null;
+      $('pgInfo').textContent = 'Belum ada jenis pelanggaran dipilih.';
+    }
+  });
+
+  $('pgCatatan').addEventListener('input', (e) => {
+    $('pgHitung').textContent = `${e.target.value.length} / 500`;
+  });
+
+  $('pgSimpan')?.addEventListener('click', pgsSimpan);
+}
+
+function pgsPasangMaster(m) {
+  PGS.pilih = m;
+  const inp = $('pgKode');
+  if (inp) { inp.value = `${m.kode_pelanggaran} — ${m.nama_pelanggaran}`; inp.dataset.kode = m.kode_pelanggaran; }
+  $('pgInfo').innerHTML =
+    `<span class="tag ${tagKategori(m.kategori)}">${esc(m.kategori)}</span>
+     <b>${m.bobot_poin} poin</b> · ${esc(m.bidang || '-')} · ${esc(m.jenjang || 'Semua')}`;
+}
+
+function pgsPilihCepat(kode) {
+  const m = (PGS.master || []).find(x => String(x.kode_pelanggaran) === String(kode));
+  if (!m) return;
+  if (PGS.panel !== 'catat') { PGS.panel = 'catat'; $('pgsRail').innerHTML = pgsRail(); pgsGambarPanel(); }
+  pgsPasangMaster(m);
+  document.querySelectorAll('[data-pgquick]').forEach(c =>
+    c.classList.toggle('on', c.dataset.pgquick === String(kode)));
+  $('pgSantri')?.focus();
+}
+
+async function pgsSimpan() {
+  if (!PGS.santri) { $('pgSantri')?.focus(); return toast('error', 'Pilih santri terlebih dahulu.'); }
+  const kode = PGS.pilih?.kode_pelanggaran || $('pgKode')?.dataset.kode || '';
+  if (!kode) { $('pgKode')?.focus(); return toast('error', 'Pilih jenis pelanggaran dari daftar saran.'); }
+
+  const hasil = await mdSimpanPelanggaran({
+    p_nisn: PGS.santri.nisn,
+    p_kode: kode,
+    p_tanggal: $('pgTanggal').value || hariIni(),
+    p_catatan: $('pgCatatan').value.trim(),
+    p_force: false
+  }, $('pgSimpan'), 'Menyimpan Pelanggaran…');
+
+  if (!hasil) return;
+  toast('success', `Tersimpan. Total poin santri: ${hasil.poin_baru ?? '-'}`);
+  navigateTo('pengasuhan');
+}
+
+// ---------- Layanan II: rekap pelanggaran ----------
+function pgsPanelRekap() {
+  return kartu('Rekap Pelanggaran per Santri', `
+    <div class="card-note"><i class="fa-solid fa-circle-info"></i>
+      Rekap memakai kaskade buku peraturan: <b>5× ringan sejenis menjadi 1× sedang</b>,
+      <b>5× sedang sejenis menjadi 1× berat</b>. Sisa yang belum genap tetap pada
+      kategori aslinya.</div>
+    <div class="filters">
+      <input id="pgRkCari" class="input grow" placeholder="Cari nama atau NISN santri…"
+             value="${esc(PGS.rk.cari)}">
+      <select id="pgRkKategori" class="input">
+        ${['Semua','Ringan','Sedang','Berat']
+          .map(k => `<option ${k === PGS.rk.kategori ? 'selected' : ''}>${k}</option>`).join('')}
+      </select>
+      <select id="pgRkKelas" class="input"><option value="">Semua Kelas</option></select>
+      <span class="sep"></span>
+      <span class="tag tag-off" id="pgRkCount">0 santri</span>
+      <button class="btn btn-ghost btn-sm" id="pgRkCsv">
+        <i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>
+    </div>
+    <div id="pgRkHasil"><div style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</div></div>
+    <div id="pgRkPager"></div>`,
+    `<span class="tag tag-sea">Pengasuhan</span>`,
+    'Angka yang muncul di sini sama dengan bagian akumulasi pada laporan cetak.');
+}
+
+async function pgsPasangRekap() {
+  const sel = $('pgRkKelas');
+  const kelas = await muatDaftarKelas();
+  sel.innerHTML = `<option value="">Semua Kelas</option>` +
+    kelas.map(k => `<option ${k === PGS.rk.kelas ? 'selected' : ''}>${esc(k)}</option>`).join('');
+
+  $('pgRkCari').addEventListener('input', debounce(e => {
+    PGS.rk.cari = e.target.value.trim(); PGS.rk.page = 1; pgsGambarRekap();
+  }, 250));
+  $('pgRkKategori').addEventListener('change', e => {
+    PGS.rk.kategori = e.target.value; PGS.rk.page = 1; pgsGambarRekap();
+  });
+  sel.addEventListener('change', e => {
+    PGS.rk.kelas = e.target.value; PGS.rk.page = 1; pgsGambarRekap();
+  });
+  $('pgRkCsv').addEventListener('click', async () => {
+    const rows = await pgsHitungRekap();
+    if (!rows.length) return toast('error', 'Belum ada data untuk diekspor.');
+    const baris = [['NISN','Nama','Kelas','Kategori','Catatan','Jumlah']];
+    rows.forEach(s => s.daftar.forEach(d =>
+      baris.push([s.nisn, s.nama, s.kelas, d.kategori, d.deskripsi, d.jumlah])));
+    unduhCsv(`rekap-pengasuhan-${hariIni()}.csv`, baris);
+  });
+
+  await pgsGambarRekap();
+}
+
+async function pgsHitungRekap() {
+  const rows = rekapPerSantri(lingkupDetail(await muatDetail()));
+  const k = PGS.rk.cari.toLowerCase();
+  return rows
+    .filter(s => !PGS.rk.kelas || s.kelas === PGS.rk.kelas)
+    .filter(s => !k || String(s.nama).toLowerCase().includes(k) ||
+                       String(s.nisn).toLowerCase().includes(k))
+    .map(s => {
+      const daftar = s.daftar.filter(d => PGS.rk.kategori === 'Semua' || d.kategori === PGS.rk.kategori);
+      return daftar.length ? { ...s, daftar } : null;
+    })
+    .filter(Boolean);
+}
+
+async function pgsGambarRekap() {
+  const rows = await pgsHitungRekap();
+  const pages = Math.max(1, Math.ceil(rows.length / PGS.rk.size));
+  if (PGS.rk.page > pages) PGS.rk.page = pages;
+  const from = (PGS.rk.page - 1) * PGS.rk.size;
+  const hal = rows.slice(from, from + PGS.rk.size);
+
+  $('pgRkCount').textContent = `${angka(rows.length)} santri`;
+  $('queryTime').textContent = `rekap pengasuhan · ${angka(rows.length)} santri`;
+
+  if (!rows.length) {
+    $('pgRkHasil').innerHTML = kosong('Tidak ditemukan santri dengan kriteria ini.',
+      'Ubah kategori, kelas, atau kata kunci pencarian.', 'fa-layer-group');
+    $('pgRkPager').innerHTML = '';
+    return;
+  }
+
+  $('pgRkHasil').innerHTML = hal.map((s, i) => {
+    const total = s.daftar.reduce((a, d) => a + d.jumlah, 0);
+    return `<article class="pgs-rk">
+      <div class="hd">
+        <span class="no">${String(from + i + 1).padStart(2, '0')}</span>
+        <div class="who">
+          <b>${esc(s.nama)}</b>
+          <span>${esc(s.nisn)} · ${esc(s.kelas)}</span>
+        </div>
+        <span class="tag tag-off">${total}× tercatat</span>
+        <button class="btn-link" data-detail="${esc(s.nisn)}">Riwayat</button>
+      </div>
+      <ul>${s.daftar.map(d => `<li>
+        <span class="tag ${tagKategori(d.kategori)}">${esc(d.kategori)}</span>
+        <span class="txt">${esc(d.deskripsi)}</span>
+        <span class="qty">${d.jumlah}×</span></li>`).join('')}</ul>
+    </article>`;
+  }).join('');
+
+  $('pgRkPager').innerHTML = pager('pgrk', PGS.rk.page, rows.length, PGS.rk.size);
+}
+
+// ---------- Layanan III: perizinan ----------
+function pgsPanelIzin() {
+  const bisa = bolehTulis() && bolehPerizinan();
+  return kartu('Perizinan Santri', `
+    <div class="minis" style="padding-bottom:6px" id="pgIzMini"></div>
+    <div class="chips">
+      ${['Semua','Pending','Sesuai Waktu','Telat Balik'].map(f =>
+        `<button class="chip ${f === PGS.iz.filter ? 'on' : ''}" data-pgizfilter="${f}">${f}</button>`).join('')}
+    </div>
+    <div class="filters">
+      <input id="pgIzCari" class="input grow" placeholder="Cari santri, kelas, atau alasan…"
+             value="${esc(PGS.iz.cari)}">
+      <span class="sep"></span>
+      <span class="tag tag-off" id="pgIzCount">0 kartu</span>
+    </div>
+    <div id="pgIzGrid" class="izin-grid"></div>
+    <div id="pgIzPager"></div>`,
+    bisa ? `<button class="btn btn-primary btn-sm" id="pgIzTambah">
+             <i class="fa-solid fa-plus"></i>Ajukan Izin</button>` : '',
+    'Izin yang belum ditutup akan menahan pencatatan pelanggaran pada tanggal yang sama.');
+}
+
+function pgsPasangIzin() {
+  $('pgIzCari').addEventListener('input', debounce(e => {
+    PGS.iz.cari = e.target.value.trim(); PGS.iz.page = 1; pgsGambarIzin();
+  }, 250));
+  $('pgIzTambah')?.addEventListener('click', pgsModalIzin);
+  pgsGambarIzin();
+}
+
+function pgsGambarIzin() {
+  const semua = PGS.izinData || [];
+  let rows = semua.filter(z => PGS.iz.filter === 'Semua' || z.status_persetujuan === PGS.iz.filter);
+  if (PGS.iz.cari) {
+    const k = PGS.iz.cari.toLowerCase();
+    rows = rows.filter(z => [z.siswa?.nama_siswa, z.siswa?.kelas, z.alasan, z.nisn, z.pemberi_izin]
+      .some(v => String(v || '').toLowerCase().includes(k)));
+  }
+
+  const hit = (s) => semua.filter(z => z.status_persetujuan === s).length;
+  $('pgIzMini').innerHTML = `
+    <div class="mini a"><span>Menunggu</span><b>${angka(hit('Pending'))}</b></div>
+    <div class="mini t"><span>Sesuai Waktu</span><b>${angka(hit('Sesuai Waktu'))}</b></div>
+    <div class="mini m"><span>Telat Balik</span><b>${angka(hit('Telat Balik'))}</b></div>
+    <div class="mini s"><span>Total Izin</span><b>${angka(semua.length)}</b></div>`;
+
+  const pages = Math.max(1, Math.ceil(rows.length / PGS.iz.size));
+  if (PGS.iz.page > pages) PGS.iz.page = pages;
+  const from = (PGS.iz.page - 1) * PGS.iz.size;
+  const hal = rows.slice(from, from + PGS.iz.size);
+
+  $('pgIzCount').textContent = `${angka(rows.length)} kartu`;
+  $('queryTime').textContent = `perizinan pengasuhan · ${angka(rows.length)} kartu`;
+
+  $('pgIzGrid').innerHTML = hal.map(z => `
+    <div class="izin">
+      <div class="top">
+        <div style="min-width:0">
+          <p style="margin:0;font-weight:700;font-size:13.5px;overflow:hidden;
+                    text-overflow:ellipsis;white-space:nowrap">
+            ${esc(z.siswa?.nama_siswa || '(tidak ditemukan)')}</p>
+          <p style="margin:2px 0 0;font-size:11.5px;color:var(--text-3)" class="mono">
+            ${esc(z.nisn)} · ${esc(z.siswa?.kelas || '-')}</p>
+        </div>
+        <span class="tag ${tagIzin(z.status_persetujuan)}">${esc(z.status_persetujuan)}</span>
+      </div>
+      <div class="lines">
+        <span><i class="fa-regular fa-calendar-days"></i>${tgl(z.tanggal_mulai)} s/d ${tgl(z.tanggal_selesai)}</span>
+        <span><i class="fa-regular fa-bookmark"></i>${esc(z.jenis_izin || '-')}</span>
+        <span><i class="fa-regular fa-comment-dots"></i>${esc(z.alasan || '-')}</span>
+        <span><i class="fa-regular fa-user"></i>Diajukan oleh ${esc(z.pemberi_izin || '-')}</span>
+      </div>
+      ${z.status_persetujuan === 'Pending' && bolehPerizinan() && !hanyaBaca() ? `
+        <div class="acts">
+          <button class="btn btn-danger btn-sm" data-pgizin="${esc(z.id_izin)}|Telat Balik">
+            <i class="fa-solid fa-clock-rotate-left"></i>Telat Balik</button>
+          <button class="btn btn-ok btn-sm" data-pgizin="${esc(z.id_izin)}|Sesuai Waktu">
+            <i class="fa-solid fa-check"></i>Sesuai Waktu</button>
+        </div>` : ''}
+    </div>`).join('') || kosong('Tidak ada data perizinan.',
+      'Ubah filter status atau ajukan izin baru.', 'fa-door-open');
+
+  $('pgIzPager').innerHTML = rows.length
+    ? pager('pgiz', PGS.iz.page, rows.length, PGS.iz.size) : '';
+}
+
+async function pgsMuatUlangIzin() {
+  cacheHapus('izin');
+  PGS.izinData = await pgsAmbilIzin();
+  pgsGambarIzin();
+  refreshBadgePending();
+}
+
+async function pgsModalIzin() {
+  const res = await Swal.fire({
+    title: 'Ajukan Perizinan', width: 540, showCancelButton: true,
+    confirmButtonText: 'Simpan', cancelButtonText: 'Batal', confirmButtonColor: '#14618B',
+    showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
+    html: `<div class="stack">
+      <div class="field"><label class="label">Santri</label>
+        <input id="pzNisn" class="input" autocomplete="off" placeholder="Ketik nama atau NISN…">
+        <p class="hint">Pilih dari daftar saran agar NISN terbaca dengan benar.</p></div>
+      <div class="duo">
+        <div class="field"><label class="label">Tanggal Mulai</label>
+          <input id="pzMulai" type="date" class="input" value="${hariIni()}"></div>
+        <div class="field"><label class="label">Tanggal Selesai</label>
+          <input id="pzSelesai" type="date" class="input" value="${hariIni()}"></div>
+      </div>
+      <div class="field"><label class="label">Jenis Izin</label>
+        <select id="pzJenis" class="input">
+          <option>Keperluan</option><option>Sakit</option><option>Pemberitahuan</option>
+        </select></div>
+      <div class="field"><label class="label">Alasan</label>
+        <textarea id="pzAlasan" class="input" rows="2"
+          placeholder="Contoh: dijemput orang tua untuk keperluan keluarga."></textarea></div>
+    </div>`,
+    didOpen: () => { saranSantri($('pzNisn')); setTimeout(() => $('pzNisn').focus(), 120); },
+    preConfirm: async () => {
+      const el = $('pzNisn');
+      const nisn = el.dataset.picked || el.value.split(' - ')[0].trim();
+      if (!nisn) { Swal.showValidationMessage('Santri belum dipilih.'); return false; }
+      const mulai = $('pzMulai').value, selesai = $('pzSelesai').value;
+      if (!mulai || !selesai) { Swal.showValidationMessage('Tanggal mulai dan selesai wajib diisi.'); return false; }
+      if (selesai < mulai) { Swal.showValidationMessage('Tanggal selesai tidak boleh lebih awal dari tanggal mulai.'); return false; }
+      const { error } = await db.rpc('ajukan_perizinan', {
+        p_nisn: nisn, p_mulai: mulai, p_selesai: selesai,
+        p_jenis: $('pzJenis').value, p_alasan: $('pzAlasan').value.trim()
+      });
+      if (error) { Swal.showValidationMessage(error.message); return false; }
+      return true;
+    }
+  });
+  if (!res.isConfirmed) return;
+  sync('done', 'Izin tersimpan');
+  toast('success', 'Permohonan izin tersimpan');
+  await pgsMuatUlangIzin();
+}
+
+async function pgsProsesIzin(idIzin, keputusan) {
+  const r = await Swal.fire({
+    icon: 'question', title: `Tandai "${keputusan}"?`,
+    showCancelButton: true, confirmButtonText: 'Ya, simpan', cancelButtonText: 'Batal',
+    confirmButtonColor: keputusan === 'Sesuai Waktu' ? '#0F766E' : '#9F1239'
+  });
+  if (!r.isConfirmed) return;
+  sync('saving', 'Memproses izin…');
+  try {
+    await q(db.rpc('proses_perizinan', { p_id_izin: idIzin, p_keputusan: keputusan }), 'proses_izin');
+    cacheHapus('izin', 'siswa');
+    sync('done', 'Izin diperbarui');
+    toast('success', 'Status izin: ' + keputusan);
+    await pgsMuatUlangIzin();
+  } catch (err) { sync('warn', 'Gagal memproses'); fireError(err); }
+}
+
 // ---------------------------------------------------------------------
 // 22. START — pulihkan sesi bila masih berlaku
 // ---------------------------------------------------------------------
