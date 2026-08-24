@@ -4651,6 +4651,9 @@ async function pgsMuatUlangIzin() {
 }
 
 async function pgsModalIzin() {
+   if (CURRENT_USER?.role?.toLowerCase() === 'osis') {
+    return toast('error', 'OSDA-RQ tidak diizinkan mengajukan perizinan.');
+  }
   const res = await Swal.fire({
     title: 'Ajukan Perizinan', width: 540, showCancelButton: true,
     confirmButtonText: 'Simpan', cancelButtonText: 'Batal', confirmButtonColor: '#14618B',
