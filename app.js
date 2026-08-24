@@ -3523,6 +3523,16 @@ async function mdSimpanPelanggaranUmum() {
 
 // ---------- Panel 3: presensi kelas ----------
 function mdPanelPresensi() {
+
+   const role = CURRENT_USER?.role?.toLowerCase();
+  if (!['walas', 'guru', 'admin','guru bk'].includes(role)) {
+    return kartu('Rekap Presensi Kelas', `
+      <div class="card-note"><i class="fa-solid fa-lock"></i>
+        Akses Terbatas: Fitur presensi hanya dapat diakses oleh <b>Wali Kelas</b>, <b>Guru</b>, <b>Guru BK</b>, dan <b>Admin</b>.
+      </div>`,
+      '<span class="tag tag-off">Akses Ditolak</span>');
+  }
+   
   if (!MDS.siapPresensi) {
     return kartu('Rekap Presensi Kelas', `
       <div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
