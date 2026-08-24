@@ -3524,7 +3524,7 @@ async function mdSimpanPelanggaranUmum() {
 // ---------- Panel 3: presensi kelas ----------
 function mdPanelPresensi() {
 
- const role = CURRENT_USER?.role?.toLowerCase();
+ const role = APP.profil?.role?.toLowerCase();
 
 if (role !== 'walas' && role !== 'guru' && role !== 'admin' && role !== 'guru bk') {
   return kartu('Rekap Presensi Kelas', `
