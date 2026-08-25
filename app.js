@@ -169,21 +169,63 @@ function selesaiSimpan(btn, asli, sukses, teks) {
 }
 
 // ---------------------------------------------------------------------
-// 2. RBAC KLIEN (mengikuti aturan Code.gs lama)
+// ---------------------------------------------------------------------
+// 2. RBAC KLIEN — SATU SUMBER KEBENARAN
+//
+//     Aturan ditulis per KEMAMPUAN (capability), bukan per peran.
+//     Menambah peran baru cukup menyisipkan namanya pada baris yang
+//     relevan di HAK; tidak perlu lagi menulis `if (role() === '...')`
+//     di dalam view mana pun.
 // ---------------------------------------------------------------------
 const role = () => APP.profil?.role || '';
 
-const SEMUA_ROLE = ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis','Pimpinan','Klinik'];
+const SEMUA_ROLE = ['Admin','Guru','Walas','Guru BK','Guru Piket',
+                    'Ustadz GEN-Z','Osis','Pimpinan','Klinik'];
+
+const HAK = {
+  // --- Pelanggaran -------------------------------------------------
+  'plg.catat'       : ['Admin','Guru','Walas','Guru BK','Ustadz GEN-Z','Osis'],
+  'plg.arsip'       : ['Admin','Guru','Walas','Guru BK','Ustadz GEN-Z','Osis'],
+
+  // --- Perizinan ---------------------------------------------------
+  'izin.lihat'      : ['Admin','Guru','Guru Piket','Klinik'],
+  'izin.ajukan'     : ['Admin','Guru','Klinik'],
+  'izin.proses'     : ['Admin','Guru'],
+  'izin.perpanjang' : ['Admin','Guru','Klinik'],
+
+  // --- Presensi Madrasah -------------------------------------------
+  'presensi.lihat'  : ['Admin','Guru','Walas','Guru BK'],
+  'presensi.isi'    : ['Admin','Guru','Walas'],
+
+  // --- Pembinaan & Master ------------------------------------------
+  'bina.ubah'       : ['Admin','Guru','Pimpinan'],
+  'master.lihat'    : ['Admin','Guru','Walas','Guru BK','Guru Piket'],
+  'master.kelola'   : ['Admin'],
+
+  // --- Laporan ------------------------------------------------------
+  'cetak'           : ['Admin','Guru','Guru BK','Pimpinan'],
+  'pdf'             : ['Admin','Guru','Pimpinan'],
+
+  // --- Batasan lingkup ----------------------------------------------
+  'lingkup.kelas'   : ['Guru','Guru BK','Walas']   // hanya kelas binaan
+};
+
+/** Satu-satunya cara memeriksa wewenang di seluruh aplikasi. */
+const bisa = (k) => (HAK[k] || []).includes(role());
+
+/** Klinik dibatasi pada izin sakit saja. */
+const KLINIK_SAKIT_SAJA = true;
+const izinSakit = (z) => String(z?.jenis_izin || '').trim().toLowerCase() === 'sakit';
 
 const isAdmin        = () => role() === 'Admin';
-const hanyaBaca      = () => role() === 'Guru Piket';                 // Guru Piket read-only di modul umum
-const bolehTulis     = () => !hanyaBaca() && ['Admin','Guru','Walas','Guru BK','Ustadz GEN-Z','Osis'].includes(role());
-const bolehPerizinan = () => ['Admin','Guru','Guru Piket'].includes(role());
-const bolehCetak     = () => !['Guru Piket','Ustadz GEN-Z','Walas','Osis'].includes(role());
-const bolehPdf       = () => !['Guru Piket','Ustadz GEN-Z','Guru BK','Walas','Osis'].includes(role());
-const bolehMaster    = () => !['Ustadz GEN-Z'].includes(role());
-const bolehPembinaan = () => !['Osis','Guru Piket','Ustadz GEN-Z','Guru BK','Walas'].includes(role());
-const perluFilterKelas = () => ['Guru','Guru BK','Walas'].includes(role());
+const hanyaBaca      = () => role() === 'Guru Piket';
+const bolehTulis     = () => bisa('plg.catat');
+const bolehPerizinan = () => bisa('izin.lihat');
+const bolehCetak     = () => bisa('cetak');
+const bolehPdf       = () => bisa('pdf');
+const bolehMaster    = () => bisa('master.lihat');
+const bolehPembinaan = () => bisa('bina.ubah');
+const perluFilterKelas = () => bisa('lingkup.kelas');
 
 /** Guru/Walas/Guru BK hanya melihat kelas binaannya. */
 function filterBinaan(rows, field = 'kelas') {
@@ -198,9 +240,9 @@ const MENU_ROLE = {
   siswa:       ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
   pelanggaran: ['Admin'],
   rekap:       ['Admin'],
-  pengasuhan:  ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'], 
+  pengasuhan:  ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
   madrasah:    ['Admin','Guru','Walas','Guru BK','Guru Piket','Osis','Ustadz GEN-Z'],
-  perizinan:   ['Admin','Guru','Guru Piket'],
+  perizinan:   ['Admin','Guru','Guru Piket','Klinik'],
   pembinaan:   ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z'],
   rekapbina:   ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z'],
   master:      ['Admin','Guru','Walas','Guru BK','Guru Piket'],
@@ -208,19 +250,23 @@ const MENU_ROLE = {
 };
 
 const JUDUL = {
-  dashboard:  { lat:'Ringkasan',           ar:'الملخّص',            teks:'Ringkasan' },
-  pimpinan:   { lat:'Pimpinan',            ar:'لوحة القيادة',       teks:'Dashboard Pimpinan' },
-  siswa:      { lat:'Santri',              ar:'بيانات الطلاب',      teks:'Profil Santri' },
-  pelanggaran:{ lat:'Pelanggaran',         ar:'المخالفات',          teks:'Catatan Pelanggaran' },
-  rekap:      { lat:'Rekap',               ar:'حصر المخالفات',      teks:'Rekap Pelanggaran' },
-   pengasuhan: { lat:'Pengasuhan', ar:'التربية والانضباط', teks:'Unit Pengasuhan' }, 
-  madrasah:   { lat:'Madrasah',            ar:'المدرسة',            teks:'Modul Madrasah' },
-  perizinan:  { lat:'Perizinan',           ar:'الاستئذان',          teks:'Pusat Perizinan' },
-  pembinaan:  { lat:'Pembinaan',           ar:'التوجيه',            teks:'Pembinaan' },
-  rekapbina:  { lat:'Rekap Pembinaan',     ar:'حصر التوجيه',        teks:'Rekap Pembinaan' },
-  master:     { lat:'Master',              ar:'دليل المخالفات',     teks:'Master Pelanggaran & Bidang' },
-  pengguna:   { lat:'Pengguna',            ar:'المستخدمون',         teks:'Manajemen Pengguna' }
+  dashboard:  { lat:'Ringkasan',       ar:'الملخّص',            teks:'Ringkasan' },
+  pimpinan:   { lat:'Pimpinan',        ar:'لوحة القيادة',       teks:'Dashboard Pimpinan' },
+  siswa:      { lat:'Santri',          ar:'بيانات الطلاب',      teks:'Profil Santri' },
+  pelanggaran:{ lat:'Pelanggaran',     ar:'المخالفات',          teks:'Catatan Pelanggaran' },
+  rekap:      { lat:'Rekap',           ar:'حصر المخالفات',      teks:'Rekap Pelanggaran' },
+  pengasuhan: { lat:'Pengasuhan',      ar:'التربية والانضباط',  teks:'Unit Pengasuhan' },
+  madrasah:   { lat:'Madrasah',        ar:'المدرسة',            teks:'Modul Madrasah' },
+  perizinan:  { lat:'Perizinan',       ar:'الاستئذان',          teks:'Pusat Perizinan' },
+  pembinaan:  { lat:'Pembinaan',       ar:'التوجيه',            teks:'Pembinaan' },
+  rekapbina:  { lat:'Rekap Pembinaan', ar:'حصر التوجيه',        teks:'Rekap Pembinaan' },
+  master:     { lat:'Master',          ar:'دليل المخالفات',     teks:'Master Pelanggaran & Bidang' },
+  pengguna:   { lat:'Pengguna',        ar:'المستخدمون',         teks:'Manajemen Pengguna' }
 };
+
+/** Halaman awal tiap peran — dipakai login maupun fallback navigasi. */
+const RUMAH_ROLE = { Pimpinan:'pimpinan', Klinik:'perizinan' };
+const rumah = () => RUMAH_ROLE[role()] || 'dashboard';
 
 // ---------------------------------------------------------------------
 // 3. LAPISAN DATA (cache ringan + pagination PostgREST)
@@ -383,8 +429,9 @@ function gambarBadgeKonteks() {
   $('ctxBadge').title = 'Unit operasional aktif: ' + labelKonteks();
 }
 
-/** Terapkan konteks + kelas binaan pada baris detail_data. */
-function lingkupDetail(rows) {
+
+/** Terapkan konteks + kelas binaan + periode pada baris detail_data. */
+function lingkupDetail(rows, pakaiPeriode = true) {
   let out = (rows || []).filter(aktifDetail);
   const { unit, jenjang } = APP.ctx;
   if (unit === 'Pengasuhan') out = out.filter(r => String(r.sumber || '').trim() === 'Pengasuhan');
@@ -392,6 +439,7 @@ function lingkupDetail(rows) {
     out = out.filter(r => String(r.sumber || '').trim() === 'Madrasah');
     if (jenjang !== 'Semua') out = out.filter(r => String(r.jenjang || '').trim() === jenjang);
   }
+  if (pakaiPeriode) out = saringPeriode(out, 'tanggal');
   return filterBinaan(out, 'kelas');
 }
 
@@ -406,6 +454,100 @@ function lingkupMaster(rows) {
   return out;
 }
 
+
+// ---------------------------------------------------------------------
+// 4b. PERIODE BULANAN
+//     Pendidik melapor bulanan, jadi seluruh modul operasional bisa
+//     dipersempit ke satu bulan. Basis penyaringan dapat dipilih:
+//       - 'kejadian' : tanggal peristiwa (tanggal, tanggal_mulai, dst.)
+//       - 'input'    : tanggal baris dibuat di database (created_at)
+// ---------------------------------------------------------------------
+APP.periode = { aktif:false, bulan:'', basis:'kejadian' };
+
+/** Kolom waktu input bisa berbeda antar tabel; ambil yang pertama ada. */
+const KOLOM_INPUT = ['created_at','dibuat_pada','waktu_input','inserted_at','diperbarui'];
+
+function tglInputBaris(r, fallback) {
+  for (const f of KOLOM_INPUT) if (r[f]) return kunciTgl(r[f]);
+  return kunciTgl(r[fallback]);
+}
+
+const bulanDari = (k) => String(k || '').slice(0, 7);
+const bulanIni  = () => bulanDari(hariIni());
+
+function labelPeriode() {
+  if (!APP.periode.aktif || !APP.periode.bulan) return 'Semua Periode';
+  const [th, bl] = APP.periode.bulan.split('-');
+  return `${BULAN_ID[Number(bl) - 1] || bl} ${th}`;
+}
+
+/** Label pendek untuk nama berkas ekspor. */
+const berkasPeriode = () => APP.periode.aktif && APP.periode.bulan
+  ? APP.periode.bulan : hariIni();
+
+/** Satu baris lolos periode atau tidak. `fKejadian` = nama kolom tanggalnya. */
+function dalamPeriode(r, fKejadian) {
+  if (!APP.periode.aktif || !APP.periode.bulan) return true;
+  const k = APP.periode.basis === 'input'
+    ? tglInputBaris(r, fKejadian)
+    : kunciTgl(r[fKejadian]);
+  return bulanDari(k) === APP.periode.bulan;
+}
+
+/** Penyaring siap pakai untuk array. */
+const saringPeriode = (rows, fKejadian) =>
+  (rows || []).filter(r => dalamPeriode(r, fKejadian));
+
+function setPeriode(bulan, basis, aktif) {
+  APP.periode = {
+    aktif: !!aktif && !!bulan,
+    bulan: bulan || bulanIni(),
+    basis: ['kejadian','input'].includes(basis) ? basis : 'kejadian'
+  };
+  try { sessionStorage.setItem('rq_periode', JSON.stringify(APP.periode)); } catch (e) {}
+  gambarBadgePeriode();
+  navigateTo(APP.view);
+}
+
+function pulihkanPeriode() {
+  try {
+    const raw = sessionStorage.getItem('rq_periode');
+    if (raw) {
+      const p = JSON.parse(raw);
+      APP.periode = {
+        aktif: !!p.aktif,
+        bulan: p.bulan || bulanIni(),
+        basis: ['kejadian','input'].includes(p.basis) ? p.basis : 'kejadian'
+      };
+    } else {
+      APP.periode = { aktif:false, bulan: bulanIni(), basis:'kejadian' };
+    }
+  } catch (e) { APP.periode = { aktif:false, bulan: bulanIni(), basis:'kejadian' }; }
+  gambarBadgePeriode();
+  pasangPeriode();
+}
+
+function gambarBadgePeriode() {
+  const box = $('periodeBox'); if (!box) return;
+  box.classList.toggle('on', APP.periode.aktif);
+  $('perBulan').value = APP.periode.bulan || bulanIni();
+  $('perBasis').value = APP.periode.basis;
+  box.title = APP.periode.aktif
+    ? `Menampilkan ${labelPeriode()} berdasarkan tanggal ${APP.periode.basis}`
+    : 'Menampilkan seluruh periode. Pilih bulan untuk memfokuskan laporan.';
+}
+
+let PERIODE_TERPASANG = false;
+function pasangPeriode() {
+  if (PERIODE_TERPASANG || !$('periodeBox')) return;
+  PERIODE_TERPASANG = true;
+  $('perBulan').addEventListener('change', e =>
+    setPeriode(e.target.value, APP.periode.basis, true));
+  $('perBasis').addEventListener('change', e =>
+    setPeriode(APP.periode.bulan, e.target.value, APP.periode.aktif));
+  $('perReset').addEventListener('click', () =>
+    setPeriode(APP.periode.bulan, APP.periode.basis, false));
+}
 // ---------------------------------------------------------------------
 // 5. LOGIKA PORTING: KASKADE KONVERSI & ANGKATAN
 // ---------------------------------------------------------------------
@@ -724,17 +866,18 @@ async function masukAplikasi() {
     b.classList.toggle('hidden', !(MENU_ROLE[b.dataset.view] || []).includes(profil.role));
   });
 
-  // Pimpinan: shell disederhanakan, hanya dashboard eksekutif.
-  if (role() === 'Pimpinan') {
+ 
+   // Pimpinan & Klinik: shell disederhanakan.
+  if (['Pimpinan','Klinik'].includes(role())) {
     document.querySelectorAll('#navMenu .sb-group').forEach(p => p.classList.add('hidden'));
     $('ctxBadge').classList.add('hidden');
   }
 
   pulihkanKonteks();
+  pulihkanPeriode();          // <— baru, lihat Patch 4
   aktifkanRealtime();
   refreshBadgePending();
-  navigateTo(role() === 'Pimpinan' ? 'pimpinan' : 'dashboard');
-}
+  navigateTo(rumah());
 
 db.auth.onAuthStateChange((event) => {
   if (event === 'SIGNED_OUT' && APP.profil) location.reload();
@@ -784,9 +927,9 @@ $('viewRoot').addEventListener('click', (e) => { APP.onKlik?.(e); });
 function onKlik(fn) { APP.onKlik = fn; }
 
 async function navigateTo(view) {
-  if (!(MENU_ROLE[view] || []).includes(role())) {
+   if (!(MENU_ROLE[view] || []).includes(role())) {
     toast('error', `Role ${role()} tidak memiliki akses ke menu ini.`);
-    view = role() === 'Pimpinan' ? 'pimpinan' : 'dashboard';
+    view = rumah();
   }
   APP.view = view;
   APP.onKlik = null;
@@ -953,8 +1096,9 @@ async function viewDashboard() {
     amanKosong(muatPembinaan, 'pembinaan')
   ]);
 
-  const siswa = filterBinaan(siswaAll.filter(aktifSantri), 'kelas');
-  const detail = lingkupDetail(detailAll);
+    const siswa   = filterBinaan(siswaAll.filter(aktifSantri), 'kelas');
+  const detail  = lingkupDetail(detailAll);          // ikut periode → untuk KPI
+  const detailTr = lingkupDetail(detailAll, false);  // lintas periode → untuk grafik
   const nisnBoleh = new Set(siswa.map(s => String(s.nisn)));
   const izin = perluFilterKelas() ? izinAll.filter(z => nisnBoleh.has(String(z.nisn))) : izinAll;
   const pembinaan = filterBinaan(
@@ -976,7 +1120,7 @@ async function viewDashboard() {
   const perBidang = {}, perJenis = {}, angkatanPekan = {};
   angkatanList.forEach(a => angkatanPekan[a] = Object.fromEntries(pekanKunci.map(k => [k, 0])));
 
-  detail.forEach(r => {
+  detailTr.forEach(r => {
     const d = tglDari(kunciTgl(r.tanggal));
     if (!d || d < mulai || d > akhir) return;
     const wk = kunciTgl(awalPekan(d));
@@ -1006,8 +1150,9 @@ async function viewDashboard() {
       ${stat('Santri Aktif', angka(siswa.length), 'fa-solid fa-user-group',
         'background:#E7F1F7;color:var(--sea)', 'var(--sea)',
         perluFilterKelas() ? 'Kelas binaan Anda' : 'Seluruh dayah')}
-      ${stat('Pelanggaran', angka(detail.length), 'fa-solid fa-scale-balanced',
-        'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)', labelKonteks())}
+           ${stat('Pelanggaran', angka(detail.length), 'fa-solid fa-scale-balanced',
+        'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)',
+        `${labelKonteks()} · ${labelPeriode()}`)}
       ${stat('Izin Menunggu', angka(izinPending), 'fa-solid fa-clock',
         'background:var(--amber-bg);color:var(--amber)', 'var(--amber)', 'Belum ada keterangan balik')}
       ${stat('Pembinaan Proses', angka(binaProses), 'fa-solid fa-hands-holding-child',
@@ -1902,7 +2047,9 @@ async function viewRekap() {
         ${kelasList.map(k => `<option ${k===stRekap.kelas?'selected':''}>${esc(k)}</option>`).join('')}
       </select>
       <span class="sep"></span>
-      <button class="btn btn-ghost btn-sm" id="rkCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>
+            <button class="btn btn-ghost btn-sm" id="rkCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>
+      ${bolehCetak() ? `<button class="btn btn-primary btn-sm" id="rkCetak">
+        <i class="fa-solid fa-print"></i>Cetak Bulanan</button>` : ''}
     </div>
     <div id="rkHasil"><div style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</div></div>
     <div id="pgRk"></div>`,
@@ -1916,8 +2063,10 @@ async function viewRekap() {
     const rows = await hitungRekap();
     const baris = [['NISN','Nama','Kelas','Kategori','Catatan','Jumlah']];
     rows.forEach(s => s.daftar.forEach(d => baris.push([s.nisn, s.nama, s.kelas, d.kategori, d.deskripsi, d.jumlah])));
-    unduhCsv(`rekap-pelanggaran-${hariIni()}.csv`, baris);
+        unduhCsv(`rekap-pelanggaran-${berkasPeriode()}.csv`, baris);
   });
+     $('rkCetak')?.addEventListener('click', async () =>
+    cetakRekapBulanan(await hitungRekap(), 'Rekap Pelanggaran'));
 
   onKlik((e) => {
     const d = e.target.closest('[data-detail]');
@@ -2019,6 +2168,9 @@ async function viewPerizinan() {
       $('izinGrid').scrollIntoView({ block:'start', behavior:'smooth' });
       return;
     }
+         const pj = e.target.closest('[data-perpanjang]');
+    if (pj) { if (await modalPerpanjangIzin(pj.dataset.perpanjang)) gambarIzin(); return; }
+     
     const i = e.target.closest('[data-izin]');
     if (i) return prosesIzin(...i.dataset.izin.split('|'));
   });
@@ -2062,20 +2214,20 @@ async function gambarIzin() {
         <span><i class="fa-regular fa-bookmark"></i>${esc(p.jenis_izin || '-')}</span>
         <span><i class="fa-regular fa-comment-dots"></i>${esc(p.alasan || '-')}</span>
         <span><i class="fa-regular fa-user"></i>Diajukan oleh ${esc(p.pemberi_izin || '-')}</span>
-      </div>
-      ${p.status_persetujuan === 'Pending' && bolehPerizinan() && !hanyaBaca() ? `
-        <div class="acts">
-          <button class="btn btn-danger btn-sm" data-izin="${esc(p.id_izin)}|Telat Balik">
-            <i class="fa-solid fa-clock-rotate-left"></i>Telat Balik</button>
-          <button class="btn btn-ok btn-sm" data-izin="${esc(p.id_izin)}|Sesuai Waktu">
-            <i class="fa-solid fa-check"></i>Sesuai Waktu</button>
-        </div>` : ''}
+      </div>     
+      
+      ${aksiIzin(p, 'izin', 'perpanjang')}
+
+      
     </div>`).join('') || kosong('Tidak ada data perizinan.', 'Ubah filter status atau kata kunci.', 'fa-door-open');
 
   $('pgIzin').innerHTML = rows.length ? pager('izin', stIzin.page, rows.length, stIzin.size) : '';
 }
 
 async function modalAjukanIzin() {
+   if (!bisa('izin.ajukan')) {
+    return toast('error', `Role ${role()} tidak berwenang mengajukan perizinan.`);
+  }
   const res = await Swal.fire({
     title:'Ajukan Perizinan', width: 540, showCancelButton:true,
     confirmButtonText:'Simpan', cancelButtonText:'Batal', confirmButtonColor:'#14618B',
@@ -2090,10 +2242,12 @@ async function modalAjukanIzin() {
         <div class="field"><label class="label">Tanggal Selesai</label>
           <input id="zSelesai" type="date" class="input" value="${hariIni()}"></div>
       </div>
-      <div class="field"><label class="label">Jenis Izin</label>
-        <select id="zJenis" class="input">
-          <option>Keperluan</option><option>Sakit</option><option>Pemberitahuan</option>
+           <div class="field"><label class="label">Jenis Izin</label>
+        <select id="zJenis" class="input" ${role()==='Klinik' && KLINIK_SAKIT_SAJA ? 'disabled' : ''}>
+          ${(role()==='Klinik' && KLINIK_SAKIT_SAJA ? ['Sakit'] : ['Keperluan','Sakit','Pemberitahuan'])
+            .map(x => `<option>${x}</option>`).join('')}
         </select></div>
+        
       <div class="field"><label class="label">Alasan</label>
         <textarea id="zAlasan" class="input" rows="2" placeholder="Contoh: dijemput orang tua untuk keperluan keluarga."></textarea></div>
     </div>`,
@@ -2146,6 +2300,111 @@ async function prosesIzin(idIzin, keputusan) {
   } catch (err) { sync('warn', 'Gagal memproses'); fireError(err); }
 }
 
+// ---------------------------------------------------------------------
+// 15b. PERPANJANGAN IZIN
+//      Tidak menambah kolom: tanggal_selesai digeser, jejak perpanjangan
+//      dicatat sebagai lampiran pada kolom `alasan`.
+// ---------------------------------------------------------------------
+
+/** Boleh diperpanjang bila masih Pending dan sesuai kewenangan peran. */
+function bolehPerpanjang(z) {
+  if (!bisa('izin.perpanjang') || hanyaBaca()) return false;
+  if (String(z?.status_persetujuan || '') !== 'Pending') return false;
+  if (role() === 'Klinik' && KLINIK_SAKIT_SAJA && !izinSakit(z)) return false;
+  return true;
+}
+
+/** Tombol aksi kartu izin — dipakai bersama oleh Perizinan & Pengasuhan. */
+function aksiIzin(z, tandaProses, tandaPanjang) {
+  const a = [];
+  if (String(z.status_persetujuan) === 'Pending' && bisa('izin.proses') && !hanyaBaca()) {
+    a.push(`<button class="btn btn-danger btn-sm" data-${tandaProses}="${esc(z.id_izin)}|Telat Balik">
+      <i class="fa-solid fa-clock-rotate-left"></i>Telat Balik</button>`);
+    a.push(`<button class="btn btn-ok btn-sm" data-${tandaProses}="${esc(z.id_izin)}|Sesuai Waktu">
+      <i class="fa-solid fa-check"></i>Sesuai Waktu</button>`);
+  }
+  if (bolehPerpanjang(z)) {
+    a.push(`<button class="btn btn-ghost btn-sm" data-${tandaPanjang}="${esc(z.id_izin)}">
+      <i class="fa-solid fa-calendar-plus"></i>Perpanjang</button>`);
+  }
+  return a.length ? `<div class="acts">${a.join('')}</div>` : '';
+}
+
+/** Hitung selisih hari inklusif untuk ditampilkan di modal. */
+function lamaHari(mulai, selesai) {
+  const a = tglDari(kunciTgl(mulai)), b = tglDari(kunciTgl(selesai));
+  if (!a || !b) return 0;
+  return Math.round((b - a) / 86400000) + 1;
+}
+
+/** Kembalikan true bila perpanjangan tersimpan, agar pemanggil bisa refresh. */
+async function modalPerpanjangIzin(idIzin) {
+  const semua = await muatIzin();
+  const z = semua.find(x => String(x.id_izin) === String(idIzin));
+  if (!z) { toast('error', 'Data izin tidak ditemukan.'); return false; }
+  if (!bolehPerpanjang(z)) {
+    toast('error', role() === 'Klinik'
+      ? 'Klinik hanya dapat memperpanjang izin berjenis Sakit.'
+      : `Role ${role()} tidak berwenang memperpanjang izin.`);
+    return false;
+  }
+
+  const lamaSelesai = kunciTgl(z.tanggal_selesai);
+  const minBaru     = kunciTgl(tambahHari(tglDari(lamaSelesai), 1));
+
+  const res = await Swal.fire({
+    title: 'Perpanjang Perizinan', width: 560, showCancelButton: true,
+    confirmButtonText: 'Simpan Perpanjangan', cancelButtonText: 'Batal',
+    confirmButtonColor: '#14618B', showLoaderOnConfirm: true,
+    allowOutsideClick: () => !Swal.isLoading(),
+    html: `<div class="stack">
+      <div class="ctx-note"><i class="fa-solid fa-door-open"></i>
+        <b>&nbsp;${esc(z.siswa?.nama_siswa || z.nisn)}</b>&nbsp;·&nbsp;${esc(z.siswa?.kelas || '-')}</div>
+      <div class="pick" style="margin:0">
+        <div class="ico"><i class="fa-regular fa-calendar-days"></i></div>
+        <div><small>Izin Berjalan</small>
+          <b>${tgl(z.tanggal_mulai)} s/d ${tgl(lamaSelesai)} · ${esc(z.jenis_izin || '-')}
+             · ${lamaHari(z.tanggal_mulai, lamaSelesai)} hari</b></div>
+      </div>
+      <div class="field"><label class="label">Tanggal Selesai Baru</label>
+        <input id="ppTanggal" type="date" class="input" min="${minBaru}" value="${minBaru}">
+        <p class="hint">Harus lebih akhir dari ${tgl(lamaSelesai)}.</p></div>
+      <div class="field"><label class="label">Alasan Perpanjangan</label>
+        <textarea id="ppAlasan" class="input" rows="2" maxlength="300"
+          placeholder="Contoh: masih dalam perawatan, surat keterangan dokter terlampir."></textarea></div>
+    </div>`,
+    didOpen: () => setTimeout(() => $('ppTanggal').focus(), 120),
+    preConfirm: async () => {
+      const baru = $('ppTanggal').value;
+      const ket  = $('ppAlasan').value.trim();
+      if (!baru) { Swal.showValidationMessage('Tanggal selesai baru wajib diisi.'); return false; }
+      if (baru <= lamaSelesai) {
+        Swal.showValidationMessage('Tanggal baru harus lebih akhir dari tanggal selesai sekarang.');
+        return false;
+      }
+      if (!ket) { Swal.showValidationMessage('Alasan perpanjangan wajib diisi.'); return false; }
+
+      const jejak = `[Perpanjangan ${tgl(lamaSelesai)} → ${tgl(baru)} oleh `
+                  + `${APP.profil?.nama || '-'} (${role()}) pada ${tgl(hariIni())}: ${ket}]`;
+      const alasanBaru = String(z.alasan || '').trim()
+        ? `${String(z.alasan).trim()}\n${jejak}` : jejak;
+
+      const { error } = await db.from('log_perizinan')
+        .update({ tanggal_selesai: baru, alasan: alasanBaru })
+        .eq('id_izin', idIzin);
+      if (error) { Swal.showValidationMessage(error.message); return false; }
+      return { baru };
+    }
+  });
+
+  if (!res.isConfirmed) return false;
+  cacheHapus('izin');
+  sync('done', 'Perpanjangan tersimpan');
+  toast('success', `Izin diperpanjang s/d ${tgl(res.value.baru)}`);
+  return true;
+}
+
+   
 
 const stBina = { cari:'', kategori:'', status:'', mode:'', page:1, size:30 };
 
@@ -2204,11 +2463,12 @@ async function viewPembinaan() {
 }
 
 async function bahanBina() {
-  const rows = (await muatPembinaan()).filter(aktifPembinaan).map(r => ({
-    ...r,
-    nama_siswa: r.siswa?.nama_siswa || '(tidak ditemukan)',
-    kelas: r.siswa?.kelas || '-'
-  }));
+  const rows = saringPeriode((await muatPembinaan()).filter(aktifPembinaan), 'tanggal_pembinaan')
+    .map(r => ({
+      ...r,
+      nama_siswa: r.siswa?.nama_siswa || '(tidak ditemukan)',
+      kelas: r.siswa?.kelas || '-'
+    }));
   return filterBinaan(rows, 'kelas');
 }
 
@@ -3042,6 +3302,57 @@ async function unduhLaporanPdf(nisn) {
 }
 
 // ---------------------------------------------------------------------
+// 20b. CETAK REKAP BULANAN (laporan rutin pendidik)
+// ---------------------------------------------------------------------
+async function cetakRekapBulanan(rows, sumberLabel) {
+  if (!bolehCetak()) return toast('error', `Role ${role()} tidak memiliki izin cetak.`);
+  if (!rows.length) return toast('error', 'Tidak ada data pada periode ini.');
+
+  const th = (t) => `<th style="border:1px solid #cbd5e1;padding:5px;background:#f1f5f9;">${esc(t)}</th>`;
+  const td = (t, c) => `<td style="border:1px solid #cbd5e1;padding:5px;${c||''}">${esc(t)}</td>`;
+  const totalKasus = rows.reduce((a, s) => a + s.daftar.reduce((x, d) => x + d.jumlah, 0), 0);
+
+  let no = 0;
+  const isi = rows.map(s => s.daftar.map((d, i) => `<tr>
+      ${i === 0 ? `<td rowspan="${s.daftar.length}" style="border:1px solid #cbd5e1;padding:5px;text-align:center">${++no}</td>
+        <td rowspan="${s.daftar.length}" style="border:1px solid #cbd5e1;padding:5px"><b>${esc(s.nama)}</b><br>
+        <span style="font-size:9.5px;color:#64748b">${esc(s.nisn)}</span></td>
+        <td rowspan="${s.daftar.length}" style="border:1px solid #cbd5e1;padding:5px;text-align:center">${esc(s.kelas)}</td>` : ''}
+      ${td(d.kategori)}${td(d.deskripsi)}${td(d.jumlah, 'text-align:center;font-weight:bold')}
+    </tr>`).join('')).join('');
+
+  $('printArea').innerHTML = `
+    <div class="laporan" style="font-family:Arial,sans-serif;color:#1e293b;padding:18px;">
+      <div style="text-align:center;border-bottom:2px solid #1e293b;padding-bottom:12px;margin-bottom:14px;">
+        <h1 style="font-size:16px;margin:0;letter-spacing:.3px;">LAPORAN BULANAN KEDISIPLINAN SANTRI</h1>
+        <p style="font-size:11px;margin:4px 0 0;color:#64748b;">
+          Dayah Ruhul Qurani · ${esc(sumberLabel)} · Periode ${esc(labelPeriode())}</p>
+      </div>
+      <table style="width:100%;font-size:11.5px;margin-bottom:12px;">
+        <tr><td style="width:150px"><b>Unit Operasional</b></td><td>: ${esc(labelKonteks())}</td>
+            <td style="width:130px"><b>Jumlah Santri</b></td><td>: ${rows.length}</td></tr>
+        <tr><td><b>Dasar Penyaringan</b></td><td>: Tanggal ${esc(APP.periode.basis)}</td>
+            <td><b>Total Catatan</b></td><td>: ${totalKasus}</td></tr>
+        <tr><td><b>Disusun oleh</b></td><td>: ${esc(APP.profil?.nama || '-')} (${esc(role())})</td>
+            <td><b>Dicetak</b></td><td>: ${tgl(hariIni())}</td></tr>
+      </table>
+      <table style="width:100%;font-size:10.5px;border-collapse:collapse;">
+        <thead><tr>${['No','Nama Santri','Kelas','Kategori','Catatan / Perkembangan','Jumlah'].map(th).join('')}</tr></thead>
+        <tbody>${isi}</tbody>
+      </table>
+      <table style="width:100%;font-size:11.5px;margin-top:34px;page-break-inside:avoid;">
+        <tr><td style="width:50%;text-align:center;">Mengetahui, Pimpinan Dayah</td>
+            <td style="width:50%;text-align:center;">Petugas Pencatat</td></tr>
+        <tr><td style="height:56px;"></td><td></td></tr>
+        <tr><td style="text-align:center;">(________________________)</td>
+            <td style="text-align:center;">(________________________)</td></tr>
+      </table>
+    </div>`;
+  window.print();
+}
+
+
+// ---------------------------------------------------------------------
 // 21. REALTIME
 // ---------------------------------------------------------------------
 const segarkan = debounce(async (tabel) => {
@@ -3523,16 +3834,14 @@ async function mdSimpanPelanggaranUmum() {
 
 // ---------- Panel 3: presensi kelas ----------
 function mdPanelPresensi() {
-
- const role = APP.profil?.role?.toLowerCase();
-
-if (role !== 'walas' && role !== 'guru' && role !== 'admin' && role !== 'guru bk') {
-  return kartu('Rekap Presensi Kelas', `
-    <div class="card-note"><i class="fa-solid fa-lock"></i>
-      Akses Terbatas: Fitur presensi hanya dapat diakses oleh <b>Wali Kelas</b>, <b>Guru</b>, <b>Guru BK</b>, dan <b>Admin</b>.
-    </div>`,
-    '<span class="tag tag-off">Akses Ditolak</span>');
-}
+  if (!bisa('presensi.lihat')) {
+    return kartu('Rekap Presensi Kelas', `
+      <div class="card-note"><i class="fa-solid fa-lock"></i>
+        Akses terbatas. Fitur presensi hanya untuk
+        <b>${esc(HAK['presensi.lihat'].join(', '))}</b>.</div>`,
+      '<span class="tag tag-off">Akses ditolak</span>');
+  }
+  // ... sisa fungsi tetap
    
   if (!MDS.siapPresensi) {
     return kartu('Rekap Presensi Kelas', `
@@ -3593,7 +3902,7 @@ if (role !== 'walas' && role !== 'guru' && role !== 'admin' && role !== 'guru bk
       <div class="md-bar">
         <span class="note-min"><i class="fa-solid fa-circle-info"></i>
           Menyimpan ulang periode yang sama akan memperbarui data lama.</span>
-        ${bolehTulis()
+        ${bisa('presensi.isi')
           ? `<button class="btn btn-primary btn-sm" id="prSimpan">
                <i class="fa-solid fa-floppy-disk"></i>Simpan Presensi Minggu Ini</button>`
           : `<span class="tag tag-off">Hanya baca</span>`}
@@ -4285,6 +4594,9 @@ async function viewPengasuhan() {
       return pgsGambarIzin();
     }
 
+         const pj = e.target.closest('[data-pgperpanjang]');
+    if (pj) { if (await modalPerpanjangIzin(pj.dataset.pgperpanjang)) await pgsMuatUlangIzin(); return; }
+     
     const z = e.target.closest('[data-pgizin]');
     if (z) return pgsProsesIzin(...z.dataset.pgizin.split('|'));
 
@@ -4601,6 +4913,7 @@ function pgsPasangIzin() {
 function pgsGambarIzin() {
   const semua = PGS.izinData || [];
   let rows = semua.filter(z => PGS.iz.filter === 'Semua' || z.status_persetujuan === PGS.iz.filter);
+   rows = saringPeriode(rows, 'tanggal_mulai');
   if (PGS.iz.cari) {
     const k = PGS.iz.cari.toLowerCase();
     rows = rows.filter(z => [z.siswa?.nama_siswa, z.siswa?.kelas, z.alasan, z.nisn, z.pemberi_izin]
@@ -4608,11 +4921,7 @@ function pgsGambarIzin() {
   }
 
   const hit = (s) => semua.filter(z => z.status_persetujuan === s).length;
-  $('pgIzMini').innerHTML = `
-    <div class="mini a"><span>Menunggu</span><b>${angka(hit('Pending'))}</b></div>
-    <div class="mini t"><span>Sesuai Waktu</span><b>${angka(hit('Sesuai Waktu'))}</b></div>
-    <div class="mini m"><span>Telat Balik</span><b>${angka(hit('Telat Balik'))}</b></div>
-    <div class="mini s"><span>Total Izin</span><b>${angka(semua.length)}</b></div>`;
+       ${aksiIzin(z, 'pgizin', 'pgperpanjang')};
 
   const pages = Math.max(1, Math.ceil(rows.length / PGS.iz.size));
   if (PGS.iz.page > pages) PGS.iz.page = pages;
@@ -4662,8 +4971,8 @@ async function pgsMuatUlangIzin() {
 }
 
 async function pgsModalIzin() {
-   if (CURRENT_USER?.role?.toLowerCase() === 'osis') {
-    return toast('error', 'OSDA-RQ tidak diizinkan mengajukan perizinan.');
+  if (!bisa('izin.ajukan')) {
+    return toast('error', `Role ${role()} tidak berwenang mengajukan perizinan.`);
   }
   const res = await Swal.fire({
     title: 'Ajukan Perizinan', width: 540, showCancelButton: true,
@@ -4679,9 +4988,10 @@ async function pgsModalIzin() {
         <div class="field"><label class="label">Tanggal Selesai</label>
           <input id="pzSelesai" type="date" class="input" value="${hariIni()}"></div>
       </div>
-      <div class="field"><label class="label">Jenis Izin</label>
-        <select id="pzJenis" class="input">
-          <option>Keperluan</option><option>Sakit</option><option>Pemberitahuan</option>
+           <div class="field"><label class="label">Jenis Izin</label>
+        <select id="zJenis" class="input" ${role()==='Klinik' && KLINIK_SAKIT_SAJA ? 'disabled' : ''}>
+          ${(role()==='Klinik' && KLINIK_SAKIT_SAJA ? ['Sakit'] : ['Keperluan','Sakit','Pemberitahuan'])
+            .map(x => `<option>${x}</option>`).join('')}
         </select></div>
       <div class="field"><label class="label">Alasan</label>
         <textarea id="pzAlasan" class="input" rows="2"
