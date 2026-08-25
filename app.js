@@ -4913,20 +4913,24 @@ function pgsPasangIzin() {
 function pgsGambarIzin() {
   const semua = PGS.izinData || [];
   let rows = semua.filter(z => PGS.iz.filter === 'Semua' || z.status_persetujuan === PGS.iz.filter);
-   rows = saringPeriode(rows, 'tanggal_mulai');
+  rows = saringPeriode(rows, 'tanggal_mulai');
   if (PGS.iz.cari) {
     const k = PGS.iz.cari.toLowerCase();
     rows = rows.filter(z => [z.siswa?.nama_siswa, z.siswa?.kelas, z.alasan, z.nisn, z.pemberi_izin]
       .some(v => String(v || '').toLowerCase().includes(k)));
   }
 
-  const hit = (s) => semua.filter(z => z.status_persetujuan === s).length;
-       // ${aksiIzin(z, 'pgizin', 'pgperpanjang')};
-
   const pages = Math.max(1, Math.ceil(rows.length / PGS.iz.size));
   if (PGS.iz.page > pages) PGS.iz.page = pages;
   const from = (PGS.iz.page - 1) * PGS.iz.size;
   const hal = rows.slice(from, from + PGS.iz.size);
+
+  // Ringkasan mini (sebelumnya dihitung via `hit` tapi tidak pernah dirender)
+  $('pgIzMini').innerHTML = `
+    <div class="mini t"><span>Sesuai Waktu</span><b>${angka(semua.filter(z => z.status_persetujuan === 'Sesuai Waktu').length)}</b></div>
+    <div class="mini m"><span>Telat Balik</span><b>${angka(semua.filter(z => z.status_persetujuan === 'Telat Balik').length)}</b></div>
+    <div class="mini a"><span>Menunggu</span><b>${angka(semua.filter(z => z.status_persetujuan === 'Pending').length)}</b></div>
+    <div class="mini s"><span>Total Izin</span><b>${angka(semua.length)}</b></div>`;
 
   $('pgIzCount').textContent = `${angka(rows.length)} kartu`;
   $('queryTime').textContent = `perizinan pengasuhan · ${angka(rows.length)} kartu`;
@@ -4949,13 +4953,7 @@ function pgsGambarIzin() {
         <span><i class="fa-regular fa-comment-dots"></i>${esc(z.alasan || '-')}</span>
         <span><i class="fa-regular fa-user"></i>Diajukan oleh ${esc(z.pemberi_izin || '-')}</span>
       </div>
-      ${z.status_persetujuan === 'Pending' && bolehPerizinan() && !hanyaBaca() ? `
-        <div class="acts">
-          <button class="btn btn-danger btn-sm" data-pgizin="${esc(z.id_izin)}|Telat Balik">
-            <i class="fa-solid fa-clock-rotate-left"></i>Telat Balik</button>
-          <button class="btn btn-ok btn-sm" data-pgizin="${esc(z.id_izin)}|Sesuai Waktu">
-            <i class="fa-solid fa-check"></i>Sesuai Waktu</button>
-        </div>` : ''}
+      ${aksiIzin(z, 'pgizin', 'pgperpanjang')}
     </div>`).join('') || kosong('Tidak ada data perizinan.',
       'Ubah filter status atau ajukan izin baru.', 'fa-door-open');
 
