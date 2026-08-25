@@ -4921,7 +4921,7 @@ function pgsGambarIzin() {
   }
 
   const hit = (s) => semua.filter(z => z.status_persetujuan === s).length;
-       ${aksiIzin(z, 'pgizin', 'pgperpanjang')};
+       // ${aksiIzin(z, 'pgizin', 'pgperpanjang')};
 
   const pages = Math.max(1, Math.ceil(rows.length / PGS.iz.size));
   if (PGS.iz.page > pages) PGS.iz.page = pages;
