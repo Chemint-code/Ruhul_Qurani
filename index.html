@@ -821,6 +821,27 @@ td.nowrap{white-space:nowrap}
 .unit-grid > .unit-card:first-child{outline:1px solid rgba(201,162,39,.45);outline-offset:-1px}
 .unit-grid > .unit-card:first-child .ico{background:rgba(201,162,39,.2);
   border-color:rgba(201,162,39,.45);color:#F2E5B8}
+
+/* ---------- Pemilih periode bulanan ---------- */
+.periode{display:inline-flex;align-items:center;gap:6px;padding:3px 6px 3px 10px;
+  border-radius:20px;background:var(--paper);border:1px solid var(--line);
+  color:var(--text-2);font-size:11.5px;font-weight:700;white-space:nowrap}
+.periode > i{color:var(--text-3);font-size:11px}
+.periode.on{background:#FDF8E9;border-color:rgba(201,162,39,.5);color:#8A6D0B}
+.periode.on > i{color:var(--brass)}
+.per-in{border:none;background:none;color:inherit;font:inherit;outline:none;
+  padding:2px 3px;border-radius:6px;cursor:pointer}
+.per-in:focus{box-shadow:0 0 0 2px rgba(20,97,139,.22)}
+select.per-in{appearance:none;padding-right:14px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M1 1l3 3 3-3' fill='none' stroke='%238298AC' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 2px center}
+.per-x{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;
+  color:var(--text-3);font-size:10px;transition:background .14s,color .14s}
+.per-x:hover{background:rgba(159,18,57,.1);color:var(--maroon)}
+@media(max-width:1024px){.periode{padding:3px 4px 3px 8px}.periode select.per-in{display:none}}
+@media(max-width:720px){.periode{display:none}}
+.periode-tag{display:inline-flex;align-items:center;gap:5px}
+
    
 </style>
 </head>
@@ -926,6 +947,17 @@ td.nowrap{white-space:nowrap}
         <span class="ctx-badge" id="ctxBadge" title="Unit operasional aktif">
           <i class="fa-solid fa-layer-group"></i><span id="ctxLabel">Semua Unit</span>
         </span>
+                 <span class="periode" id="periodeBox" title="Periode laporan">
+          <i class="fa-regular fa-calendar-days"></i>
+          <input type="month" id="perBulan" class="per-in">
+          <select id="perBasis" class="per-in" title="Dasar penyaringan">
+            <option value="kejadian">Kejadian</option>
+            <option value="input">Input</option>
+          </select>
+          <button class="per-x" id="perReset" title="Tampilkan semua periode">
+            <i class="fa-solid fa-xmark"></i></button>
+        </span>
+         
         <span class="sync" id="syncDot"><span class="dot"></span><b id="syncText">Tersinkron</b></span>
         <span class="live" id="liveDot"><span class="dot"></span>Realtime</span>
         <span class="qtime" id="queryTime"></span>
