@@ -878,7 +878,7 @@ async function masukAplikasi() {
   aktifkanRealtime();
   refreshBadgePending();
   navigateTo(rumah());
-
+}
 db.auth.onAuthStateChange((event) => {
   if (event === 'SIGNED_OUT' && APP.profil) location.reload();
 });
