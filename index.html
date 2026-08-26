@@ -241,7 +241,41 @@ textarea.input{resize:vertical;min-height:64px}
     justify-content:center;padding:4px 0 10px;gap:0;
   }
   .sidebar:not(:hover) .sb-user .who{display:none}
-  .sidebar:not(:hover) .sb-user .avatar{width:34px;height:34px;font-size:13px}
+  .sidebar:not(:hover) 
+   /* ===== FIX AVATAR FOTO PROFIL ===== */
+.sb-user .avatar{
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  overflow: hidden !important;
+  padding: 0 !important;
+  position: relative;
+  display: block !important;          /* ganti grid → block */
+  flex-shrink: 0;
+  background: linear-gradient(150deg, var(--sea), var(--navy));
+}
+
+.sb-user .avatar img,
+#guru-avatar-img{
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  display: block !important;
+  border-radius: 10px;
+  opacity: 1 !important;              /* pastikan selalu terlihat */
+  transition: opacity .35s ease;
+}
+
+/* Saat sidebar collaps (desktop) */
+.sidebar:not(:hover) .sb-user .avatar{
+  width: 34px;
+  height: 34px;
+}
+.sidebar:not(:hover) .sb-user .avatar img{
+  border-radius: 10px;
+}
   .sidebar:not(:hover) #btnLogout{
     justify-content:center;padding:11px 0;font-size:0;gap:0;
   }
@@ -1436,14 +1470,14 @@ select.per-in{appearance:none;padding-right:14px;
       <button class="nav-item" data-view="master"><i class="fa-solid fa-book"></i>Master &amp; Bidang</button>
       <button class="nav-item" data-view="pengguna"><i class="fa-solid fa-users-gear"></i>Pengguna</button>
     </nav>
-   <div class="sb-foot">
+
+    <div class="sb-foot">
       <div class="sb-user">
         <div class="avatar" id="guru-avatar-container">
-          <img id="guru-avatar-img" 
-               src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Ccircle cx='100' cy='100' r='100' fill='%23ddd'/%3E%3C/svg%3E" 
-               alt="Profil" 
-               style="width:100%;height:100%;object-fit:cover;border-radius:10px;opacity:0;transition:opacity .4s">
-          <!-- fallback huruf inisial jika foto belum load bisa diisi via JS -->
+          <img id="guru-avatar-img"
+               src=""
+               alt="Profil"
+               style="width:100%;height:100%;object-fit:cover;display:block;border-radius:10px;">
         </div>
         <div class="who">
           <b id="guru-nama">Loading...</b>
@@ -1454,6 +1488,7 @@ select.per-in{appearance:none;padding-right:14px;
         <i class="fa-solid fa-right-from-bracket"></i>Keluar
       </button>
     </div>
+  </aside>
   </aside>
   <div id="scrim" class="hidden"></div>
   <div class="main">
