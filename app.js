@@ -8,7 +8,7 @@
    - Modul Pembinaan (KPI, filter, ubah status) + Rekap Pembinaan per santri
    - Master Bidang (divisi) berdampingan dengan Master Pelanggaran
    - Dashboard Pimpinan (analisis eksekutif, tier santri prioritas)
-   - Laporan terpadu: cetak + unduh PDF (html2pdf)
+   - Laporan terpadu: cetak + unduh PDF (html2pdf) — MENGIKUTI PERIODE AKTIF
    - RBAC klien: Admin/Guru/Walas/Guru BK/Guru Piket/Ustadz GEN-Z/Osis/Pimpinan
    - Indikator sinkronisasi saat proses input
 
@@ -169,7 +169,6 @@ function selesaiSimpan(btn, asli, sukses, teks) {
 }
 
 // ---------------------------------------------------------------------
-// ---------------------------------------------------------------------
 // 2. RBAC KLIEN — SATU SUMBER KEBENARAN
 //
 //     Aturan ditulis per KEMAMPUAN (capability), bukan per peran.
@@ -226,6 +225,9 @@ const bolehPdf       = () => bisa('pdf');
 const bolehMaster    = () => bisa('master.lihat');
 const bolehPembinaan = () => bisa('bina.ubah');
 const perluFilterKelas = () => bisa('lingkup.kelas');
+
+/** Pengajuan izin: dipakai bersama oleh Perizinan & Pengasuhan. */
+const bolehAjukanIzin = () => bisa('izin.ajukan') && !hanyaBaca();
 
 /** Guru/Walas/Guru BK hanya melihat kelas binaannya. */
 function filterBinaan(rows, field = 'kelas') {
@@ -339,6 +341,7 @@ async function amanKosong(fn, nama) {
   try { return await fn(); }
   catch (e) { console.warn(`Data ${nama} tidak dapat dibaca:`, e.message); return []; }
 }
+
 async function muatDetail() {
   return cacheGet('detail') || cacheSet('detail',
     await ambilSemua('detail_data', '*', { order: 'tanggal', asc: false }));
@@ -426,9 +429,9 @@ function pulihkanKonteks() {
 
 function gambarBadgeKonteks() {
   const el = $('ctxLabel'); if (el) el.textContent = labelKonteks();
-  $('ctxBadge').title = 'Unit operasional aktif: ' + labelKonteks();
+  const badge = $('ctxBadge');
+  if (badge) badge.title = 'Unit operasional aktif: ' + labelKonteks();
 }
-
 
 /** Terapkan konteks + kelas binaan + periode pada baris detail_data. */
 function lingkupDetail(rows, pakaiPeriode = true) {
@@ -453,7 +456,6 @@ function lingkupMaster(rows) {
   }
   return out;
 }
-
 
 // ---------------------------------------------------------------------
 // 4b. PERIODE BULANAN
@@ -485,6 +487,23 @@ function labelPeriode() {
 const berkasPeriode = () => APP.periode.aktif && APP.periode.bulan
   ? APP.periode.bulan : hariIni();
 
+/**
+ * Batas tanggal periode aktif: { bulan, awal, akhir } — atau null bila
+ * periode tidak aktif. Dipakai laporan bulanan (cetak & PDF) dan
+ * penyaringan perizinan yang rentangnya melintasi bulan.
+ */
+function batasPeriode() {
+  if (!APP.periode.aktif || !APP.periode.bulan) return null;
+  const [th, bl] = APP.periode.bulan.split('-').map(Number);
+  if (!th || !bl) return null;
+  const hariAkhir = new Date(th, bl, 0).getDate();
+  return {
+    bulan: APP.periode.bulan,
+    awal:  `${APP.periode.bulan}-01`,
+    akhir: `${APP.periode.bulan}-${String(hariAkhir).padStart(2,'0')}`
+  };
+}
+
 /** Satu baris lolos periode atau tidak. `fKejadian` = nama kolom tanggalnya. */
 function dalamPeriode(r, fKejadian) {
   if (!APP.periode.aktif || !APP.periode.bulan) return true;
@@ -494,9 +513,27 @@ function dalamPeriode(r, fKejadian) {
   return bulanDari(k) === APP.periode.bulan;
 }
 
+/**
+ * Perizinan dihitung masuk periode bila RENTANGNYA BERSINGGUNGAN dengan
+ * bulan aktif. Contoh: 29 Juni – 3 Juli tetap muncul pada laporan Juli.
+ */
+function izinDalamPeriode(z) {
+  const p = batasPeriode();
+  if (!p) return true;
+  if (APP.periode.basis === 'input') return dalamPeriode(z, 'tanggal_mulai');
+  const mulai = kunciTgl(z?.tanggal_mulai);
+  const selesai = kunciTgl(z?.tanggal_selesai) || mulai;
+  if (!mulai && !selesai) return false;
+  const a = mulai || selesai, b = selesai || mulai;
+  return a <= p.akhir && b >= p.awal;
+}
+
 /** Penyaring siap pakai untuk array. */
 const saringPeriode = (rows, fKejadian) =>
   (rows || []).filter(r => dalamPeriode(r, fKejadian));
+
+/** Penyaring perizinan berbasis persinggungan rentang. */
+const saringPeriodeIzin = (rows) => (rows || []).filter(izinDalamPeriode);
 
 function setPeriode(bulan, basis, aktif) {
   APP.periode = {
@@ -548,6 +585,7 @@ function pasangPeriode() {
   $('perReset').addEventListener('click', () =>
     setPeriode(APP.periode.bulan, APP.periode.basis, false));
 }
+
 // ---------------------------------------------------------------------
 // 5. LOGIKA PORTING: KASKADE KONVERSI & ANGKATAN
 // ---------------------------------------------------------------------
@@ -866,19 +904,19 @@ async function masukAplikasi() {
     b.classList.toggle('hidden', !(MENU_ROLE[b.dataset.view] || []).includes(profil.role));
   });
 
- 
-   // Pimpinan & Klinik: shell disederhanakan.
+  // Pimpinan & Klinik: shell disederhanakan.
   if (['Pimpinan','Klinik'].includes(role())) {
     document.querySelectorAll('#navMenu .sb-group').forEach(p => p.classList.add('hidden'));
     $('ctxBadge').classList.add('hidden');
   }
 
   pulihkanKonteks();
-  pulihkanPeriode();          // <— baru, lihat Patch 4
+  pulihkanPeriode();
   aktifkanRealtime();
   refreshBadgePending();
   navigateTo(rumah());
 }
+
 db.auth.onAuthStateChange((event) => {
   if (event === 'SIGNED_OUT' && APP.profil) location.reload();
 });
@@ -927,7 +965,7 @@ $('viewRoot').addEventListener('click', (e) => { APP.onKlik?.(e); });
 function onKlik(fn) { APP.onKlik = fn; }
 
 async function navigateTo(view) {
-   if (!(MENU_ROLE[view] || []).includes(role())) {
+  if (!(MENU_ROLE[view] || []).includes(role())) {
     toast('error', `Role ${role()} tidak memiliki akses ke menu ini.`);
     view = rumah();
   }
@@ -944,6 +982,7 @@ async function navigateTo(view) {
 
   Object.values(APP.charts).forEach(c => { try { c.destroy(); } catch(e){} });
   APP.charts = {};
+  window.scrollTo({ top: 0, behavior: 'auto' });
 
   loading(true);
   try {
@@ -952,8 +991,8 @@ async function navigateTo(view) {
     else if (view === 'siswa')       await viewSiswa();
     else if (view === 'pelanggaran') await viewPelanggaran();
     else if (view === 'rekap')       await viewRekap();
-    else if (view === 'pengasuhan') await viewPengasuhan();
-    else if (view === 'madrasah')    await viewMadrasah();     // <— baris baru
+    else if (view === 'pengasuhan')  await viewPengasuhan();
+    else if (view === 'madrasah')    await viewMadrasah();
     else if (view === 'perizinan')   await viewPerizinan();
     else if (view === 'pembinaan')   await viewPembinaan();
     else if (view === 'rekapbina')   await viewRekapPembinaan();
@@ -1096,13 +1135,15 @@ async function viewDashboard() {
     amanKosong(muatPembinaan, 'pembinaan')
   ]);
 
-    const siswa   = filterBinaan(siswaAll.filter(aktifSantri), 'kelas');
+  const siswa   = filterBinaan(siswaAll.filter(aktifSantri), 'kelas');
   const detail  = lingkupDetail(detailAll);          // ikut periode → untuk KPI
   const detailTr = lingkupDetail(detailAll, false);  // lintas periode → untuk grafik
   const nisnBoleh = new Set(siswa.map(s => String(s.nisn)));
-  const izin = perluFilterKelas() ? izinAll.filter(z => nisnBoleh.has(String(z.nisn))) : izinAll;
+  const izinSemua = perluFilterKelas() ? izinAll.filter(z => nisnBoleh.has(String(z.nisn))) : izinAll;
+  const izin = saringPeriodeIzin(izinSemua);
   const pembinaan = filterBinaan(
-    pembinaanAll.filter(aktifPembinaan).map(p => ({ ...p, kelas: p.siswa?.kelas || '' })), 'kelas');
+    saringPeriode(pembinaanAll.filter(aktifPembinaan), 'tanggal_pembinaan')
+      .map(p => ({ ...p, kelas: p.siswa?.kelas || '' })), 'kelas');
 
   const izinPending = izin.filter(z => z.status_persetujuan === 'Pending').length;
   const izinSesuai  = izin.filter(z => z.status_persetujuan === 'Sesuai Waktu').length;
@@ -1141,7 +1182,7 @@ async function viewDashboard() {
   // Trend izin 14 hari berdasarkan tanggal_mulai (santri unik per hari)
   const hari14 = [], petaIzinHari = {};
   for (let i = 13; i >= 0; i--) { const k = kunciTgl(tambahHari(new Date(), -i)); hari14.push(k); petaIzinHari[k] = new Set(); }
-  izin.forEach(z => { const k = kunciTgl(z.tanggal_mulai); if (petaIzinHari[k]) petaIzinHari[k].add(String(z.nisn)); });
+  izinSemua.forEach(z => { const k = kunciTgl(z.tanggal_mulai); if (petaIzinHari[k]) petaIzinHari[k].add(String(z.nisn)); });
 
   $('viewRoot').innerHTML = `
     ${kartuUnit()}
@@ -1150,7 +1191,7 @@ async function viewDashboard() {
       ${stat('Santri Aktif', angka(siswa.length), 'fa-solid fa-user-group',
         'background:#E7F1F7;color:var(--sea)', 'var(--sea)',
         perluFilterKelas() ? 'Kelas binaan Anda' : 'Seluruh dayah')}
-           ${stat('Pelanggaran', angka(detail.length), 'fa-solid fa-scale-balanced',
+      ${stat('Pelanggaran', angka(detail.length), 'fa-solid fa-scale-balanced',
         'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)',
         `${labelKonteks()} · ${labelPeriode()}`)}
       ${stat('Izin Menunggu', angka(izinPending), 'fa-solid fa-clock',
@@ -1606,8 +1647,8 @@ async function viewPimpinan() {
         backgroundColor:['#0F766E','#B45309'], borderWidth:0 }]},
     options:{ responsive:true, maintainAspectRatio:false, cutout:'66%',
       plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:9}}} }});
-   
-     await panelKinerjaGuru();
+
+  await panelKinerjaGuru();
 }
 
 // ---------------------------------------------------------------------
@@ -1759,6 +1800,8 @@ async function bukaDetailSantri(nisn) {
           </div></div>`;
     };
 
+    const bolehLaporan = bolehCetak() || bolehPdf();
+
     await Swal.fire({
       width: 800, showConfirmButton:false, showCloseButton:true,
       html: `<div style="text-align:left">
@@ -1772,6 +1815,15 @@ async function bukaDetailSantri(nisn) {
             <p class="k">Total Poin</p>
           </div>
         </div>
+
+        ${bolehLaporan ? `<div class="detail-periode${APP.periode.aktif ? ' on' : ''}">
+          <i class="fa-regular fa-calendar-days"></i>
+          <span>Cetak &amp; PDF mengikuti periode aktif:
+            <b>${esc(labelPeriode())}</b>${APP.periode.aktif
+              ? ` — pelanggaran, pembinaan, dan perizinan disaring ke bulan ini
+                  (presensi tetap ditampilkan seluruhnya).`
+              : ` — seluruh riwayat santri akan tercetak.`}</span>
+        </div>` : ''}
 
         <div class="detail-acts">
           ${bolehCetak() ? `<button class="btn btn-primary btn-sm" id="dCetak"><i class="fa-solid fa-print"></i>Cetak Laporan</button>` : ''}
@@ -1804,37 +1856,62 @@ async function resetStatus(nisn) {
 }
 
 // ---------------------------------------------------------------------
-// 13. CATATAN PELANGGARAN
+// 13. CATATAN PELANGGARAN — halaman administrasi (khusus Admin)
+//     Tata letak eksekutif: kepala halaman berwibawa, papan indikator,
+//     panel penyaring ringkas, dan tabel arsip bergaya premium.
 // ---------------------------------------------------------------------
 const stPlg = { page:1, size:30, cari:'', kategori:'', bidang:'', kelas:'', dari:'', sampai:'' };
 
 async function viewPelanggaran() {
-  $('viewRoot').innerHTML = kartu('Catatan Pelanggaran', `
-    <div class="card-note"><i class="fa-solid fa-circle-info"></i>
-      Unit aktif: <b>${esc(labelKonteks())}</b>. Daftar dan pilihan jenis pelanggaran
-      otomatis mengikuti unit ini.</div>
-    <div class="filters">
-      <input id="plgCari" class="input grow" placeholder="Cari santri / jenis pelanggaran…" value="${esc(stPlg.cari)}">
-      <select id="plgKategori" class="input">
-        <option value="">Semua Kategori</option>
-        ${['Ringan','Sedang','Berat'].map(k => `<option ${k===stPlg.kategori?'selected':''}>${k}</option>`).join('')}
-      </select>
-      <input id="plgBidang" class="input" autocomplete="off" placeholder="Semua bidang" value="${esc(stPlg.bidang)}">
-      <input id="plgKelas" class="input" autocomplete="off" placeholder="Semua kelas" value="${esc(stPlg.kelas)}">
-      <input id="plgDari" type="date" class="input" value="${stPlg.dari}" title="Tanggal mulai">
-      <input id="plgSampai" type="date" class="input" value="${stPlg.sampai}" title="Tanggal akhir">
-      <span class="sep"></span>
-      <button class="btn btn-ghost btn-sm" id="plgReset"><i class="fa-solid fa-rotate-left"></i>Reset</button>
-    </div>
-    <div class="tbl"><table>
-      <thead><tr><th>Tanggal</th><th>Santri</th><th>Pelanggaran</th><th>Kategori</th>
-        <th class="center">Poin</th><th>Bidang</th><th>Penindak</th><th class="right">Aksi</th></tr></thead>
-      <tbody id="tbPlg"><tr><td colspan="8" style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</td></tr></tbody>
-    </table></div>
-    <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
-    <div id="pgPlg"></div>`,
-    `${bolehCetak() ? `<button class="btn btn-ghost btn-sm" id="plgCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>` : ''}
-     ${bolehTulis() ? `<button class="btn btn-primary btn-sm" id="btnAddPlg"><i class="fa-solid fa-plus"></i>Catat Pelanggaran</button>` : ''}`);
+  $('viewRoot').innerHTML = `
+  <div class="adm">
+    <section class="adm-head">
+      <div class="adm-head-main">
+        <div class="eyebrow"><span class="ar">المخالفات</span><span class="rule"></span>
+          <span class="lat">Administrasi · Khusus Admin</span></div>
+        <h2>Catatan Pelanggaran Santri</h2>
+        <p>Arsip resmi seluruh catatan kedisiplinan. Setiap baris terhubung langsung
+           dengan poin santri, instruksi pembinaan, dan laporan perkembangan.</p>
+        <div class="adm-meta">
+          <span><i class="fa-solid fa-layer-group"></i>${esc(labelKonteks())}</span>
+          <span><i class="fa-regular fa-calendar-days"></i>${esc(labelPeriode())}</span>
+          <span id="admCount"><i class="fa-solid fa-database"></i>Memuat data…</span>
+        </div>
+      </div>
+      <div class="adm-actions">
+        ${bolehCetak() ? `<button class="btn btn-onnavy btn-sm" id="plgCsv">
+          <i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>` : ''}
+        ${bolehTulis() ? `<button class="btn btn-brass btn-sm" id="btnAddPlg">
+          <i class="fa-solid fa-plus"></i>Catat Pelanggaran</button>` : ''}
+      </div>
+    </section>
+
+    <div class="stats adm-stats" id="plgStats"></div>
+
+    ${kartu('Arsip Catatan Pelanggaran', `
+      <div class="filters adm-filters">
+        <input id="plgCari" class="input grow" placeholder="Cari santri, NISN, atau jenis pelanggaran…" value="${esc(stPlg.cari)}">
+        <select id="plgKategori" class="input">
+          <option value="">Semua Kategori</option>
+          ${['Ringan','Sedang','Berat'].map(k => `<option ${k===stPlg.kategori?'selected':''}>${k}</option>`).join('')}
+        </select>
+        <input id="plgBidang" class="input" autocomplete="off" placeholder="Semua bidang" value="${esc(stPlg.bidang)}">
+        <input id="plgKelas" class="input" autocomplete="off" placeholder="Semua kelas" value="${esc(stPlg.kelas)}">
+        <input id="plgDari" type="date" class="input" value="${stPlg.dari}" title="Tanggal mulai">
+        <input id="plgSampai" type="date" class="input" value="${stPlg.sampai}" title="Tanggal akhir">
+        <span class="sep"></span>
+        <button class="btn btn-ghost btn-sm" id="plgReset"><i class="fa-solid fa-rotate-left"></i>Reset</button>
+      </div>
+      <div class="tbl"><table class="adm-tbl">
+        <thead><tr><th>Tanggal</th><th>Santri</th><th>Pelanggaran</th><th>Kategori</th>
+          <th class="center">Poin</th><th>Bidang</th><th>Penindak</th><th class="right">Aksi</th></tr></thead>
+        <tbody id="tbPlg"><tr><td colspan="8" style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</td></tr></tbody>
+      </table></div>
+      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
+      <div id="pgPlg"></div>`,
+      `<span class="tag tag-sea">${esc(labelKonteks())}</span>`,
+      'Pencarian, penyaringan, dan pengarsipan catatan kedisiplinan santri.')}
+  </div>`;
 
   $('plgCari').addEventListener('input', debounce(e => {
     stPlg.cari = e.target.value.trim(); stPlg.page = 1; muatTabelPlg(); }, 280));
@@ -1854,7 +1931,7 @@ async function viewPelanggaran() {
   $('btnAddPlg')?.addEventListener('click', () => modalCatatPelanggaran());
   $('plgCsv')?.addEventListener('click', async () => {
     const rows = saringPlg(await muatDetail());
-    unduhCsv(`pelanggaran-${hariIni()}.csv`, [
+    unduhCsv(`pelanggaran-${berkasPeriode()}.csv`, [
       ['Tanggal','NISN','Nama','Kelas','Jenjang','Kode','Pelanggaran','Kategori','Poin','Sumber','Bidang','Penindak','Catatan'],
       ...rows.map(r => [kunciTgl(r.tanggal), r.nisn, r.nama_siswa, r.kelas, r.jenjang, r.kode_pelanggaran,
         r.nama_pelanggaran, r.kategori, r.bobot_pelanggaran, r.sumber, r.bidang, r.penindak, r.catatan])
@@ -1864,8 +1941,14 @@ async function viewPelanggaran() {
   onKlik(async (e) => {
     const a = e.target.closest('[data-arsip]');
     if (a) return arsipkanPelanggaran(a.dataset.arsip);
+    const d = e.target.closest('[data-detail]');
+    if (d) return bukaDetailSantri(d.dataset.detail);
     const p = e.target.closest('[data-pg]');
-    if (p && p.dataset.pg.startsWith('plg:')) { stPlg.page = Number(p.dataset.pg.split(':')[1]); muatTabelPlg(); }
+    if (p && p.dataset.pg.startsWith('plg:')) {
+      stPlg.page = Number(p.dataset.pg.split(':')[1]);
+      muatTabelPlg();
+      $('viewRoot').scrollIntoView({ block:'start', behavior:'smooth' });
+    }
   });
 
   await muatTabelPlg();
@@ -1886,6 +1969,28 @@ function saringPlg(all) {
   return rows.sort((a,b) => String(kunciTgl(b.tanggal)).localeCompare(String(kunciTgl(a.tanggal))));
 }
 
+/** Papan indikator kecil di atas tabel arsip. */
+function gambarStatPlg(rows) {
+  const box = $('plgStats'); if (!box) return;
+  const poin  = rows.reduce((a,r) => a + (Number(r.bobot_pelanggaran) || 0), 0);
+  const unik  = new Set(rows.map(r => String(r.nisn || ''))).size;
+  const berat = rows.filter(r => r.kategori === 'Berat').length;
+  const sedang = rows.filter(r => r.kategori === 'Sedang').length;
+
+  box.innerHTML =
+    stat('Catatan Tersaring', angka(rows.length), 'fa-solid fa-scale-balanced',
+      'background:#E7F1F7;color:var(--sea)', 'var(--sea)', labelPeriode()) +
+    stat('Santri Terlibat', angka(unik), 'fa-solid fa-user-group',
+      'background:var(--violet-bg);color:var(--violet)', 'var(--violet)', 'NISN unik pada hasil filter') +
+    stat('Akumulasi Poin', angka(poin), 'fa-solid fa-coins',
+      'background:var(--amber-bg);color:var(--amber)', 'var(--amber)', `${angka(sedang)} kategori sedang`) +
+    stat('Kategori Berat', angka(berat), 'fa-solid fa-circle-exclamation',
+      'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)', 'Perlu tindak lanjut pimpinan');
+
+  const c = $('admCount');
+  if (c) c.innerHTML = `<i class="fa-solid fa-database"></i>${angka(rows.length)} catatan aktif`;
+}
+
 async function muatTabelPlg() {
   const rows = saringPlg(await muatDetail());
   const pages = Math.max(1, Math.ceil(rows.length / stPlg.size));
@@ -1894,20 +1999,30 @@ async function muatTabelPlg() {
   const hal = rows.slice(from, from + stPlg.size);
   $('queryTime').textContent = `pelanggaran · ${angka(rows.length)} baris`;
 
+  gambarStatPlg(rows);
+
+  const poinKelas = (n) => Number(n) >= 25 ? 'poin-pill tinggi' : Number(n) >= 10 ? 'poin-pill sedang' : 'poin-pill';
+
   $('tbPlg').innerHTML = hal.map(r => `<tr>
-    <td class="secondary nowrap" style="padding-top:14px">${tgl(r.tanggal)}</td>
-    <td><div class="primary">${esc(r.nama_siswa)}</div>
-        <div class="secondary">${esc(r.nisn)} · ${esc(r.kelas||'-')}</div></td>
-    <td>${esc(r.nama_pelanggaran)}<div class="secondary">${esc(r.kode_pelanggaran)}</div></td>
+    <td class="nowrap"><div class="adm-date">${tgl(r.tanggal)}</div>
+      <div class="secondary">${esc(kunciTgl(r.tanggal))}</div></td>
+    <td><button class="adm-santri" data-detail="${esc(r.nisn)}" title="Lihat riwayat santri">
+        <span class="av">${esc(String(r.nama_siswa||'?').charAt(0).toUpperCase())}</span>
+        <span class="who"><span class="nm">${esc(r.nama_siswa)}</span>
+          <span class="secondary">${esc(r.nisn)} · ${esc(r.kelas||'-')}</span></span>
+      </button></td>
+    <td><div class="primary">${esc(r.nama_pelanggaran)}</div>
+        <div class="secondary">${esc(r.kode_pelanggaran)}</div>
+        ${r.catatan ? `<div class="adm-note">${esc(r.catatan)}</div>` : ''}</td>
     <td><span class="tag ${tagKategori(r.kategori)}">${esc(r.kategori)}</span></td>
-    <td class="num center" style="color:var(--maroon)">${r.bobot_pelanggaran}</td>
+    <td class="center"><span class="${poinKelas(r.bobot_pelanggaran)}">${r.bobot_pelanggaran ?? 0}</span></td>
     <td><span class="tag tag-sea">${esc(r.bidang||'-')}</span>
         <div class="secondary">${esc(r.sumber||'-')}</div></td>
     <td style="font-size:12.5px;color:var(--text-2)">${esc(r.penindak||'-')}</td>
     <td class="right">${bolehTulis()
       ? `<button class="btn btn-danger btn-sm" data-arsip="${esc(r.id_log)}">
           <i class="fa-solid fa-box-archive"></i>Arsip</button>` : '<span class="tag tag-off">Hanya baca</span>'}</td>
-  </tr>`).join('') || barisKosong(8, 'Tidak ada catatan pada filter ini.', 'Coba ubah unit, rentang tanggal, atau kata kunci.');
+  </tr>`).join('') || barisKosong(8, 'Tidak ada catatan pada filter ini.', 'Coba ubah unit, periode, rentang tanggal, atau kata kunci.');
 
   $('pgPlg').innerHTML = pager('plg', stPlg.page, rows.length, stPlg.size);
   tandaiTabelBisaGeser();
@@ -2047,13 +2162,14 @@ async function viewRekap() {
         ${kelasList.map(k => `<option ${k===stRekap.kelas?'selected':''}>${esc(k)}</option>`).join('')}
       </select>
       <span class="sep"></span>
-            <button class="btn btn-ghost btn-sm" id="rkCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>
+      <button class="btn btn-ghost btn-sm" id="rkCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>
       ${bolehCetak() ? `<button class="btn btn-primary btn-sm" id="rkCetak">
         <i class="fa-solid fa-print"></i>Cetak Bulanan</button>` : ''}
     </div>
     <div id="rkHasil"><div style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</div></div>
     <div id="pgRk"></div>`,
-    `<span class="tag tag-sea">${esc(labelKonteks())}</span>`);
+    `<span class="tag tag-sea">${esc(labelKonteks())}</span>
+     <span class="tag tag-off">${esc(labelPeriode())}</span>`);
 
   $('rkCari').addEventListener('input', debounce(e => {
     stRekap.cari = e.target.value.trim(); stRekap.page = 1; gambarRekap(); }, 250));
@@ -2063,9 +2179,9 @@ async function viewRekap() {
     const rows = await hitungRekap();
     const baris = [['NISN','Nama','Kelas','Kategori','Catatan','Jumlah']];
     rows.forEach(s => s.daftar.forEach(d => baris.push([s.nisn, s.nama, s.kelas, d.kategori, d.deskripsi, d.jumlah])));
-        unduhCsv(`rekap-pelanggaran-${berkasPeriode()}.csv`, baris);
+    unduhCsv(`rekap-pelanggaran-${berkasPeriode()}.csv`, baris);
   });
-     $('rkCetak')?.addEventListener('click', async () =>
+  $('rkCetak')?.addEventListener('click', async () =>
     cetakRekapBulanan(await hitungRekap(), 'Rekap Pelanggaran'));
 
   onKlik((e) => {
@@ -2105,7 +2221,7 @@ async function gambarRekap() {
 
   if (!rows.length) {
     $('rkHasil').innerHTML = kosong('Tidak ditemukan santri dengan kriteria ini.',
-      'Ubah kategori, kelas, atau kata kunci pencarian.', 'fa-layer-group');
+      'Ubah kategori, kelas, periode, atau kata kunci pencarian.', 'fa-layer-group');
     $('pgRk').innerHTML = '';
     return;
   }
@@ -2134,6 +2250,8 @@ async function gambarRekap() {
 }
 
 // ---------------------------------------------------------------------
+// 15. PUSAT PERIZINAN
+// ---------------------------------------------------------------------
 const stIzin = { filter:'Semua', cari:'', page:1, size:30 };
 
 async function viewPerizinan() {
@@ -2147,7 +2265,7 @@ async function viewPerizinan() {
     </div>
     <div id="izinGrid" class="izin-grid"><div style="padding:20px;color:var(--text-3)">Memuat…</div></div>
     <div id="pgIzin"></div>`,
-    bolehTulis() && bolehPerizinan()
+    bolehAjukanIzin()
       ? `<button class="btn btn-primary btn-sm" id="btnAddIzin"><i class="fa-solid fa-plus"></i>Ajukan Izin</button>` : '');
 
   $('izCari').addEventListener('input', debounce(e => {
@@ -2168,9 +2286,9 @@ async function viewPerizinan() {
       $('izinGrid').scrollIntoView({ block:'start', behavior:'smooth' });
       return;
     }
-         const pj = e.target.closest('[data-perpanjang]');
+    const pj = e.target.closest('[data-perpanjang]');
     if (pj) { if (await modalPerpanjangIzin(pj.dataset.perpanjang)) gambarIzin(); return; }
-     
+
     const i = e.target.closest('[data-izin]');
     if (i) return prosesIzin(...i.dataset.izin.split('|'));
   });
@@ -2185,6 +2303,7 @@ async function gambarIzin() {
 
   let rows = semua.filter(p => stIzin.filter === 'Semua' || p.status_persetujuan === stIzin.filter);
   if (nisnBoleh) rows = rows.filter(p => nisnBoleh.has(String(p.nisn)));
+  rows = saringPeriodeIzin(rows);
   if (stIzin.cari) {
     const k = stIzin.cari.toLowerCase();
     rows = rows.filter(p => [p.siswa?.nama_siswa, p.siswa?.kelas, p.alasan, p.nisn, p.pemberi_izin]
@@ -2214,18 +2333,15 @@ async function gambarIzin() {
         <span><i class="fa-regular fa-bookmark"></i>${esc(p.jenis_izin || '-')}</span>
         <span><i class="fa-regular fa-comment-dots"></i>${esc(p.alasan || '-')}</span>
         <span><i class="fa-regular fa-user"></i>Diajukan oleh ${esc(p.pemberi_izin || '-')}</span>
-      </div>     
-      
+      </div>
       ${aksiIzin(p, 'izin', 'perpanjang')}
-
-      
-    </div>`).join('') || kosong('Tidak ada data perizinan.', 'Ubah filter status atau kata kunci.', 'fa-door-open');
+    </div>`).join('') || kosong('Tidak ada data perizinan.', 'Ubah filter status, periode, atau kata kunci.', 'fa-door-open');
 
   $('pgIzin').innerHTML = rows.length ? pager('izin', stIzin.page, rows.length, stIzin.size) : '';
 }
 
 async function modalAjukanIzin() {
-   if (!bisa('izin.ajukan')) {
+  if (!bolehAjukanIzin()) {
     return toast('error', `Role ${role()} tidak berwenang mengajukan perizinan.`);
   }
   const res = await Swal.fire({
@@ -2242,12 +2358,11 @@ async function modalAjukanIzin() {
         <div class="field"><label class="label">Tanggal Selesai</label>
           <input id="zSelesai" type="date" class="input" value="${hariIni()}"></div>
       </div>
-           <div class="field"><label class="label">Jenis Izin</label>
+      <div class="field"><label class="label">Jenis Izin</label>
         <select id="zJenis" class="input" ${role()==='Klinik' && KLINIK_SAKIT_SAJA ? 'disabled' : ''}>
           ${(role()==='Klinik' && KLINIK_SAKIT_SAJA ? ['Sakit'] : ['Keperluan','Sakit','Pemberitahuan'])
             .map(x => `<option>${x}</option>`).join('')}
         </select></div>
-        
       <div class="field"><label class="label">Alasan</label>
         <textarea id="zAlasan" class="input" rows="2" placeholder="Contoh: dijemput orang tua untuk keperluan keluarga."></textarea></div>
     </div>`,
@@ -2280,6 +2395,7 @@ async function refreshBadgePending() {
   const { count } = await db.from('log_perizinan')
     .select('id_izin', { count:'exact', head:true }).eq('status_persetujuan','Pending');
   const b = $('badgePending');
+  if (!b) return;
   b.textContent = count > 99 ? '99+' : String(count || 0);
   b.classList.toggle('hidden', !count);
   b.title = count ? `${count} izin menunggu keterangan balik` : '';
@@ -2404,8 +2520,9 @@ async function modalPerpanjangIzin(idIzin) {
   return true;
 }
 
-   
-
+// ---------------------------------------------------------------------
+// 16. PEMBINAAN
+// ---------------------------------------------------------------------
 const stBina = { cari:'', kategori:'', status:'', mode:'', page:1, size:30 };
 
 function tahapBina(r) { const t = Number(r.pengulangan_ke) || 0; return t > 0 ? t : null; }
@@ -2479,7 +2596,7 @@ async function gambarBina() {
   const proses = semua.filter(r => r.status_pembinaan !== 'Selesai').length;
   const otomatis = semua.filter(r => String(r.mode_pembinaan) === 'Otomatis').length;
   $('binaKpi').innerHTML =
-    stat('Total Instruksi', angka(total), 'fa-solid fa-list', 'background:#EFF3F6;color:var(--text-2)', 'var(--text-3)') +
+    stat('Total Instruksi', angka(total), 'fa-solid fa-list', 'background:#EFF3F6;color:var(--text-2)', 'var(--text-3)', labelPeriode()) +
     stat('Dalam Proses', angka(proses), 'fa-solid fa-hourglass-half', 'background:var(--amber-bg);color:var(--amber)', 'var(--amber)') +
     stat('Selesai', angka(total - proses), 'fa-solid fa-circle-check', 'background:var(--teal-bg);color:var(--teal)', 'var(--teal)') +
     stat('Dibuat Otomatis', angka(otomatis), 'fa-solid fa-robot', 'background:#E7F1F7;color:var(--sea)', 'var(--sea)');
@@ -2629,7 +2746,7 @@ async function gambarRb() {
   const rekap = rekapPembinaanPerSantri(semua);
 
   $('rbKpi').innerHTML =
-    stat('Santri Dibina', angka(rekap.length), 'fa-solid fa-user-group', 'background:#E7F1F7;color:var(--sea)', 'var(--sea)') +
+    stat('Santri Dibina', angka(rekap.length), 'fa-solid fa-user-group', 'background:#E7F1F7;color:var(--sea)', 'var(--sea)', labelPeriode()) +
     stat('Kategori Ringan', angka(semua.filter(r => r.kategori==='Ringan').length), 'fa-solid fa-leaf', 'background:var(--teal-bg);color:var(--teal)', 'var(--teal)') +
     stat('Kategori Sedang', angka(semua.filter(r => r.kategori==='Sedang').length), 'fa-solid fa-triangle-exclamation', 'background:var(--amber-bg);color:var(--amber)', 'var(--amber)') +
     stat('Kategori Berat', angka(semua.filter(r => r.kategori==='Berat').length), 'fa-solid fa-circle-exclamation', 'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)');
@@ -2914,6 +3031,7 @@ async function viewPengguna() {
   onKlik(async (e) => {
     const b = e.target.closest('[data-edit]'); if (!b) return;
     const u = (data||[]).find(x => x.id === b.dataset.edit);
+    if (!u) return;
     const res = await Swal.fire({
       title:'Ubah Pengguna', width: 560, showCancelButton:true,
       confirmButtonText:'Simpan', cancelButtonText:'Batal', confirmButtonColor:'#14618B',
@@ -2961,6 +3079,12 @@ async function viewPengguna() {
 
 // ---------------------------------------------------------------------
 // 20. LAPORAN TERPADU: CETAK & UNDUH PDF
+//     Seluruh laporan santri MENGIKUTI PERIODE AKTIF:
+//       - Pelanggaran  : hanya bulan terpilih
+//       - Pembinaan    : hanya bulan terpilih
+//       - Perizinan    : seluruh izin yang rentangnya bersinggungan
+//       - Presensi     : TIDAK disaring (rekap penuh dari backend)
+//       - Rekap & poin : dihitung ulang dari pelanggaran bulan tersebut
 // ---------------------------------------------------------------------
 /**
  * Hitung pengulangan NYATA per kategori dari riwayat perkembangan santri.
@@ -3106,9 +3230,71 @@ function bagianPembinaanCetak(pembinaan, perkembangan) {
   }).join('');
 }
 
+/**
+ * Saring hasil RPC `laporan_santri` mengikuti periode aktif.
+ * Selalu dipanggil sebelum bangunLaporanHTML() — baik untuk cetak
+ * maupun unduh PDF — sehingga keduanya memakai data yang identik.
+ */
+function saringDataLaporanBulanan(mentah) {
+  const data = mentah || {};
+  const p = batasPeriode();
+
+  // Riwayat penuh tetap disimpan: dipakai menomori pengulangan pembinaan
+  // agar "Ke-7, Ke-8" tetap benar walaupun lembar cetak hanya satu bulan.
+  const perkembanganPenuh = (data.perkembangan || []).slice().sort((a, b) =>
+    String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal))));
+
+  if (!p) {
+    return { ...data,
+      perkembanganPenuh,
+      presensi: data.presensi || [],
+      periodeAktif: false,
+      labelPeriode: 'Seluruh Periode',
+      poinPeriode: perkembanganPenuh.reduce((a, r) => a + (Number(r.poin) || 0), 0) };
+  }
+
+  const diBulan = (v) => bulanDari(kunciTgl(v)) === p.bulan;
+
+  const perkembangan = perkembanganPenuh.filter(r => diBulan(r.tanggal));
+  const pembinaan = (data.pembinaan || []).filter(b => diBulan(b.tanggal_pembinaan));
+
+  // Perizinan: masuk bila rentangnya bersinggungan dengan bulan aktif.
+  const perizinan = (data.perizinan || []).filter(z => {
+    const mulai = kunciTgl(z.tanggal_mulai);
+    const selesai = kunciTgl(z.tanggal_selesai) || mulai;
+    if (!mulai && !selesai) return false;
+    const a = mulai || selesai, b = selesai || mulai;
+    return a <= p.akhir && b >= p.awal;
+  });
+
+  // Rekap dihitung ULANG dari pelanggaran bulan ini (bukan kumulatif).
+  const perKode = new Map();
+  perkembangan.forEach(r => {
+    const kunci = String(r.judul || r.nama_pelanggaran || '-').trim();
+    if (!perKode.has(kunci)) perKode.set(kunci, {
+      kategori: r.kategori || '-', deskripsi: kunci, jumlah: 0 });
+    perKode.get(kunci).jumlah++;
+  });
+
+  return { ...data,
+    perkembangan,
+    perkembanganPenuh,
+    pembinaan,
+    perizinan,
+    presensi: data.presensi || [],          // presensi TIDAK disaring
+    rekap: kaskadeKonversi(perKode),
+    poinPeriode: perkembangan.reduce((a, r) => a + (Number(r.poin) || 0), 0),
+    periodeAktif: true,
+    labelPeriode: labelPeriode(),
+    periodeAwal: p.awal,
+    periodeAkhir: p.akhir };
+}
+
 function bangunLaporanHTML(data) {
   const s = data.siswa || {};
   const dicetak = new Date().toLocaleDateString('id-ID', { day:'2-digit', month:'long', year:'numeric' });
+  const aktif = !!data.periodeAktif;
+  const labelPer = data.labelPeriode || 'Seluruh Periode';
 
   const th = (t) => `<th style="border:1px solid #cbd5e1;padding:5px;background:#f1f5f9;">${esc(t)}</th>`;
   const td = (t, c) => `<td style="border:1px solid #cbd5e1;padding:5px;${c||''}">${esc(t)}</td>`;
@@ -3131,11 +3317,16 @@ function bangunLaporanHTML(data) {
     rekap = kaskadeKonversi(perKode);
   }
 
+  const poinTampil = aktif ? (data.poinPeriode || 0) : (s.total_poin_pelanggaran || 0);
+  const rentangTeks = aktif && data.periodeAwal
+    ? `${tgl(data.periodeAwal)} s/d ${tgl(data.periodeAkhir)}` : 'Seluruh riwayat tercatat';
+
   return `
   <div class="laporan" style="font-family:Arial,sans-serif;color:#1e293b;padding:18px;">
     <div style="text-align:center;border-bottom:2px solid #1e293b;padding-bottom:12px;margin-bottom:16px;">
       <h1 style="font-size:17px;margin:0;letter-spacing:.3px;">LAPORAN PERKEMBANGAN SANTRI</h1>
-      <p style="font-size:11px;margin:4px 0 0;color:#64748b;">Dayah Ruhul Qurani · Dicetak ${dicetak}</p>
+      <p style="font-size:11px;margin:4px 0 0;color:#64748b;">
+        Dayah Ruhul Qurani · Periode ${esc(labelPer)} · Dicetak ${dicetak}</p>
     </div>
 
     <table style="width:100%;font-size:12px;margin-bottom:16px;">
@@ -3143,11 +3334,17 @@ function bangunLaporanHTML(data) {
       <tr><td style="padding:2px 0;"><b>NISN</b></td><td>: ${esc(s.nisn)}</td></tr>
       <tr><td style="padding:2px 0;"><b>Jenjang / Kelas</b></td><td>: ${esc(s.jenjang||'-')} / ${esc(s.kelas||'-')}</td></tr>
       <tr><td style="padding:2px 0;"><b>Asrama</b></td><td>: ${esc(s.asrama||'-')}</td></tr>
-      <tr><td style="padding:2px 0;"><b>Total Poin</b></td><td>: ${s.total_poin_pelanggaran||0}</td></tr>
+      <tr><td style="padding:2px 0;"><b>Periode Laporan</b></td><td>: ${esc(labelPer)} (${esc(rentangTeks)})</td></tr>
+      <tr><td style="padding:2px 0;"><b>${aktif ? 'Total Poin Periode' : 'Total Poin'}</b></td>
+          <td>: ${poinTampil}${aktif
+            ? ` <span style="color:#64748b;font-size:10.5px;">(akumulasi seluruh riwayat: ${s.total_poin_pelanggaran||0})</span>`
+            : ''}</td></tr>
       <tr><td style="padding:2px 0;"><b>Status Saat Ini</b></td><td>: ${esc(s.status_keberadaan||'Hadir')}</td></tr>
     </table>
 
     <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">1. Presensi Madrasah</h3>
+    <p style="font-size:10.5px;margin:4px 0 6px;color:#64748b;">
+      Rekap presensi ditampilkan seluruhnya, tidak mengikuti penyaringan bulan.</p>
     <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:16px;">
       <thead><tr>${['Bulan','Hadir','Izin','Sakit','Alpa'].map(th).join('')}</tr></thead>
       <tbody>${baris(data.presensi, p =>
@@ -3155,33 +3352,37 @@ function bangunLaporanHTML(data) {
         'Belum ada data presensi.', 5)}</tbody>
     </table>
 
-    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">2. Akumulasi Perkembangan</h3>
+    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
+      2. Akumulasi Perkembangan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
     <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:16px;">
       <thead><tr>${['Kategori','Catatan / Perkembangan','Jumlah'].map(th).join('')}</tr></thead>
       <tbody>${baris(rekap, r =>
         `<tr>${td(r.kategori)}${td(r.deskripsi)}${td(r.jumlah,'text-align:center')}</tr>`,
-        'Tidak ada akumulasi.', 3)}</tbody>
+        'Tidak ada akumulasi pada periode ini.', 3)}</tbody>
     </table>
 
-    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">3. Riwayat Perkembangan</h3>
+    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
+      3. Riwayat Perkembangan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
     <table style="width:100%;font-size:10.5px;border-collapse:collapse;margin-bottom:16px;">
       <thead><tr>${['Tanggal','Bidang','Catatan','Kategori','Poin','Petugas','Keterangan'].map(th).join('')}</tr></thead>
       <tbody>${baris(perkembangan, p =>
         `<tr>${td(tgl(p.tanggal))}${td(p.bidang||'-')}${td(p.judul)}${td(p.kategori)}${td(p.poin,'text-align:center')}${td(p.penindak||'-')}${td(p.catatan||'-')}</tr>`,
-        'Tidak ada catatan perkembangan.', 7)}</tbody>
+        'Tidak ada catatan perkembangan pada periode ini.', 7)}</tbody>
     </table>
 
-    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">4. Riwayat Perizinan</h3>
+    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
+      4. Riwayat Perizinan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
     <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:16px;">
       <thead><tr>${['Mulai','Selesai','Jenis','Alasan','Status'].map(th).join('')}</tr></thead>
       <tbody>${baris(data.perizinan, z =>
         `<tr>${td(tgl(z.tanggal_mulai))}${td(tgl(z.tanggal_selesai))}${td(z.jenis_izin)}${td(z.alasan||'-')}${td(z.status_persetujuan)}</tr>`,
-        'Tidak ada perizinan.', 5)}</tbody>
+        'Tidak ada perizinan pada periode ini.', 5)}</tbody>
     </table>
 
-    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">5. Instrumen Pembinaan</h3>
+    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
+      5. Instrumen Pembinaan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
     <div style="margin-bottom:24px;">
-      ${bagianPembinaanCetak(data.pembinaan, perkembangan)}
+      ${bagianPembinaanCetak(data.pembinaan, data.perkembanganPenuh || perkembangan)}
     </div>
 
     <table style="width:100%;font-size:12px;margin-top:36px;page-break-inside:avoid;break-inside:avoid;">
@@ -3239,11 +3440,19 @@ async function ambilLaporan(nisn) {
   return data;
 }
 
+/** Nama berkas laporan: selalu membawa periode. */
+function namaBerkasLaporan(namaSantri) {
+  const bersih = String(namaSantri || 'Santri')
+    .trim().replace(/[\\/:*?"<>|]+/g,'').replace(/\s+/g,'_');
+  return `Laporan_${bersih}_${berkasPeriode()}.pdf`;
+}
+
 async function cetakLaporan(nisn) {
   if (!bolehCetak()) return toast('error', `Role ${role()} tidak memiliki izin cetak.`);
   loading(true);
   try {
-    const data = await ambilLaporan(nisn);
+    const dataMentah = await ambilLaporan(nisn);
+    const data = saringDataLaporanBulanan(dataMentah);
     $('printArea').innerHTML = bangunLaporanHTML(data);
     window.print();
   } catch (err) { fireError(err); }
@@ -3256,6 +3465,7 @@ window.addEventListener('afterprint', () => { $('printArea').innerHTML = ''; });
  * Unduh PDF memakai panggung render terpisah (#pdfStage), bukan #printArea.
  * html2canvas berjalan pada media screen sehingga elemen harus benar-benar
  * memiliki layout di viewport, kalau tidak hasilnya halaman putih.
+ * Data yang dipakai IDENTIK dengan hasil cetak (periode yang sama).
  */
 async function unduhLaporanPdf(nisn) {
   if (!bolehPdf()) return toast('error', `Role ${role()} tidak memiliki izin unduh PDF.`);
@@ -3266,7 +3476,8 @@ async function unduhLaporanPdf(nisn) {
   const stage = $('pdfStage'), mask = $('pdfMask');
   loading(true);
   try {
-    const data = await ambilLaporan(nisn);
+    const dataMentah = await ambilLaporan(nisn);
+    const data = saringDataLaporanBulanan(dataMentah);
     stage.innerHTML = bangunLaporanHTML(data);
     stage.classList.add('on');
     mask.classList.add('on');
@@ -3281,8 +3492,7 @@ async function unduhLaporanPdf(nisn) {
       throw new Error(`Area PDF belum siap dirender (${Math.round(rect.width)}×${Math.round(rect.height)}, ${panjang} karakter).`);
     }
 
-    const nama = 'Laporan_' + String(data.siswa.nama_siswa || 'Santri')
-      .trim().replace(/[\\/:*?"<>|]+/g,'').replace(/\s+/g,'_') + '.pdf';
+    const nama = namaBerkasLaporan(data.siswa?.nama_siswa);
 
     await window.html2pdf().set({
       margin: [8,8,8,8], filename: nama,
@@ -3292,7 +3502,7 @@ async function unduhLaporanPdf(nisn) {
       pagebreak: { mode:['css','legacy'], avoid:['tr','h3'] }
     }).from(root).save();
 
-    toast('success', 'PDF berhasil diunduh.');
+    toast('success', `PDF ${data.periodeAktif ? labelPeriode() : 'lengkap'} berhasil diunduh.`);
   } catch (err) { fireError(err); }
   finally {
     stage.classList.remove('on'); stage.innerHTML = '';
@@ -3350,7 +3560,6 @@ async function cetakRekapBulanan(rows, sumberLabel) {
     </div>`;
   window.print();
 }
-
 
 // ---------------------------------------------------------------------
 // 21. REALTIME
@@ -3653,7 +3862,7 @@ async function mdSimpanPelanggaran(payload, btn, label) {
 // ---------- Panel 1: pemeriksaan atribut ----------
 function mdPanelAtribut() {
   const m = MDS.atribut;
-  const bisa = bolehTulis();
+  const bolehIsi = bolehTulis();
 
   return kartu('Pemeriksaan Atribut Santri', `
     ${m
@@ -3685,7 +3894,7 @@ function mdPanelAtribut() {
     <div class="md-bar">
       <span class="note-min"><i class="fa-solid fa-shield-halved"></i>
         Penindak dan poin diproses otomatis oleh sistem.</span>
-      ${bisa && m
+      ${bolehIsi && m
         ? `<button class="btn btn-primary btn-sm" id="atrSimpan">
              <i class="fa-solid fa-floppy-disk"></i>Simpan Pemeriksaan</button>`
         : `<span class="tag tag-off">Hanya baca</span>`}
@@ -3733,7 +3942,7 @@ async function mdSimpanAtribut() {
 
 // ---------- Panel 2: tambah pelanggaran ----------
 function mdPanelPelanggaran() {
-  const bisa = bolehTulis();
+  const bolehIsi = bolehTulis();
 
   return kartu('Tambah Pelanggaran Santri', `
     <div class="card-note"><i class="fa-solid fa-circle-info"></i>
@@ -3774,7 +3983,7 @@ function mdPanelPelanggaran() {
     <div class="md-bar">
       <span class="note-min"><i class="fa-solid fa-user-shield"></i>
         Penindak: ${esc(APP.profil?.nama || '-')}</span>
-      ${bisa
+      ${bolehIsi
         ? `<button class="btn btn-primary btn-sm" id="mpSimpan">
              <i class="fa-solid fa-floppy-disk"></i>Simpan Pelanggaran</button>`
         : `<span class="tag tag-off">Hanya baca</span>`}
@@ -3841,8 +4050,7 @@ function mdPanelPresensi() {
         <b>${esc(HAK['presensi.lihat'].join(', '))}</b>.</div>`,
       '<span class="tag tag-off">Akses ditolak</span>');
   }
-  // ... sisa fungsi tetap
-   
+
   if (!MDS.siapPresensi) {
     return kartu('Rekap Presensi Kelas', `
       <div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
@@ -3931,7 +4139,7 @@ function mdPanelPresensi() {
 }
 
 function mdPasangPresensi() {
-  if (!MDS.siapPresensi) return;
+  if (!MDS.siapPresensi || !$('prSemester')) return;
 
   const isiBulan = () => {
     const bulan = bulanSemester($('prSemester').value);
@@ -4138,24 +4346,11 @@ function mdEksporRekapPresensi() {
   unduhCsv(`presensi-${r.kelas}-${r.semester}-${r.tahun}.csv`, [kepala, ...baris]);
 }
 
-
 // ---------------------------------------------------------------------
 // 24. PANEL KINERJA GURU — pelengkap Dashboard Pimpinan
-//
-//     CARA PASANG (2 langkah):
-//
-//     1) Tempel SELURUH isi berkas ini di bagian bawah app.js,
-//        tepat SEBELUM blok "22. START".
-//
-//     2) Di dalam fungsi viewPimpinan(), tambahkan satu baris di
-//        paling akhir (setelah buatChart('pBina', ...)):
-//
-//            await panelKinerjaGuru();
-//
-//     Panel menempel sendiri ke #viewRoot, jadi template HTML besar
-//     di viewPimpinan() tidak perlu disentuh sama sekali.
+//     Panel menempel sendiri ke #viewRoot pada akhir viewPimpinan(),
+//     sehingga template besar dashboard tidak perlu disentuh.
 // ---------------------------------------------------------------------
-
 const stKg = { dari: '', sampai: '', role: '', cari: '', data: null };
 
 /** Rentang bawaan: 90 hari terakhir, sejalan dengan dashboard pimpinan. */
@@ -4229,7 +4424,7 @@ function gambarKinerjaGuru() {
         : g.role === 'Pimpinan' ? 'tag-violet' : 'tag-sea'}">${esc(g.role)}</span></td>
       ${num(g.pelanggaran_dicatat, 'var(--maroon)')}
       ${num(g.pembinaan_selesai, 'var(--violet)')}
-      ${num(g.perizinan_diajukan + g.perizinan_diproses, 'var(--teal)')}
+      ${num((Number(g.perizinan_diajukan) || 0) + (Number(g.perizinan_diproses) || 0), 'var(--teal)')}
       ${num(g.hari_aktif)}
       <td><div class="kg-skor"><b>${angka(skor)}</b>
         <span class="kg-bar"><i style="width:${Math.round(skor / maks * 100)}%"></i></span></div></td>
@@ -4296,6 +4491,12 @@ function gambarKinerjaGuru() {
   tandaiTabelBisaGeser();
 }
 
+/**
+ * Listener kartu (#kgWrap) hanya dipasang SEKALI. Tanpa penjaga ini,
+ * setiap kali panel dirender ulang listener akan menumpuk dan satu klik
+ * memicu banyak permintaan sekaligus.
+ */
+let KG_TERPASANG = false;
 function pasangKinerjaGuru() {
   $('kgCari').addEventListener('input', debounce(e => {
     stKg.cari = e.target.value.trim(); muatKinerjaGuru();
@@ -4320,7 +4521,10 @@ function pasangKinerjaGuru() {
     ]);
   });
 
-  $('kgWrap').addEventListener('click', (e) => {
+  if (KG_TERPASANG) return;
+  KG_TERPASANG = true;
+  document.addEventListener('click', (e) => {
+    if (!$('kgWrap') || !$('kgWrap').contains(e.target)) return;
     const c = e.target.closest('[data-kgrole]');
     if (c) {
       const v = c.dataset.kgrole;
@@ -4422,18 +4626,10 @@ async function bukaDetailKinerjaGuru(guruId) {
 // ---------------------------------------------------------------------
 // 25. MODUL PENGASUHAN — Catat Pelanggaran · Rekap · Perizinan
 //
-//     CARA PASANG (4 langkah, lihat PETUNJUK-PASANG.md):
-//     1) Tempel seluruh isi berkas ini di app.js, tepat SEBELUM blok
-//        "22. START — pulihkan sesi bila masih berlaku".
-//     2) Tambahkan 'pengasuhan' pada MENU_ROLE dan JUDUL.
-//     3) Tambahkan satu baris rute di navigateTo().
-//     4) Tambahkan tombol menu di index.html + tempel pengasuhan.css.
-//
 //     Modul ini tidak menambah tabel maupun RPC baru: semuanya berjalan
 //     di atas catat_pelanggaran, ajukan_perizinan, dan proses_perizinan
 //     yang sudah dipakai modul lain.
 // ---------------------------------------------------------------------
-
 const PGS = {
   panel: 'catat',
   hari: '',
@@ -4525,14 +4721,14 @@ async function viewPengasuhan() {
 
   PGS.hari = hariIni();
   PGS.master = master;
-  PGS.cepat = pgsJenisCepat(detail, master);
+  PGS.cepat = pgsJenisCepat(lingkupDetail(detailAll, false), master);
   PGS.izinData = izin;
   PGS.recent = detail.slice(0, 8);
 
   const pekan = kunciTgl(tambahHari(new Date(), -6));
   const plgHari = detail.filter(r => kunciTgl(r.tanggal) === PGS.hari).length;
   const plgPekan = detail.filter(r => kunciTgl(r.tanggal) >= pekan).length;
-  const izinPending = izin.filter(z => z.status_persetujuan === 'Pending').length;
+  const izinPending = saringPeriodeIzin(izin).filter(z => z.status_persetujuan === 'Pending').length;
 
   $('viewRoot').innerHTML = `
     <section class="pgs-hero">
@@ -4581,8 +4777,8 @@ async function viewPengasuhan() {
       return pgsGambarPanel();
     }
 
-    const q = e.target.closest('[data-pgquick]');
-    if (q) return pgsPilihCepat(q.dataset.pgquick);
+    const qk = e.target.closest('[data-pgquick]');
+    if (qk) return pgsPilihCepat(qk.dataset.pgquick);
 
     const d = e.target.closest('[data-detail]');
     if (d) return bukaDetailSantri(d.dataset.detail);
@@ -4594,9 +4790,9 @@ async function viewPengasuhan() {
       return pgsGambarIzin();
     }
 
-         const pj = e.target.closest('[data-pgperpanjang]');
+    const pj = e.target.closest('[data-pgperpanjang]');
     if (pj) { if (await modalPerpanjangIzin(pj.dataset.pgperpanjang)) await pgsMuatUlangIzin(); return; }
-     
+
     const z = e.target.closest('[data-pgizin]');
     if (z) return pgsProsesIzin(...z.dataset.pgizin.split('|'));
 
@@ -4636,7 +4832,7 @@ function pgsGambarPanel() {
 
 // ---------- Layanan I: catat pelanggaran ----------
 function pgsPanelCatat() {
-  const bisa = bolehTulis();
+  const bolehIsi = bolehTulis();
   const cepat = PGS.cepat || [];
 
   return kartu('Catat Pelanggaran Santri', `
@@ -4681,7 +4877,7 @@ function pgsPanelCatat() {
     <div class="pgs-bar">
       <span class="note"><i class="fa-solid fa-user-shield"></i>
         Penindak: ${esc(APP.profil?.nama || '-')}</span>
-      ${bisa
+      ${bolehIsi
         ? `<button class="btn btn-primary btn-sm" id="pgSimpan">
              <i class="fa-solid fa-floppy-disk"></i>Simpan Pelanggaran</button>`
         : `<span class="tag tag-off">Hanya baca</span>`}
@@ -4793,10 +4989,13 @@ function pgsPanelRekap() {
       <span class="tag tag-off" id="pgRkCount">0 santri</span>
       <button class="btn btn-ghost btn-sm" id="pgRkCsv">
         <i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>
+      ${bolehCetak() ? `<button class="btn btn-primary btn-sm" id="pgRkCetak">
+        <i class="fa-solid fa-print"></i>Cetak Bulanan</button>` : ''}
     </div>
     <div id="pgRkHasil"><div style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</div></div>
     <div id="pgRkPager"></div>`,
-    `<span class="tag tag-sea">Pengasuhan</span>`,
+    `<span class="tag tag-sea">Pengasuhan</span>
+     <span class="tag tag-off">${esc(labelPeriode())}</span>`,
     'Angka yang muncul di sini sama dengan bagian akumulasi pada laporan cetak.');
 }
 
@@ -4821,8 +5020,10 @@ async function pgsPasangRekap() {
     const baris = [['NISN','Nama','Kelas','Kategori','Catatan','Jumlah']];
     rows.forEach(s => s.daftar.forEach(d =>
       baris.push([s.nisn, s.nama, s.kelas, d.kategori, d.deskripsi, d.jumlah])));
-    unduhCsv(`rekap-pengasuhan-${hariIni()}.csv`, baris);
+    unduhCsv(`rekap-pengasuhan-${berkasPeriode()}.csv`, baris);
   });
+  $('pgRkCetak')?.addEventListener('click', async () =>
+    cetakRekapBulanan(await pgsHitungRekap(), 'Unit Pengasuhan'));
 
   await pgsGambarRekap();
 }
@@ -4853,7 +5054,7 @@ async function pgsGambarRekap() {
 
   if (!rows.length) {
     $('pgRkHasil').innerHTML = kosong('Tidak ditemukan santri dengan kriteria ini.',
-      'Ubah kategori, kelas, atau kata kunci pencarian.', 'fa-layer-group');
+      'Ubah kategori, kelas, periode, atau kata kunci pencarian.', 'fa-layer-group');
     $('pgRkPager').innerHTML = '';
     return;
   }
@@ -4882,7 +5083,7 @@ async function pgsGambarRekap() {
 
 // ---------- Layanan III: perizinan ----------
 function pgsPanelIzin() {
-  const bisa = bolehTulis() && bolehPerizinan();
+  const bolehAjukan = bolehAjukanIzin();
   return kartu('Perizinan Santri', `
     <div class="minis" style="padding-bottom:6px" id="pgIzMini"></div>
     <div class="chips">
@@ -4897,7 +5098,7 @@ function pgsPanelIzin() {
     </div>
     <div id="pgIzGrid" class="izin-grid"></div>
     <div id="pgIzPager"></div>`,
-    bisa ? `<button class="btn btn-primary btn-sm" id="pgIzTambah">
+    bolehAjukan ? `<button class="btn btn-primary btn-sm" id="pgIzTambah">
              <i class="fa-solid fa-plus"></i>Ajukan Izin</button>` : '',
     'Izin yang belum ditutup akan menahan pencatatan pelanggaran pada tanggal yang sama.');
 }
@@ -4913,7 +5114,7 @@ function pgsPasangIzin() {
 function pgsGambarIzin() {
   const semua = PGS.izinData || [];
   let rows = semua.filter(z => PGS.iz.filter === 'Semua' || z.status_persetujuan === PGS.iz.filter);
-  rows = saringPeriode(rows, 'tanggal_mulai');
+  rows = saringPeriodeIzin(rows);
   if (PGS.iz.cari) {
     const k = PGS.iz.cari.toLowerCase();
     rows = rows.filter(z => [z.siswa?.nama_siswa, z.siswa?.kelas, z.alasan, z.nisn, z.pemberi_izin]
@@ -4925,12 +5126,13 @@ function pgsGambarIzin() {
   const from = (PGS.iz.page - 1) * PGS.iz.size;
   const hal = rows.slice(from, from + PGS.iz.size);
 
-  // Ringkasan mini (sebelumnya dihitung via `hit` tapi tidak pernah dirender)
+  // Ringkasan mini pada cakupan periode aktif.
+  const lingkup = saringPeriodeIzin(semua);
   $('pgIzMini').innerHTML = `
-    <div class="mini t"><span>Sesuai Waktu</span><b>${angka(semua.filter(z => z.status_persetujuan === 'Sesuai Waktu').length)}</b></div>
-    <div class="mini m"><span>Telat Balik</span><b>${angka(semua.filter(z => z.status_persetujuan === 'Telat Balik').length)}</b></div>
-    <div class="mini a"><span>Menunggu</span><b>${angka(semua.filter(z => z.status_persetujuan === 'Pending').length)}</b></div>
-    <div class="mini s"><span>Total Izin</span><b>${angka(semua.length)}</b></div>`;
+    <div class="mini t"><span>Sesuai Waktu</span><b>${angka(lingkup.filter(z => z.status_persetujuan === 'Sesuai Waktu').length)}</b></div>
+    <div class="mini m"><span>Telat Balik</span><b>${angka(lingkup.filter(z => z.status_persetujuan === 'Telat Balik').length)}</b></div>
+    <div class="mini a"><span>Menunggu</span><b>${angka(lingkup.filter(z => z.status_persetujuan === 'Pending').length)}</b></div>
+    <div class="mini s"><span>Total Izin</span><b>${angka(lingkup.length)}</b></div>`;
 
   $('pgIzCount').textContent = `${angka(rows.length)} kartu`;
   $('queryTime').textContent = `perizinan pengasuhan · ${angka(rows.length)} kartu`;
@@ -4955,7 +5157,7 @@ function pgsGambarIzin() {
       </div>
       ${aksiIzin(z, 'pgizin', 'pgperpanjang')}
     </div>`).join('') || kosong('Tidak ada data perizinan.',
-      'Ubah filter status atau ajukan izin baru.', 'fa-door-open');
+      'Ubah filter status, periode, atau ajukan izin baru.', 'fa-door-open');
 
   $('pgIzPager').innerHTML = rows.length
     ? pager('pgiz', PGS.iz.page, rows.length, PGS.iz.size) : '';
@@ -4969,7 +5171,7 @@ async function pgsMuatUlangIzin() {
 }
 
 async function pgsModalIzin() {
-  if (!bisa('izin.ajukan')) {
+  if (!bolehAjukanIzin()) {
     return toast('error', `Role ${role()} tidak berwenang mengajukan perizinan.`);
   }
   const res = await Swal.fire({
@@ -4986,8 +5188,8 @@ async function pgsModalIzin() {
         <div class="field"><label class="label">Tanggal Selesai</label>
           <input id="pzSelesai" type="date" class="input" value="${hariIni()}"></div>
       </div>
-           <div class="field"><label class="label">Jenis Izin</label>
-        <select id="zJenis" class="input" ${role()==='Klinik' && KLINIK_SAKIT_SAJA ? 'disabled' : ''}>
+      <div class="field"><label class="label">Jenis Izin</label>
+        <select id="pzJenis" class="input" ${role()==='Klinik' && KLINIK_SAKIT_SAJA ? 'disabled' : ''}>
           ${(role()==='Klinik' && KLINIK_SAKIT_SAJA ? ['Sakit'] : ['Keperluan','Sakit','Pemberitahuan'])
             .map(x => `<option>${x}</option>`).join('')}
         </select></div>
