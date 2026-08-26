@@ -842,7 +842,175 @@ select.per-in{appearance:none;padding-right:14px;
 @media(max-width:720px){.periode{display:none}}
 .periode-tag{display:inline-flex;align-items:center;gap:5px}
 
-   
+/* ============================================================
+   ADMINISTRASI CATATAN PELANGGARAN — khusus Admin (arsip)
+   Tata letak eksekutif · kepala berwibawa · arsip premium
+   Scoped ke .adm agar tidak menyentuh modul unit lain
+   ============================================================ */
+.adm{max-width:1480px}
+
+/* ---------- Kepala halaman ---------- */
+.adm-head{
+  position:relative;overflow:hidden;
+  display:flex;align-items:flex-end;justify-content:space-between;gap:22px;
+  flex-wrap:wrap;padding:28px 28px 24px;margin-bottom:20px;
+  border-radius:var(--r-lg);color:#fff;
+  background:radial-gradient(130% 160% at 8% -12%,#16456A 0%,#0B2B45 48%,#061826 100%);
+  border:1px solid rgba(201,162,39,.28);
+  box-shadow:0 24px 52px -32px rgba(6,24,38,.92);
+}
+.adm-head::before{
+  content:'';position:absolute;right:-60px;top:-80px;width:260px;height:260px;
+  border-radius:50%;background:radial-gradient(circle,rgba(201,162,39,.22),transparent 68%);
+  pointer-events:none;
+}
+.adm-head::after{
+  content:'';position:absolute;inset:0;background-image:var(--girih);pointer-events:none;
+}
+.adm-head > *{position:relative;z-index:1}
+.adm-head-main{min-width:0;flex:1}
+.adm-head .eyebrow .lat{color:rgba(255,255,255,.55)}
+.adm-head .eyebrow .ar{color:#F2E5B8}
+.adm-head .eyebrow .rule{background:rgba(201,162,39,.55)}
+.adm-head h2{
+  font-family:'Instrument Serif',Georgia,serif;font-weight:400;
+  font-size:clamp(26px,3.2vw,36px);line-height:1.08;letter-spacing:-.02em;
+  margin:6px 0 0;color:#fff;
+}
+.adm-head p{
+  margin:10px 0 0;max-width:560px;font-size:13px;line-height:1.7;
+  color:rgba(255,255,255,.62);
+}
+.adm-meta{
+  display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;
+}
+.adm-meta span{
+  display:inline-flex;align-items:center;gap:6px;padding:5px 11px;
+  border-radius:8px;background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.13);
+  font-size:11.5px;font-weight:600;color:rgba(255,255,255,.86);
+}
+.adm-meta span i{font-size:11px;opacity:.85}
+.adm-actions{
+  display:flex;flex-wrap:wrap;gap:9px;align-items:center;flex-shrink:0;
+}
+@media(max-width:640px){
+  .adm-head{padding:20px}
+  .adm-actions{width:100%}
+  .adm-actions .btn{flex:1}
+}
+
+/* Tombol aksen khusus admin (tidak dipakai modul lain) */
+.btn-onnavy{
+  background:rgba(255,255,255,.1);color:#E8F0F6;
+  border:1px solid rgba(255,255,255,.22);backdrop-filter:blur(6px);
+}
+.btn-onnavy:hover:not(:disabled){
+  background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.32);color:#fff;
+}
+.btn-brass{
+  background:linear-gradient(150deg,#E8CC6B,var(--brass));
+  color:#2A2003;border:1px solid rgba(232,204,107,.6);
+  box-shadow:0 6px 16px -8px rgba(201,162,39,.9);
+}
+.btn-brass:hover:not(:disabled){
+  background:linear-gradient(150deg,#F0D97A,#D4AD2E);
+  box-shadow:0 8px 20px -8px rgba(201,162,39,1);
+}
+
+/* ---------- Papan statistik ---------- */
+.adm-stats{margin-bottom:18px}
+.adm-stats .stat{
+  border-color:#D5E2EC;
+  box-shadow:0 1px 2px rgba(6,24,38,.04),0 12px 24px -20px rgba(6,24,38,.35);
+}
+.adm-stats .stat .v{font-size:26px}
+
+/* ---------- Filter arsip ---------- */
+.adm-filters{
+  background:linear-gradient(180deg,#F8FBFD 0%,var(--surface) 100%);
+  border-bottom-color:#D9E6EF;
+}
+.adm-filters .input{min-height:38px}
+.adm-filters .grow{min-width:200px}
+
+/* ---------- Tabel arsip premium ---------- */
+.adm-tbl thead th{
+  background:linear-gradient(180deg,#F3F7FA,#EEF3F7);
+  border-bottom:1px solid #D5E0EA;
+  color:var(--text-3);
+}
+.adm-tbl tbody tr{transition:background .12s}
+.adm-tbl tbody tr:hover{background:#F3F8FB}
+.adm-tbl tbody td{padding:13px 16px;vertical-align:middle}
+
+.adm-date{
+  font-weight:600;font-size:13px;color:var(--text);line-height:1.3;
+}
+.adm-note{
+  margin-top:5px;padding:5px 9px;border-radius:6px;
+  background:#F5F8FA;border-left:2px solid var(--sea);
+  font-size:11.5px;color:var(--text-2);line-height:1.45;
+  max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+
+/* Tombol santri di tabel */
+.adm-santri{
+  display:flex;align-items:center;gap:11px;padding:0;
+  background:none;border:none;cursor:pointer;text-align:left;
+  max-width:220px;transition:opacity .12s;
+}
+.adm-santri:hover{opacity:.88}
+.adm-santri:hover .nm{color:var(--sea)}
+.adm-santri .av{
+  flex:0 0 34px;width:34px;height:34px;border-radius:10px;
+  display:grid;place-items:center;
+  background:linear-gradient(150deg,var(--sea),var(--navy));
+  color:#fff;font-family:'Instrument Serif',Georgia,serif;
+  font-size:15px;font-weight:400;
+  border:1px solid rgba(255,255,255,.12);
+}
+.adm-santri .who{min-width:0}
+.adm-santri .nm{
+  display:block;font-weight:600;font-size:13.5px;color:var(--text);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  transition:color .12s;
+}
+.adm-santri .secondary{
+  display:block;font-size:11.5px;color:var(--text-3);
+  font-family:'IBM Plex Mono',monospace;margin-top:1px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+
+/* Pill poin */
+.poin-pill{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:36px;padding:3px 9px;border-radius:6px;
+  font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:13px;
+  background:#EFF3F6;color:var(--text-2);
+}
+.poin-pill.sedang{
+  background:var(--amber-bg);color:var(--amber);
+}
+.poin-pill.tinggi{
+  background:var(--maroon-bg);color:var(--maroon);
+}
+
+/* Kartu arsip di dalam .adm */
+.adm .card{border-color:#D5E2EC}
+.adm .card-head{
+  background:linear-gradient(90deg,rgba(201,162,39,.07),transparent 50%);
+}
+.adm .card-head h3{
+  font-family:'Instrument Serif',Georgia,serif;font-weight:400;
+  font-size:18px;letter-spacing:-.015em;
+}
+
+@media(max-width:720px){
+  .adm-meta span:nth-child(n+3){display:none}
+  .adm-note{max-width:180px}
+}
+
 </style>
 </head>
 <body>
