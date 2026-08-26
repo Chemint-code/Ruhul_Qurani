@@ -3078,185 +3078,317 @@ async function viewPengguna() {
 }
 
 // ---------------------------------------------------------------------
-// 20. LAPORAN TERPADU: CETAK & UNDUH PDF
+// 20. LAPORAN TERPADU: CETAK & UNDUH PDF  (revisi v2)
 //     Seluruh laporan santri MENGIKUTI PERIODE AKTIF:
 //       - Pelanggaran  : hanya bulan terpilih
 //       - Pembinaan    : hanya bulan terpilih
 //       - Perizinan    : seluruh izin yang rentangnya bersinggungan
 //       - Presensi     : TIDAK disaring (rekap penuh dari backend)
 //       - Rekap & poin : dihitung ulang dari pelanggaran bulan tersebut
+//
+//     Perubahan v2 dibanding versi sebelumnya:
+//       Bagian 2 : akumulasi UNIK per (kategori + catatan). Tidak ada
+//                  kaskade 5x Ringan -> 1 Sedang. kaskadeKonversi() tetap
+//                  hidup dan tetap dipakai modul Rekap (§14) & Pengasuhan (§25).
+//       Bagian 3 : diurutkan kategori (Ringan -> Sedang -> Berat) lalu
+//                  tanggal ascending; kolom KETERANGAN diganti BENTUK
+//                  PEMBINAAN; baris yang melewati batas modul instrumen
+//                  ditandai "Sudah melebihi modul Instrumen".
+//       Bagian 5 : "Instrumen Pembinaan" diganti "Kesimpulan Sementara"
+//                  (konteks jenjang & angkatan, tier, box catatan manual).
+//
+//     Batas modul instrumen dibaca dari master_pembinaan:
+//       maxFrequency  = MAX(pengulangan_ke) per kategori
+//       daftar bentuk = bentuk_pembinaan per pengulangan_ke
+//     Tidak ada tabel baru dan tidak ada RPC baru.
 // ---------------------------------------------------------------------
+
+const NA_DATA  = 'Data tidak tersedia';
+const URUT_KAT = { Ringan: 1, Sedang: 2, Berat: 3 };
+const kunciTeks = (s) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+
+// ---------- 20a. Master instrumen (dari master_pembinaan) -------------
+
+async function muatMasterPembinaan() {
+  try {
+    return cacheGet('aturanBina') || cacheSet('aturanBina',
+      await ambilSemua('master_pembinaan', '*', { order: 'kategori' }));
+  } catch (e) {
+    console.warn('master_pembinaan tidak terbaca:', e.message);
+    return cacheSet('aturanBina', []);
+  }
+}
+
 /**
- * Hitung pengulangan NYATA per kategori dari riwayat perkembangan santri.
+ * Peta instrumen per kategori.
+ *   max    : pengulangan_ke tertinggi yang terdaftar (= maxFrequency)
+ *   bentuk : Map(pengulangan_ke -> bentuk_pembinaan) dari aturan AKTIF saja
  *
- * Penting: fungsi ini TIDAK memakai kaskade konversi (5x Ringan -> 1 Sedang).
- * Angka "ke-N" di sini adalah jumlah sebenarnya pelanggaran pada kategori
- * tersebut, diurutkan dari tanggal terlama, sehingga selalu sinkron dengan
- * bagian "3. Riwayat Perkembangan" pada lembar cetak yang sama.
+ * Catatan: `max` sengaja TIDAK memfilter kolom `aktif`. Menonaktifkan satu
+ * aturan sementara tidak boleh menurunkan batas modul, karena itu akan
+ * membuat santri lama mendadak tercetak "melebihi modul".
  */
-function urutanPengulanganKategori(perkembangan) {
-  const urut = (perkembangan || []).slice().sort((a, b) =>
+function petaInstrumen(rows) {
+  const peta = new Map();
+  (rows || []).forEach(r => {
+    const kat = String(r.kategori || '').trim();
+    const n = Number(r.pengulangan_ke) || 0;
+    if (!kat || n < 1) return;
+    if (!peta.has(kat)) peta.set(kat, { max: 0, bentuk: new Map() });
+    const o = peta.get(kat);
+    o.max = Math.max(o.max, n);
+    if (r.aktif !== false) o.bentuk.set(n, r.bentuk_pembinaan || '-');
+  });
+  return peta;
+}
+
+/** Aturan yang berlaku untuk pengulangan ke-n: tangga tertinggi yang <= n. */
+function bentukAturan(info, n) {
+  if (!info) return null;
+  let pilih = null;
+  info.bentuk.forEach((v, k) => { if (k <= n && (!pilih || k > pilih.k)) pilih = { k, v }; });
+  return pilih ? pilih.v : null;
+}
+
+// ---------- 20b. Bagian 2: akumulasi unik ----------------------------
+
+/**
+ * Hitung pelanggaran unik per (kategori + catatan). Tanpa konversi:
+ * 5x Ringan tetap tercatat 5x Ringan, bukan 1x Sedang.
+ */
+function akumulasiUnik(perkembangan) {
+  const peta = new Map();
+  (perkembangan || []).forEach(p => {
+    const kategori = String(p.kategori || '-').trim();
+    const teks = String(p.judul || p.nama_pelanggaran || '-').trim();
+    const k = `${kategori}|${kunciTeks(teks)}`;
+    if (!peta.has(k)) peta.set(k, { kategori, deskripsi: teks, jumlah: 0 });
+    peta.get(k).jumlah++;
+  });
+  return [...peta.values()].sort((a, b) =>
+    (URUT_KAT[a.kategori] ?? 99) - (URUT_KAT[b.kategori] ?? 99) ||
+    b.jumlah - a.jumlah ||
+    a.deskripsi.localeCompare(b.deskripsi, 'id'));
+}
+
+// ---------- 20c. Bagian 3: riwayat terurut + validasi overflow --------
+
+/** Bentuk pembinaan yang benar-benar tercatat: "kategori|pengulangan_ke". */
+function petaBentukTercatat(pembinaan) {
+  const peta = new Map(), jalan = {};
+  (pembinaan || []).slice().sort((a, b) =>
+    String(kunciTgl(a.tanggal_pembinaan)).localeCompare(String(kunciTgl(b.tanggal_pembinaan))))
+    .forEach(b => {
+      const kat = String(b.kategori || '').trim(); if (!kat) return;
+      const n = Number(b.pengulangan_ke) || ((jalan[kat] = (jalan[kat] || 0) + 1));
+      jalan[kat] = Math.max(jalan[kat] || 0, n);
+      const teks = b.instrumen_pembinaan || b.bentuk_pembinaan;
+      if (teks) peta.set(`${kat}|${n}`, teks);
+    });
+  return peta;
+}
+
+/**
+ * Susun baris bagian 3.
+ * Nomor ke-N dihitung dari riwayat PENUH supaya "ke-16" tetap benar
+ * walaupun lembar cetak hanya memuat satu bulan.
+ *
+ * Prioritas isi kolom Bentuk Pembinaan:
+ *   1. n > maxFrequency        -> "Sudah melebihi modul Instrumen"
+ *   2. log_pembinaan tercatat  -> apa yang benar-benar dijalankan
+ *   3. master_pembinaan        -> aturan yang seharusnya berlaku
+ *   4. tidak ada rujukan       -> "Data tidak tersedia"
+ */
+function riwayatCetak(tampil, penuh, pembinaan, instrumen) {
+  const tercatat = petaBentukTercatat(pembinaan);
+  const urut = (arr) => (arr || []).slice().sort((a, b) =>
+    (URUT_KAT[a.kategori] ?? 99) - (URUT_KAT[b.kategori] ?? 99) ||
     String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal))));
 
-  const total = { Ringan:0, Sedang:0, Berat:0 };
-  const peta  = { Ringan:new Map(), Sedang:new Map(), Berat:new Map() };
-
-  urut.forEach(p => {
-    const kat = ['Ringan','Sedang','Berat'].includes(p.kategori) ? p.kategori : null;
-    if (!kat) return;
-    total[kat]++;
-    peta[kat].set(total[kat], {
-      tanggal: kunciTgl(p.tanggal),
-      judul: p.judul || p.nama_pelanggaran || '-'
-    });
+  const hitung = {};
+  urut(penuh && penuh.length ? penuh : tampil).forEach(p => {
+    const kat = String(p.kategori || '-').trim();
+    p.__n = (hitung[kat] = (hitung[kat] || 0) + 1);
   });
 
-  return { total, peta };
+  return urut(tampil).map(p => {
+    const kategori = String(p.kategori || '-').trim();
+    const n = p.__n || 0;
+    const info = instrumen ? instrumen.get(kategori) : null;
+    const batas = info && info.max > 0 ? info.max : null;
+    const overflow = isNum(batas) && n > batas;
+    return { ...p, kategori, urutanKategori: n, batas, overflow,
+      bentukPembinaan: overflow
+        ? 'Sudah melebihi modul Instrumen'
+        : (tercatat.get(`${kategori}|${n}`) || bentukAturan(info, n) || NA_DATA) };
+  });
+}
+
+// ---------- 20d. Bagian 5: agregasi, tier, kesimpulan -----------------
+
+/**
+ * Konteks santri dalam jenjang & angkatan, dihitung di browser dari
+ * detail_data. Sengaja TIDAK memakai lingkupDetail(): laporan santri
+ * mencakup Pengasuhan + Madrasah sekaligus, dan pembandingnya harus
+ * seluruh santri, bukan hanya kelas binaan pengguna.
+ */
+async function hitungAgregasiSantri(siswa) {
+  const jenjang  = String(siswa?.jenjang || angkatanJenjang(siswa?.kelas) || '').trim();
+  const angkatan = angkatanDariKelas(siswa?.kelas);
+  const kosong = { jenjang, angkatan, totalPerJenjang: null, totalPerAngkatan: null, santriData: [] };
+
+  try {
+    const rows = saringPeriode((await muatDetail()).filter(aktifDetail), 'tanggal');
+    if (!rows.length) return kosong;
+    const peta = await petaSiswa();
+    const poin = new Map();
+    let tJenjang = 0, tAngkatan = 0;
+
+    rows.forEach(r => {
+      const s = peta[String(r.nisn)] || {};
+      const kls = r.kelas || s.kelas;
+      const j = String(r.jenjang || s.jenjang || angkatanJenjang(kls) || '').trim();
+      if (jenjang && j === jenjang) tJenjang++;
+      if (angkatan && angkatanDariKelas(kls) === angkatan) tAngkatan++;
+      const n = String(r.nisn || ''); if (!n) return;
+      poin.set(n, (poin.get(n) || 0) + (Number(r.bobot_pelanggaran) || 0));
+    });
+
+    return { jenjang, angkatan,
+      totalPerJenjang:  jenjang  ? tJenjang  : null,
+      totalPerAngkatan: angkatan ? tAngkatan : null,
+      santriData: [...poin.entries()].map(([nisn, totalPoin]) => ({ nisn, totalPoin })) };
+  } catch (e) {
+    console.warn('agregasi laporan tidak tersedia:', e.message);
+    return kosong;
+  }
 }
 
 /**
- * Susun instrumen pembinaan untuk lembar cetak.
- *
- * Aturan tampilan per kategori:
- *   1. Nomor pengulangan diambil dari kolom pengulangan_ke; bila kosong
- *      (data lama), nomor dihitung ulang dari urutan tanggal pembinaan.
- *   2. Yang dicetak hanya: pembinaan TERAKHIR yang berstatus Selesai,
- *      lalu SELURUH pembinaan yang belum diselesaikan.
- *   3. Sisanya (pembinaan lama yang sudah tertutup) tidak ikut dicetak.
- * Contoh: Ringan 10 kali, selesai s/d ke-7 -> tercetak ke-7, 8, 9, 10.
+ * Tier prioritas. Ambang diambil dari sebaran poin santri lain bila
+ * datanya cukup (>= 5 santri); selain itu memakai ambang tetap.
  */
-function susunPembinaanCetak(pembinaan, perkembangan) {
-  const KAT = ['Ringan','Sedang','Berat'];
-  const { total, peta } = urutanPengulanganKategori(perkembangan);
-
-  const bucket = new Map();
-  KAT.forEach(k => bucket.set(k, []));
-  (pembinaan || []).forEach(b => {
-    const k = String(b.kategori || '').trim();
-    const kunci = KAT.includes(k) ? k : 'Tanpa Kategori';
-    if (!bucket.has(kunci)) bucket.set(kunci, []);
-    bucket.get(kunci).push(b);
-  });
-
-  const hasil = [];
-
-  bucket.forEach((list, kat) => {
-    const jumlahPelanggaran = total[kat] || 0;
-    if (!list.length && !jumlahPelanggaran) return;
-
-    // Urutkan: nomor pengulangan dulu, baru tanggal.
-    const urut = list.slice().sort((a, b) => {
-      const ua = Number(a.pengulangan_ke) || 0, ub = Number(b.pengulangan_ke) || 0;
-      if (ua && ub && ua !== ub) return ua - ub;
-      return String(kunciTgl(a.tanggal_pembinaan)).localeCompare(String(kunciTgl(b.tanggal_pembinaan)));
-    });
-
-    let jalan = 0;
-    const bernomor = urut.map(b => {
-      const p = Number(b.pengulangan_ke) || 0;
-      jalan = p > 0 ? p : jalan + 1;
-      return { ...b, urutan: jalan, selesai: String(b.status_pembinaan || '').trim() === 'Selesai' };
-    });
-
-    // Satu nomor pengulangan = satu baris; catatan berstatus Selesai diutamakan.
-    const unik = new Map();
-    bernomor.forEach(b => {
-      const ada = unik.get(b.urutan);
-      if (!ada || (b.selesai && !ada.selesai)) unik.set(b.urutan, b);
-    });
-    const semua = [...unik.values()].sort((a, b) => a.urutan - b.urutan);
-
-    const selesai = semua.filter(b => b.selesai);
-    const terakhirSelesai = selesai.length ? selesai[selesai.length - 1] : null;
-
-    const tampil = [];
-    if (terakhirSelesai) tampil.push(terakhirSelesai);
-    semua.filter(b => !b.selesai).forEach(b => { if (!tampil.includes(b)) tampil.push(b); });
-    tampil.sort((a, b) => a.urutan - b.urutan);
-
-    hasil.push({
-      kategori: kat,
-      totalPelanggaran: jumlahPelanggaran,
-      tercatat: semua.length ? semua[semua.length - 1].urutan : 0,
-      belum: semua.filter(b => !b.selesai).length,
-      baris: tampil.map(b => ({
-        urutan: b.urutan,
-        tanggal: b.tanggal_pembinaan,
-        bentuk: b.instrumen_pembinaan || b.bentuk_pembinaan || '-',
-        status: b.selesai ? 'Selesai' : (b.status_pembinaan || 'Dalam Proses'),
-        pemicu: (peta[kat] && peta[kat].get(b.urutan) ? peta[kat].get(b.urutan).judul : '-')
-      }))
-    });
-  });
-
-  const bobot = { Ringan:1, Sedang:2, Berat:3, 'Tanpa Kategori':4 };
-  return hasil.sort((a, b) => (bobot[a.kategori] || 9) - (bobot[b.kategori] || 9));
+function tierSantri(poin, santriData) {
+  const semua = (santriData || []).map(s => s.totalPoin).filter(isNum).sort((a, b) => a - b);
+  const q = (f) => semua[Math.min(semua.length - 1, Math.floor(semua.length * f))];
+  const dinamis = semua.length >= 5;
+  const amb = dinamis ? { baik: q(0.50), perhatian: q(0.80) } : { baik: 20, perhatian: 50 };
+  const nama = poin <= amb.baik ? 'Baik'
+             : poin <= amb.perhatian ? 'Perlu Perhatian'
+             : 'Butuh Intervensi';
+  return { nama, dinamis, amb };
 }
 
-/** Render bagian 5 laporan cetak. */
-function bagianPembinaanCetak(pembinaan, perkembangan) {
-  const th = (t) => `<th style="border:1px solid #cbd5e1;padding:5px;background:#f1f5f9;">${esc(t)}</th>`;
-  const td = (t, c) => `<td style="border:1px solid #cbd5e1;padding:5px;${c||''}">${esc(t)}</td>`;
+function kesimpulanSementara(data, akumulasi) {
+  const s  = data.siswa || {};
+  const ag = data.agregasi || {};
+  const Z  = (data.perkembangan || []).length;
+  const poin = data.periodeAktif ? (data.poinPeriode || 0) : (s.total_poin_pelanggaran || 0);
+  const pct = (a, b) => (isNum(b) && b > 0 ? `${Math.round(a / b * 1000) / 10}%` : NA_DATA);
 
-  const blok = susunPembinaanCetak(pembinaan, perkembangan);
-  if (!blok.length) {
-    return `<p style="font-size:11px;color:#94a3b8;text-align:center;padding:10px 0;">
-      Belum ada instrumen pembinaan.</p>`;
-  }
+  const perKat = {};
+  (akumulasi || []).forEach(r => perKat[r.kategori] = (perKat[r.kategori] || 0) + r.jumlah);
+  const katDominan = Object.entries(perKat).sort((a, b) => b[1] - a[1])[0]?.[0] || NA_DATA;
 
-  return blok.map(g => {
-    const ket = g.kategori === 'Tanpa Kategori'
-      ? 'Tanpa kategori'
-      : `${g.kategori} · ${g.totalPelanggaran} pelanggaran · sampai ke-${g.tercatat || 0}`
-        + (g.belum ? ` · ${g.belum} belum selesai` : '');
+  const perBidang = {};
+  (data.perkembangan || []).forEach(p => {
+    const b = String(p.bidang || '').trim();
+    if (b) perBidang[b] = (perBidang[b] || 0) + 1;
+  });
+  const areaFokus = Object.entries(perBidang).sort((a, b) => b[1] - a[1])[0]?.[0] || NA_DATA;
 
-    const isi = g.baris.length
-      ? g.baris.map(r => `<tr>
-          ${td('Ke-' + r.urutan, 'text-align:center;font-weight:bold')}
-          ${td(tgl(r.tanggal))}
-          ${td(r.pemicu)}
-          ${td(r.bentuk)}
-          ${td(r.status, r.status === 'Selesai' ? '' : 'font-weight:bold')}
-        </tr>`).join('')
-      : `<tr><td colspan="5" style="border:1px solid #cbd5e1;text-align:center;padding:8px;color:#94a3b8;">
-          Belum ada instrumen pembinaan yang tercatat untuk kategori ini.</td></tr>`;
-
-    return `
-      <p style="font-size:11px;margin:0 0 4px;color:#475569;">${ket}</p>
-      <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:14px;">
-        <thead><tr>${['Pengulangan','Tanggal Pembinaan','Pemicu (Pelanggaran)','Bentuk / Instrumen','Status'].map(th).join('')}</tr></thead>
-        <tbody>${isi}</tbody>
-      </table>`;
-  }).join('');
+  return { Z, poin, perKat, katDominan, areaFokus,
+    tier: tierSantri(poin, ag.santriData),
+    jenjang:  ag.jenjang  || NA_DATA,
+    angkatan: ag.angkatan || NA_DATA,
+    X: isNum(ag.totalPerJenjang)  ? ag.totalPerJenjang  : NA_DATA,
+    Y: isNum(ag.totalPerAngkatan) ? ag.totalPerAngkatan : NA_DATA,
+    pctJenjang:  pct(Z, ag.totalPerJenjang),
+    pctAngkatan: pct(Z, ag.totalPerAngkatan) };
 }
+
+/** Render bagian 5 lembar cetak, termasuk box catatan manual musyrif. */
+function bagianKesimpulanCetak(k) {
+  const warna = k.tier.nama === 'Baik' ? '#0F766E'
+              : k.tier.nama === 'Perlu Perhatian' ? '#B45309' : '#9F1239';
+  const sel = (a, b) =>
+    `<td style="border:1px solid #cbd5e1;padding:5px;">${esc(a)}</td>
+     <td style="border:1px solid #cbd5e1;padding:5px;text-align:right;font-weight:bold;">${esc(b)}</td>`;
+  const rincian = Object.entries(k.perKat)
+    .sort((a, b) => (URUT_KAT[a[0]] ?? 99) - (URUT_KAT[b[0]] ?? 99))
+    .map(([kat, n]) => `${kat} ${n}`).join(' · ') || NA_DATA;
+
+  return `
+    <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:12px;">
+      <tbody>
+        <tr>${sel(`Total pelanggaran jenjang ${k.jenjang}`, k.X)}</tr>
+        <tr>${sel(`Total pelanggaran angkatan ${k.angkatan}`, k.Y)}</tr>
+        <tr>${sel('Pelanggaran santri ini', `${k.Z} (${rincian})`)}</tr>
+        <tr>${sel('Kontribusi terhadap jenjang', k.pctJenjang)}</tr>
+        <tr>${sel('Kontribusi terhadap angkatan', k.pctAngkatan)}</tr>
+        <tr>${sel('Akumulasi poin', k.poin)}</tr>
+      </tbody>
+    </table>
+
+    <p style="font-size:11.5px;line-height:1.6;margin:0 0 6px;">
+      Santri ini mencatat <b>${k.Z}</b> pelanggaran dari <b>${esc(String(k.X))}</b> total di
+      jenjang ${esc(k.jenjang)} (${esc(k.pctJenjang)}), dan ${esc(k.pctAngkatan)} dari angkatan
+      ${esc(k.angkatan)}. Mayoritas pada kategori <b>${esc(k.katDominan)}</b>.
+      Status: <b style="color:${warna};">${esc(k.tier.nama)}</b>${k.tier.dinamis ? ''
+        : ' <span style="color:#64748b;">(ambang standar — data pembanding belum mencukupi)</span>'}.
+      Memerlukan fokus pada bidang <b>${esc(k.areaFokus)}</b>.
+    </p>
+    <p style="font-size:10px;color:#94a3b8;margin:0 0 16px;">
+      Tier merupakan indikator prioritas pembinaan, bukan keputusan sanksi.
+    </p>
+
+    <div style="border:1px solid #cbd5e1;border-radius:5px;background:#fafafa;
+                padding:10px 14px;page-break-inside:avoid;break-inside:avoid;">
+      <p style="margin:0 0 8px;font-size:11px;font-weight:bold;letter-spacing:.4px;
+                text-transform:uppercase;color:#334155;">Catatan Musyrif Asrama</p>
+      ${Array.from({ length: 6 }).map(() =>
+        `<div style="height:22px;border-bottom:1px dashed #cbd5e1;"></div>`).join('')}
+      <p style="margin:10px 0 0;font-size:10px;text-align:right;color:#64748b;">
+        Musyrif: _________________&nbsp;&nbsp;&nbsp;Tanggal: ____________</p>
+    </div>`;
+}
+
+// ---------- 20e. Penyaringan periode ----------------------------------
 
 /**
  * Saring hasil RPC `laporan_santri` mengikuti periode aktif.
  * Selalu dipanggil sebelum bangunLaporanHTML() — baik untuk cetak
  * maupun unduh PDF — sehingga keduanya memakai data yang identik.
+ *
+ * PENTING: `perkembangan` dibuat dengan .filter() dari perkembanganPenuh,
+ * bukan .map(), agar objeknya sama persis. riwayatCetak() menempelkan
+ * nomor pengulangan pada objek riwayat penuh, dan nomor itu harus ikut
+ * terbawa ke baris yang dicetak.
  */
 function saringDataLaporanBulanan(mentah) {
   const data = mentah || {};
   const p = batasPeriode();
 
-  // Riwayat penuh tetap disimpan: dipakai menomori pengulangan pembinaan
-  // agar "Ke-7, Ke-8" tetap benar walaupun lembar cetak hanya satu bulan.
   const perkembanganPenuh = (data.perkembangan || []).slice().sort((a, b) =>
     String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal))));
+  const pembinaanPenuh = (data.pembinaan || []).slice();
 
   if (!p) {
     return { ...data,
+      perkembangan: perkembanganPenuh,
       perkembanganPenuh,
+      pembinaanPenuh,
       presensi: data.presensi || [],
+      rekap: akumulasiUnik(perkembanganPenuh),
       periodeAktif: false,
       labelPeriode: 'Seluruh Periode',
       poinPeriode: perkembanganPenuh.reduce((a, r) => a + (Number(r.poin) || 0), 0) };
   }
 
   const diBulan = (v) => bulanDari(kunciTgl(v)) === p.bulan;
-
   const perkembangan = perkembanganPenuh.filter(r => diBulan(r.tanggal));
-  const pembinaan = (data.pembinaan || []).filter(b => diBulan(b.tanggal_pembinaan));
+  const pembinaan = pembinaanPenuh.filter(b => diBulan(b.tanggal_pembinaan));
 
   // Perizinan: masuk bila rentangnya bersinggungan dengan bulan aktif.
   const perizinan = (data.perizinan || []).filter(z => {
@@ -3267,28 +3399,31 @@ function saringDataLaporanBulanan(mentah) {
     return a <= p.akhir && b >= p.awal;
   });
 
-  // Rekap dihitung ULANG dari pelanggaran bulan ini (bukan kumulatif).
-  const perKode = new Map();
-  perkembangan.forEach(r => {
-    const kunci = String(r.judul || r.nama_pelanggaran || '-').trim();
-    if (!perKode.has(kunci)) perKode.set(kunci, {
-      kategori: r.kategori || '-', deskripsi: kunci, jumlah: 0 });
-    perKode.get(kunci).jumlah++;
-  });
-
   return { ...data,
     perkembangan,
     perkembanganPenuh,
     pembinaan,
+    pembinaanPenuh,
     perizinan,
     presensi: data.presensi || [],          // presensi TIDAK disaring
-    rekap: kaskadeKonversi(perKode),
+    rekap: akumulasiUnik(perkembangan),
     poinPeriode: perkembangan.reduce((a, r) => a + (Number(r.poin) || 0), 0),
     periodeAktif: true,
     labelPeriode: labelPeriode(),
     periodeAwal: p.awal,
     periodeAkhir: p.akhir };
 }
+
+/** Lengkapi data laporan dengan master instrumen + agregasi jenjang/angkatan. */
+async function lengkapiLaporan(data) {
+  const [aturan, agregasi] = await Promise.all([
+    muatMasterPembinaan(),
+    hitungAgregasiSantri(data.siswa || {})
+  ]);
+  return { ...data, instrumen: petaInstrumen(aturan), agregasi };
+}
+
+// ---------- 20f. Template lembar cetak --------------------------------
 
 function bangunLaporanHTML(data) {
   const s = data.siswa || {};
@@ -3302,20 +3437,12 @@ function bangunLaporanHTML(data) {
     ? arr.map(kolom).join('')
     : `<tr><td colspan="${span}" style="text-align:center;padding:10px;color:#94a3b8;">${esc(kosongTeks)}</td></tr>`;
 
-  const perkembangan = (data.perkembangan || []).slice()
-    .sort((a,b) => String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal))));
-
-  // Akumulasi terpadu: pakai data.rekap bila ada, kalau tidak hitung kaskade di browser.
-  let rekap = data.rekap;
-  if (!rekap || !rekap.length) {
-    const perKode = new Map();
-    perkembangan.forEach(p => {
-      const kunci = String(p.judul || '-').trim();
-      if (!perKode.has(kunci)) perKode.set(kunci, { kategori: p.kategori || '-', deskripsi: kunci, jumlah: 0 });
-      perKode.get(kunci).jumlah++;
-    });
-    rekap = kaskadeKonversi(perKode);
-  }
+  const perkembangan = data.perkembangan || [];
+  const rekap = (data.rekap && data.rekap.length) ? data.rekap : akumulasiUnik(perkembangan);
+  const riwayat = riwayatCetak(perkembangan, data.perkembanganPenuh,
+                               data.pembinaanPenuh || data.pembinaan, data.instrumen);
+  const kesimpulan = kesimpulanSementara(data, rekap);
+  const adaInstrumen = !!(data.instrumen && data.instrumen.size);
 
   const poinTampil = aktif ? (data.poinPeriode || 0) : (s.total_poin_pelanggaran || 0);
   const rentangTeks = aktif && data.periodeAwal
@@ -3354,20 +3481,33 @@ function bangunLaporanHTML(data) {
 
     <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
       2. Akumulasi Perkembangan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
+    <p style="font-size:10.5px;margin:4px 0 6px;color:#64748b;">
+      Dihitung per jenis pelanggaran tanpa konversi antar kategori.</p>
     <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:16px;">
-      <thead><tr>${['Kategori','Catatan / Perkembangan','Jumlah'].map(th).join('')}</tr></thead>
+      <thead><tr>${['Kategori','Catatan','Jumlah'].map(th).join('')}</tr></thead>
       <tbody>${baris(rekap, r =>
-        `<tr>${td(r.kategori)}${td(r.deskripsi)}${td(r.jumlah,'text-align:center')}</tr>`,
+        `<tr>${td(r.kategori)}${td(r.deskripsi)}${td(r.jumlah,'text-align:center;font-weight:bold')}</tr>`,
         'Tidak ada akumulasi pada periode ini.', 3)}</tbody>
     </table>
 
     <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
       3. Riwayat Perkembangan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
+    <p style="font-size:10.5px;margin:4px 0 6px;color:#64748b;">
+      Diurutkan per kategori, lalu tanggal terlama ke terbaru.${adaInstrumen ? ''
+        : ' Aturan pembinaan belum terisi di Master Pembinaan — validasi batas modul dilewati.'}</p>
     <table style="width:100%;font-size:10.5px;border-collapse:collapse;margin-bottom:16px;">
-      <thead><tr>${['Tanggal','Bidang','Catatan','Kategori','Poin','Petugas','Keterangan'].map(th).join('')}</tr></thead>
-      <tbody>${baris(perkembangan, p =>
-        `<tr>${td(tgl(p.tanggal))}${td(p.bidang||'-')}${td(p.judul)}${td(p.kategori)}${td(p.poin,'text-align:center')}${td(p.penindak||'-')}${td(p.catatan||'-')}</tr>`,
-        'Tidak ada catatan perkembangan pada periode ini.', 7)}</tbody>
+      <thead><tr>${['Tanggal','Bidang','Catatan','Kategori','Poin','Bentuk Pembinaan'].map(th).join('')}</tr></thead>
+      <tbody>${baris(riwayat, p => {
+        const bg = p.overflow ? 'background:#fff4f4;' : '';
+        const selPembinaan = p.overflow
+          ? `<td style="border:1px solid #cbd5e1;padding:5px;${bg}color:#9F1239;font-weight:bold;">
+               ${esc(p.bentukPembinaan)}
+               <span style="display:block;font-weight:normal;font-size:9px;color:#94a3b8;">
+                 (ke-${p.urutanKategori} dari batas ${p.batas})</span></td>`
+          : td(p.bentukPembinaan, bg);
+        return `<tr>${td(tgl(p.tanggal), bg)}${td(p.bidang||'-', bg)}${td(p.judul, bg)}`
+             + `${td(p.kategori, bg)}${td(p.poin, bg + 'text-align:center')}${selPembinaan}</tr>`;
+      }, 'Tidak ada catatan perkembangan pada periode ini.', 6)}</tbody>
     </table>
 
     <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
@@ -3380,12 +3520,10 @@ function bangunLaporanHTML(data) {
     </table>
 
     <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
-      5. Instrumen Pembinaan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
-    <div style="margin-bottom:24px;">
-      ${bagianPembinaanCetak(data.pembinaan, data.perkembanganPenuh || perkembangan)}
-    </div>
+      5. Kesimpulan Sementara${aktif ? ' — ' + esc(labelPer) : ''}</h3>
+    <div style="margin-bottom:24px;">${bagianKesimpulanCetak(kesimpulan)}</div>
 
-    <table style="width:100%;font-size:12px;margin-top:36px;page-break-inside:avoid;break-inside:avoid;">
+    <table style="width:100%;font-size:12px;margin-top:28px;page-break-inside:avoid;break-inside:avoid;">
       <tr><td style="width:50%;text-align:center;">Musyrif Asrama</td>
           <td style="width:50%;text-align:center;">Wali Santri</td></tr>
       <tr><td style="height:58px;"></td><td></td></tr>
@@ -3394,6 +3532,8 @@ function bangunLaporanHTML(data) {
     </table>
   </div>`;
 }
+
+// ---------- 20g. Pengambilan data & aksi cetak ------------------------
 
 /** Agregasi data_presensi mingguan → baris bulanan untuk lembar cetak. */
 function agregatPresensiCetak(rows) {
@@ -3406,10 +3546,7 @@ function agregatPresensiCetak(rows) {
     if (!b || !th) return;
     const kunci = `${th}-${String(b).padStart(2, '0')}`;
     if (!peta.has(kunci)) {
-      peta.set(kunci, {
-        bulan: `${namaBulan[b - 1] || b} ${th}`,
-        hadir: 0, izin: 0, sakit: 0, alpa: 0
-      });
+      peta.set(kunci, { bulan: `${namaBulan[b - 1] || b} ${th}`, hadir: 0, izin: 0, sakit: 0, alpa: 0 });
     }
     const o = peta.get(kunci);
     o.hadir += Number(r.hadir) || 0;
@@ -3417,9 +3554,7 @@ function agregatPresensiCetak(rows) {
     o.sakit += Number(r.sakit) || 0;
     o.alpa  += Number(r.alpa)  || 0;
   });
-  return [...peta.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([, v]) => v);
+  return [...peta.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([, v]) => v);
 }
 
 async function ambilLaporan(nisn) {
@@ -3452,7 +3587,7 @@ async function cetakLaporan(nisn) {
   loading(true);
   try {
     const dataMentah = await ambilLaporan(nisn);
-    const data = saringDataLaporanBulanan(dataMentah);
+    const data = await lengkapiLaporan(saringDataLaporanBulanan(dataMentah));
     $('printArea').innerHTML = bangunLaporanHTML(data);
     window.print();
   } catch (err) { fireError(err); }
@@ -3477,7 +3612,7 @@ async function unduhLaporanPdf(nisn) {
   loading(true);
   try {
     const dataMentah = await ambilLaporan(nisn);
-    const data = saringDataLaporanBulanan(dataMentah);
+    const data = await lengkapiLaporan(saringDataLaporanBulanan(dataMentah));
     stage.innerHTML = bangunLaporanHTML(data);
     stage.classList.add('on');
     mask.classList.add('on');
@@ -3510,7 +3645,6 @@ async function unduhLaporanPdf(nisn) {
     loading(false);
   }
 }
-
 // ---------------------------------------------------------------------
 // 20b. CETAK REKAP BULANAN (laporan rutin pendidik)
 // ---------------------------------------------------------------------
