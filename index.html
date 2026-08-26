@@ -1074,6 +1074,293 @@ select.per-in{appearance:none;padding-right:14px;
   .adm-note{max-width:180px}
 }
 
+/* ===== PROFIL SECTION STYLING ===== */
+ 
+.profil-section {
+  padding: 16px;
+  background: var(--surface-1, #ffffff);
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  margin-bottom: 16px;
+  transition: all 0.3s ease-in-out;
+}
+ 
+.profil-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+}
+ 
+/* Avatar Wrapper */
+.avatar-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+ 
+.avatar-circle {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface-2, #f9fafb);
+  border: 2px solid var(--border, #e5e7eb);
+  transition: all 0.3s ease-in-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+ 
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  animation: fadeInAvatar 0.6s ease-in-out;
+  transition: all 0.3s ease-in-out;
+}
+ 
+/* Avatar Hover Effect */
+.avatar-circle:hover {
+  border-color: var(--primary, #4f46e5);
+  box-shadow: 0 0 12px rgba(79, 70, 229, 0.2);
+}
+ 
+.avatar-circle:hover .avatar-img {
+  filter: brightness(1.1);
+  transform: scale(1.05);
+}
+ 
+/* Profil Info */
+.profil-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+ 
+.profil-nama {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary, #1f2937);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+ 
+.profil-role {
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+ 
+/* Logout Button */
+.profil-logout-btn {
+  padding: 4px 8px;
+  background: var(--surface-2, #f3f4f6);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease-in-out;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+}
+ 
+.profil-logout-btn:hover {
+  background: var(--danger-light, #fee2e2);
+  border-color: var(--danger, #ef4444);
+  color: var(--danger, #ef4444);
+}
+ 
+/* Divider */
+.profil-divider {
+  height: 1px;
+  background: var(--border, #e5e7eb);
+  margin-top: 12px;
+}
+ 
+/* ===== ANIMATIONS ===== */
+ 
+@keyframes fadeInAvatar {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+ 
+@keyframes slideInName {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+ 
+.profil-nama {
+  animation: slideInName 0.4s ease-in-out 0.1s both;
+}
+ 
+.profil-role {
+  animation: slideInName 0.4s ease-in-out 0.15s both;
+}
+ 
+/* ===== RESPONSIVE ===== */
+ 
+/* Mobile (320px - 480px) */
+@media (max-width: 480px) {
+  .profil-container {
+    gap: 10px;
+  }
+ 
+  .avatar-circle {
+    width: 48px;
+    height: 48px;
+    border-width: 1px;
+  }
+ 
+  .profil-nama {
+    font-size: 13px;
+  }
+ 
+  .profil-role {
+    font-size: 11px;
+  }
+ 
+  .profil-logout-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 14px;
+  }
+ 
+  .profil-section {
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+}
+ 
+/* Tablet (481px - 768px) */
+@media (max-width: 768px) {
+  .profil-container {
+    gap: 12px;
+  }
+ 
+  .avatar-circle {
+    width: 52px;
+    height: 52px;
+  }
+ 
+  .profil-nama {
+    font-size: 13px;
+  }
+ 
+  .profil-role {
+    font-size: 11px;
+  }
+}
+ 
+/* Desktop (769px+) */
+@media (min-width: 769px) {
+  .profil-section {
+    padding: 16px;
+  }
+ 
+  .avatar-circle {
+    width: 56px;
+    height: 56px;
+  }
+ 
+  .profil-nama {
+    font-size: 14px;
+  }
+ 
+  .profil-role {
+    font-size: 12px;
+  }
+}
+ 
+/* ===== DARK MODE SUPPORT (Optional) ===== */
+ 
+@media (prefers-color-scheme: dark) {
+  .profil-section {
+    background: var(--surface-1-dark, #1f2937);
+    border-bottom-color: var(--border-dark, #374151);
+  }
+ 
+  .avatar-circle {
+    background: var(--surface-2-dark, #111827);
+    border-color: var(--border-dark, #374151);
+  }
+ 
+  .profil-nama {
+    color: var(--text-primary-dark, #f3f4f6);
+  }
+ 
+  .profil-role {
+    color: var(--text-secondary-dark, #9ca3af);
+  }
+ 
+  .profil-logout-btn {
+    background: var(--surface-2-dark, #374151);
+    border-color: var(--border-dark, #4b5563);
+  }
+ 
+  .profil-logout-btn:hover {
+    background: var(--danger-dark, #7f1d1d);
+    border-color: var(--danger-dark, #991b1b);
+  }
+}
+ 
+/* ===== LOADING STATE ===== */
+ 
+.profil-nama:has(+ .profil-role),
+.profil-role {
+  --bg: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-2) 40%, transparent 60%);
+}
+ 
+.profil-nama.loading,
+.profil-role.loading {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2, #f3f4f6) 0%,
+    var(--surface-3, #e5e7eb) 50%,
+    var(--surface-2, #f3f4f6) 100%
+  );
+  background-size: 200% 100%;
+  animation: loading-shimmer 1.5s infinite;
+  color: transparent;
+  min-width: 100px;
+  height: 1em;
+  border-radius: 4px;
+}
+ 
+@keyframes loading-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+
+   
 </style>
 </head>
 <body>
@@ -1149,14 +1436,52 @@ select.per-in{appearance:none;padding-right:14px;
       <button class="nav-item" data-view="master"><i class="fa-solid fa-book"></i>Master &amp; Bidang</button>
       <button class="nav-item" data-view="pengguna"><i class="fa-solid fa-users-gear"></i>Pengguna</button>
     </nav>
-    <div class="sb-foot">
-      <div class="sb-user">
-        <div class="avatar" id="profileInitial">·</div>
-        <div class="who">
-          <b id="profileName">—</b>
-          <span id="profileRole">—</span>
-        </div>
+   <div class="profile-section" style="padding: 16px; border-bottom: 1px solid var(--border);">
+  <div style="display: flex; align-items: center; gap: 12px;">
+    
+    <!-- Foto Profil Guru -->
+    <div id="guru-avatar-container" style="
+      width: 56px; 
+      height: 56px; 
+      border-radius: 50%;
+      background: var(--surface-1);
+      border: 2px solid var(--border);
+      overflow: hidden;
+      flex-shrink: 0;
+      position: relative;
+    ">
+      <img 
+        id="guru-avatar-img"
+        src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Ccircle cx='100' cy='100' r='100' fill='%23ddd'/%3E%3C/svg%3E"
+        style="
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          animation: fadeIn 0.6s ease-in-out;
+        "
+        alt="Profil guru"
+      />
+    </div>
+    
+    <!-- Info Guru Text -->
+    <div style="flex: 1;">
+      <div id="guru-nama" style="
+        font-weight: 500;
+        color: var(--text-primary);
+        font-size: 14px;
+      ">
+        Loading...
       </div>
+      <div id="guru-role" style="
+        font-size: 12px;
+        color: var(--text-secondary);
+      ">
+        -
+      </div>
+    </div>
+    
+  </div>
+</div>
       <button class="nav-item" id="btnLogout" style="color:#E9A7B6">
         <i class="fa-solid fa-right-from-bracket"></i>Keluar
       </button>
