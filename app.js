@@ -587,6 +587,288 @@ function pasangPeriode() {
 }
 
 // ---------------------------------------------------------------------
+
+/**
+ * Setup foto profil admin Nyak Al Azwansyah
+ * Panggil ini setelah user berhasil login (di viewDashboard atau sejenisnya)
+ */
+/**
+ * =====================================================================
+ * GLOBAL PROFIL SETUP - Reusable untuk Admin, Guru, Walas, semua role
+ * Sistem Informasi Pengembangan Santri
+ * =====================================================================
+ * 
+ * Fitur:
+ * ✅ Ambil user_id dari auth.getUser()
+ * ✅ Ambil nama dari APP.profil atau database
+ * ✅ Query foto dari foto_aset berdasarkan user_id yang login
+ * ✅ Fallback placeholder jika tidak ada foto
+ * ✅ Works untuk: Admin, Guru, Guru BK, Walas, Ustadz, dll
+ * ✅ Cukup call 1x di viewDashboard(), berlaku untuk semua
+ */
+
+// =====================================================================
+// 1. FUNGSI UTAMA - GENERIC PROFILE SETUP
+// =====================================================================
+
+/**
+ * Setup profil untuk user manapun yang login (Admin, Guru, Walas, dll)
+ * Cukup dipanggil sekali di viewDashboard(), otomatis work untuk semua user
+ * 
+ * @returns {Promise<void>}
+ */
+async function setupProfilUserLogin() {
+  try {
+    loading(true);
+    
+    // ===== STEP 1: Ambil user yang sedang login =====
+    const { data: authUser, error: authError } = await db.auth.getUser();
+    
+    if (authError || !authUser?.user?.id) {
+      console.warn('[profil] Tidak ada user yang login');
+      loading(false);
+      return;
+    }
+
+    const userId = authUser.user.id;
+    console.log('[profil] Loading profil untuk user:', userId);
+
+    // ===== STEP 2: Ambil data user dari APP.profil =====
+    // APP.profil sudah di-set sebelumnya saat login/init
+    const namaUser = APP.profil?.nama_lengkap || 
+                     APP.profil?.nama || 
+                     authUser.user.email?.split('@')[0] || 
+                     'User';
+    const roleUser = APP.profil?.role || 'User';
+
+    // ===== STEP 3: Query foto dari database berdasarkan user_id =====
+    const { data: fotoData, error: fotoError } = await db.from('foto_aset')
+      .select('url_publik, nama_file, ukuran_px')
+      .eq('kategori', 'profil_guru')
+      .eq('relasi_id', userId)
+      .eq('is_aktif', true)
+      .order('tanggal_upload', { ascending: false })
+      .single(); // Ambil 1 foto terbaru
+
+    if (fotoError && fotoError.code !== 'PGRST116') {
+      console.warn('[profil] Query foto error:', fotoError.message);
+    }
+
+    // ===== STEP 4: Set elemen di UI =====
+    const namaEl = $('guru-nama');
+    const roleEl = $('guru-role');
+    const imgEl = $('guru-avatar-img');
+
+    // Set nama
+    if (namaEl) {
+      namaEl.textContent = namaUser;
+      namaEl.title = `User ID: ${userId}`; // Hover untuk lihat ID
+    }
+
+    // Set role
+    if (roleEl) {
+      roleEl.textContent = roleUser;
+    }
+
+    // ===== STEP 5: Set foto =====
+    if (imgEl) {
+      if (fotoData?.url_publik) {
+        // Ada foto di database → load
+        imgEl.src = fotoData.url_publik;
+        imgEl.alt = `Profil ${namaUser}`;
+        imgEl.style.opacity = '0';
+        
+        imgEl.onload = () => {
+          imgEl.style.transition = 'opacity 0.5s ease-in-out';
+          imgEl.style.opacity = '1';
+          console.log(`[profil] ✅ Foto loaded: ${fotoData.nama_file}`);
+        };
+        
+        imgEl.onerror = () => {
+          // Foto tidak bisa di-load → gunakan placeholder inisial
+          imgEl.src = generateUserAvatarPlaceholder(namaUser, roleUser);
+          imgEl.style.opacity = '1';
+          console.warn(`[profil] Foto gagal load, using placeholder`);
+        };
+      } else {
+        // Tidak ada foto di database → gunakan placeholder langsung
+        imgEl.src = generateUserAvatarPlaceholder(namaUser, roleUser);
+        imgEl.alt = `Profil ${namaUser} (placeholder)`;
+        console.log(`[profil] Menggunakan placeholder avatar`);
+      }
+    }
+
+    console.log(`✅ [profil] Selesai load profil: ${namaUser} (${roleUser})`);
+    loading(false);
+
+  } catch (e) {
+    console.error('[profil] Setup error:', e.message);
+    loading(false);
+  }
+}
+
+// =====================================================================
+// 2. HELPER: Generate Avatar Placeholder dengan Inisial + Warna Dinamis
+// =====================================================================
+
+/**
+ * Generate placeholder avatar SVG dengan inisial nama + warna berdasarkan role
+ * 
+ * @param {string} namaUser - Nama lengkap user (mis: "Joni Suryanto")
+ * @param {string} roleUser - Role user (mis: "Admin", "Guru BK", "Walas")
+ * @returns {string} Data URI SVG avatar
+ */
+function generateUserAvatarPlaceholder(namaUser, roleUser) {
+  // Ambil inisial dari nama
+  const words = (namaUser || 'User').trim().split(' ');
+  const initials = words.map(w => w[0]).join('').toUpperCase().slice(0, 2);
+
+  // Pilih warna berdasarkan role
+  const roleColors = {
+    'Admin': '#4F46E5',           // Indigo
+    'Pimpinan': '#7C3AED',        // Violet
+    'Guru': '#0891B2',            // Cyan
+    'Guru BK': '#06B6D4',         // Sky
+    'Guru Piket': '#3B82F6',      // Blue
+    'Walas': '#10B981',           // Emerald
+    'Ustadz GEN-Z': '#F59E0B',    // Amber
+    'Osis': '#EC4899',            // Pink
+    'Klinik': '#8B5CF6',          // Purple
+  };
+
+  // Default color jika role tidak ada di list
+  const bgColor = roleColors[roleUser] || '#6366F1';
+
+  // Return SVG data URI
+  const svg = `
+    <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'>
+      <defs>
+        <style>
+          @font-face {
+            font-family: 'Arial';
+          }
+        </style>
+      </defs>
+      <circle cx='100' cy='100' r='100' fill='${bgColor}'/>
+      <text 
+        x='100' y='120' 
+        font-size='60' 
+        font-weight='bold' 
+        fill='white' 
+        text-anchor='middle' 
+        font-family='Arial, sans-serif'
+      >${initials}</text>
+    </svg>
+  `;
+
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+// =====================================================================
+// 3. HELPER: Generate initials dari nama (simple version)
+// =====================================================================
+
+function getInitialsFromName(nama) {
+  const words = (nama || 'User').trim().split(' ');
+  return words.map(w => w[0]).join('').toUpperCase().slice(0, 2);
+}
+
+// =====================================================================
+// 4. HELPER: Get role color (untuk styling lain jika perlu)
+// =====================================================================
+
+function getRoleColor(role) {
+  const roleColors = {
+    'Admin': '#4F46E5',
+    'Pimpinan': '#7C3AED',
+    'Guru': '#0891B2',
+    'Guru BK': '#06B6D4',
+    'Guru Piket': '#3B82F6',
+    'Walas': '#10B981',
+    'Ustadz GEN-Z': '#F59E0B',
+    'Osis': '#EC4899',
+    'Klinik': '#8B5CF6',
+  };
+  return roleColors[role] || '#6366F1';
+}
+
+// =====================================================================
+// 5. INTEGRATION DI APP.JS
+// =====================================================================
+
+/*
+TEMPAT MEMANGGIL:
+
+async function viewDashboard() {
+  // Start profil loading (paralel dengan data)
+  const profilePromise = setupProfilUserLogin();  // ← CUKUP PANGGIL INI
+  
+  const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
+    amanKosong(muatSiswa, 'santri'),
+    amanKosong(muatDetail, 'pelanggaran'),
+    amanKosong(muatIzin, 'perizinan'),
+    amanKosong(muatPembinaan, 'pembinaan')
+  ]);
+  
+  // Tunggu profil selesai
+  await profilePromise;
+  
+  // ... rest of code ...
+}
+*/
+
+// =====================================================================
+// 6. TESTING DAN DEBUG
+// =====================================================================
+
+/*
+DI BROWSER CONSOLE (F12), test function:
+
+// Test dengan nama & role yang berbeda
+generateUserAvatarPlaceholder('Joni Suryanto', 'Guru BK');
+// Result: Inisial "JS" dengan warna Sky (#06B6D4)
+
+generateUserAvatarPlaceholder('Siti Nurhaliza', 'Walas');
+// Result: Inisial "SN" dengan warna Emerald (#10B981)
+
+generateUserAvatarPlaceholder('Rahman', 'Admin');
+// Result: Inisial "R" dengan warna Indigo (#4F46E5)
+
+// Get warna role tertentu
+getRoleColor('Pimpinan');
+// Result: '#7C3AED'
+
+// Get inisial
+getInitialsFromName('Nyak Al Azwansyah');
+// Result: 'NA'
+*/
+
+// =====================================================================
+// 7. EXPECTED OUTPUT (Console)
+// =====================================================================
+
+/*
+Saat login sebagai berbeda user:
+
+ADMIN LOGIN (Nyak):
+✅ [profil] Loading profil untuk user: 550e8400-e29b-41d4-a716-446655440000
+✅ [profil] ✅ Foto loaded: nyak_al_azwansyah.png
+✅ [profil] Selesai load profil: Nyak Al Azwansyah, S.Sos. (Admin)
+
+GURU BK LOGIN (Joni):
+✅ [profil] Loading profil untuk user: 660e8401-e39c-42e5-b727-557766551111
+✅ [profil] ✅ Foto loaded: joni_suryanto.png
+✅ [profil] Selesai load profil: Joni Suryanto (Guru BK)
+
+WALAS LOGIN (Rahman):
+✅ [profil] Loading profil untuk user: 770e8402-e49d-43f6-c838-668877662222
+✅ [profil] Menggunakan placeholder avatar
+✅ [profil] Selesai load profil: Rahman (Walas)
+
+Sidebar berubah otomatis sesuai siapa yang login! ✨
+*/ 
+
+
 // 5. LOGIKA PORTING: KASKADE KONVERSI & ANGKATAN
 // ---------------------------------------------------------------------
 /**
@@ -1128,6 +1410,8 @@ function kartuUnit() {
 }
 
 async function viewDashboard() {
+
+   const profilePromise = setupProfilUserLogin();
   const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
     amanKosong(muatSiswa, 'santri'),
     amanKosong(muatDetail, 'pelanggaran'),
@@ -1149,6 +1433,7 @@ async function viewDashboard() {
   const izinSesuai  = izin.filter(z => z.status_persetujuan === 'Sesuai Waktu').length;
   const izinTelat   = izin.filter(z => z.status_persetujuan === 'Telat Balik').length;
   const binaProses  = pembinaan.filter(p => p.status_pembinaan !== 'Selesai').length;
+   await profilePromise;
 
   // ---- Agregasi 3 bulan ----
   const { mulai, akhir } = rentang3Bulan();
