@@ -648,7 +648,7 @@ async function setupProfilUserLogin() {
       .eq('relasi_id', userId)
       .eq('is_aktif', true)
       .order('tanggal_upload', { ascending: false })
-      .single(); // Ambil 1 foto terbaru
+      .maybeSingle(); // Ambil 1 foto terbaru
 
     if (fotoError && fotoError.code !== 'PGRST116') {
       console.warn('[profil] Query foto error:', fotoError.message);
@@ -1177,25 +1177,36 @@ async function masukAplikasi() {
 
   $('loginScreen').classList.add('hidden');
   $('appShell').classList.remove('hidden');
-  $('profileName').textContent = profil.nama;
-  $('profileRole').textContent = profil.role +
-    (profil.kelas_binaan?.length ? ' · ' + profil.kelas_binaan.join(', ') : '');
-  $('profileInitial').textContent = (profil.nama || '?').charAt(0).toUpperCase();
+
+  // === GANTI BAGIAN LAMA INI ===
+  // Hapus: profileName, profileRole, profileInitial
+  // Gunakan ID yang ada di HTML sekarang
+  const namaEl = $('guru-nama');
+  const roleEl = $('guru-role');
+  if (namaEl) namaEl.textContent = profil.nama || 'User';
+  if (roleEl) {
+    roleEl.textContent = profil.role +
+      (profil.kelas_binaan?.length ? ' · ' + profil.kelas_binaan.join(', ') : '');
+  }
+  // ============================
 
   document.querySelectorAll('.nav-item[data-view]').forEach(b => {
     b.classList.toggle('hidden', !(MENU_ROLE[b.dataset.view] || []).includes(profil.role));
   });
 
-  // Pimpinan & Klinik: shell disederhanakan.
   if (['Pimpinan','Klinik'].includes(role())) {
     document.querySelectorAll('#navMenu .sb-group').forEach(p => p.classList.add('hidden'));
-    $('ctxBadge').classList.add('hidden');
+    $('ctxBadge')?.classList.add('hidden');
   }
 
   pulihkanKonteks();
   pulihkanPeriode();
   aktifkanRealtime();
   refreshBadgePending();
+
+  // Load foto profil (opsional, bisa dipanggil di sini atau di dashboard)
+  setupProfilUserLogin().catch(e => console.warn('[profil]', e));
+
   navigateTo(rumah());
 }
 
