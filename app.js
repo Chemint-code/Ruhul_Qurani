@@ -2819,16 +2819,17 @@ async function modalPerpanjangIzin(idIzin) {
 // ---------------------------------------------------------------------
 // 16. PEMBINAAN
 //
-//     CATATAN PENTING TENTANG NOMOR TAHAP
-//     Kolom log_pembinaan.pengulangan_ke dihitung backend per JENIS
-//     pelanggaran, sehingga dalam satu kategori nomornya bisa kembar
-//     (mis. dua baris sama-sama "ke-11"). Aturan yang benar: pengulangan
-//     dihitung per KATEGORI pelanggaran, sedangkan deskripsi pelanggaran
-//     hanya ditampilkan sebagai pemicu.
+//     SUMBER NOMOR TAHAP
+//     log_pembinaan.pengulangan_ke dihitung backend per JENIS pelanggaran,
+//     sehingga dalam satu kategori nomornya bisa kembar (dua baris ke-11).
+//     Aturan yang benar: pengulangan dihitung dari JUMLAH PELANGGARAN yang
+//     tercatat pada KATEGORI yang sama; deskripsi pelanggaran hanya pemicu
+//     yang ditampilkan, bukan dasar hitungan.
 //
-//     Karena skema dan trigger tidak boleh diubah, nomor tahap DIHITUNG
-//     ULANG di browser dari riwayat penuh santri, lalu bentuk pembinaan
-//     dicari di master_pembinaan berdasarkan nomor hasil hitungan itu.
+//     Karena skema dan trigger tidak boleh diubah, tahap dihitung ulang di
+//     browser dari log_pelanggaran (detail_data), lalu dipetakan ke baris
+//     pembinaan melalui id_log_pelanggaran. Bentuk pembinaan diambil dari
+//     master_pembinaan berdasarkan nomor hasil hitungan itu.
 // ---------------------------------------------------------------------
 const stBina = { cari:'', kategori:'', status:'', mode:'', page:1, size:30 };
 
@@ -2842,11 +2843,7 @@ function bentukBina(r) { return r.instrumen_pembinaan || r.bentuk_pembinaan || '
 /** Normalisasi teks bentuk pembinaan agar cocok meski beda spasi/kapital. */
 const kunciBentuk = (s) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 
-/**
- * Peta cadangan untuk baris lama yang kolom `kategori`-nya kosong.
- *   byId     : id_aturan          -> kategori
- *   byBentuk : teks bentuk (norm) -> kategori
- */
+/** Peta cadangan kategori untuk baris pembinaan yang kolom kategorinya kosong. */
 function petaKatAturan(aturan) {
   const peta = { byId: new Map(), byBentuk: new Map() };
   (aturan || []).forEach(a => {
@@ -2859,16 +2856,16 @@ function petaKatAturan(aturan) {
   return peta;
 }
 
-/** Kategori acuan satu baris pembinaan (kategori pelanggaran). */
+/** Kategori acuan satu baris pembinaan. */
 function kategoriBina(r, peta) {
   const kat = String(r.kategori || '').trim();
   if (kat) return kat;
-  if (r.id_aturan) {                                   // cadangan 1: lewat aturan
+  if (r.id_aturan) {
     const k = peta.byId.get(String(r.id_aturan));
     if (k) return k;
   }
   const kb = kunciBentuk(r.instrumen_pembinaan || r.bentuk_pembinaan);
-  if (kb) {                                            // cadangan 2: lewat teks bentuk
+  if (kb) {
     const k = peta.byBentuk.get(kb);
     if (k) return k;
   }
@@ -2876,9 +2873,34 @@ function kategoriBina(r, peta) {
 }
 
 /**
+ * Penomoran resmi: urutkan SELURUH pelanggaran aktif per (santri + kategori)
+ * dari yang terlama, lalu beri nomor 1, 2, 3, …
+ * Hasilnya: Map(id_log -> { n, kategori, nisn }).
+ * Pelanggaran yang diarsipkan tidak ikut dihitung, sehingga nomor tahap
+ * selalu mencerminkan jumlah catatan yang benar-benar berlaku.
+ */
+async function petaTahapPelanggaran() {
+  const rows = (await amanKosong(muatDetail, 'pelanggaran')).filter(aktifDetail);
+  const urut = rows.slice().sort((a, b) => {
+    const t = String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal)));
+    if (t) return t;
+    return String(a.id_log || '').localeCompare(String(b.id_log || ''));
+  });
+  const hitung = {}, peta = new Map();
+  urut.forEach(r => {
+    const nisn = String(r.nisn || '').trim();
+    const kat = String(r.kategori || '').trim();
+    const id = String(r.id_log || '').trim();
+    if (!nisn || !kat || !id) return;
+    const kunci = `${nisn}|${kat}`;
+    peta.set(id, { n: (hitung[kunci] = (hitung[kunci] || 0) + 1), kategori: kat, nisn });
+  });
+  return peta;
+}
+
+/**
  * Buang baris pembinaan yang terpicu lebih dari sekali oleh SATU pelanggaran
- * yang sama. Hanya baris ber-id_log_pelanggaran identik yang digabung;
- * baris tanpa id (data lama / mode manual) selalu dipertahankan.
+ * yang sama. Baris tanpa id_log_pelanggaran (manual/data lama) dipertahankan.
  */
 function dedupBina(rows) {
   const terlihat = new Set();
@@ -2892,30 +2914,46 @@ function dedupBina(rows) {
 }
 
 /**
- * Hitung ulang nomor pengulangan per (santri + kategori) dari riwayat PENUH.
- * Dipanggil sebelum penyaringan periode, supaya "ke-13" tetap benar
- * meskipun layar hanya menampilkan satu bulan.
- * Menulis properti `tahap_hitung` langsung pada objek baris.
+ * Tempelkan nomor tahap pada setiap baris pembinaan.
+ *   1. Ada id_log_pelanggaran & cocok -> pakai nomor resmi dari pelanggaran.
+ *   2. Tidak cocok (manual/data lama) -> lanjutkan dari nomor tertinggi yang
+ *      sudah terpakai pada (santri + kategori) itu, dan ditandai perkiraan.
  */
-function nomorkanBina(rows) {
-  const urut = (rows || []).slice().sort((a, b) => {
+function nomorkanBina(rows, petaTahap) {
+  const maks = {};
+  const sisa = [];
+
+  (rows || []).forEach(r => {
+    const id = String(r.id_log_pelanggaran || '').trim();
+    const ref = id ? petaTahap.get(id) : null;
+    if (ref) {
+      if (ref.kategori) r.kategori_bina = ref.kategori;   // kategori ikut sumber resmi
+      r.tahap_hitung = ref.n;
+      r.tahap_perkiraan = false;
+      const kunci = `${r.nisn}|${r.kategori_bina}`;
+      maks[kunci] = Math.max(maks[kunci] || 0, ref.n);
+    } else {
+      sisa.push(r);
+    }
+  });
+
+  sisa.sort((a, b) => {
     const t = String(kunciTgl(a.tanggal_pembinaan)).localeCompare(String(kunciTgl(b.tanggal_pembinaan)));
     if (t) return t;
-    // id_pembinaan memuat cap waktu (PBN-YYYYMMDDhhmmss-xxxx) → aman jadi pemecah seri.
     return String(a.id_pembinaan || '').localeCompare(String(b.id_pembinaan || ''));
-  });
-  const hitung = {};
-  urut.forEach(r => {
+  }).forEach(r => {
     const kunci = `${r.nisn}|${r.kategori_bina}`;
-    r.tahap_hitung = (hitung[kunci] = (hitung[kunci] || 0) + 1);
+    r.tahap_hitung = (maks[kunci] = (maks[kunci] || 0) + 1);
+    r.tahap_perkiraan = true;
   });
+
   return rows;
 }
 
 /**
- * Tentukan bentuk pembinaan dari master_pembinaan berdasarkan nomor tahap
- * hasil hitung ulang. Prioritas sama dengan lembar cetak (bagian 3):
- *   1. n > max modul    -> "Sudah melebihi modul Instrumen"
+ * Bentuk pembinaan menurut master_pembinaan, prioritas sama dengan lembar
+ * cetak bagian 3:
+ *   1. n > batas modul  -> "Sudah melebihi modul Instrumen"
  *   2. aturan master    -> tangga tertinggi yang <= n
  *   3. tidak ada aturan -> pakai apa yang tercatat di log
  */
@@ -2936,7 +2974,7 @@ function urutkanBina(rows) {
     const kb = URUT_KAT[b.kategori_bina] ?? 99;
     if (ka !== kb) return ka - kb;
     const na = a.tahap_hitung || 0, nb = b.tahap_hitung || 0;
-    if (na !== nb) return nb - na;                     // tahap terbaru di atas
+    if (na !== nb) return nb - na;
     return String(kunciTgl(b.tanggal_pembinaan)).localeCompare(String(kunciTgl(a.tanggal_pembinaan)));
   });
 }
@@ -2964,7 +3002,7 @@ async function viewPembinaan() {
       <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
       <div id="pgBina"></div>`,
       `<button class="btn btn-ghost btn-sm" id="pbRefresh"><i class="fa-solid fa-rotate"></i>Muat Ulang</button>`,
-      'Tahap dihitung per kategori pelanggaran; bentuk pembinaan mengikuti Master Pembinaan.')}`;
+      'Tahap dihitung dari jumlah pelanggaran per kategori; bentuk mengikuti Master Pembinaan.')}`;
 
   ['pbKategori','pbStatus','pbMode'].forEach(id => $(id).addEventListener('change', e => {
     stBina[{pbKategori:'kategori', pbStatus:'status', pbMode:'mode'}[id]] = e.target.value;
@@ -2973,7 +3011,8 @@ async function viewPembinaan() {
   $('pbCari').addEventListener('input', debounce(e => {
     stBina.cari = e.target.value.trim(); stBina.page = 1; gambarBina(); }, 220));
   $('pbRefresh').addEventListener('click', async () => {
-    cacheHapus('pembinaan','aturanBina'); await gambarBina(); toast('success','Data dimuat ulang'); });
+    cacheHapus('pembinaan','aturanBina','detail');
+    await gambarBina(); toast('success','Data dimuat ulang'); });
 
   onKlik(async (e) => {
     const p = e.target.closest('[data-pg]');
@@ -2993,7 +3032,11 @@ async function viewPembinaan() {
 }
 
 async function bahanBina() {
-  const [aturan, mentah] = await Promise.all([muatMasterPembinaan(), muatPembinaan()]);
+  const [aturan, mentah, petaTahap] = await Promise.all([
+    muatMasterPembinaan(),
+    muatPembinaan(),
+    petaTahapPelanggaran()
+  ]);
   const instrumen = petaInstrumen(aturan);             // lihat 20a
   const petaKat = petaKatAturan(aturan);
 
@@ -3006,8 +3049,8 @@ async function bahanBina() {
       kategori_bina: kategoriBina(r, petaKat)
     })));
 
-  // 2. Nomor tahap per (santri + kategori), lalu bentuk sesuai aturan master.
-  nomorkanBina(penuh);
+  // 2. Nomor tahap dari log pelanggaran, lalu bentuk sesuai aturan master.
+  nomorkanBina(penuh, petaTahap);
   penuh.forEach(r => Object.assign(r, bentukMenurutAturan(r, instrumen)));
 
   // 3. Baru disaring periode & kelas binaan, lalu diurutkan untuk tampilan.
@@ -3051,11 +3094,6 @@ async function gambarBina() {
     const tahap = tahapBina(r);
     const catatan = String(r.catatan_pembinaan || '').trim();
     const tampilCatatan = catatan && !/^Pembinaan otomatis kategori /i.test(catatan);
-    // Nomor bawaan database ditampilkan kecil bila berbeda, untuk penelusuran.
-    const dbTahap = Number(r.pengulangan_ke) || 0;
-    const bedaTahap = dbTahap > 0 && dbTahap !== tahap;
-    const bentukLog = bentukBina(r);
-    const bedaBentuk = !r.overflow && bentukLog !== '-' && bentukLog !== r.bentuk_final;
     return `<tr>
       <td class="nowrap"><div class="secondary" style="margin:0">${tgl(r.tanggal_pembinaan)}</div>
         <div class="secondary" style="font-size:10px">${esc(r.id_pembinaan||'')}</div></td>
@@ -3064,11 +3102,10 @@ async function gambarBina() {
       <td><span class="tag ${tagKategori(r.kategori_bina)}">${esc(r.kategori_bina||'-')}</span></td>
       <td class="center">${tahap
         ? `<span class="tag ${r.overflow ? 'tag-berat' : 'tag-sea'}">Ke-${tahap}</span>
-           ${bedaTahap ? `<div class="secondary" style="font-size:10px;margin-top:4px">db: ke-${dbTahap}</div>` : ''}`
+           ${r.tahap_perkiraan ? `<div class="secondary" style="font-size:10px;margin-top:4px">perkiraan</div>` : ''}`
         : '<span class="tag tag-off">—</span>'}</td>
       <td><div class="primary" ${r.overflow ? 'style="color:var(--maroon)"' : ''}>${esc(r.bentuk_final)}</div>
         ${r.overflow ? `<div class="secondary">Batas modul kategori ini: ${r.batas}</div>` : ''}
-        ${bedaBentuk ? `<div class="secondary">Tercatat di log: ${esc(bentukLog)}</div>` : ''}
         ${tampilCatatan ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:5px">${esc(catatan)}</div>` : ''}</td>
       <td style="font-size:12.5px;color:var(--text-2);max-width:240px">${esc(r.deskripsi_pelanggaran||'-')}</td>
       <td><span class="tag ${String(r.mode_pembinaan)==='Otomatis'?'tag-sea':'tag-off'}">${esc(r.mode_pembinaan||'Manual')}</span></td>
