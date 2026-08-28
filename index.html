@@ -241,45 +241,28 @@ textarea.input{resize:vertical;min-height:64px}
     justify-content:center;padding:4px 0 10px;gap:0;
   }
   .sidebar:not(:hover) .sb-user .who{display:none}
-  .sidebar:not(:hover) 
-   /* ===== FIX AVATAR FOTO PROFIL ===== */
-.sb-user .avatar{
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  overflow: hidden !important;
-  padding: 0 !important;
-  position: relative;
-  display: block !important;          /* ganti grid → block */
-  flex-shrink: 0;
-  background: linear-gradient(150deg, var(--sea), var(--navy));
-}
-
-.sb-user .avatar img,
-#guru-avatar-img{
-  position: absolute;
-  inset: 0;
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: cover !important;
-  display: block !important;
-  border-radius: 10px;
-  opacity: 1 !important;              /* pastikan selalu terlihat */
-  transition: opacity .35s ease;
-}
-
-/* Saat sidebar collaps (desktop) */
-.sidebar:not(:hover) .sb-user .avatar{
-  width: 34px;
-  height: 34px;
-}
-.sidebar:not(:hover) .sb-user .avatar img{
-  border-radius: 10px;
-}
+  .sidebar:not(:hover) .sb-user .avatar{width:34px;height:34px}
   .sidebar:not(:hover) #btnLogout{
     justify-content:center;padding:11px 0;font-size:0;gap:0;
   }
   .sidebar:not(:hover) #btnLogout i{font-size:15px;width:auto}
+}
+
+/* ---------- Foto profil pengguna ----------
+   Aturan ini sebelumnya terkurung di dalam @media(min-width:1025px)
+   dan diawali selector menggantung, sehingga tidak pernah aktif di
+   ponsel maupun saat sidebar sedang dibentangkan. Kini berlaku global. */
+.sb-user .avatar{
+  position:relative;display:block;overflow:hidden;padding:0;
+  width:36px;height:36px;border-radius:10px;flex-shrink:0;
+  background:linear-gradient(150deg,var(--sea),var(--navy));
+  border:1px solid rgba(255,255,255,.12);
+}
+.sb-user .avatar img,
+#guru-avatar-img{
+  position:absolute;inset:0;
+  width:100%;height:100%;object-fit:cover;display:block;
+  border-radius:inherit;transition:opacity .35s ease;
 }
 
 @media(max-width:1024px){
@@ -396,7 +379,8 @@ td.nowrap{white-space:nowrap}
 @media(max-width:1200px){.stats.six{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:640px){.stats.six{grid-template-columns:repeat(2,1fr)}}
 .stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
-  padding:17px 18px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  padding:17px 18px;box-shadow:var(--shadow);position:relative;overflow:hidden;
+  display:flex;flex-direction:column;min-height:132px}
 .stat::after{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;
   background:var(--accent,var(--sea))}
 .stat .ico{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;
@@ -405,7 +389,8 @@ td.nowrap{white-space:nowrap}
   color:var(--text-3)}
 .stat .v{font-family:'IBM Plex Mono',monospace;font-size:27px;font-weight:600;
   letter-spacing:-.02em;margin-top:2px;line-height:1.1}
-.stat .f{font-size:11px;color:var(--text-3);margin-top:6px;line-height:1.4}
+.stat .f{font-size:11px;color:var(--text-3);margin-top:auto;padding-top:6px;line-height:1.4}
+@media(max-width:640px){.stat{min-height:120px;padding:15px 15px}.stat .v{font-size:24px}}
 .grid-2{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px}
 .grid-half{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
 .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:16px}
@@ -935,9 +920,40 @@ select.per-in{appearance:none;padding-right:14px;
 .per-x{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;
   color:var(--text-3);font-size:10px;transition:background .14s,color .14s}
 .per-x:hover{background:rgba(159,18,57,.1);color:var(--maroon)}
-@media(max-width:1024px){.periode{padding:3px 4px 3px 8px}.periode select.per-in{display:none}}
-@media(max-width:720px){.periode{display:none}}
+@media(max-width:1024px){
+  .periode{padding:3px 4px 3px 8px}
+  .periode select.per-in{display:none}
+}
+/* Ponsel: kotak periode diringkas, bukan dihilangkan — pengguna tetap
+   harus bisa mengganti bulan laporan dari perangkat genggam. */
+@media(max-width:720px){
+  .periode{padding:2px 3px 2px 7px;gap:3px;font-size:11px}
+  .periode > i{display:none}
+  .periode .per-in{padding:2px 1px;max-width:116px}
+  .per-x{width:20px;height:20px;font-size:9px}
+}
+@media(max-width:420px){
+  .periode .per-in{max-width:94px;font-size:10.5px}
+}
 .periode-tag{display:inline-flex;align-items:center;gap:5px}
+
+/* ---------- Catatan periode pada detail santri ---------- */
+.detail-periode{
+  display:flex;align-items:flex-start;gap:9px;
+  margin:14px 0 2px;padding:11px 13px;
+  border:1px solid #D9E9F2;border-left:3px solid var(--sea);
+  border-radius:var(--r);background:#F1F7FA;
+  font-size:12.5px;line-height:1.6;color:var(--navy-2);
+}
+.detail-periode > i{flex:none;margin-top:2px;font-size:12px;color:var(--sea)}
+.detail-periode b{font-family:'IBM Plex Mono',monospace;font-weight:600;color:var(--text)}
+.detail-periode.on{
+  background:#FDF8E9;border-color:rgba(201,162,39,.42);
+  border-left-color:var(--brass);color:#6E5406;
+}
+.detail-periode.on > i{color:var(--brass)}
+.detail-periode.on b{color:#5A4404}
+@media(max-width:560px){.detail-periode{padding:10px 11px;font-size:12px}}
 
 /* ============================================================
    ADMINISTRASI CATATAN PELANGGARAN — khusus Admin (arsip)
@@ -1108,293 +1124,69 @@ select.per-in{appearance:none;padding-right:14px;
   .adm-note{max-width:180px}
 }
 
-/* ===== PROFIL SECTION STYLING ===== */
- 
-.profil-section {
-  padding: 16px;
-  background: var(--surface-1, #ffffff);
-  border-bottom: 1px solid var(--border, #e5e7eb);
-  margin-bottom: 16px;
-  transition: all 0.3s ease-in-out;
-}
- 
-.profil-container {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  position: relative;
-}
- 
-/* Avatar Wrapper */
-.avatar-wrapper {
-  position: relative;
-  flex-shrink: 0;
-}
- 
-.avatar-circle {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  overflow: hidden;
-  background: var(--surface-2, #f9fafb);
-  border: 2px solid var(--border, #e5e7eb);
-  transition: all 0.3s ease-in-out;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
- 
-.avatar-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  animation: fadeInAvatar 0.6s ease-in-out;
-  transition: all 0.3s ease-in-out;
-}
- 
-/* Avatar Hover Effect */
-.avatar-circle:hover {
-  border-color: var(--primary, #4f46e5);
-  box-shadow: 0 0 12px rgba(79, 70, 229, 0.2);
-}
- 
-.avatar-circle:hover .avatar-img {
-  filter: brightness(1.1);
-  transform: scale(1.05);
-}
- 
-/* Profil Info */
-.profil-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
- 
-.profil-nama {
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--text-primary, #1f2937);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.2;
-}
- 
-.profil-role {
-  font-size: 12px;
-  color: var(--text-secondary, #6b7280);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.2;
-  margin-top: 2px;
-}
- 
-/* Logout Button */
-.profil-logout-btn {
-  padding: 4px 8px;
-  background: var(--surface-2, #f3f4f6);
-  border: 1px solid var(--border, #e5e7eb);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease-in-out;
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-}
- 
-.profil-logout-btn:hover {
-  background: var(--danger-light, #fee2e2);
-  border-color: var(--danger, #ef4444);
-  color: var(--danger, #ef4444);
-}
- 
-/* Divider */
-.profil-divider {
-  height: 1px;
-  background: var(--border, #e5e7eb);
-  margin-top: 12px;
-}
- 
-/* ===== ANIMATIONS ===== */
- 
-@keyframes fadeInAvatar {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
- 
-@keyframes slideInName {
-  from {
-    opacity: 0;
-    transform: translateX(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
- 
-.profil-nama {
-  animation: slideInName 0.4s ease-in-out 0.1s both;
-}
- 
-.profil-role {
-  animation: slideInName 0.4s ease-in-out 0.15s both;
-}
- 
-/* ===== RESPONSIVE ===== */
- 
-/* Mobile (320px - 480px) */
-@media (max-width: 480px) {
-  .profil-container {
-    gap: 10px;
-  }
- 
-  .avatar-circle {
-    width: 48px;
-    height: 48px;
-    border-width: 1px;
-  }
- 
-  .profil-nama {
-    font-size: 13px;
-  }
- 
-  .profil-role {
-    font-size: 11px;
-  }
- 
-  .profil-logout-btn {
-    width: 28px;
-    height: 28px;
-    font-size: 14px;
-  }
- 
-  .profil-section {
-    padding: 12px;
-    margin-bottom: 12px;
-  }
-}
- 
-/* Tablet (481px - 768px) */
-@media (max-width: 768px) {
-  .profil-container {
-    gap: 12px;
-  }
- 
-  .avatar-circle {
-    width: 52px;
-    height: 52px;
-  }
- 
-  .profil-nama {
-    font-size: 13px;
-  }
- 
-  .profil-role {
-    font-size: 11px;
-  }
-}
- 
-/* Desktop (769px+) */
-@media (min-width: 769px) {
-  .profil-section {
-    padding: 16px;
-  }
- 
-  .avatar-circle {
-    width: 56px;
-    height: 56px;
-  }
- 
-  .profil-nama {
-    font-size: 14px;
-  }
- 
-  .profil-role {
-    font-size: 12px;
-  }
-}
- 
-/* ===== DARK MODE SUPPORT (Optional) ===== */
- 
-@media (prefers-color-scheme: dark) {
-  .profil-section {
-    background: var(--surface-1-dark, #1f2937);
-    border-bottom-color: var(--border-dark, #374151);
-  }
- 
-  .avatar-circle {
-    background: var(--surface-2-dark, #111827);
-    border-color: var(--border-dark, #374151);
-  }
- 
-  .profil-nama {
-    color: var(--text-primary-dark, #f3f4f6);
-  }
- 
-  .profil-role {
-    color: var(--text-secondary-dark, #9ca3af);
-  }
- 
-  .profil-logout-btn {
-    background: var(--surface-2-dark, #374151);
-    border-color: var(--border-dark, #4b5563);
-  }
- 
-  .profil-logout-btn:hover {
-    background: var(--danger-dark, #7f1d1d);
-    border-color: var(--danger-dark, #991b1b);
-  }
-}
- 
-/* ===== LOADING STATE ===== */
- 
-.profil-nama:has(+ .profil-role),
-.profil-role {
-  --bg: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-2) 40%, transparent 60%);
-}
- 
-.profil-nama.loading,
-.profil-role.loading {
-  background: linear-gradient(
-    90deg,
-    var(--surface-2, #f3f4f6) 0%,
-    var(--surface-3, #e5e7eb) 50%,
-    var(--surface-2, #f3f4f6) 100%
-  );
-  background-size: 200% 100%;
-  animation: loading-shimmer 1.5s infinite;
-  color: transparent;
-  min-width: 100px;
-  height: 1em;
-  border-radius: 4px;
-}
- 
-@keyframes loading-shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
+/* ============================================================
+   PENYEMPURNAAN — batang gulir, presensi, cetak, aksesibilitas
+   ============================================================ */
+
+/* ---------- Batang gulir ramping pada wadah bergulir ---------- */
+.sb-nav{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.2) transparent}
+.sb-nav::-webkit-scrollbar{width:6px}
+.sb-nav::-webkit-scrollbar-track{background:transparent}
+.sb-nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:6px}
+.sb-nav:hover::-webkit-scrollbar-thumb{background:rgba(255,255,255,.28)}
+
+.tl,.ac-panel,.tbl,.kg-wrap,.sql-note{scrollbar-width:thin;
+  scrollbar-color:#CBD8E2 transparent}
+.tl::-webkit-scrollbar,
+.ac-panel::-webkit-scrollbar,
+.tbl::-webkit-scrollbar,
+.sql-note::-webkit-scrollbar{width:7px;height:7px}
+.tl::-webkit-scrollbar-track,
+.ac-panel::-webkit-scrollbar-track,
+.tbl::-webkit-scrollbar-track,
+.sql-note::-webkit-scrollbar-track{background:transparent}
+.tl::-webkit-scrollbar-thumb,
+.ac-panel::-webkit-scrollbar-thumb,
+.tbl::-webkit-scrollbar-thumb,
+.sql-note::-webkit-scrollbar-thumb{background:#CBD8E2;border-radius:7px}
+.tl::-webkit-scrollbar-thumb:hover,
+.tbl::-webkit-scrollbar-thumb:hover{background:#AEC1D0}
+
+/* ---------- Sidebar: aman terhadap bilah alamat ponsel ---------- */
+@supports(height:100dvh){
+  .sidebar{height:100dvh}
+  #loginScreen{min-height:100dvh}
 }
 
+/* ---------- Kolom presensi madrasah ---------- */
+.num-in.pr-hadir{color:var(--teal)}
+.num-in.pr-izin{color:var(--sea)}
+.num-in.pr-sakit{color:var(--amber)}
+.num-in.pr-alpa{color:var(--maroon)}
+.num-in::-webkit-outer-spin-button,
+.num-in::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.num-in[type=number]{-moz-appearance:textfield;appearance:textfield}
+@media(max-width:640px){.num-in{width:58px;padding:7px 4px}}
 
-   
+/* ---------- Sudut kartu tetap rapi saat tabel menempel ---------- */
+.card > .tbl:last-child table tbody tr:last-child td:first-child{
+  border-bottom-left-radius:var(--r-lg)}
+.card > .tbl:last-child table tbody tr:last-child td:last-child{
+  border-bottom-right-radius:var(--r-lg)}
+
+/* ---------- Cetak: sembunyikan elemen antarmuka ---------- */
+@media print{
+  #bar,#scrim,#pdfMask,#pdfStage{display:none !important}
+  .sidebar,.topbar{display:none !important}
+}
+
+/* ---------- Aksesibilitas: fokus terlihat di latar gelap ---------- */
+.sidebar :focus-visible,
+.login-art :focus-visible,
+.hero :focus-visible,
+.pgs-hero :focus-visible,
+.adm-head :focus-visible{outline-color:var(--brass);outline-offset:2px}
+
 </style>
 </head>
 <body>
@@ -1488,7 +1280,6 @@ select.per-in{appearance:none;padding-right:14px;
         <i class="fa-solid fa-right-from-bracket"></i>Keluar
       </button>
     </div>
-  </aside>
   </aside>
   <div id="scrim" class="hidden"></div>
   <div class="main">
