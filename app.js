@@ -2437,17 +2437,85 @@ async function arsipkanPelanggaran(idLog) {
 }
 
 // ---------------------------------------------------------------------
-// 14. REKAP PELANGGARAN (kaskade konversi) — port FilterPelanggaranView
+// 14. REKAP PELANGGARAN
+//
+//     Dua aturan khusus modul ini:
+//     1. TIDAK PERNAH menyaring unit. Pendidik melihat akumulasi seluruh
+//        bidang — Pengasuhan dan Madrasah digabung — karena santrinya sama.
+//        Karena itu modul ini memakai lingkupRekap(), bukan lingkupDetail().
+//     2. TIDAK ADA konversi berjenjang. 5x Ringan tetap 5x Ringan, bukan
+//        1x Sedang. Yang dihitung adalah akumulasi per KODE pelanggaran
+//        yang identik, ditambah total catatan per santri.
+//
+//     kaskadeKonversi() (bagian 5) tidak lagi dipanggil dari sini.
 // ---------------------------------------------------------------------
 const stRekap = { kategori:'Semua', kelas:'', cari:'', page:1, size:30 };
+
+/**
+ * Lingkup baris rekap: status aktif + periode + kelas binaan.
+ * Sengaja TANPA penyaringan unit/jenjang, berbeda dari lingkupDetail().
+ */
+function lingkupRekap(rows, pakaiPeriode = true) {
+  let out = (rows || []).filter(aktifDetail);
+  if (pakaiPeriode) out = saringPeriode(out, 'tanggal');
+  return filterBinaan(out, 'kelas');
+}
+
+/**
+ * Akumulasi per santri berdasarkan kode pelanggaran yang identik.
+ * Setiap entri daftar: { kode, kategori, deskripsi, jumlah, poin, sumber }.
+ * Baris tanpa kode dikelompokkan memakai nama pelanggarannya.
+ */
+function rekapUnikPerSantri(rows) {
+  const peta = new Map();
+  (rows || []).forEach(r => {
+    const nisn = String(r.nisn || '').trim(); if (!nisn) return;
+    if (!peta.has(nisn)) peta.set(nisn, {
+      nisn, nama: r.nama_siswa || '', kelas: r.kelas || '-', perKode: new Map()
+    });
+    const e = peta.get(nisn);
+    const kode = String(r.kode_pelanggaran || '').trim();
+    const nama = String(r.nama_pelanggaran || '').trim();
+    const kunci = kode || kunciTeks(nama);           // kunci pengelompokan
+    if (!kunci) return;
+    if (!e.perKode.has(kunci)) e.perKode.set(kunci, {
+      kode: kode || '-', kategori: r.kategori || '-',
+      deskripsi: nama || kode, jumlah: 0, poin: 0,
+      sumber: String(r.sumber || '-').trim() || '-'
+    });
+    const it = e.perKode.get(kunci);
+    it.jumlah++;
+    it.poin += Number(r.bobot_pelanggaran) || 0;
+  });
+
+  const out = [];
+  peta.forEach(e => {
+    const daftar = [...e.perKode.values()].sort((a, b) =>
+      (URUT_KAT[a.kategori] ?? 99) - (URUT_KAT[b.kategori] ?? 99) ||
+      b.jumlah - a.jumlah ||
+      a.deskripsi.localeCompare(b.deskripsi, 'id'));
+    if (!daftar.length) return;
+    out.push({
+      nisn: e.nisn, nama: e.nama, kelas: e.kelas, daftar,
+      total: daftar.reduce((a, d) => a + d.jumlah, 0),
+      poin:  daftar.reduce((a, d) => a + d.poin, 0),
+      jenis: daftar.length
+    });
+  });
+  return out.sort((a, b) => b.total - a.total || b.poin - a.poin);
+}
 
 async function viewRekap() {
   const kelasList = await muatDaftarKelas();
 
-  $('viewRoot').innerHTML = kartu('Rekap Pelanggaran per Santri', `
+  $('viewRoot').innerHTML = `
+    <div class="stats" id="rkKpi"></div>
+    ${kartu('Rekap Pelanggaran per Santri', `
     <div class="card-note"><i class="fa-solid fa-circle-info"></i>
-      Rekap memakai kaskade konversi buku peraturan: <b>5x Ringan sejenis → 1x Sedang</b>,
-      <b>5x Sedang sejenis → 1x Berat</b>. Sisa yang belum genap tetap pada kategori aslinya.</div>
+      Menampilkan <b>akumulasi seluruh unit</b> — Pengasuhan dan Madrasah digabung,
+      tidak mengikuti unit yang sedang aktif. Perhitungan bersifat apa adanya:
+      pelanggaran dengan <b>kode yang sama</b> dijumlahkan, tanpa konversi
+      antar kategori.</div>
     <div class="filters">
       <input id="rkCari" class="input grow" placeholder="Cari nama atau NISN santri…" value="${esc(stRekap.cari)}">
       <select id="rkKategori" class="input">
@@ -2464,8 +2532,8 @@ async function viewRekap() {
     </div>
     <div id="rkHasil"><div style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</div></div>
     <div id="pgRk"></div>`,
-    `<span class="tag tag-sea">${esc(labelKonteks())}</span>
-     <span class="tag tag-off">${esc(labelPeriode())}</span>`);
+    `<span class="tag tag-sea">Semua Unit</span>
+     <span class="tag tag-off">${esc(labelPeriode())}</span>`)}`;
 
   $('rkCari').addEventListener('input', debounce(e => {
     stRekap.cari = e.target.value.trim(); stRekap.page = 1; gambarRekap(); }, 250));
@@ -2473,12 +2541,15 @@ async function viewRekap() {
   $('rkKelas').addEventListener('change', e => { stRekap.kelas = e.target.value; stRekap.page = 1; gambarRekap(); });
   $('rkCsv').addEventListener('click', async () => {
     const rows = await hitungRekap();
-    const baris = [['NISN','Nama','Kelas','Kategori','Catatan','Jumlah']];
-    rows.forEach(s => s.daftar.forEach(d => baris.push([s.nisn, s.nama, s.kelas, d.kategori, d.deskripsi, d.jumlah])));
+    if (!rows.length) return toast('error', 'Belum ada data untuk diekspor.');
+    const baris = [['NISN','Nama','Kelas','Kode','Pelanggaran','Kategori','Sumber','Jumlah','Poin','Total Santri']];
+    rows.forEach(s => s.daftar.forEach(d =>
+      baris.push([s.nisn, s.nama, s.kelas, d.kode, d.deskripsi, d.kategori,
+                  d.sumber, d.jumlah, d.poin, s.total])));
     unduhCsv(`rekap-pelanggaran-${berkasPeriode()}.csv`, baris);
   });
   $('rkCetak')?.addEventListener('click', async () =>
-    cetakRekapBulanan(await hitungRekap(), 'Rekap Pelanggaran'));
+    cetakRekapBulanan(await hitungRekap(), 'Semua Unit'));
 
   onKlik((e) => {
     const d = e.target.closest('[data-detail]');
@@ -2494,14 +2565,17 @@ async function viewRekap() {
 }
 
 async function hitungRekap() {
-  const rows = rekapPerSantri(lingkupDetail(await muatDetail()));
+  const rows = rekapUnikPerSantri(lingkupRekap(await muatDetail()));
   const k = stRekap.cari.toLowerCase();
   return rows
     .filter(s => !stRekap.kelas || s.kelas === stRekap.kelas)
-    .filter(s => !k || String(s.nama).toLowerCase().includes(k) || String(s.nisn).toLowerCase().includes(k))
+    .filter(s => !k || String(s.nama).toLowerCase().includes(k) ||
+                       String(s.nisn).toLowerCase().includes(k))
     .map(s => {
+      // Filter kategori hanya memangkas daftar; total santri tetap utuh.
       const daftar = s.daftar.filter(d => stRekap.kategori === 'Semua' || d.kategori === stRekap.kategori);
-      return daftar.length ? { ...s, daftar } : null;
+      return daftar.length ? { ...s, daftar,
+        tampil: daftar.reduce((a, d) => a + d.jumlah, 0) } : null;
     })
     .filter(Boolean);
 }
@@ -2513,6 +2587,21 @@ async function gambarRekap() {
   const from = (stRekap.page - 1) * stRekap.size;
   const hal = rows.slice(from, from + stRekap.size);
 
+  const totCatatan = rows.reduce((a, s) => a + (s.tampil ?? s.total), 0);
+  const totPoin = rows.reduce((a, s) => a + s.poin, 0);
+  const totJenis = rows.reduce((a, s) => a + s.daftar.length, 0);
+
+  $('rkKpi').innerHTML =
+    stat('Santri Tercatat', angka(rows.length), 'fa-solid fa-user-group',
+      'background:#E7F1F7;color:var(--sea)', 'var(--sea)', labelPeriode()) +
+    stat('Total Pelanggaran', angka(totCatatan), 'fa-solid fa-scale-balanced',
+      'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)', 'Seluruh unit digabung') +
+    stat('Baris Akumulasi', angka(totJenis), 'fa-solid fa-layer-group',
+      'background:var(--violet-bg);color:var(--violet)', 'var(--violet)', 'Kode pelanggaran unik') +
+    stat('Akumulasi Poin', angka(totPoin), 'fa-solid fa-coins',
+      'background:var(--amber-bg);color:var(--amber)', 'var(--amber)',
+      stRekap.kategori === 'Semua' ? 'Seluruh kategori' : `Kategori ${stRekap.kategori}`);
+
   $('queryTime').textContent = `rekap · ${angka(rows.length)} santri`;
 
   if (!rows.length) {
@@ -2523,21 +2612,25 @@ async function gambarRekap() {
   }
 
   $('rkHasil').innerHTML = hal.map(s => {
-    const total = s.daftar.reduce((a,d) => a + d.jumlah, 0);
+    const tampil = s.tampil ?? s.total;
+    const disaring = tampil !== s.total;
     return `<div class="rekap-item">
       <div class="hd">
         <div style="min-width:0">
           <b>${esc(s.nama)}</b>
           <span class="id">${esc(s.nisn)} · ${esc(s.kelas)}</span>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;flex:none">
-          <span class="tag tag-off">Total ${total}x</span>
+        <div style="display:flex;gap:8px;align-items:center;flex:none;flex-wrap:wrap">
+          <span class="tag tag-berat">Total ${tampil}x</span>
+          ${disaring ? `<span class="tag tag-off">dari ${s.total}x semua kategori</span>` : ''}
+          <span class="tag tag-off">${s.daftar.length} jenis · ${angka(s.poin)} poin</span>
           <button class="btn-link" data-detail="${esc(s.nisn)}">Detail</button>
         </div>
       </div>
       <ul>${s.daftar.map(d => `<li>
-        ${stRekap.kategori === 'Semua' ? `<span class="tag ${tagKategori(d.kategori)}">${esc(d.kategori)}</span>` : ''}
-        <span class="txt">${esc(d.deskripsi)}</span>
+        <span class="tag ${tagKategori(d.kategori)}">${esc(d.kategori)}</span>
+        <span class="txt">${esc(d.deskripsi)}
+          <span class="secondary" style="display:block;font-size:11px">${esc(d.kode)} · ${esc(d.sumber)} · ${angka(d.poin)} poin</span></span>
         <span class="qty">${d.jumlah}x</span></li>`).join('')}</ul>
     </div>`;
   }).join('');
@@ -5580,9 +5673,9 @@ async function pgsSimpan() {
 function pgsPanelRekap() {
   return kartu('Rekap Pelanggaran per Santri', `
     <div class="card-note"><i class="fa-solid fa-circle-info"></i>
-      Rekap memakai kaskade buku peraturan: <b>5× ringan sejenis menjadi 1× sedang</b>,
-      <b>5× sedang sejenis menjadi 1× berat</b>. Sisa yang belum genap tetap pada
-      kategori aslinya.</div>
+      Menampilkan <b>akumulasi seluruh unit</b> — Pengasuhan dan Madrasah digabung.
+      Pelanggaran dengan <b>kode yang sama</b> dijumlahkan apa adanya, tanpa konversi
+      antar kategori.</div>
     <div class="filters">
       <input id="pgRkCari" class="input grow" placeholder="Cari nama atau NISN santri…"
              value="${esc(PGS.rk.cari)}">
@@ -5600,7 +5693,7 @@ function pgsPanelRekap() {
     </div>
     <div id="pgRkHasil"><div style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</div></div>
     <div id="pgRkPager"></div>`,
-    `<span class="tag tag-sea">Pengasuhan</span>
+    `<span class="tag tag-sea">Semua Unit</span>
      <span class="tag tag-off">${esc(labelPeriode())}</span>`,
     'Angka yang muncul di sini sama dengan bagian akumulasi pada laporan cetak.');
 }
@@ -5623,19 +5716,21 @@ async function pgsPasangRekap() {
   $('pgRkCsv').addEventListener('click', async () => {
     const rows = await pgsHitungRekap();
     if (!rows.length) return toast('error', 'Belum ada data untuk diekspor.');
-    const baris = [['NISN','Nama','Kelas','Kategori','Catatan','Jumlah']];
+    const baris = [['NISN','Nama','Kelas','Kode','Pelanggaran','Kategori','Sumber','Jumlah','Poin','Total Santri']];
     rows.forEach(s => s.daftar.forEach(d =>
-      baris.push([s.nisn, s.nama, s.kelas, d.kategori, d.deskripsi, d.jumlah])));
+      baris.push([s.nisn, s.nama, s.kelas, d.kode, d.deskripsi, d.kategori,
+                  d.sumber, d.jumlah, d.poin, s.total])));
     unduhCsv(`rekap-pengasuhan-${berkasPeriode()}.csv`, baris);
   });
   $('pgRkCetak')?.addEventListener('click', async () =>
-    cetakRekapBulanan(await pgsHitungRekap(), 'Unit Pengasuhan'));
+    cetakRekapBulanan(await pgsHitungRekap(), 'Semua Unit'));
 
   await pgsGambarRekap();
 }
 
 async function pgsHitungRekap() {
-  const rows = rekapPerSantri(lingkupDetail(await muatDetail()));
+  // Sama seperti menu Rekap: seluruh unit digabung, tanpa konversi berjenjang.
+  const rows = rekapUnikPerSantri(lingkupRekap(await muatDetail()));
   const k = PGS.rk.cari.toLowerCase();
   return rows
     .filter(s => !PGS.rk.kelas || s.kelas === PGS.rk.kelas)
@@ -5643,7 +5738,8 @@ async function pgsHitungRekap() {
                        String(s.nisn).toLowerCase().includes(k))
     .map(s => {
       const daftar = s.daftar.filter(d => PGS.rk.kategori === 'Semua' || d.kategori === PGS.rk.kategori);
-      return daftar.length ? { ...s, daftar } : null;
+      return daftar.length ? { ...s, daftar,
+        tampil: daftar.reduce((a, d) => a + d.jumlah, 0) } : null;
     })
     .filter(Boolean);
 }
@@ -5666,7 +5762,7 @@ async function pgsGambarRekap() {
   }
 
   $('pgRkHasil').innerHTML = hal.map((s, i) => {
-    const total = s.daftar.reduce((a, d) => a + d.jumlah, 0);
+    const total = s.tampil ?? s.total;
     return `<article class="pgs-rk">
       <div class="hd">
         <span class="no">${String(from + i + 1).padStart(2, '0')}</span>
@@ -5674,12 +5770,13 @@ async function pgsGambarRekap() {
           <b>${esc(s.nama)}</b>
           <span>${esc(s.nisn)} · ${esc(s.kelas)}</span>
         </div>
-        <span class="tag tag-off">${total}× tercatat</span>
+        <span class="tag tag-off">${total}× tercatat · ${s.daftar.length} jenis · ${angka(s.poin)} poin</span>
         <button class="btn-link" data-detail="${esc(s.nisn)}">Riwayat</button>
       </div>
       <ul>${s.daftar.map(d => `<li>
         <span class="tag ${tagKategori(d.kategori)}">${esc(d.kategori)}</span>
-        <span class="txt">${esc(d.deskripsi)}</span>
+        <span class="txt">${esc(d.deskripsi)}
+          <span class="secondary" style="display:block;font-size:11px">${esc(d.kode)} · ${esc(d.sumber)} · ${angka(d.poin)} poin</span></span>
         <span class="qty">${d.jumlah}×</span></li>`).join('')}</ul>
     </article>`;
   }).join('');
