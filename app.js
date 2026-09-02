@@ -1856,6 +1856,12 @@ async function viewPimpinan() {
             <div class="rec"><i class="fa-solid fa-arrow-turn-up fa-rotate-90"></i> ${esc(c.rek)}</div>
           </article>`).join('')}
         </div>
+        <div class="ai-actions">
+          <button class="btn btn-ghost btn-sm" data-ai="payload-pimpinan">
+            <i class="fa-solid fa-file-code"></i>Salin ringkasan untuk analisis</button>
+          <button class="btn btn-ghost btn-sm" data-ai="prompt-pimpinan">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>Salin instruksi AI</button>
+        </div>
       </div>
     </section>
 
@@ -2177,6 +2183,8 @@ async function viewPelanggaran() {
       <div class="adm-actions">
         ${bolehCetak() ? `<button class="btn btn-onnavy btn-sm" id="plgCsv">
           <i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>` : ''}
+        ${bolehTulis() ? `<button class="btn btn-onnavy btn-sm" data-ai="massal">
+          <i class="fa-solid fa-users-rectangle"></i>Input Massal</button>` : ''}
         ${bolehTulis() ? `<button class="btn btn-brass btn-sm" id="btnAddPlg">
           <i class="fa-solid fa-plus"></i>Catat Pelanggaran</button>` : ''}
       </div>
@@ -3392,7 +3400,20 @@ async function viewMaster() {
           <th>Jenjang</th><th>Status</th><th class="right">Aksi</th></tr></thead>
         <tbody id="tbBidang"></tbody>
       </table></div>`,
-      isAdmin() ? `<button class="btn btn-primary btn-sm" id="btnAddBidang"><i class="fa-solid fa-plus"></i>Tambah Bidang</button>` : '')}`;
+      isAdmin() ? `<button class="btn btn-primary btn-sm" id="btnAddBidang"><i class="fa-solid fa-plus"></i>Tambah Bidang</button>` : '')}
+
+    ${kartu('Analisis Frekuensi Peraturan', `
+      <div class="card-note"><i class="fa-solid fa-chart-simple"></i>
+        Peringkat jenis pelanggaran ${AI_AMBANG.mundurHari} hari terakhir pada unit aktif,
+        lengkap dengan tren 30 hari, sebaran santri, dan jenis yang tidak pernah dipakai.</div>
+      <div id="anaPeraturan">
+        <div class="ai-actions">
+          <button class="btn btn-primary btn-sm" data-ai="analisis-peraturan">
+            <i class="fa-solid fa-play"></i>Jalankan analisis</button>
+        </div>
+      </div>`,
+      `<span class="tag tag-off">${AI_AMBANG.mundurHari} hari</span>`,
+      `Dasar evaluasi peraturan untuk unit: ${labelKonteks()}`)}`;
 
   $('msCari').addEventListener('input', debounce(e => { stMaster.cari = e.target.value.trim(); gambarMaster(); }, 220));
   $('btnAddMaster')?.addEventListener('click', () => modalMaster(null));
@@ -4683,7 +4704,9 @@ function mdPanelPelanggaran() {
       <span class="note-min"><i class="fa-solid fa-user-shield"></i>
         Penindak: ${esc(APP.profil?.nama || '-')}</span>
       ${bolehIsi
-        ? `<button class="btn btn-primary btn-sm" id="mpSimpan">
+        ? `<button class="btn btn-ghost btn-sm" data-ai="massal">
+             <i class="fa-solid fa-users-rectangle"></i>Input Massal</button>
+           <button class="btn btn-primary btn-sm" id="mpSimpan">
              <i class="fa-solid fa-floppy-disk"></i>Simpan Pelanggaran</button>`
         : `<span class="tag tag-off">Hanya baca</span>`}
     </div>`,
@@ -5577,7 +5600,9 @@ function pgsPanelCatat() {
       <span class="note"><i class="fa-solid fa-user-shield"></i>
         Penindak: ${esc(APP.profil?.nama || '-')}</span>
       ${bolehIsi
-        ? `<button class="btn btn-primary btn-sm" id="pgSimpan">
+        ? `<button class="btn btn-ghost btn-sm" data-ai="massal">
+             <i class="fa-solid fa-users-rectangle"></i>Input Massal</button>
+           <button class="btn btn-primary btn-sm" id="pgSimpan">
              <i class="fa-solid fa-floppy-disk"></i>Simpan Pelanggaran</button>`
         : `<span class="tag tag-off">Hanya baca</span>`}
     </div>`,
@@ -5938,6 +5963,1008 @@ async function pgsProsesIzin(idIzin, keputusan) {
     await pgsMuatUlangIzin();
   } catch (err) { sync('warn', 'Gagal memproses'); fireError(err); }
 }
+
+// ---------------------------------------------------------------------
+// 24. ASISTEN AI — INPUT MASSAL PELANGGARAN & PAYLOAD ANALISIS
+//     Tiga instruksi kerja diterjemahkan menjadi logika aplikasi:
+//       (1) Validasi & eksekusi bulk pelanggaran  -> RPC catat_pelanggaran
+//       (2) Analisis frekuensi peraturan & master -> panel di menu Master
+//       (3) Ringkasan eksekutif dashboard Pimpinan-> payload siap dianalisis
+//     Tidak menambah tabel, kolom, maupun RPC baru. Seluruh perhitungan
+//     dilakukan di browser dari data yang sudah dimuat.
+// ---------------------------------------------------------------------
+
+/** Ambang baku yang dipakai bersama oleh modul analisis. */
+const AI_AMBANG = {
+  minSantri: 2,          // input massal minimal 2 santri
+  maksSantri: 50,        // batas aman satu proses
+  mundurHari: 90,        // tanggal kejadian tidak boleh lebih lama dari ini
+  catatanMin: 10,        // panjang catatan wajib untuk kategori Sedang/Berat
+  kaskade: 5,            // 5x sejenis naik satu tingkat kategori
+  poinPerhatian: 50,
+  poinKritis: 100
+};
+
+/** Instruksi untuk analis eksternal. Disalin apa adanya bersama payload. */
+const AI_PROMPT = {
+  bulk:
+`Anda adalah validator dan generator parameter RPC untuk Sistem Informasi
+Pengembangan Santri — Dayah Ruhul Qurani. Bahasa: Indonesia. Output: JSON murni.
+
+FAKTA SISTEM (tidak boleh dilanggar):
+1. Pelanggaran TIDAK di-INSERT ke tabel. Satu-satunya jalur adalah RPC Supabase
+   catat_pelanggaran dengan lima parameter: p_nisn, p_kode, p_tanggal
+   (YYYY-MM-DD), p_catatan, p_force (boolean).
+2. RPC mengisi sendiri nama_pelanggaran, kategori, bobot_pelanggaran, bidang,
+   sumber, jenjang, penindak, jam, serta memperbarui total poin santri.
+   Jangan pernah menghasilkan kolom-kolom itu.
+3. Input massal = pemanggilan RPC berulang, satu panggilan per santri.
+4. Kategori hanya Ringan, Sedang, Berat. bobot_poin adalah integer bebas >= 0
+   yang ditetapkan Admin per jenis. TIDAK ADA rentang bobot baku per kategori.
+5. Kode pelanggaran berformat bebas (PG001, MD001, P220). Validasi kode dengan
+   mencocokkan ke master_terpilih pada payload, bukan dengan regex.
+6. RPC bisa membalas {conflict:true} bila santri punya izin "Sesuai Waktu" pada
+   tanggal itu. Role "Osis" tidak berwenang menimpanya dengan p_force.
+7. Role "Guru Piket" hanya baca.
+
+VALIDASI (satu gagal = seluruh permintaan ditolak):
+V1 konteks.boleh_tulis harus true dan role bukan "Guru Piket".
+V2 nisn_list unik 2-50 NISN, hanya angka, semuanya ditemukan di array santri.
+V3 master_terpilih tidak null dan kodenya sama dengan input.
+V4 Bila konteks.unit != "Semua", master_terpilih.sumber harus sama.
+V5 Bila unit "Madrasah" dan jenjang != "Semua", master.jenjang harus "Semua"
+   atau sama dengan konteks.jenjang.
+V6 Bila konteks.perlu_filter_kelas true, kelas tiap santri harus ada di
+   konteks.kelas_binaan.
+V7 tanggal <= hari_ini dan >= hari_ini - 90 hari.
+V8 catatan wajib minimal 10 karakter bila kategori Sedang atau Berat.
+
+PERINGATAN NON-BLOKIR (status tetap ok):
+duplikat (nisn+kode+tanggal sudah ada di riwayat_90h), kaskade (jumlah kode ini
+mencapai kelipatan 5 sehingga rekap naik satu tingkat), ambang poin (menembus
+50 = Perhatian Tinggi atau 100 = Kritis), potensi konflik izin.
+
+OUTPUT VALID:
+{"status":"ok","message":"...","rpc":"catat_pelanggaran",
+ "panggilan":[{"urutan":1,"nisn":"...","nama_siswa":"...","kelas":"...",
+   "params":{"p_nisn":"...","p_kode":"...","p_tanggal":"...","p_catatan":"...","p_force":false}}],
+ "ringkasan":{"total_panggilan":0,"kode_pelanggaran":"...","nama_pelanggaran":"...",
+   "kategori":"...","bobot_poin":0,"bidang":"...","sumber":"...","jenjang":"...",
+   "total_poin_ditambahkan":0},
+ "peringatan":[{"nisn":"...","jenis":"duplikat|kaskade|ambang_poin|konflik_izin","pesan":"..."}],
+ "catatan_eksekusi":"..."}
+
+OUTPUT DITOLAK:
+{"status":"error","message":"...","errors":[{"field":"...","nisn":"...","issue":"..."}]}
+
+CRITICAL: keluarkan JSON saja, tanpa pagar markdown dan tanpa kalimat pembuka.`,
+
+  peraturan:
+`Anda adalah analis evaluasi peraturan untuk Dayah Ruhul Qurani (pesantren di
+Aceh Barat). Gunakan kerangka pendidikan dan psikologi remaja.
+Bahasa: Indonesia. Output: JSON murni.
+
+FAKTA SISTEM:
+1. Sumber data: master_pelanggaran (katalog aturan) dan detail_data (kejadian).
+   Baris berstatus archived sudah dibuang oleh pembangun payload.
+2. Bidang BUKAN daftar tetap. Bidang berasal dari master_bidang.nama_bidang dan
+   berbeda antar unit. Baris tanpa bidang tercatat "Belum Dipetakan". Dilarang
+   menyebut nama bidang yang tidak ada di payload.
+3. Kategori hanya Ringan/Sedang/Berat. Bobot bebas per jenis; jangan menilai
+   keparahan hanya dari angka bobot.
+4. Kaskade buku peraturan: 5x Ringan sejenis dihitung 1 Sedang, 5x Sedang
+   sejenis dihitung 1 Berat. Jenis Ringan berfrekuensi tinggi karena itu
+   berdampak lebih besar daripada yang tampak dari angka mentah.
+5. Master hanya boleh diubah role Admin. Sosialisasi dan penegakan dijalankan
+   Guru, Walas, Guru BK, Guru Piket, Ustadz GEN-Z, dan Osis.
+
+KERANGKA PSIKOLOGI:
+- Ringan berfrekuensi tinggi  -> kesenjangan pemahaman/pembiasaan: sosialisasi
+  ulang, keteladanan, pengingat terjadwal.
+- Sedang berulang            -> pola perilaku menetap: pembinaan 1:1,
+  kesepakatan tertulis, pelibatan wali.
+- Berat frekuensi rendah     -> pelanggaran sadar atau masalah lebih dalam:
+  asesmen bersama Guru BK sebelum sanksi.
+- Frekuensi tinggi dengan santri_unik sedikit = masalah individu; santri_unik
+  banyak = masalah sistem atau rumusan aturan.
+
+ANALISIS YANG DIMINTA:
+A. Top 10 jenis paling perlu perhatian (gabungan frekuensi, tren 30 hari, dan
+   rasio santri_unik). Sertakan diagnosis individu/sistemik dan rekomendasi
+   bernomor yang konkret.
+B. Analisis per bidang, urut terbanyak: 3 jenis teratas, tren, dan apakah pola
+   itu wajar untuk asrama/madrasah atau sinyal masalah.
+C. Anomali dari deret harian: lonjakan, jenis baru, konsentrasi kelas mendadak.
+   Sertakan langkah verifikasi ke Walas atau Guru Piket.
+D. Kebersihan katalog: aturan yang tidak pernah terpakai dan baris
+   "Belum Dipetakan" — hapus, gabung, petakan ulang, atau memang belum
+   ditegakkan. Bagian ini ditujukan ke Admin.
+E. Saran penyesuaian peraturan per bidang bermasalah. Bedakan akar masalah:
+   sosialisasi, penegakan tidak konsisten, rumusan tidak operasional, atau
+   bobot/kategori tidak proporsional. Sertakan lini masa nyata.
+
+OUTPUT:
+{"status":"ok","analisis":{"unit":"...","periode":"...","ringkasan":"...",
+ "top_jenis":[{"peringkat":1,"kode_pelanggaran":"...","nama_pelanggaran":"...",
+   "kategori":"...","bidang":"...","frek_total":0,"frek_30h":0,"frek_prev30":0,
+   "tren_30h":"...","persen_total":"...","santri_unik":0,
+   "pola":"individu|sistemik","catatan":"...","rekomendasi":"1. ... 2. ..."}],
+ "per_bidang":[{"nama":"...","jumlah":0,"persen":0,"tren":"naik|stabil|turun",
+   "top_3_jenis":["..."],"insight":"..."}],
+ "anomali":[{"tipe":"lonjakan|pola_baru|konsentrasi_kelas","deskripsi":"...",
+   "kemungkinan":"...","verifikasi":"..."}],
+ "kebersihan_katalog":{"tidak_terpakai":[{"kode_pelanggaran":"...",
+   "saran":"hapus|gabung|pertahankan","alasan":"..."}],
+   "belum_dipetakan":{"jumlah":0,"saran":"..."}},
+ "saran_penyesuaian":[{"bidang":"...","prioritas":"tinggi|sedang|rendah",
+   "akar_masalah":"sosialisasi|penegakan|rumusan_aturan|bobot","usulan":"...",
+   "penanggung_jawab":"Admin|Guru BK|Walas|Guru Piket","lini_masa":"..."}],
+ "tinjauan_berikutnya":"YYYY-MM-DD"}}
+
+CRITICAL: JSON saja. Setiap rekomendasi menyebut angka dari payload.`,
+
+  pimpinan:
+`Anda adalah analis senior untuk dashboard eksekutif Dayah Ruhul Qurani.
+Pembaca: Pimpinan dayah, waktu baca 30 detik. Bahasa: Indonesia.
+Output: JSON murni. Nada lugas, tanpa basa-basi, menghormati jenjang wewenang.
+
+FAKTA SISTEM — samakan dengan perhitungan yang berjalan di aplikasi:
+1. Jendela 90 hari (d90); pembanding 30 hari terakhir (d30) vs 30 hari
+   sebelumnya (dPrev). ubah = ((d30-dPrev)/dPrev)*100, null bila dPrev = 0.
+2. Kategori dihitung ke empat ember: Ringan, Sedang, Berat, Lainnya.
+3. Tier santri (ambang baku, jangan diubah):
+   Kritis           : poin90 >= 100 ATAU berat >= 2
+   Perhatian Tinggi : poin90 >= 50 ATAU berat >= 1 ATAU kasus30 >= 5
+   Monitor          : kasus30 >= 3 ATAU telat >= 2 ATAU bina >= 1
+   Observasi        : selain itu
+4. Label kondisi harus persis salah satu dari:
+   "Perlu Perhatian Pimpinan"   bila ubah > 20 ATAU rasio_kritis >= 3
+                                ATAU kategori.Berat >= 10
+   "Perlu Penguatan Pengawasan" bila ubah > 5 ATAU Kritis > 0
+                                ATAU Perhatian Tinggi >= 5 ATAU izin.rate >= 20
+   "Relatif Terkendali"         selain itu
+5. Status pembinaan HANYA "Dalam Proses" dan "Selesai". Tidak ada status
+   "Belum Mulai" — jangan menyebutnya. Yang bisa disorot adalah santri tier
+   tinggi yang belum punya catatan pembinaan sama sekali (tier.tanpa_pembinaan).
+6. Status izin: Pending, Sesuai Waktu, Telat Balik. izin.rate = Telat Balik
+   dibagi (Sesuai Waktu + Telat Balik) x 100, dipakai sebagai proksi kepatuhan.
+7. Bandingkan angkatan memakai per100 (kasus per 100 santri), bukan jumlah.
+8. Wewenang: Guru Piket hanya baca; Osis tidak boleh menimpa izin "Sesuai
+   Waktu"; master hanya diubah Admin; pembinaan diubah Admin/Guru/Pimpinan.
+   Jangan memberi saran yang melampaui wewenang sebuah peran.
+
+LIMA PILAR DIAGNOSIS (semuanya wajib diisi):
+1 disiplin_umum      volume 90 hari, arah tren, luas keterlibatan.
+2 beban_kategori     komposisi Ringan:Sedang:Berat; Berat > 15% = temuan.
+                     Nilai apakah beban tersebar atau terkonsentrasi.
+3 fokus_bidang       bidang dominan; wajar untuk asrama atau sinyal masalah.
+4 respons_pembinaan  rasio Selesai vs Dalam Proses dan tier tinggi yang belum
+                     tersentuh pembinaan.
+5 perilaku_sekunder  izin.rate dan angkatan dengan per100 tertinggi.
+
+SARAN dipisah tegas per peran dan tidak boleh saling menyalin:
+Guru & Wali Kelas -> tindakan lapangan pekan ini beserta metrik.
+Guru BK           -> fokus asesmen, sasaran tier, bentuk pembinaan, lini masa.
+Pimpinan          -> keputusan tata kelola: struktur, konsistensi, kebijakan.
+
+OUTPUT:
+{"status":"ok","kesimpulan_sementara":"[ikon] [label] — ringkasan 1-2 baris",
+ "kondisi":{"kode":"ok|warn|danger","label":"..."},
+ "diagnosis":{"disiplin_umum":"...","beban_kategori":"...","fokus_bidang":"...",
+   "respons_pembinaan":"...","perilaku_sekunder":"..."},
+ "sorotan_angka":[{"label":"...","nilai":"...","arah":"naik|turun|stabil"}],
+ "saran_untuk_guru":[{"urgensi":"segera|pekan_ini|dua_pekan","aksi":"...","metrik":"..."}],
+ "saran_untuk_bk":[{"urgensi":"segera|pekan_ini","sasaran":"...",
+   "bentuk_pembinaan":"pendampingan individu|pembinaan kelompok|pertemuan wali|asesmen",
+   "lini_masa":"..."}],
+ "saran_untuk_pimpinan":[{"urgensi":"pekan_ini|dua_pekan","tinjau":"...",
+   "keputusan":"...","lini_masa":"..."}],
+ "santri_disorot":[{"nisn":"...","nama":"...","kelas":"...","tier":"...","alasan":"..."}],
+ "catatan_batas":"...","tinjauan_berikutnya":"YYYY-MM-DD"}
+
+Ikon: "OK" untuk kode ok, "!" untuk warn, "!!" untuk danger.
+CRITICAL: JSON saja. Maksimal 6 nama pada santri_disorot. Dilarang menyebut
+status pembinaan yang tidak ada di sistem atau angka di luar payload.`
+};
+
+/** Salin teks ke papan klip; sediakan jalur cadangan bila API diblokir. */
+async function aiSalin(teks, label) {
+  try {
+    await navigator.clipboard.writeText(teks);
+    toast('success', `${label || 'Teks'} tersalin ke papan klip.`);
+    return true;
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = teks;
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+    document.body.removeChild(ta);
+    if (ok) { toast('success', `${label || 'Teks'} tersalin ke papan klip.`); return true; }
+    Swal.fire({ title:'Salin manual', width:660,
+      html:`<textarea class="input" rows="12" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">${esc(teks)}</textarea>`,
+      confirmButtonColor:'#14618B' });
+    return false;
+  }
+}
+
+const aiSalinPayload = (obj, label) => aiSalin(JSON.stringify(obj, null, 2), label || 'Payload');
+
+/** Rentang waktu standar analisis: 90 hari, 30 hari, dan 30 hari sebelumnya. */
+function aiJendela(hari) {
+  const n = Number(hari) || AI_AMBANG.mundurHari;
+  const akhir = new Date(); akhir.setHours(23,59,59,999);
+  const mulai = tambahHari(akhir, -(n - 1)); mulai.setHours(0,0,0,0);
+  const mulai30 = tambahHari(akhir, -29); mulai30.setHours(0,0,0,0);
+  const prevMulai = tambahHari(mulai30, -30); prevMulai.setHours(0,0,0,0);
+  const prevAkhir = tambahHari(mulai30, -1); prevAkhir.setHours(23,59,59,999);
+  return { akhir, mulai, mulai30, prevMulai, prevAkhir };
+}
+
+const aiBulat = (n) => Math.round(Number(n || 0) * 10) / 10;
+
+// ---------- 24a. Input massal: penyusunan payload -------------------
+async function aiPayloadBulk(opsi) {
+  const o = opsi || {};
+  const pilih = o.santri || [];
+  const kode = String(o.kode || '').trim();
+  const tanggal = kunciTgl(o.tanggal || hariIni());
+  const catatan = String(o.catatan || '').trim();
+
+  const [master, siswaAll, detailAll] = await Promise.all([
+    amanKosong(muatMaster, 'master pelanggaran'),
+    amanKosong(muatSiswa, 'santri'),
+    amanKosong(muatDetail, 'pelanggaran')
+  ]);
+
+  const m = master.find(x => String(x.kode_pelanggaran).trim() === kode) || null;
+  const petaSiswa = Object.fromEntries(
+    siswaAll.filter(aktifSantri).map(s => [String(s.nisn).trim(), s]));
+
+  const unik = [];
+  pilih.forEach(s => {
+    const n = String(s.nisn || '').trim();
+    if (n && !unik.includes(n)) unik.push(n);
+  });
+
+  const akhir = new Date(); akhir.setHours(23,59,59,999);
+  const mulai90 = tambahHari(akhir, -(AI_AMBANG.mundurHari - 1)); mulai90.setHours(0,0,0,0);
+  const setUnik = new Set(unik);
+
+  const riwayat = detailAll.filter(aktifDetail)
+    .filter(r => setUnik.has(String(r.nisn).trim()))
+    .filter(r => { const d = tglDari(kunciTgl(r.tanggal)); return d && d >= mulai90 && d <= akhir; })
+    .map(r => ({
+      nisn: String(r.nisn).trim(),
+      tanggal: kunciTgl(r.tanggal),
+      kode_pelanggaran: String(r.kode_pelanggaran || '').trim(),
+      kategori: r.kategori || '',
+      bobot_pelanggaran: Number(r.bobot_pelanggaran) || 0
+    }));
+
+  return {
+    konteks: {
+      unit: APP.ctx.unit,
+      jenjang: APP.ctx.jenjang,
+      role: role(),
+      nama_petugas: APP.profil?.nama || '',
+      kelas_binaan: APP.profil?.kelas_binaan || [],
+      perlu_filter_kelas: perluFilterKelas(),
+      boleh_tulis: bolehTulis(),
+      hari_ini: hariIni()
+    },
+    input: { nisn_list: unik, kode_pelanggaran: kode, tanggal, catatan },
+    master_terpilih: m ? {
+      kode_pelanggaran: m.kode_pelanggaran,
+      nama_pelanggaran: m.nama_pelanggaran,
+      kategori: m.kategori,
+      bobot_poin: Number(m.bobot_poin) || 0,
+      bidang: m.bidang || 'Belum Dipetakan',
+      sumber: m.sumber || 'Pengasuhan',
+      jenjang: m.jenjang || 'Semua'
+    } : null,
+    santri: unik.map(n => {
+      const s = petaSiswa[n] || null;
+      return {
+        nisn: n,
+        ditemukan: !!s,
+        nama_siswa: s ? s.nama_siswa : null,
+        kelas: s ? (s.kelas || null) : null,
+        jenjang: s ? (s.jenjang || null) : null,
+        total_poin_pelanggaran: s ? (Number(s.total_poin_pelanggaran) || 0) : 0
+      };
+    }),
+    riwayat_90h: riwayat
+  };
+}
+
+// ---------- 24b. Input massal: validasi (all-or-nothing) ------------
+function aiValidasiBulk(p) {
+  const errors = [], peringatan = [];
+  const k = p.konteks, inp = p.input, m = p.master_terpilih;
+  const list = inp.nisn_list || [];
+
+  if (!k.boleh_tulis || k.role === 'Guru Piket') {
+    errors.push({ field:'wewenang', issue:`Role ${k.role} tidak berwenang mencatat pelanggaran.` });
+  }
+  if (!m) {
+    errors.push({ field:'kode_pelanggaran',
+      issue:`Jenis pelanggaran "${inp.kode_pelanggaran || '(kosong)'}" tidak ada pada Master Pelanggaran unit ini.` });
+  }
+  if (list.length < AI_AMBANG.minSantri) {
+    errors.push({ field:'nisn_list', issue:`Minimal ${AI_AMBANG.minSantri} santri untuk input massal.` });
+  }
+  if (list.length > AI_AMBANG.maksSantri) {
+    errors.push({ field:'nisn_list', issue:`Maksimal ${AI_AMBANG.maksSantri} santri dalam satu proses.` });
+  }
+
+  const petaS = Object.fromEntries((p.santri || []).map(s => [s.nisn, s]));
+  list.forEach(n => {
+    const s = petaS[n];
+    if (!/^\d+$/.test(n)) errors.push({ field:'nisn_list', nisn:n, issue:`NISN ${n} bukan angka.` });
+    else if (!s || !s.ditemukan) errors.push({ field:'nisn_list', nisn:n, issue:`NISN ${n} tidak ditemukan pada data santri aktif.` });
+    else if (k.perlu_filter_kelas && !(k.kelas_binaan || []).includes(s.kelas)) {
+      errors.push({ field:'nisn_list', nisn:n, issue:`${s.nama_siswa} (kelas ${s.kelas || '-'}) di luar kelas binaan Anda.` });
+    }
+  });
+
+  if (m) {
+    if (k.unit !== 'Semua' && String(m.sumber) !== k.unit) {
+      errors.push({ field:'kode_pelanggaran',
+        issue:`Jenis ini milik unit ${m.sumber}, sedangkan unit aktif adalah ${k.unit}.` });
+    }
+    if (k.unit === 'Madrasah' && k.jenjang !== 'Semua'
+        && m.jenjang !== 'Semua' && m.jenjang !== k.jenjang) {
+      errors.push({ field:'kode_pelanggaran',
+        issue:`Jenis ini khusus jenjang ${m.jenjang}, tidak untuk ${k.jenjang}.` });
+    }
+    if (['Sedang','Berat'].includes(m.kategori) && inp.catatan.length < AI_AMBANG.catatanMin) {
+      errors.push({ field:'catatan',
+        issue:`Kategori ${m.kategori} wajib disertai catatan minimal ${AI_AMBANG.catatanMin} karakter.` });
+    }
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(inp.tanggal)) {
+    errors.push({ field:'tanggal', issue:'Format tanggal harus YYYY-MM-DD.' });
+  } else {
+    const d = tglDari(inp.tanggal), kini = tglDari(k.hari_ini);
+    const batas = tambahHari(kini, -AI_AMBANG.mundurHari);
+    if (!d) errors.push({ field:'tanggal', issue:'Tanggal tidak terbaca.' });
+    else if (d > kini) errors.push({ field:'tanggal', issue:'Tanggal kejadian tidak boleh di masa depan.' });
+    else if (d < batas) errors.push({ field:'tanggal',
+      issue:`Tanggal kejadian lebih lama dari ${AI_AMBANG.mundurHari} hari. Gunakan jalur input satuan.` });
+  }
+
+  if (errors.length) {
+    return { status:'error', message:`${errors.length} masalah ditemukan. Tidak ada data yang disimpan.`, errors };
+  }
+
+  // ----- peringatan non-blokir -----
+  const riwayat = p.riwayat_90h || [];
+  list.forEach(n => {
+    const s = petaS[n];
+    const milik = riwayat.filter(r => r.nisn === n);
+
+    if (milik.some(r => r.kode_pelanggaran === m.kode_pelanggaran && r.tanggal === inp.tanggal)) {
+      peringatan.push({ nisn:n, jenis:'duplikat',
+        pesan:`${s.nama_siswa} sudah memiliki catatan jenis yang sama pada tanggal ${tgl(inp.tanggal)}.` });
+    }
+
+    const sejenis = milik.filter(r => r.kode_pelanggaran === m.kode_pelanggaran).length + 1;
+    if (['Ringan','Sedang'].includes(m.kategori) && sejenis % AI_AMBANG.kaskade === 0) {
+      const naik = m.kategori === 'Ringan' ? 'Sedang' : 'Berat';
+      peringatan.push({ nisn:n, jenis:'kaskade',
+        pesan:`${s.nama_siswa} mencapai ${sejenis}x jenis ini — rekap akan menaikkannya menjadi ${naik}.` });
+    }
+
+    const poinBaru = (s.total_poin_pelanggaran || 0) + m.bobot_poin;
+    if (s.total_poin_pelanggaran < AI_AMBANG.poinKritis && poinBaru >= AI_AMBANG.poinKritis) {
+      peringatan.push({ nisn:n, jenis:'ambang_poin',
+        pesan:`${s.nama_siswa} menembus ${AI_AMBANG.poinKritis} poin — masuk tier Kritis.` });
+    } else if (s.total_poin_pelanggaran < AI_AMBANG.poinPerhatian && poinBaru >= AI_AMBANG.poinPerhatian) {
+      peringatan.push({ nisn:n, jenis:'ambang_poin',
+        pesan:`${s.nama_siswa} menembus ${AI_AMBANG.poinPerhatian} poin — masuk tier Perhatian Tinggi.` });
+    }
+  });
+
+  if (k.role === 'Osis') {
+    peringatan.push({ nisn:'', jenis:'konflik_izin',
+      pesan:'Bila ada santri yang sedang berizin "Sesuai Waktu", baris itu dilewati — Osis tidak berwenang menimpanya.' });
+  }
+
+  return {
+    status: 'ok',
+    message: `Siap dieksekusi untuk ${list.length} santri.`,
+    rpc: 'catat_pelanggaran',
+    panggilan: list.map((n, i) => ({
+      urutan: i + 1,
+      nisn: n,
+      nama_siswa: petaS[n].nama_siswa,
+      kelas: petaS[n].kelas || '-',
+      params: {
+        p_nisn: n, p_kode: m.kode_pelanggaran, p_tanggal: inp.tanggal,
+        p_catatan: inp.catatan, p_force: false
+      }
+    })),
+    ringkasan: {
+      total_panggilan: list.length,
+      kode_pelanggaran: m.kode_pelanggaran,
+      nama_pelanggaran: m.nama_pelanggaran,
+      kategori: m.kategori,
+      bobot_poin: m.bobot_poin,
+      bidang: m.bidang,
+      sumber: m.sumber,
+      jenjang: m.jenjang,
+      total_poin_ditambahkan: m.bobot_poin * list.length
+    },
+    peringatan,
+    catatan_eksekusi: 'RPC dipanggil satu per satu; baris yang mengembalikan conflict dihentikan dan dimintakan konfirmasi.'
+  };
+}
+
+// ---------- 24c. Input massal: eksekusi RPC berurutan ---------------
+async function aiJalankanBulk(hasil) {
+  if (!bolehTulis()) return toast('error', `Role ${role()} tidak berwenang mencatat pelanggaran.`);
+
+  const total = hasil.panggilan.length;
+  const laporan = { berhasil: [], konflik: [], gagal: [] };
+
+  Swal.fire({
+    title:'Menyimpan catatan…', allowOutsideClick:false, allowEscapeKey:false,
+    html:`<p class="hint" style="margin:0">Memproses <b id="aiProg">0</b> dari ${total} santri.</p>`,
+    didOpen: () => Swal.showLoading()
+  });
+  sync('saving', 'Menyimpan input massal…');
+
+  for (let i = 0; i < total; i++) {
+    const p = hasil.panggilan[i];
+    try {
+      const { data, error } = await db.rpc('catat_pelanggaran', p.params);
+      if (error) laporan.gagal.push({ ...p, pesan: error.message });
+      else if (data?.conflict) laporan.konflik.push({ ...p, pesan: data.message || 'Santri memiliki izin sesuai waktu.' });
+      else laporan.berhasil.push({ ...p, poin_baru: data?.poin_baru ?? null });
+    } catch (err) {
+      laporan.gagal.push({ ...p, pesan: err?.message || String(err) });
+    }
+    const el = $('aiProg'); if (el) el.textContent = String(i + 1);
+  }
+
+  Swal.close();
+  cacheHapus('detail','siswa','pembinaan');
+
+  // Konflik izin: tawarkan penimpaan, kecuali untuk Osis.
+  if (laporan.konflik.length && role() !== 'Osis') {
+    const konf = await Swal.fire({
+      icon:'warning', title:'Terdeteksi izin yang sesuai waktu', width:600,
+      html:`<div style="text-align:left;font-size:13px">
+        <p>${laporan.konflik.length} santri sedang memiliki izin berstatus <b>Sesuai Waktu</b>
+           pada tanggal tersebut sehingga catatannya belum tersimpan:</p>
+        <ul style="margin:6px 0 0 16px">${laporan.konflik
+          .map(x => `<li>${esc(x.nama_siswa)} (${esc(x.kelas)})</li>`).join('')}</ul></div>`,
+      showCancelButton:true, confirmButtonText:'Tetap catat semuanya',
+      cancelButtonText:'Lewati', confirmButtonColor:'#9F1239'
+    });
+    if (konf.isConfirmed) {
+      sync('saving', 'Menimpa izin…');
+      for (const x of laporan.konflik.slice()) {
+        const r2 = await db.rpc('catat_pelanggaran', { ...x.params, p_force: true });
+        if (r2.error) laporan.gagal.push({ ...x, pesan: r2.error.message });
+        else laporan.berhasil.push({ ...x, poin_baru: r2.data?.poin_baru ?? null, dipaksa:true });
+      }
+      laporan.konflik = [];
+      cacheHapus('detail','siswa','pembinaan');
+    }
+  } else if (laporan.konflik.length) {
+    await Swal.fire({ icon:'info', title:'Sebagian dilewati',
+      text:'Beberapa santri sedang berizin sesuai waktu. Role Osis tidak berwenang menimpanya — laporkan ke Admin atau Guru.',
+      confirmButtonColor:'#14618B' });
+  }
+
+  sync(laporan.gagal.length ? 'warn' : 'done',
+       laporan.gagal.length ? 'Sebagian gagal disimpan' : 'Input massal tersimpan');
+
+  await Swal.fire({
+    icon: laporan.gagal.length ? 'warning' : 'success',
+    title: 'Ringkasan Input Massal', width: 620,
+    html: `<div style="text-align:left;font-size:13px">
+      <p><b>${laporan.berhasil.length}</b> tersimpan ·
+         <b>${laporan.konflik.length}</b> dilewati ·
+         <b>${laporan.gagal.length}</b> gagal.</p>
+      ${laporan.gagal.length ? `<p style="margin-top:8px"><b>Gagal:</b></p>
+        <ul style="margin:4px 0 0 16px">${laporan.gagal
+          .map(x => `<li>${esc(x.nama_siswa)} — ${esc(x.pesan)}</li>`).join('')}</ul>` : ''}
+    </div>`,
+    confirmButtonColor:'#14618B'
+  });
+
+  // Segarkan tampilan yang sedang aktif.
+  if (APP.view === 'pelanggaran') muatTabelPlg();
+  else if (['dashboard','pimpinan','pengasuhan','madrasah','rekap'].includes(APP.view)) navigateTo(APP.view);
+}
+
+// ---------- 24d. Input massal: antarmuka ----------------------------
+const MASSAL = { pilih: [], master: null };
+
+function aiGambarChip() {
+  const el = $('msChips'); if (!el) return;
+  const n = MASSAL.pilih.length;
+  const info = $('msHitung');
+  if (info) info.textContent = `${n} / ${AI_AMBANG.maksSantri} santri`;
+  el.innerHTML = n
+    ? MASSAL.pilih.map(s => `<span class="mchip">${esc(s.nama_siswa || s.nisn)}
+        <span class="nis">${esc(s.kelas || '-')}</span>
+        <button type="button" data-hapus="${esc(s.nisn)}" title="Keluarkan">
+          <i class="fa-solid fa-xmark"></i></button></span>`).join('')
+    : `<span class="mchip-kosong">Belum ada santri dipilih — minimal ${AI_AMBANG.minSantri}.</span>`;
+}
+
+async function modalMassalPelanggaran() {
+  if (!bolehTulis()) {
+    return Swal.fire({ icon:'error', title:'Tidak berwenang',
+      text:`Role ${role()} tidak dapat mencatat pelanggaran.`, confirmButtonColor:'#9F1239' });
+  }
+  MASSAL.pilih = []; MASSAL.master = null;
+
+  const res = await Swal.fire({
+    title:'Input Massal Pelanggaran', width: 660, showCancelButton:true,
+    confirmButtonText:'Periksa & Lanjut', cancelButtonText:'Batal',
+    confirmButtonColor:'#14618B', showLoaderOnConfirm:true,
+    allowOutsideClick:() => !Swal.isLoading(),
+    html:`<div class="stack">
+      <div class="ctx-note"><i class="fa-solid fa-layer-group"></i>
+        Satu jenis pelanggaran untuk banyak santri · unit <b>&nbsp;${esc(labelKonteks())}</b></div>
+
+      <div class="field">
+        <label class="label">Jenis Pelanggaran</label>
+        <input id="msKode" class="input" autocomplete="off"
+               placeholder="Ketik kode, nama, kategori, atau bidang…">
+        <div id="msInfo" class="hint">Belum ada jenis pelanggaran dipilih.</div>
+      </div>
+
+      <div class="field">
+        <label class="label">Tambah Santri</label>
+        <input id="msSantri" class="input" autocomplete="off"
+               placeholder="Ketik nama atau NISN (min. 2 huruf), pilih dari saran…">
+        <div class="ms-head"><span class="hint">Klik tanda silang untuk mengeluarkan santri.</span>
+          <span class="hint mono" id="msHitung">0 / ${AI_AMBANG.maksSantri} santri</span></div>
+        <div class="mchips" id="msChips"></div>
+      </div>
+
+      <div class="duo">
+        <div class="field"><label class="label">Tanggal Kejadian</label>
+          <input id="msTgl" type="date" class="input" value="${hariIni()}"></div>
+        <div class="field"><label class="label">Catatan Bersama</label>
+          <input id="msCatatan" class="input" maxlength="500"
+                 placeholder="Wajib untuk kategori Sedang / Berat"></div>
+      </div>
+    </div>`,
+    didOpen: () => {
+      aiGambarChip();
+      saranPelanggaran($('msKode'), (m) => {
+        MASSAL.master = m;
+        $('msInfo').innerHTML =
+          `<span class="tag ${tagKategori(m.kategori)}">${esc(m.kategori)}</span>
+           <b>${m.bobot_poin} poin</b> · ${esc(m.bidang || '-')} · ${esc(m.sumber || '-')} · ${esc(m.jenjang || 'Semua')}`;
+      });
+      saranSantri($('msSantri'), (s) => {
+        const inp = $('msSantri');
+        if (!MASSAL.pilih.some(x => String(x.nisn) === String(s.nisn))) {
+          if (MASSAL.pilih.length >= AI_AMBANG.maksSantri) toast('error', `Maksimal ${AI_AMBANG.maksSantri} santri.`);
+          else MASSAL.pilih.push(s);
+        }
+        inp.value = ''; delete inp.dataset.picked;
+        aiGambarChip();
+      });
+      $('msChips').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-hapus]'); if (!b) return;
+        MASSAL.pilih = MASSAL.pilih.filter(x => String(x.nisn) !== b.dataset.hapus);
+        aiGambarChip();
+      });
+      setTimeout(() => $('msKode').focus(), 120);
+    },
+    preConfirm: async () => {
+      const payload = await aiPayloadBulk({
+        santri: MASSAL.pilih,
+        kode: $('msKode').dataset.kode || MASSAL.master?.kode_pelanggaran || '',
+        tanggal: $('msTgl').value,
+        catatan: $('msCatatan').value.trim()
+      });
+      const hasil = aiValidasiBulk(payload);
+      if (hasil.status !== 'ok') {
+        Swal.showValidationMessage(hasil.errors.map(x => '• ' + x.issue).join('<br>'));
+        return false;
+      }
+      return { payload, hasil };
+    }
+  });
+
+  if (!res.isConfirmed) return;
+  const { payload, hasil } = res.value;
+  const r = hasil.ringkasan;
+
+  const konf = await Swal.fire({
+    title:'Konfirmasi Input Massal', width: 640,
+    showCancelButton:true, showDenyButton:true,
+    confirmButtonText:`Simpan ${r.total_panggilan} catatan`,
+    denyButtonText:'Salin payload AI', cancelButtonText:'Batal',
+    confirmButtonColor:'#14618B', denyButtonColor:'#4A6076',
+    html:`<div style="text-align:left;font-size:13px">
+      <p style="margin:0 0 8px"><b>${esc(r.kode_pelanggaran)} — ${esc(r.nama_pelanggaran)}</b><br>
+        <span class="tag ${tagKategori(r.kategori)}">${esc(r.kategori)}</span>
+        ${r.bobot_poin} poin · ${esc(r.bidang)} · ${esc(r.sumber)}</p>
+      <p style="margin:0 0 8px">${r.total_panggilan} santri ·
+        total ${angka(r.total_poin_ditambahkan)} poin ·
+        tanggal ${tgl(payload.input.tanggal)}</p>
+      ${hasil.peringatan.length ? `<div class="ai-warn">
+        <b>Perlu diperhatikan (${hasil.peringatan.length})</b>
+        <ul>${hasil.peringatan.map(w => `<li>${esc(w.pesan)}</li>`).join('')}</ul></div>` : ''}
+    </div>`
+  });
+
+  if (konf.isDenied) return aiSalinPayload(payload, 'Payload input massal');
+  if (!konf.isConfirmed) return;
+  await aiJalankanBulk(hasil);
+}
+
+// ---------- 24e. Analisis peraturan & master ------------------------
+async function aiPayloadPeraturan(hari) {
+  const n = Number(hari) || AI_AMBANG.mundurHari;
+  const { akhir, mulai, mulai30, prevMulai, prevAkhir } = aiJendela(n);
+
+  const [master, bidangMaster, detailAll] = await Promise.all([
+    amanKosong(muatMaster, 'master pelanggaran'),
+    amanKosong(muatBidang, 'master bidang'),
+    amanKosong(muatDetail, 'pelanggaran')
+  ]);
+
+  const rows = lingkupDetail(detailAll, false)
+    .filter(r => { const d = tglDari(kunciTgl(r.tanggal)); return d && d >= mulai && d <= akhir; });
+
+  const petaMaster = Object.fromEntries(master.map(m => [String(m.kode_pelanggaran).trim(), m]));
+  const jenis = {}, bidang = {}, harian = {}, terlibat = new Set();
+  let poin = 0;
+
+  rows.forEach(r => {
+    const d = tglDari(kunciTgl(r.tanggal));
+    const kode = String(r.kode_pelanggaran || '-').trim() || '-';
+    const nb = String(r.bidang || 'Belum Dipetakan').trim() || 'Belum Dipetakan';
+    const m = petaMaster[kode] || {};
+
+    if (!jenis[kode]) jenis[kode] = {
+      kode_pelanggaran: kode,
+      nama_pelanggaran: r.nama_pelanggaran || m.nama_pelanggaran || kode,
+      kategori: r.kategori || m.kategori || '-',
+      bobot_poin: Number(m.bobot_poin) || Number(r.bobot_pelanggaran) || 0,
+      bidang: nb, sumber: r.sumber || m.sumber || '-',
+      frek_total:0, frek_30h:0, frek_prev30:0, poin:0, _santri:new Set(), _kelas:{}
+    };
+    const j = jenis[kode];
+    j.frek_total++; j.poin += Number(r.bobot_pelanggaran) || 0;
+    if (r.nisn) j._santri.add(String(r.nisn));
+    const kl = String(r.kelas || '-').trim() || '-';
+    j._kelas[kl] = (j._kelas[kl] || 0) + 1;
+
+    if (!bidang[nb]) bidang[nb] = { nama:nb, jumlah:0, jumlah_30h:0, jumlah_prev30:0 };
+    bidang[nb].jumlah++;
+
+    if (d >= mulai30) { j.frek_30h++; bidang[nb].jumlah_30h++; }
+    else if (d >= prevMulai && d <= prevAkhir) { j.frek_prev30++; bidang[nb].jumlah_prev30++; }
+
+    const k = kunciTgl(r.tanggal);
+    harian[k] = (harian[k] || 0) + 1;
+    if (r.nisn) terlibat.add(String(r.nisn));
+    poin += Number(r.bobot_pelanggaran) || 0;
+  });
+
+  const perJenis = Object.values(jenis).map(j => ({
+    kode_pelanggaran: j.kode_pelanggaran,
+    nama_pelanggaran: j.nama_pelanggaran,
+    kategori: j.kategori, bobot_poin: j.bobot_poin,
+    bidang: j.bidang, sumber: j.sumber,
+    frek_total: j.frek_total, frek_30h: j.frek_30h, frek_prev30: j.frek_prev30,
+    poin: j.poin, santri_unik: j._santri.size,
+    kelas_teratas: Object.entries(j._kelas).sort((a,b) => b[1]-a[1]).slice(0,3)
+  })).sort((a,b) => b.frek_total - a.frek_total);
+
+  const terpakai = new Set(perJenis.map(j => j.kode_pelanggaran));
+  const tidakTerpakai = lingkupMaster(master)
+    .filter(m => !terpakai.has(String(m.kode_pelanggaran).trim()))
+    .map(m => ({
+      kode_pelanggaran: m.kode_pelanggaran, nama_pelanggaran: m.nama_pelanggaran,
+      kategori: m.kategori, bidang: m.bidang || 'Belum Dipetakan'
+    }));
+
+  return {
+    konteks: { unit:APP.ctx.unit, jenjang:APP.ctx.jenjang, role:role(),
+               hari_ini:hariIni(), rentang_hari:n },
+    periode: { mulai:kunciTgl(mulai), akhir:kunciTgl(akhir), mulai_30h:kunciTgl(mulai30),
+               prev_mulai:kunciTgl(prevMulai), prev_akhir:kunciTgl(prevAkhir) },
+    total: { kejadian: rows.length, santri_terlibat: terlibat.size, poin },
+    bidang_master: (bidangMaster || []).map(b => ({
+      nama_bidang: b.nama_bidang, deskripsi: b.deskripsi || '',
+      kata_kunci: b.kata_kunci || '', sumber: b.sumber || '',
+      jenjang: b.jenjang || 'Semua',
+      aktif: String(b.aktif == null ? 'Ya' : b.aktif).toLowerCase() !== 'tidak'
+    })),
+    per_jenis: perJenis,
+    per_bidang: Object.values(bidang)
+      .map(b => ({ ...b, persen: rows.length ? aiBulat(b.jumlah / rows.length * 100) : 0 }))
+      .sort((a,b) => b.jumlah - a.jumlah),
+    master_tidak_terpakai: tidakTerpakai,
+    harian: Object.entries(harian).sort().map(([tanggal, jumlah]) => ({ tanggal, jumlah }))
+  };
+}
+
+/** Tren 30 hari dalam bentuk teks singkat. */
+function aiTren(kini, lalu) {
+  if (!lalu) return kini ? 'baru' : 'kosong';
+  const p = Math.round((kini - lalu) / lalu * 100);
+  return `${p > 0 ? '+' : ''}${p}%`;
+}
+
+async function aiGambarAnalisisPeraturan() {
+  const el = $('anaPeraturan'); if (!el) return;
+  el.innerHTML = '<div class="ac-loading"><i class="fa-solid fa-circle-notch fa-spin"></i>Menghitung…</div>';
+  try {
+    const p = await aiPayloadPeraturan(AI_AMBANG.mundurHari);
+    APP.aiPeraturan = p;
+
+    const top = p.per_jenis.slice(0, 10);
+    const belum = p.per_bidang.find(b => b.nama === 'Belum Dipetakan');
+
+    el.innerHTML = `
+      <div class="ana-grid">
+        <div class="ana-box"><small>Kejadian ${p.konteks.rentang_hari} hari</small><b>${angka(p.total.kejadian)}</b></div>
+        <div class="ana-box"><small>Santri terlibat</small><b>${angka(p.total.santri_terlibat)}</b></div>
+        <div class="ana-box"><small>Jenis terpakai</small><b>${angka(p.per_jenis.length)}</b></div>
+        <div class="ana-box"><small>Jenis belum terpakai</small><b>${angka(p.master_tidak_terpakai.length)}</b></div>
+      </div>
+
+      <div class="tbl"><table>
+        <thead><tr><th>Kode</th><th>Nama Pelanggaran</th><th>Kategori</th><th>Bidang</th>
+          <th class="center">Total</th><th class="center">30h</th><th class="center">Tren</th>
+          <th class="center">Santri</th><th>Pola</th></tr></thead>
+        <tbody>${top.map(j => {
+          const pola = j.santri_unik && (j.frek_total / j.santri_unik) >= 2 ? 'Individu berulang' : 'Tersebar';
+          const t = aiTren(j.frek_30h, j.frek_prev30);
+          return `<tr>
+            <td class="secondary nowrap" style="padding-top:14px">${esc(j.kode_pelanggaran)}</td>
+            <td><div class="primary">${esc(j.nama_pelanggaran)}</div>
+                <div class="secondary">${esc(j.kelas_teratas.map(k => `${k[0]} (${k[1]})`).join(' · ') || '-')}</div></td>
+            <td><span class="tag ${tagKategori(j.kategori)}">${esc(j.kategori)}</span></td>
+            <td><span class="tag tag-sea">${esc(j.bidang)}</span></td>
+            <td class="num center">${j.frek_total}</td>
+            <td class="num center">${j.frek_30h}</td>
+            <td class="num center">${esc(t)}</td>
+            <td class="num center">${j.santri_unik}</td>
+            <td class="secondary" style="padding-top:14px">${pola}</td>
+          </tr>`;
+        }).join('') || barisKosong(9, 'Belum ada kejadian pada rentang ini.',
+            'Ubah unit aktif atau tunggu data masuk.')}</tbody>
+      </table></div>
+      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
+
+      ${belum ? `<div class="ai-warn" style="margin:14px 20px 0">
+        <b>${angka(belum.jumlah)} kejadian tanpa bidang</b>
+        <ul><li>Petakan jenis pelanggaran terkait ke Master Bidang agar laporan per divisi utuh.</li></ul>
+      </div>` : ''}
+
+      ${p.master_tidak_terpakai.length ? `<div class="ai-warn" style="margin:14px 20px 0">
+        <b>${angka(p.master_tidak_terpakai.length)} jenis tidak pernah dipakai</b>
+        <ul>${p.master_tidak_terpakai.slice(0, 8).map(m =>
+          `<li>${esc(m.kode_pelanggaran)} — ${esc(m.nama_pelanggaran)}</li>`).join('')}
+          ${p.master_tidak_terpakai.length > 8 ? `<li>… dan ${p.master_tidak_terpakai.length - 8} lainnya.</li>` : ''}</ul>
+      </div>` : ''}
+
+      <div class="ai-actions">
+        <button class="btn btn-ghost btn-sm" data-ai="payload-peraturan">
+          <i class="fa-solid fa-file-code"></i>Salin payload AI</button>
+        <button class="btn btn-ghost btn-sm" data-ai="prompt-peraturan">
+          <i class="fa-solid fa-wand-magic-sparkles"></i>Salin instruksi AI</button>
+      </div>`;
+    tandaiTabelBisaGeser();
+  } catch (err) {
+    el.innerHTML = '<div class="ac-empty">Analisis gagal dimuat.</div>';
+    fireError(err);
+  }
+}
+
+// ---------- 24f. Payload ringkasan eksekutif Pimpinan ---------------
+async function aiPayloadPimpinan() {
+  const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
+    amanKosong(muatSiswa, 'santri'),
+    amanKosong(muatDetail, 'pelanggaran'),
+    amanKosong(muatIzin, 'perizinan'),
+    amanKosong(muatPembinaan, 'pembinaan')
+  ]);
+
+  const siswa = siswaAll.filter(aktifSantri);
+  const mapSiswa = Object.fromEntries(siswa.map(s => [String(s.nisn), s]));
+  const detailAktif = detailAll.filter(aktifDetail);
+
+  const akhir = new Date(); akhir.setHours(23,59,59,999);
+  const mulai90 = tambahHari(akhir, -89); mulai90.setHours(0,0,0,0);
+  const mulai30 = tambahHari(akhir, -29); mulai30.setHours(0,0,0,0);
+  const prevMulai = tambahHari(mulai30, -30);
+  const prevAkhir = tambahHari(mulai30, -1); prevAkhir.setHours(23,59,59,999);
+
+  const d90 = [], d30 = [], dPrev = [];
+  detailAktif.forEach(r => {
+    const d = tglDari(kunciTgl(r.tanggal)); if (!d) return;
+    if (d >= mulai90 && d <= akhir) d90.push(r);
+    if (d >= mulai30 && d <= akhir) d30.push(r);
+    if (d >= prevMulai && d <= prevAkhir) dPrev.push(r);
+  });
+
+  const kat = { Ringan:0, Sedang:0, Berat:0, Lainnya:0 };
+  const bidang = {}, jenis = {}; let poin90 = 0; const terlibat = new Set();
+  d90.forEach(r => {
+    const k = ['Ringan','Sedang','Berat'].includes(r.kategori) ? r.kategori : 'Lainnya';
+    kat[k]++;
+    const b = String(r.bidang || 'Belum Dipetakan').trim() || 'Belum Dipetakan';
+    bidang[b] = (bidang[b] || 0) + 1;
+    const j = String(r.nama_pelanggaran || r.kode_pelanggaran || '-').trim();
+    jenis[j] = (jenis[j] || 0) + 1;
+    poin90 += Number(r.bobot_pelanggaran) || 0;
+    if (r.nisn) terlibat.add(String(r.nisn));
+  });
+
+  const wkKunci = [], wkPeta = {};
+  for (let c = awalPekan(mulai90); c <= awalPekan(akhir); c = tambahHari(c, 7)) {
+    const k = kunciTgl(c); wkKunci.push(k); wkPeta[k] = 0;
+  }
+  d90.forEach(r => {
+    const d = tglDari(kunciTgl(r.tanggal)); if (!d) return;
+    const k = kunciTgl(awalPekan(d)); if (k in wkPeta) wkPeta[k]++;
+  });
+
+  const urutAng = ['VII','VIII','IX','X','XI','XII'];
+  const angPeta = Object.fromEntries(urutAng.map(a =>
+    [a, { angkatan:a, jumlahSantri:0, kasus:0, poin:0, berat:0, terlibat:new Set() }]));
+  siswa.forEach(s => { const a = angkatanDariKelas(s.kelas); if (angPeta[a]) angPeta[a].jumlahSantri++; });
+  d90.forEach(r => {
+    const a = angkatanDariKelas(r.kelas); if (!angPeta[a]) return;
+    const it = angPeta[a];
+    it.kasus++; it.poin += Number(r.bobot_pelanggaran) || 0;
+    if (r.nisn) it.terlibat.add(String(r.nisn));
+    if (r.kategori === 'Berat') it.berat++;
+  });
+  const angkatan = urutAng.map(a => {
+    const it = angPeta[a];
+    return { angkatan:it.angkatan, jumlahSantri:it.jumlahSantri, kasus:it.kasus,
+             poin:it.poin, berat:it.berat, terlibat:it.terlibat.size,
+             per100: it.jumlahSantri ? aiBulat(it.kasus / it.jumlahSantri * 100) : 0 };
+  });
+
+  const izin90 = izinAll.filter(z => {
+    const d = tglDari(kunciTgl(z.tanggal_mulai)); return d && d >= mulai90 && d <= akhir;
+  });
+  const telatPer = {};
+  const izinStat = { sesuai:0, telat:0, pending:0, rate:0 };
+  izin90.forEach(z => {
+    const s = String(z.status_persetujuan || '').trim();
+    if (s === 'Sesuai Waktu') izinStat.sesuai++;
+    else if (s === 'Telat Balik') { izinStat.telat++; telatPer[String(z.nisn)] = (telatPer[String(z.nisn)] || 0) + 1; }
+    else if (s === 'Pending') izinStat.pending++;
+  });
+  const selesaiIzin = izinStat.sesuai + izinStat.telat;
+  izinStat.rate = selesaiIzin ? aiBulat(izinStat.telat / selesaiIzin * 100) : 0;
+
+  const pbnAktif = pembinaanAll.filter(aktifPembinaan);
+  const binaPer = {};
+  const binaStat = { total: pbnAktif.length, selesai:0, proses:0 };
+  pbnAktif.forEach(p => {
+    if (String(p.status_pembinaan) === 'Selesai') binaStat.selesai++;
+    else { binaStat.proses++; binaPer[String(p.nisn)] = (binaPer[String(p.nisn)] || 0) + 1; }
+  });
+  const pernahBina = new Set(pbnAktif.map(p => String(p.nisn)));
+
+  const prio = {};
+  const entri = (nisn) => {
+    if (!prio[nisn]) {
+      const s = mapSiswa[nisn] || {};
+      prio[nisn] = { nisn, nama: s.nama_siswa || '(tidak ditemukan)', kelas: s.kelas || '-',
+        kasus90:0, kasus30:0, poin90:0, ringan:0, sedang:0, berat:0, bidang:{},
+        telat: telatPer[nisn] || 0, bina: binaPer[nisn] || 0 };
+    }
+    return prio[nisn];
+  };
+  d90.forEach(r => {
+    const n = String(r.nisn || ''); if (!n) return;
+    const it = entri(n);
+    it.kasus90++; it.poin90 += Number(r.bobot_pelanggaran) || 0;
+    if (r.kategori === 'Ringan') it.ringan++;
+    if (r.kategori === 'Sedang') it.sedang++;
+    if (r.kategori === 'Berat') it.berat++;
+    const b = String(r.bidang || 'Belum Dipetakan').trim();
+    it.bidang[b] = (it.bidang[b] || 0) + 1;
+  });
+  d30.forEach(r => { const n = String(r.nisn || ''); if (n) entri(n).kasus30++; });
+  Object.keys(telatPer).forEach(entri);
+  Object.keys(binaPer).forEach(entri);
+
+  const daftarPrio = Object.values(prio).map(it => {
+    const dom = Object.entries(it.bidang).sort((a,b) => b[1]-a[1])[0];
+    it.bidangDominan = dom ? dom[0] : '-';
+    if (it.poin90 >= AI_AMBANG.poinKritis || it.berat >= 2) it.tier = 'Kritis';
+    else if (it.poin90 >= AI_AMBANG.poinPerhatian || it.berat >= 1 || it.kasus30 >= 5) it.tier = 'Perhatian Tinggi';
+    else if (it.kasus30 >= 3 || it.telat >= 2 || it.bina >= 1) it.tier = 'Monitor';
+    else it.tier = 'Observasi';
+
+    const alasan = [];
+    if (it.berat) alasan.push(`${it.berat} pelanggaran berat`);
+    if (it.kasus30 >= 3) alasan.push(`${it.kasus30} kasus dalam 30 hari`);
+    if (it.telat) alasan.push(`${it.telat} kali telat balik`);
+    if (it.bina) alasan.push(`${it.bina} pembinaan berjalan`);
+    if (!alasan.length && it.poin90) alasan.push(`${it.poin90} poin dalam 90 hari`);
+    it.alasan = alasan.join(' · ') || 'Perlu observasi berkala';
+    return it;
+  }).filter(it => it.kasus90 > 0 || it.telat > 0 || it.bina > 0);
+
+  const peringkat = { 'Kritis':4, 'Perhatian Tinggi':3, 'Monitor':2, 'Observasi':1 };
+  daftarPrio.sort((a,b) =>
+    (peringkat[b.tier]-peringkat[a.tier]) || (b.poin90-a.poin90) || (b.kasus30-a.kasus30));
+
+  const tier = { 'Kritis':0, 'Perhatian Tinggi':0, 'Monitor':0, 'Observasi':0 };
+  daftarPrio.forEach(x => { tier[x.tier]++; });
+  tier.rasio_kritis = siswa.length ? aiBulat(tier['Kritis'] / siswa.length * 100) : 0;
+  tier.tanpa_pembinaan = daftarPrio.filter(x =>
+    ['Kritis','Perhatian Tinggi'].includes(x.tier) && !pernahBina.has(x.nisn)).length;
+
+  const ubah = dPrev.length === 0
+    ? (d30.length === 0 ? 0 : null)
+    : aiBulat((d30.length - dPrev.length) / dPrev.length * 100);
+
+  return {
+    konteks: { hari_ini:hariIni(), unit:APP.ctx.unit, jenjang:APP.ctx.jenjang,
+               santri_aktif: siswa.length },
+    pelanggaran: {
+      d90: d90.length, d30: d30.length, dPrev: dPrev.length, ubah,
+      poin90, santri_terlibat: terlibat.size,
+      persen_terlibat: siswa.length ? aiBulat(terlibat.size / siswa.length * 100) : 0,
+      kategori: kat
+    },
+    bidang: Object.entries(bidang).sort((a,b) => b[1]-a[1])
+      .map(([nama, jumlah]) => ({ nama, jumlah,
+        persen: d90.length ? aiBulat(jumlah / d90.length * 100) : 0 })),
+    top_jenis: Object.entries(jenis).sort((a,b) => b[1]-a[1]).slice(0, 8),
+    mingguan: wkKunci.map(k => ({ pekan:k, jumlah: wkPeta[k] })),
+    angkatan, izin: izinStat, pembinaan: binaStat, tier,
+    prioritas: daftarPrio.slice(0, 20).map(x => ({
+      nisn:x.nisn, nama:x.nama, kelas:x.kelas, tier:x.tier,
+      kasus90:x.kasus90, kasus30:x.kasus30, poin90:x.poin90,
+      ringan:x.ringan, sedang:x.sedang, berat:x.berat,
+      telat:x.telat, bina:x.bina, bidangDominan:x.bidangDominan, alasan:x.alasan
+    }))
+  };
+}
+
+// ---------- 24g. Satu penyalur klik untuk seluruh tombol AI ---------
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-ai]'); if (!b) return;
+  e.preventDefault();
+  const aksi = b.dataset.ai;
+  try {
+    if (aksi === 'massal') return modalMassalPelanggaran();
+    if (aksi === 'analisis-peraturan') return aiGambarAnalisisPeraturan();
+
+    if (aksi === 'prompt-bulk')      return aiSalin(AI_PROMPT.bulk, 'Instruksi input massal');
+    if (aksi === 'prompt-peraturan') return aiSalin(AI_PROMPT.peraturan, 'Instruksi analisis peraturan');
+    if (aksi === 'prompt-pimpinan')  return aiSalin(AI_PROMPT.pimpinan, 'Instruksi analisis eksekutif');
+
+    if (aksi === 'payload-peraturan') {
+      const p = APP.aiPeraturan || await aiPayloadPeraturan(AI_AMBANG.mundurHari);
+      return aiSalinPayload(p, 'Payload analisis peraturan');
+    }
+    if (aksi === 'payload-pimpinan') {
+      const asli = mulaiSimpan(b, 'Menyusun…');
+      const p = await aiPayloadPimpinan();
+      selesaiSimpan(b, asli, true, 'Payload siap');
+      return aiSalinPayload(p, 'Payload dashboard pimpinan');
+    }
+  } catch (err) { fireError(err); }
+});
 
 // ---------------------------------------------------------------------
 // 22. START — pulihkan sesi bila masih berlaku
