@@ -1205,6 +1205,76 @@ select.per-in{appearance:none;padding-right:14px;
 .ai-warn ul{margin:0;padding-left:17px}
 .ai-warn li{margin:2px 0;color:var(--text-2)}
 
+/* ---------- Kesimpulan konsultan pendidikan ---------- */
+.kons-head{display:flex;gap:14px;align-items:flex-start;margin:16px 20px 0;padding:14px 16px;
+  border-radius:var(--r-lg);border:1px solid var(--line);background:var(--paper)}
+.kons-head.ok{border-color:#BFE3DC;background:#F0FAF7}
+.kons-head.warn{border-color:#F0DFA8;background:#FDF8EA}
+.kons-head.danger{border-color:#F3C9D3;background:#FDF1F4}
+.kons-ikon{flex:0 0 40px;height:40px;border-radius:50%;display:grid;place-items:center;
+  background:var(--navy);color:#F2E5B8;font-size:15px}
+.kons-head small{display:block;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-3);margin-bottom:5px}
+.kons-head p{margin:0;font-size:14px;line-height:1.55;color:var(--navy);
+  font-family:'Inter Tight',sans-serif}
+
+.kons-angka{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:10px;padding:14px 20px 0}
+.kons-angka .arah{display:block;margin-top:3px;font-size:11px;color:var(--text-3)}
+.kons-angka .arah.naik{color:var(--maroon)}
+.kons-angka .arah.turun{color:var(--teal)}
+
+.kons-pilar{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+  gap:12px;padding:16px 20px 0}
+.kons-pilar article{border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;
+  background:var(--surface)}
+.kons-pilar h4{margin:0 0 6px;font-size:12.5px;color:var(--navy);
+  font-family:'Inter Tight',sans-serif;display:flex;align-items:center;gap:7px}
+.kons-pilar h4 i{color:var(--sea);font-size:12px}
+.kons-pilar p{margin:0;font-size:12.5px;line-height:1.6;color:var(--text-2)}
+
+.kons-saran{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:12px;padding:16px 20px 0}
+.kons-kolom{border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;
+  background:var(--paper)}
+.kons-kolom h4{margin:0 0 9px;font-size:12.5px;color:var(--navy);
+  font-family:'Inter Tight',sans-serif;display:flex;align-items:center;gap:7px}
+.kons-kolom h4 i{color:var(--brass)}
+.kons-kolom ul{list-style:none;margin:0;padding:0}
+.kons-kolom li{padding:9px 0;border-top:1px solid var(--line-soft)}
+.kons-kolom li:first-child{border-top:0;padding-top:0}
+.kons-kolom li p{margin:5px 0 3px;font-size:12.5px;line-height:1.55;color:var(--text)}
+.kons-kolom li small{font-size:11.5px;color:var(--text-3);line-height:1.5}
+
+.kons-sorot{padding:16px 20px 0}
+.kons-sorot h4{margin:0 0 8px;font-size:12.5px;color:var(--navy);
+  font-family:'Inter Tight',sans-serif;display:flex;align-items:center;gap:7px}
+.kons-sorot h4 i{color:var(--maroon)}
+.kons-chips{display:flex;flex-wrap:wrap;gap:7px}
+.kons-chips .mchip{cursor:pointer}
+.kons-chips .mchip:hover{border-color:var(--sea)}
+.kons-catatan{display:flex;gap:9px;margin:16px 20px 0;padding:10px 13px;border-radius:var(--r);
+  background:#F1F7FA;font-size:12px;color:var(--text-2);line-height:1.55}
+.kons-catatan i{color:var(--sea);margin-top:2px}
+
+/* ---------- Evaluasi bidang ---------- */
+.bid-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));
+  gap:11px;padding:16px 20px}
+.bid-card{text-align:left;border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:13px 14px;background:var(--surface);cursor:pointer;transition:.16s}
+.bid-card:hover{border-color:#CFDCE6;transform:translateY(-1px)}
+.bid-card.on{border-color:var(--sea);box-shadow:0 0 0 2px rgba(20,97,139,.12)}
+.bid-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+.bid-top b{font-size:13px;color:var(--navy);font-family:'Inter Tight',sans-serif}
+.bid-angka{font-family:'IBM Plex Mono',monospace;font-size:22px;color:var(--navy);line-height:1}
+.bid-angka small{display:block;margin-top:4px;font-family:'Inter Tight',sans-serif;
+  font-size:11px;color:var(--text-3)}
+.bid-bar{display:flex;height:6px;border-radius:4px;overflow:hidden;margin:10px 0 7px;
+  background:var(--line-soft)}
+.bid-bar span{display:block;height:100%}
+.bid-kaki{font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',monospace}
+@media(max-width:640px){.bid-grid{grid-template-columns:1fr 1fr;padding:14px}}
+
 /* ---------- Cetak: sembunyikan elemen antarmuka ---------- */
 @media print{
   #bar,#scrim,#pdfMask,#pdfStage{display:none !important}
@@ -1283,6 +1353,7 @@ select.per-in{appearance:none;padding-right:14px;
       <p class="sb-group" data-group="operasional">Operasional</p>
       <button class="nav-item" data-view="pelanggaran"><i class="fa-solid fa-scale-balanced"></i>Catatan Pelanggaran</button>
       <button class="nav-item" data-view="rekap"><i class="fa-solid fa-layer-group"></i>Rekap Pelanggaran</button>
+      <button class="nav-item" data-view="bidang"><i class="fa-solid fa-diagram-project"></i>Evaluasi Bidang</button>
         <button class="nav-item" data-view="pengasuhan"><i class="fa-solid fa-mosque"></i>Pengasuhan</button>
       <button class="nav-item" data-view="madrasah"><i class="fa-solid fa-school"></i>Madrasah</button>
       <button class="nav-item" data-view="perizinan"><i class="fa-solid fa-door-open"></i>Perizinan
