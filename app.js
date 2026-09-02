@@ -1314,6 +1314,8 @@ function tandaiTabelBisaGeser() {
 // ---------------------------------------------------------------------
 const tagKategori = (k) => k === 'Ringan' ? 'tag-ringan' : k === 'Sedang' ? 'tag-sedang' : 'tag-berat';
 const tagIzin = (s) => s === 'Sesuai Waktu' ? 'tag-ok' : s === 'Telat Balik' ? 'tag-berat' : 'tag-wait';
+/** Kelas aksen garis kiri pada kartu izin, mengikuti status persetujuan. */
+const garisIzin = (s) => s === 'Sesuai Waktu' ? 'st-ok' : s === 'Telat Balik' ? 'st-telat' : 'st-wait';
 
 function stat(label, nilai, ikon, warna, aksen, kaki) {
   return `<div class="stat rise" style="--accent:${aksen}">
@@ -2721,7 +2723,7 @@ async function gambarIzin() {
   $('queryTime').textContent = `perizinan · ${angka(rows.length)} kartu`;
 
   $('izinGrid').innerHTML = hal.map(p => `
-    <div class="izin">
+    <div class="izin ${garisIzin(p.status_persetujuan)}">
       <div class="top">
         <div style="min-width:0">
           <p style="margin:0;font-weight:700;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
@@ -2837,21 +2839,32 @@ function bolehPerpanjang(z) {
 /** Tombol aksi kartu izin — dipakai bersama oleh Perizinan & Pengasuhan. */
 function aksiIzin(z, tandaProses, tandaPanjang) {
   const a = [];
+  const nama = esc(z.siswa?.nama_siswa || z.nisn || 'santri ini');
+
   if (String(z.status_persetujuan) === 'Pending' && bisa('izin.proses') && !hanyaBaca()) {
-    a.push(`<button class="btn btn-danger btn-sm" data-${tandaProses}="${esc(z.id_izin)}|Telat Balik">
+    a.push(`<button class="btn btn-danger btn-sm act-telat"
+      data-${tandaProses}="${esc(z.id_izin)}|Telat Balik"
+      title="Tandai telat balik" aria-label="Tandai izin ${nama} telat balik">
       <i class="fa-solid fa-clock-rotate-left"></i>Telat Balik</button>`);
-    a.push(`<button class="btn btn-ok btn-sm" data-${tandaProses}="${esc(z.id_izin)}|Sesuai Waktu">
+    a.push(`<button class="btn btn-ok btn-sm act-sesuai"
+      data-${tandaProses}="${esc(z.id_izin)}|Sesuai Waktu"
+      title="Tandai kembali sesuai waktu" aria-label="Tandai izin ${nama} sesuai waktu">
       <i class="fa-solid fa-check"></i>Sesuai Waktu</button>`);
   }
   if (bolehPerpanjang(z)) {
-    a.push(`<button class="btn btn-ghost btn-sm" data-${tandaPanjang}="${esc(z.id_izin)}">
+    a.push(`<button class="btn btn-ghost btn-sm act-panjang"
+      data-${tandaPanjang}="${esc(z.id_izin)}"
+      title="Perpanjang masa izin" aria-label="Perpanjang izin ${nama}">
       <i class="fa-solid fa-calendar-plus"></i>Perpanjang</button>`);
   }
   if (bisa('izin.lihat')) {
-    a.push(`<button class="btn btn-ghost btn-sm" data-wa="${esc(z.id_izin)}">
+    a.push(`<button class="btn btn-ghost btn-sm act-wa" data-wa="${esc(z.id_izin)}"
+      title="Kirim rincian izin ke grup WhatsApp" aria-label="Kirim izin ${nama} ke grup WhatsApp">
       <i class="fa-brands fa-whatsapp"></i>Kirim ke Grup</button>`);
   }
-  return a.length ? `<div class="acts">${a.join('')}</div>` : '';
+  // Kelas `ganjil` membuat tombol terakhir melebar penuh pada grid dua kolom.
+  const ganjil = a.length % 2 === 1 ? ' ganjil' : '';
+  return a.length ? `<div class="acts${ganjil}">${a.join('')}</div>` : '';
 }
 
 /** Hitung selisih hari inklusif untuk ditampilkan di modal. */
@@ -5864,7 +5877,7 @@ function pgsGambarIzin() {
   $('queryTime').textContent = `perizinan pengasuhan · ${angka(rows.length)} kartu`;
 
   $('pgIzGrid').innerHTML = hal.map(z => `
-    <div class="izin">
+    <div class="izin ${garisIzin(z.status_persetujuan)}">
       <div class="top">
         <div style="min-width:0">
           <p style="margin:0;font-weight:700;font-size:13.5px;overflow:hidden;
