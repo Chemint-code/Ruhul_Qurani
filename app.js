@@ -242,6 +242,7 @@ const MENU_ROLE = {
   siswa:       ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
   pelanggaran: ['Admin'],
   rekap:       ['Admin'],
+  bidang:      ['Admin','Guru','Walas','Guru BK','Guru Piket','Pimpinan'],
   pengasuhan:  ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
   madrasah:    ['Admin','Guru','Walas','Guru BK','Guru Piket','Osis','Ustadz GEN-Z'],
   perizinan:   ['Admin','Guru','Guru Piket','Klinik'],
@@ -257,6 +258,7 @@ const JUDUL = {
   siswa:      { lat:'Santri',          ar:'بيانات الطلاب',      teks:'Profil Santri' },
   pelanggaran:{ lat:'Pelanggaran',     ar:'المخالفات',          teks:'Catatan Pelanggaran' },
   rekap:      { lat:'Rekap',           ar:'حصر المخالفات',      teks:'Rekap Pelanggaran' },
+  bidang:     { lat:'Evaluasi Bidang', ar:'تقويم المجالات',     teks:'Evaluasi Bidang Pelanggaran' },
   pengasuhan: { lat:'Pengasuhan',      ar:'التربية والانضباط',  teks:'Unit Pengasuhan' },
   madrasah:   { lat:'Madrasah',        ar:'المدرسة',            teks:'Modul Madrasah' },
   perizinan:  { lat:'Perizinan',       ar:'الاستئذان',          teks:'Pusat Perizinan' },
@@ -1284,6 +1286,7 @@ async function navigateTo(view) {
     else if (view === 'siswa')       await viewSiswa();
     else if (view === 'pelanggaran') await viewPelanggaran();
     else if (view === 'rekap')       await viewRekap();
+    else if (view === 'bidang')      await viewEvaluasiBidang();
     else if (view === 'pengasuhan')  await viewPengasuhan();
     else if (view === 'madrasah')    await viewMadrasah();
     else if (view === 'perizinan')   await viewPerizinan();
@@ -1865,6 +1868,8 @@ async function viewPimpinan() {
       </div>
     </section>
 
+    <div id="konsultanBox"></div>
+
     <div class="grid-2">
       ${kartu('Gelombang Pelanggaran Mingguan', chartBox('pWeek'), '', '90 hari terakhir')}
       ${kartu('Risiko Relatif per Angkatan', chartBox('pAng'), '', 'Kasus per 100 santri')}
@@ -1950,6 +1955,7 @@ async function viewPimpinan() {
     options:{ responsive:true, maintainAspectRatio:false, cutout:'66%',
       plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:9}}} }});
 
+  await gambarKonsultan();
   await panelKinerjaGuru();
 }
 
@@ -2776,7 +2782,7 @@ async function modalAjukanIzin() {
         p_jenis: $('zJenis').value, p_alasan: $('zAlasan').value.trim()
       });
       if (error) { Swal.showValidationMessage(error.message); return false; }
-      return true;
+      return { nisn };
     }
   });
   if (res.isConfirmed) {
@@ -2784,6 +2790,7 @@ async function modalAjukanIzin() {
     sync('done', 'Izin tersimpan');
     toast('success','Permohonan izin tersimpan');
     gambarIzin(); refreshBadgePending();
+    waKirimIzinTerbaru(res.value?.nisn);
   }
 }
 
@@ -2839,6 +2846,10 @@ function aksiIzin(z, tandaProses, tandaPanjang) {
   if (bolehPerpanjang(z)) {
     a.push(`<button class="btn btn-ghost btn-sm" data-${tandaPanjang}="${esc(z.id_izin)}">
       <i class="fa-solid fa-calendar-plus"></i>Perpanjang</button>`);
+  }
+  if (bisa('izin.lihat')) {
+    a.push(`<button class="btn btn-ghost btn-sm" data-wa="${esc(z.id_izin)}">
+      <i class="fa-brands fa-whatsapp"></i>Kirim ke Grup</button>`);
   }
   return a.length ? `<div class="acts">${a.join('')}</div>` : '';
 }
@@ -3400,20 +3411,7 @@ async function viewMaster() {
           <th>Jenjang</th><th>Status</th><th class="right">Aksi</th></tr></thead>
         <tbody id="tbBidang"></tbody>
       </table></div>`,
-      isAdmin() ? `<button class="btn btn-primary btn-sm" id="btnAddBidang"><i class="fa-solid fa-plus"></i>Tambah Bidang</button>` : '')}
-
-    ${kartu('Analisis Frekuensi Peraturan', `
-      <div class="card-note"><i class="fa-solid fa-chart-simple"></i>
-        Peringkat jenis pelanggaran ${AI_AMBANG.mundurHari} hari terakhir pada unit aktif,
-        lengkap dengan tren 30 hari, sebaran santri, dan jenis yang tidak pernah dipakai.</div>
-      <div id="anaPeraturan">
-        <div class="ai-actions">
-          <button class="btn btn-primary btn-sm" data-ai="analisis-peraturan">
-            <i class="fa-solid fa-play"></i>Jalankan analisis</button>
-        </div>
-      </div>`,
-      `<span class="tag tag-off">${AI_AMBANG.mundurHari} hari</span>`,
-      `Dasar evaluasi peraturan untuk unit: ${labelKonteks()}`)}`;
+      isAdmin() ? `<button class="btn btn-primary btn-sm" id="btnAddBidang"><i class="fa-solid fa-plus"></i>Tambah Bidang</button>` : '')}`;
 
   $('msCari').addEventListener('input', debounce(e => { stMaster.cari = e.target.value.trim(); gambarMaster(); }, 220));
   $('btnAddMaster')?.addEventListener('click', () => modalMaster(null));
@@ -5938,13 +5936,14 @@ async function pgsModalIzin() {
         p_jenis: $('pzJenis').value, p_alasan: $('pzAlasan').value.trim()
       });
       if (error) { Swal.showValidationMessage(error.message); return false; }
-      return true;
+      return { nisn };
     }
   });
   if (!res.isConfirmed) return;
   sync('done', 'Izin tersimpan');
   toast('success', 'Permohonan izin tersimpan');
   await pgsMuatUlangIzin();
+  waKirimIzinTerbaru(res.value?.nisn);
 }
 
 async function pgsProsesIzin(idIzin, keputusan) {
@@ -6952,6 +6951,10 @@ document.addEventListener('click', async (e) => {
     if (aksi === 'prompt-bulk')      return aiSalin(AI_PROMPT.bulk, 'Instruksi input massal');
     if (aksi === 'prompt-peraturan') return aiSalin(AI_PROMPT.peraturan, 'Instruksi analisis peraturan');
     if (aksi === 'prompt-pimpinan')  return aiSalin(AI_PROMPT.pimpinan, 'Instruksi analisis eksekutif');
+    if (aksi === 'salin-kesimpulan') {
+      if (!APP.aiKesimpulan) return toast('error', 'Kesimpulan belum tersusun.');
+      return aiSalin(kesimpulanKeTeks(APP.aiKesimpulan), 'Kesimpulan konsultan');
+    }
 
     if (aksi === 'payload-peraturan') {
       const p = APP.aiPeraturan || await aiPayloadPeraturan(AI_AMBANG.mundurHari);
@@ -6963,6 +6966,619 @@ document.addEventListener('click', async (e) => {
       selesaiSimpan(b, asli, true, 'Payload siap');
       return aiSalinPayload(p, 'Payload dashboard pimpinan');
     }
+  } catch (err) { fireError(err); }
+});
+
+// ---------------------------------------------------------------------
+// 25. KONSULTAN PENDIDIKAN — KESIMPULAN OTOMATIS
+//     Mesin aturan yang membaca payload eksekutif lalu menyusun satu
+//     kesimpulan, lima pilar diagnosis, dan saran terpisah per peran.
+//     Bila AI_LLM.url diisi, narasi diambil dari layanan tersebut dan
+//     mesin lokal dipakai sebagai cadangan bila layanan gagal.
+// ---------------------------------------------------------------------
+
+/**
+ * Jembatan opsional ke layanan analisis (mis. Supabase Edge Function).
+ * Kosongkan `url` bila ingin memakai mesin lokal saja.
+ * Layanan diharapkan menerima { prompt, payload } dan membalas JSON
+ * dengan skema yang sama seperti keluaran konsultanLokal().
+ */
+const AI_LLM = {
+  url: '',                 // contoh: 'https://xxxx.supabase.co/functions/v1/konsultan'
+  header: { 'Content-Type': 'application/json' },
+  timeout: 25000
+};
+
+const aiPersen = (a, b) => b ? Math.round((Number(a) / Number(b)) * 1000) / 10 : 0;
+
+/** Kesimpulan konsultan berbasis aturan — selalu tersedia tanpa jaringan. */
+function konsultanLokal(p) {
+  const pl = p.pelanggaran, kat = pl.kategori, t = p.tier;
+  const total = pl.d90 || 0;
+  const persenBerat = aiPersen(kat.Berat, total);
+  const persenSedang = aiPersen(kat.Sedang, total);
+  const persenRingan = aiPersen(kat.Ringan, total);
+  const kasusPerSantri = pl.santri_terlibat ? Math.round(total / pl.santri_terlibat * 10) / 10 : 0;
+  const dom = p.bidang[0] || null;
+  const belumPeta = p.bidang.find(b => b.nama === 'Belum Dipetakan');
+  const rasioSelesai = aiPersen(p.pembinaan.selesai, p.pembinaan.total);
+  const angkatanTop = p.angkatan.filter(a => a.jumlahSantri > 0)
+    .slice().sort((a, b) => b.per100 - a.per100)[0];
+  const ubah = pl.ubah;
+
+  // ----- kondisi (ambang identik dengan dashboard) -----
+  let kondisi = { kode:'ok', label:'Relatif Terkendali', ikon:'✅' };
+  if ((ubah !== null && ubah > 20) || t.rasio_kritis >= 3 || kat.Berat >= 10) {
+    kondisi = { kode:'danger', label:'Perlu Perhatian Pimpinan', ikon:'🚨' };
+  } else if ((ubah !== null && ubah > 5) || t['Kritis'] > 0
+             || t['Perhatian Tinggi'] >= 5 || p.izin.rate >= 20) {
+    kondisi = { kode:'warn', label:'Perlu Penguatan Pengawasan', ikon:'⚠' };
+  }
+
+  const arah = ubah === null ? 'belum bisa dibandingkan'
+    : ubah > 5 ? `naik ${ubah}%` : ubah < -5 ? `turun ${Math.abs(ubah)}%` : 'relatif datar';
+
+  // ----- lima pilar -----
+  const diagnosis = {
+    disiplin_umum:
+      `${angka(total)} catatan dalam 90 hari melibatkan ${angka(pl.santri_terlibat)} santri `
+      + `(${pl.persen_terlibat}% dari ${angka(p.konteks.santri_aktif)} santri aktif). `
+      + `Tren 30 hari terakhir ${arah} dibanding periode sebelumnya `
+      + `(${pl.d30} vs ${pl.dPrev} kasus). `
+      + (ubah !== null && ubah < -5
+          ? 'Penurunan ini perlu dipastikan berasal dari perbaikan perilaku, bukan dari pencatatan yang mengendur.'
+          : ubah !== null && ubah > 5
+            ? 'Kenaikan ini layak ditelusuri ke bidang dan angkatan penyumbang terbesar.'
+            : 'Volume stabil; fokus dialihkan ke kualitas tindak lanjut.'),
+
+    beban_kategori:
+      `Komposisi Ringan ${persenRingan}% · Sedang ${persenSedang}% · Berat ${persenBerat}%. `
+      + (persenBerat > 15
+          ? `Porsi Berat melampaui 15% — ini temuan yang menuntut asesmen individual, bukan sekadar sanksi. `
+          : `Porsi Berat masih di bawah 15%, artinya sebagian besar persoalan bersifat pembiasaan. `)
+      + `Rata-rata ${kasusPerSantri} kasus per santri terlibat, sehingga beban tergolong `
+      + (kasusPerSantri >= 3 ? 'terkonsentrasi pada sedikit santri yang berulang.'
+                             : 'tersebar merata di banyak santri.'),
+
+    fokus_bidang: dom
+      ? `Bidang ${dom.nama} mendominasi dengan ${angka(dom.jumlah)} kasus (${dom.persen}%). `
+        + (dom.persen >= 40
+            ? 'Konsentrasi setinggi ini biasanya menandakan rumusan aturan yang belum operasional atau penegakan yang tidak seragam antar petugas.'
+            : 'Proporsi ini masih wajar untuk lingkungan asrama; yang perlu dijaga adalah konsistensi pembiasaan harian.')
+        + (belumPeta ? ` Catatan: ${angka(belumPeta.jumlah)} kejadian belum terpetakan ke bidang mana pun.` : '')
+      : 'Belum ada kejadian yang cukup untuk menilai fokus bidang.',
+
+    respons_pembinaan:
+      `${angka(p.pembinaan.total)} catatan pembinaan: ${angka(p.pembinaan.selesai)} Selesai `
+      + `dan ${angka(p.pembinaan.proses)} Dalam Proses (${rasioSelesai}% tuntas). `
+      + (t.tanpa_pembinaan > 0
+          ? `${t.tanpa_pembinaan} santri tier Kritis/Perhatian Tinggi belum memiliki catatan pembinaan sama sekali — ini celah terbesar saat ini.`
+          : 'Seluruh santri tier tinggi sudah tersentuh pembinaan; tinggal memastikan penutupan status setelah evaluasi.'),
+
+    perilaku_sekunder:
+      `Izin Telat Balik ${p.izin.telat} dari ${p.izin.sesuai + p.izin.telat} izin yang sudah berketerangan `
+      + `(${p.izin.rate}%). `
+      + (p.izin.rate >= 20
+          ? 'Angka di atas 20% menandakan pengendalian diri dan kepatuhan jadwal yang lemah, dan biasanya berkorelasi dengan pelanggaran lain.'
+          : 'Angka ini masih dalam batas wajar.')
+      + (angkatanTop && angkatanTop.per100 > 0
+          ? ` Angkatan ${angkatanTop.angkatan} tercatat tertinggi secara relatif dengan ${angkatanTop.per100} kasus per 100 santri.`
+          : '')
+  };
+
+  // ----- saran per peran -----
+  const guru = [];
+  if (dom && dom.persen >= 30) guru.push({
+    urgensi:'pekan_ini',
+    aksi:`Sosialisasi ulang aturan bidang ${dom.nama} di jam wali kelas, memakai 5 contoh kasus nyata dari catatan 30 hari terakhir.`,
+    metrik:`Kasus bidang ${dom.nama} turun di bawah ${Math.max(10, dom.persen - 10)}% pada tinjauan berikutnya.` });
+  if (persenRingan >= 60) guru.push({
+    urgensi:'segera',
+    aksi:'Perkuat pengingat rutin sebelum waktu rawan (bangun subuh, masuk kelas, tertib asrama) alih-alih menambah sanksi baru.',
+    metrik:'Jumlah kasus Ringan harian turun pada dua pekan berjalan.' });
+  if (angkatanTop && angkatanTop.per100 > 0) guru.push({
+    urgensi:'pekan_ini',
+    aksi:`Wali kelas angkatan ${angkatanTop.angkatan} memetakan kelas penyumbang terbesar dan menyepakati satu aturan kelas bersama santri.`,
+    metrik:`Kasus per 100 santri angkatan ${angkatanTop.angkatan} turun dari ${angkatanTop.per100}.` });
+  guru.push({
+    urgensi:'dua_pekan',
+    aksi:'Samakan standar pencatatan antar petugas: satu perbuatan satu kode, catatan diisi untuk kategori Sedang dan Berat.',
+    metrik:'Tidak ada lagi kejadian berbidang "Belum Dipetakan" pada catatan baru.' });
+
+  const bk = [];
+  if (t['Kritis'] > 0) bk.push({
+    urgensi:'segera',
+    sasaran:`${t['Kritis']} santri tier Kritis`,
+    bentuk_pembinaan:'pendampingan individu',
+    lini_masa:'Kontak awal dalam 3 hari, asesmen tuntas dalam 2 pekan.' });
+  if (t.tanpa_pembinaan > 0) bk.push({
+    urgensi:'segera',
+    sasaran:`${t.tanpa_pembinaan} santri tier tinggi yang belum memiliki catatan pembinaan`,
+    bentuk_pembinaan:'asesmen',
+    lini_masa:'Jadwalkan seluruhnya pekan ini agar tidak ada kasus berat yang menggantung.' });
+  if (t['Perhatian Tinggi'] >= 5) bk.push({
+    urgensi:'pekan_ini',
+    sasaran:`${t['Perhatian Tinggi']} santri tier Perhatian Tinggi`,
+    bentuk_pembinaan:'pembinaan kelompok',
+    lini_masa:'Dua sesi dalam tiga pekan, dengan kesepakatan tertulis per santri.' });
+  if (p.izin.rate >= 20) bk.push({
+    urgensi:'pekan_ini',
+    sasaran:'Santri yang berulang kali Telat Balik',
+    bentuk_pembinaan:'pertemuan wali',
+    lini_masa:'Undang wali santri dengan dua kali telat atau lebih dalam bulan berjalan.' });
+  if (!bk.length) bk.push({
+    urgensi:'pekan_ini',
+    sasaran:'Santri tier Monitor',
+    bentuk_pembinaan:'pendampingan individu',
+    lini_masa:'Pemantauan ringan dua pekan sekali untuk mencegah naik tier.' });
+
+  const pimpinan = [];
+  if (ubah !== null && ubah > 20) pimpinan.push({
+    urgensi:'pekan_ini',
+    tinjau:`Lonjakan ${ubah}% pada 30 hari terakhir.`,
+    keputusan:'Panggil rapat lintas bagian (Pengasuhan, Madrasah, BK) untuk menetapkan satu prioritas penanganan, bukan beberapa sekaligus.',
+    lini_masa:'Rapat pekan ini, evaluasi 14 hari.' });
+  if (persenBerat > 15) pimpinan.push({
+    urgensi:'pekan_ini',
+    tinjau:`Porsi pelanggaran Berat ${persenBerat}%.`,
+    keputusan:'Periksa proporsionalitas kategori dan bobot pada Master Pelanggaran, serta keseragaman penegakan antar petugas.',
+    lini_masa:'Tinjauan katalog selesai dalam 14 hari.' });
+  if (rasioSelesai < 50 && p.pembinaan.total > 0) pimpinan.push({
+    urgensi:'dua_pekan',
+    tinjau:`Hanya ${rasioSelesai}% pembinaan berstatus Selesai.`,
+    keputusan:'Tetapkan batas waktu penutupan pembinaan dan tambah kapasitas pembina bila beban melebihi kemampuan.',
+    lini_masa:'Kebijakan berlaku awal bulan berikutnya.' });
+  if (belumPeta) pimpinan.push({
+    urgensi:'dua_pekan',
+    tinjau:`${angka(belumPeta.jumlah)} kejadian tanpa bidang.`,
+    keputusan:'Instruksikan Admin memetakan seluruh jenis pelanggaran ke Master Bidang agar laporan per divisi utuh.',
+    lini_masa:'Selesai dalam 14 hari.' });
+  if (!pimpinan.length) pimpinan.push({
+    urgensi:'dua_pekan',
+    tinjau:'Indikator utama masih terkendali.',
+    keputusan:'Pertahankan intensitas pengawasan dan jadwalkan sosialisasi berkala pada bidang dominan.',
+    lini_masa:'Tinjauan rutin 14 hari.' });
+
+  const kesimpulan =
+    `${kondisi.ikon} ${kondisi.label} — ${angka(total)} catatan 90 hari, tren 30 hari ${arah}; `
+    + `${t['Kritis']} santri tier Kritis dan ${t['Perhatian Tinggi']} Perhatian Tinggi `
+    + `(${t.rasio_kritis}% santri aktif berada di tier Kritis).`;
+
+  const kini = tglDari(p.konteks.hari_ini) || new Date();
+
+  return {
+    status: 'ok',
+    sumber: 'lokal',
+    kesimpulan_sementara: kesimpulan,
+    kondisi,
+    diagnosis,
+    sorotan_angka: [
+      { label:'Santri terlibat', nilai:`${pl.persen_terlibat}%`,
+        arah: pl.persen_terlibat >= 30 ? 'naik' : 'stabil' },
+      { label:'Porsi kategori Berat', nilai:`${persenBerat}%`,
+        arah: persenBerat > 15 ? 'naik' : 'stabil' },
+      { label:'Pembinaan tuntas', nilai:`${rasioSelesai}%`,
+        arah: rasioSelesai >= 60 ? 'naik' : 'turun' },
+      { label:'Izin telat balik', nilai:`${p.izin.rate}%`,
+        arah: p.izin.rate >= 20 ? 'naik' : 'stabil' },
+      { label:'Perubahan 30 hari', nilai: ubah === null ? 'Baru' : `${ubah > 0 ? '+' : ''}${ubah}%`,
+        arah: ubah === null ? 'stabil' : ubah > 5 ? 'naik' : ubah < -5 ? 'turun' : 'stabil' }
+    ],
+    saran_untuk_guru: guru,
+    saran_untuk_bk: bk,
+    saran_untuk_pimpinan: pimpinan,
+    santri_disorot: p.prioritas
+      .filter(x => ['Kritis','Perhatian Tinggi'].includes(x.tier))
+      .slice(0, 6)
+      .map(x => ({ nisn:x.nisn, nama:x.nama, kelas:x.kelas, tier:x.tier, alasan:x.alasan })),
+    catatan_batas:
+      'Kesimpulan ini berbasis potret 90 hari dari data yang tercatat. Angka rendah bisa berarti '
+      + 'disiplin membaik atau pencatatan menurun. Untuk memahami motif santri, koordinasikan dengan Guru BK.',
+    tinjauan_berikutnya: kunciTgl(tambahHari(kini, 14))
+  };
+}
+
+/** Ambil kesimpulan: layanan eksternal bila tersedia, selain itu mesin lokal. */
+async function aiKonsultan(payload) {
+  if (!AI_LLM.url) return konsultanLokal(payload);
+  try {
+    const kontrol = new AbortController();
+    const jam = setTimeout(() => kontrol.abort(), AI_LLM.timeout);
+    const res = await fetch(AI_LLM.url, {
+      method: 'POST', headers: AI_LLM.header, signal: kontrol.signal,
+      body: JSON.stringify({ prompt: AI_PROMPT.pimpinan, payload })
+    });
+    clearTimeout(jam);
+    if (!res.ok) throw new Error(`Layanan analisis membalas ${res.status}`);
+    const teks = await res.text();
+    const bersih = teks.replace(/```json|```/g, '').trim();
+    const data = JSON.parse(bersih);
+    if (!data || !data.diagnosis) throw new Error('Balasan layanan tidak lengkap.');
+    return { ...konsultanLokal(payload), ...data, sumber: 'layanan' };
+  } catch (e) {
+    console.warn('Layanan analisis tidak terpakai:', e.message);
+    return { ...konsultanLokal(payload), sumber: 'lokal (layanan gagal)' };
+  }
+}
+
+const PILAR = {
+  disiplin_umum:     { judul:'Disiplin Umum',        ikon:'fa-gauge-high' },
+  beban_kategori:    { judul:'Beban Kategori',       ikon:'fa-scale-unbalanced' },
+  fokus_bidang:      { judul:'Fokus Bidang',         ikon:'fa-compass' },
+  respons_pembinaan: { judul:'Respons Pembinaan',    ikon:'fa-hands-holding-child' },
+  perilaku_sekunder: { judul:'Perilaku Sekunder',    ikon:'fa-person-walking-arrow-right' }
+};
+
+const URGEN = { segera:'tag-berat', pekan_ini:'tag-sedang', dua_pekan:'tag-sea' };
+const labelUrgen = (u) => u === 'segera' ? 'Segera' : u === 'pekan_ini' ? 'Pekan ini' : 'Dua pekan';
+
+function kartuSaranKonsultan(k) {
+  const guru = (k.saran_untuk_guru || []).map(s => `<li>
+    <span class="tag ${URGEN[s.urgensi] || 'tag-off'}">${labelUrgen(s.urgensi)}</span>
+    <p>${esc(s.aksi)}</p><small>Ukuran keberhasilan: ${esc(s.metrik || '-')}</small></li>`).join('');
+  const bk = (k.saran_untuk_bk || []).map(s => `<li>
+    <span class="tag ${URGEN[s.urgensi] || 'tag-off'}">${labelUrgen(s.urgensi)}</span>
+    <p>${esc(s.sasaran)} — ${esc(s.bentuk_pembinaan)}</p>
+    <small>${esc(s.lini_masa || '-')}</small></li>`).join('');
+  const pim = (k.saran_untuk_pimpinan || []).map(s => `<li>
+    <span class="tag ${URGEN[s.urgensi] || 'tag-off'}">${labelUrgen(s.urgensi)}</span>
+    <p>${esc(s.tinjau)}</p><small>${esc(s.keputusan)} · ${esc(s.lini_masa || '-')}</small></li>`).join('');
+
+  return `<div class="kons-saran">
+    <div class="kons-kolom"><h4><i class="fa-solid fa-chalkboard-user"></i>Guru &amp; Wali Kelas</h4>
+      <ul>${guru || '<li><p>Tidak ada tindakan mendesak.</p></li>'}</ul></div>
+    <div class="kons-kolom"><h4><i class="fa-solid fa-user-doctor"></i>Guru BK</h4>
+      <ul>${bk || '<li><p>Tidak ada tindakan mendesak.</p></li>'}</ul></div>
+    <div class="kons-kolom"><h4><i class="fa-solid fa-landmark"></i>Pimpinan</h4>
+      <ul>${pim || '<li><p>Tidak ada keputusan yang tertunda.</p></li>'}</ul></div>
+  </div>`;
+}
+
+async function gambarKonsultan() {
+  const el = $('konsultanBox'); if (!el) return;
+  el.innerHTML = `<div class="card"><div class="ac-loading">
+    <i class="fa-solid fa-circle-notch fa-spin"></i>Menyusun kesimpulan konsultan…</div></div>`;
+  try {
+    const payload = APP.aiPimpinan || await aiPayloadPimpinan();
+    APP.aiPimpinan = payload;
+    const k = await aiKonsultan(payload);
+    APP.aiKesimpulan = k;
+
+    el.innerHTML = kartu('Kesimpulan Konsultan Pendidikan', `
+      <div class="kons-head ${k.kondisi.kode}">
+        <div class="kons-ikon"><i class="fa-solid fa-user-tie"></i></div>
+        <div>
+          <small>Kesimpulan menyeluruh · ${esc(k.kondisi.label)}</small>
+          <p>${esc(k.kesimpulan_sementara)}</p>
+        </div>
+      </div>
+
+      <div class="kons-angka">
+        ${(k.sorotan_angka || []).map(s => `<div class="ana-box">
+          <small>${esc(s.label)}</small><b>${esc(s.nilai)}</b>
+          <span class="arah ${esc(s.arah)}">${s.arah === 'naik' ? '▲' : s.arah === 'turun' ? '▼' : '■'} ${esc(s.arah)}</span>
+        </div>`).join('')}
+      </div>
+
+      <div class="kons-pilar">
+        ${Object.keys(PILAR).map(key => `<article>
+          <h4><i class="fa-solid ${PILAR[key].ikon}"></i>${PILAR[key].judul}</h4>
+          <p>${esc(k.diagnosis[key] || '-')}</p>
+        </article>`).join('')}
+      </div>
+
+      ${kartuSaranKonsultan(k)}
+
+      ${(k.santri_disorot || []).length ? `<div class="kons-sorot">
+        <h4><i class="fa-solid fa-user-shield"></i>Santri yang disorot</h4>
+        <div class="kons-chips">${k.santri_disorot.map(s => `<button class="mchip"
+          data-detail="${esc(s.nisn)}" title="${esc(s.alasan)}">
+          ${esc(s.nama)} <span class="nis">${esc(s.kelas)} · ${esc(s.tier)}</span></button>`).join('')}</div>
+      </div>` : ''}
+
+      <div class="kons-catatan"><i class="fa-solid fa-circle-info"></i>${esc(k.catatan_batas)}</div>
+
+      <div class="ai-actions">
+        <button class="btn btn-ghost btn-sm" data-ai="salin-kesimpulan">
+          <i class="fa-solid fa-copy"></i>Salin kesimpulan</button>
+        <button class="btn btn-ghost btn-sm" data-ai="payload-pimpinan">
+          <i class="fa-solid fa-file-code"></i>Salin data mentah</button>
+        <button class="btn btn-ghost btn-sm" data-ai="prompt-pimpinan">
+          <i class="fa-solid fa-wand-magic-sparkles"></i>Salin instruksi AI</button>
+      </div>`,
+      `<span class="tag ${k.kondisi.kode === 'danger' ? 'tag-berat' : k.kondisi.kode === 'warn' ? 'tag-sedang' : 'tag-ok'}">
+         ${esc(k.kondisi.label)}</span>`,
+      `Sumber analisis: ${esc(k.sumber)} · tinjauan berikutnya ${tgl(k.tinjauan_berikutnya)}`);
+  } catch (err) {
+    el.innerHTML = `<div class="card"><div class="ac-empty">Kesimpulan gagal disusun.</div></div>`;
+    console.warn(err);
+  }
+}
+
+/** Versi teks datar untuk disalin ke notula atau pesan. */
+function kesimpulanKeTeks(k) {
+  const baris = [];
+  baris.push('KESIMPULAN KONSULTAN PENDIDIKAN — DAYAH RUHUL QURANI');
+  baris.push(`Tanggal ${tgl(hariIni())} · Kondisi: ${k.kondisi.label}`);
+  baris.push('');
+  baris.push(k.kesimpulan_sementara);
+  baris.push('');
+  baris.push('DIAGNOSIS');
+  Object.keys(PILAR).forEach(key => {
+    baris.push(`- ${PILAR[key].judul}: ${k.diagnosis[key]}`);
+  });
+  baris.push('');
+  baris.push('SARAN GURU & WALI KELAS');
+  (k.saran_untuk_guru || []).forEach((s, i) =>
+    baris.push(`${i+1}. [${labelUrgen(s.urgensi)}] ${s.aksi} (Ukuran: ${s.metrik})`));
+  baris.push('');
+  baris.push('SARAN GURU BK');
+  (k.saran_untuk_bk || []).forEach((s, i) =>
+    baris.push(`${i+1}. [${labelUrgen(s.urgensi)}] ${s.sasaran} — ${s.bentuk_pembinaan} (${s.lini_masa})`));
+  baris.push('');
+  baris.push('SARAN PIMPINAN');
+  (k.saran_untuk_pimpinan || []).forEach((s, i) =>
+    baris.push(`${i+1}. [${labelUrgen(s.urgensi)}] ${s.tinjau} → ${s.keputusan} (${s.lini_masa})`));
+  if ((k.santri_disorot || []).length) {
+    baris.push('');
+    baris.push('SANTRI DISOROT');
+    k.santri_disorot.forEach(s => baris.push(`- ${s.nama} (${s.kelas}) · ${s.tier} · ${s.alasan}`));
+  }
+  baris.push('');
+  baris.push(k.catatan_batas);
+  baris.push(`Tinjauan berikutnya: ${tgl(k.tinjauan_berikutnya)}`);
+  return baris.join('\n');
+}
+
+// ---------------------------------------------------------------------
+// 26. EVALUASI BIDANG PELANGGARAN (menu tersendiri)
+// ---------------------------------------------------------------------
+const stBidang = { pilih:'', hari: AI_AMBANG.mundurHari };
+
+async function viewEvaluasiBidang() {
+  const p = await aiPayloadPeraturan(stBidang.hari);
+  APP.aiPeraturan = p;
+
+  // Rangkum tiap bidang dari daftar jenis.
+  const peta = {};
+  p.per_bidang.forEach(b => {
+    peta[b.nama] = { ...b, jenis: [], kategori:{ Ringan:0, Sedang:0, Berat:0 }, santri:0 };
+  });
+  p.per_jenis.forEach(j => {
+    const b = peta[j.bidang]; if (!b) return;
+    b.jenis.push(j);
+    if (b.kategori[j.kategori] !== undefined) b.kategori[j.kategori] += j.frek_total;
+    b.santri += j.santri_unik;
+  });
+  const daftar = Object.values(peta).sort((a, b) => b.jumlah - a.jumlah);
+  if (stBidang.pilih && !peta[stBidang.pilih]) stBidang.pilih = '';
+
+  const jenisTampil = stBidang.pilih
+    ? p.per_jenis.filter(j => j.bidang === stBidang.pilih)
+    : p.per_jenis;
+
+  $('viewRoot').innerHTML = `
+    <section class="hero" style="padding:24px">
+      <div class="eyebrow"><span class="ar">تقويم المجالات</span><span class="rule"></span>
+        <span class="lat">Evaluasi Bidang</span></div>
+      <h2 style="font-size:clamp(24px,3vw,32px)">Evaluasi per Bidang Pelanggaran</h2>
+      <p>Membaca peraturan dari sisi divisi: bidang mana yang paling banyak menyerap kejadian,
+         bagaimana trennya, dan aturan mana yang belum pernah ditegakkan.</p>
+      <div class="meta">
+        <span><i class="fa-solid fa-layer-group"></i>${esc(labelKonteks())}</span>
+        <span><i class="fa-regular fa-calendar"></i>${tgl(p.periode.mulai)} – ${tgl(p.periode.akhir)}</span>
+        <span><i class="fa-solid fa-database"></i>${angka(p.total.kejadian)} kejadian</span>
+      </div>
+    </section>
+
+    <div class="stats">
+      ${stat('Kejadian', angka(p.total.kejadian), 'fa-solid fa-triangle-exclamation',
+        'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)', `${stBidang.hari} hari terakhir`)}
+      ${stat('Bidang Aktif', angka(daftar.length), 'fa-solid fa-diagram-project',
+        'background:#E7F1F7;color:var(--sea)', 'var(--sea)', 'Bidang dengan kejadian')}
+      ${stat('Jenis Terpakai', angka(p.per_jenis.length), 'fa-solid fa-book-open',
+        'background:var(--violet-bg);color:var(--violet)', 'var(--violet)', 'Dari Master Pelanggaran')}
+      ${stat('Belum Terpakai', angka(p.master_tidak_terpakai.length), 'fa-solid fa-box-archive',
+        'background:var(--amber-bg);color:var(--amber)', 'var(--amber)', 'Aturan tanpa kejadian')}
+    </div>
+
+    ${kartu('Peta Bidang', `
+      <div class="card-note"><i class="fa-solid fa-hand-pointer"></i>
+        Pilih satu bidang untuk menyaring tabel jenis pelanggaran di bawahnya.</div>
+      <div class="bid-grid">
+        ${daftar.map(b => {
+          const t = aiTren(b.jumlah_30h, b.jumlah_prev30);
+          const naik = b.jumlah_prev30 && b.jumlah_30h > b.jumlah_prev30;
+          return `<button class="bid-card${stBidang.pilih === b.nama ? ' on' : ''}"
+                    data-bidang-pilih="${esc(b.nama)}">
+            <div class="bid-top"><b>${esc(b.nama)}</b>
+              <span class="tag ${naik ? 'tag-berat' : 'tag-ok'}">${esc(t)}</span></div>
+            <div class="bid-angka">${angka(b.jumlah)}<small>kejadian · ${b.persen}%</small></div>
+            <div class="bid-bar">
+              <span style="width:${b.jumlah ? b.kategori.Ringan / b.jumlah * 100 : 0}%;background:#0F766E"></span>
+              <span style="width:${b.jumlah ? b.kategori.Sedang / b.jumlah * 100 : 0}%;background:#B45309"></span>
+              <span style="width:${b.jumlah ? b.kategori.Berat / b.jumlah * 100 : 0}%;background:#9F1239"></span>
+            </div>
+            <div class="bid-kaki">R ${b.kategori.Ringan} · S ${b.kategori.Sedang} · B ${b.kategori.Berat}
+              · ${b.jenis.length} jenis</div>
+          </button>`;
+        }).join('') || '<p style="color:var(--text-3);padding:16px">Belum ada kejadian pada rentang ini.</p>'}
+      </div>`,
+      stBidang.pilih ? `<button class="btn btn-ghost btn-sm" data-bidang-pilih="">
+        <i class="fa-solid fa-rotate-left"></i>Tampilkan semua</button>` : '',
+      'Batang warna menunjukkan komposisi Ringan · Sedang · Berat.')}
+
+    <div class="grid-2">
+      ${kartu('Sebaran Kejadian per Bidang', chartBox('bidBar'), '', `${stBidang.hari} hari terakhir`)}
+      ${kartu('Pergerakan 30 Hari', chartBox('bidTren'), '', '30 hari terakhir vs 30 hari sebelumnya')}
+    </div>
+
+    ${kartu(stBidang.pilih ? `Jenis Pelanggaran — ${stBidang.pilih}` : 'Jenis Pelanggaran (semua bidang)', `
+      <div class="tbl"><table>
+        <thead><tr><th>Kode</th><th>Nama Pelanggaran</th><th>Kategori</th><th>Bidang</th>
+          <th class="center">Total</th><th class="center">30h</th><th class="center">Tren</th>
+          <th class="center">Santri</th><th>Pola</th></tr></thead>
+        <tbody>${jenisTampil.slice(0, 40).map(j => {
+          const pola = j.santri_unik && (j.frek_total / j.santri_unik) >= 2 ? 'Individu berulang' : 'Tersebar';
+          return `<tr>
+            <td class="secondary nowrap" style="padding-top:14px">${esc(j.kode_pelanggaran)}</td>
+            <td><div class="primary">${esc(j.nama_pelanggaran)}</div>
+                <div class="secondary">${esc(j.kelas_teratas.map(k => `${k[0]} (${k[1]})`).join(' · ') || '-')}</div></td>
+            <td><span class="tag ${tagKategori(j.kategori)}">${esc(j.kategori)}</span></td>
+            <td><span class="tag tag-sea">${esc(j.bidang)}</span></td>
+            <td class="num center">${j.frek_total}</td>
+            <td class="num center">${j.frek_30h}</td>
+            <td class="num center">${esc(aiTren(j.frek_30h, j.frek_prev30))}</td>
+            <td class="num center">${j.santri_unik}</td>
+            <td class="secondary" style="padding-top:14px">${pola}</td>
+          </tr>`;
+        }).join('') || barisKosong(9, 'Belum ada kejadian pada bidang ini.',
+            'Coba pilih bidang lain atau ganti unit aktif.')}</tbody>
+      </table></div>
+      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>`,
+      `<span class="tag tag-off">${angka(jenisTampil.length)} jenis</span>`)}
+
+    ${kartu('Kebersihan Katalog Peraturan', `
+      ${p.master_tidak_terpakai.length ? `<div class="ai-warn" style="margin:16px 20px 0">
+        <b>${angka(p.master_tidak_terpakai.length)} jenis tidak pernah dipakai pada rentang ini</b>
+        <ul>${p.master_tidak_terpakai.slice(0, 12).map(m =>
+          `<li>${esc(m.kode_pelanggaran)} — ${esc(m.nama_pelanggaran)}
+            <span class="tag ${tagKategori(m.kategori)}">${esc(m.kategori)}</span></li>`).join('')}
+          ${p.master_tidak_terpakai.length > 12
+            ? `<li>… dan ${p.master_tidak_terpakai.length - 12} lainnya.</li>` : ''}</ul>
+      </div>` : `<div class="card-note"><i class="fa-solid fa-circle-check"></i>
+        Seluruh jenis pelanggaran pada unit ini pernah ditegakkan.</div>`}
+      <div class="ai-actions">
+        <button class="btn btn-ghost btn-sm" data-ai="payload-peraturan">
+          <i class="fa-solid fa-file-code"></i>Salin data mentah</button>
+        <button class="btn btn-ghost btn-sm" data-ai="prompt-peraturan">
+          <i class="fa-solid fa-wand-magic-sparkles"></i>Salin instruksi AI</button>
+      </div>`,
+      isAdmin() ? '<span class="tag tag-sea">Perubahan katalog: menu Master</span>' : '',
+      'Aturan yang tak pernah dipakai perlu ditinjau: dihapus, digabung, atau memang belum ditegakkan.')}`;
+
+  buatChart('bidBar','bidBar',{ type:'bar',
+    data:{ labels: daftar.slice(0,8).map(b => b.nama),
+      datasets:[{ label:'Kejadian', data: daftar.slice(0,8).map(b => b.jumlah),
+        backgroundColor:'#1B7AAD', borderRadius:6 }]},
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{x:{beginAtZero:true,ticks:{precision:0}},y:{grid:{display:false}}} }});
+
+  buatChart('bidTren','bidTren',{ type:'bar',
+    data:{ labels: daftar.slice(0,8).map(b => b.nama),
+      datasets:[
+        { label:'30 hari sebelumnya', data: daftar.slice(0,8).map(b => b.jumlah_prev30),
+          backgroundColor:'#8298AC', borderRadius:5 },
+        { label:'30 hari terakhir', data: daftar.slice(0,8).map(b => b.jumlah_30h),
+          backgroundColor:'#C9A227', borderRadius:5 }
+      ]},
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:9}}},
+      scales:{x:{grid:{display:false}},y:{beginAtZero:true,ticks:{precision:0}}} }});
+
+  onKlik((e) => {
+    const b = e.target.closest('[data-bidang-pilih]');
+    if (b) { stBidang.pilih = b.dataset.bidangPilih; return viewEvaluasiBidang(); }
+    const d = e.target.closest('[data-detail]');
+    if (d) return bukaDetailSantri(d.dataset.detail);
+  });
+}
+
+// ---------------------------------------------------------------------
+// 27. NOTIFIKASI WHATSAPP — AJUAN IZIN KE GRUP
+//     Aplikasi hanya mengirim ke satu webhook; pengiriman ke grup
+//     dilakukan oleh layanan di luar browser (lihat panduan terpisah).
+//     Bila WA.webhook kosong, tombol memakai tautan wa.me sebagai
+//     jalur manual sehingga fitur tetap berguna tanpa server.
+// ---------------------------------------------------------------------
+const WA = {
+  webhook: '',        // contoh: 'https://xxxx.supabase.co/functions/v1/wa-izin'
+  kunci: '',          // dikirim sebagai header x-rq-token bila diisi
+  grup: '',           // id grup WhatsApp, mis. '1203630xxxxxxxxx@g.us'
+  nomorUji: ''        // nomor pribadi untuk jalur wa.me, mis. '628116xxxxxxx'
+};
+
+/** Susun pesan izin yang rapi untuk dibaca di grup. */
+function waPesanIzin(z) {
+  const s = z.siswa || {};
+  const baris = [
+    '*AJUAN IZIN SANTRI*',
+    'Dayah Ruhul Qurani',
+    '',
+    `Nama    : ${s.nama_siswa || '-'}`,
+    `NISN    : ${z.nisn || '-'}`,
+    `Kelas   : ${s.kelas || '-'}${s.jenjang ? ' (' + s.jenjang + ')' : ''}`,
+    `Jenis   : ${z.jenis_izin || '-'}`,
+    `Tanggal : ${tgl(z.tanggal_mulai)} s/d ${tgl(z.tanggal_selesai)}`,
+    `Status  : ${z.status_persetujuan || 'Pending'}`,
+    `Pemberi : ${z.pemberi_izin || '-'}`,
+    '',
+    `Alasan  : ${String(z.alasan || '-').split('\n')[0]}`,
+    '',
+    `_Dikirim otomatis oleh Sistem Informasi Pengembangan Santri pada ${new Date().toLocaleString('id-ID')}._`
+  ];
+  return baris.join('\n');
+}
+
+/** Kirim ke webhook; bila belum dikonfigurasi, buka tautan wa.me. */
+async function waKirimIzin(z, btn) {
+  const pesan = waPesanIzin(z);
+
+  if (!WA.webhook) {
+    const nomor = WA.nomorUji ? WA.nomorUji.replace(/\D/g, '') : '';
+    const url = `https://wa.me/${nomor}?text=${encodeURIComponent(pesan)}`;
+    window.open(url, '_blank', 'noopener');
+    return toast('info', 'Webhook belum disetel — pesan dibuka di WhatsApp.');
+  }
+
+  const asli = btn ? mulaiSimpan(btn, 'Mengirim…') : null;
+  try {
+    const res = await fetch(WA.webhook, {
+      method: 'POST',
+      headers: WA.kunci
+        ? { 'Content-Type':'application/json', 'x-rq-token': WA.kunci }
+        : { 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        tujuan: WA.grup,
+        pesan,
+        izin: {
+          id_izin: z.id_izin, nisn: z.nisn,
+          nama_siswa: z.siswa?.nama_siswa || '', kelas: z.siswa?.kelas || '',
+          jenis_izin: z.jenis_izin, tanggal_mulai: kunciTgl(z.tanggal_mulai),
+          tanggal_selesai: kunciTgl(z.tanggal_selesai),
+          status_persetujuan: z.status_persetujuan, pemberi_izin: z.pemberi_izin
+        }
+      })
+    });
+    if (!res.ok) throw new Error(`Layanan WhatsApp membalas ${res.status}`);
+    if (btn) selesaiSimpan(btn, asli, true, 'Terkirim');
+    toast('success', 'Ajuan izin dikirim ke grup WhatsApp.');
+  } catch (err) {
+    if (btn) selesaiSimpan(btn, asli, false, 'Gagal mengirim');
+    fireError(err);
+  }
+}
+
+/** Dipanggil setelah izin baru tersimpan; diam-diam tidak memblokir alur. */
+async function waKirimIzinTerbaru(nisn) {
+  if (!WA.webhook && !WA.nomorUji) return;
+  try {
+    cacheHapus('izin');
+    const semua = await muatIzin();
+    const z = semua.find(x => String(x.nisn) === String(nisn));
+    if (z) await waKirimIzin(z, null);
+  } catch (e) { console.warn('[wa] gagal mengirim otomatis:', e.message); }
+}
+
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-wa]'); if (!b) return;
+  e.preventDefault();
+  try {
+    const semua = await muatIzin();
+    const z = semua.find(x => String(x.id_izin) === b.dataset.wa);
+    if (!z) return toast('error', 'Data izin tidak ditemukan.');
+    await waKirimIzin(z, b);
   } catch (err) { fireError(err); }
 });
 
