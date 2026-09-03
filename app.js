@@ -1853,6 +1853,11 @@ function analisisEksekutif({ detail30, detailPrev30, bidangUrut, angkatan, izinS
   return { catatan, ubah };
 }
 
+/* Data ringkasan Dashboard Pimpinan — diisi viewPimpinan(), dibaca oleh
+   jendela daftar yang dibuka dari kartu ringkas. */
+const PIM = { prio: [], jenis: [], kritis: 0, perhatian: 0, monitor: 0, rentang: '' };
+const stPrio = { cari: '', tier: 'Semua' };
+
 async function viewPimpinan() {
   const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
     amanKosong(muatSiswa, 'santri'),
@@ -1894,7 +1899,8 @@ async function viewPimpinan() {
   });
   const bidangUrut = Object.entries(bidang).sort((a,b) => b[1]-a[1])
     .map(([nama, jumlah]) => ({ nama, jumlah, persen: d90.length ? Math.round(jumlah/d90.length*1000)/10 : 0 }));
-  const topJenis = Object.entries(jenis).sort((a,b) => b[1]-a[1]).slice(0, 8);
+  const semuaJenis = Object.entries(jenis).sort((a,b) => b[1]-a[1]);
+  const topJenis = semuaJenis.slice(0, 8);
 
   // Mingguan 90 hari
   const wkKunci = [], wkPeta = {};
@@ -1990,6 +1996,14 @@ async function viewPimpinan() {
   daftarPrio.sort((a,b) => (peringkat[b.tier]-peringkat[a.tier]) || (b.poin90-a.poin90) || (b.kasus30-a.kasus30));
   const kritis = daftarPrio.filter(x => x.tier === 'Kritis').length;
   const perhatian = daftarPrio.filter(x => x.tier === 'Perhatian Tinggi').length;
+  const monitor = daftarPrio.filter(x => x.tier === 'Monitor').length;
+
+  // Disimpan agar jendela daftar (dibuka dari kartu ringkas) tetap punya
+  // datanya tanpa perlu menghitung ulang seluruh agregasi.
+  PIM.prio = daftarPrio;
+  PIM.jenis = semuaJenis;
+  PIM.kritis = kritis; PIM.perhatian = perhatian; PIM.monitor = monitor;
+  PIM.rentang = `${tgl(kunciTgl(mulai90))} – ${tgl(kunciTgl(akhir))}`;
 
   const { catatan, ubah } = analisisEksekutif({
     detail30: d30.length, detailPrev30: dPrev.length, bidangUrut, angkatan, izinStat, binaStat, kritis, perhatian });
@@ -2078,34 +2092,18 @@ async function viewPimpinan() {
       ${kartu('Kondisi Pembinaan', chartBox('pBina'))}
     </div>
 
-    ${kartu('Santri Membutuhkan Perhatian', `
-      <div class="tbl"><table>
-        <thead><tr><th>Santri</th><th>Kelas</th><th>Tier</th><th class="center">Kasus 90h</th>
-          <th class="center">Kasus 30h</th><th class="center">Poin</th><th>Bidang Dominan</th>
-          <th class="center">Telat</th><th class="center">Bina</th><th>Alasan</th></tr></thead>
-        <tbody>${daftarPrio.slice(0, 20).map(r => `<tr>
-          <td><div class="primary">${esc(r.nama)}</div><div class="secondary">${esc(r.nisn)}</div></td>
-          <td class="nowrap">${esc(r.kelas)}</td>
-          <td><span class="tag ${tierTag(r.tier)}">${esc(r.tier)}</span></td>
-          <td class="num center">${r.kasus90}</td>
-          <td class="num center">${r.kasus30}</td>
-          <td class="num center">${r.poin90}</td>
-          <td>${esc(r.bidangDominan)}</td>
-          <td class="num center">${r.telat}</td>
-          <td class="num center">${r.bina}</td>
-          <td style="min-width:220px;font-size:12.5px;color:var(--text-2)">${esc(r.alasan)}</td>
-        </tr>`).join('') || barisKosong(10,'Belum ada santri pada indikator prioritas.','Data akan muncul seiring pencatatan berjalan.')}
-        </tbody></table></div>
-      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>`,
-      `<span class="tag tag-berat">${kritis} Kritis</span><span class="tag tag-sedang">${perhatian} Perhatian</span>`,
-      'Ranking indikator, bukan keputusan hukuman otomatis.')}
+    <div class="brankas-grid">
+      <div id="brkPrio">${kartuBrankasPrioritas()}</div>
+      <div id="brkJenis">${kartuBrankasJenis()}</div>
+    </div>`;
 
-    ${kartu('Jenis Pelanggaran Terbanyak', `<div class="card-body">
-      ${topJenis.map(([nama, jml], i) => `<div class="rank">
-        <span class="n">${String(i+1).padStart(2,'0')}</span>
-        <span class="t">${esc(nama)}</span><span class="c">${jml}x</span></div>`).join('')
-        || '<p style="color:var(--text-3);text-align:center;padding:20px 0">Belum ada data.</p>'}
-    </div>`)}`;
+  onKlik((e) => {
+    if (e.target.closest('#konsultanBox .brankas')) return bukaKesimpulanKonsultan();
+    if (e.target.closest('#brkPrio .brankas'))      return bukaSantriPrioritas();
+    if (e.target.closest('#brkJenis .brankas'))     return bukaJenisTerbanyak();
+    const d = e.target.closest('[data-detail]');
+    if (d) return bukaDetailSantri(d.dataset.detail);
+  });
 
   buatChart('pWeek','pWeek',{ type:'line',
     data:{ labels: wkKunci.map(labelPekan), datasets:[{ label:'Pelanggaran', data: wkKunci.map(k => wkPeta[k]),
@@ -7770,7 +7768,25 @@ async function gambarKonsultan() {
     const k = await aiKonsultan(payload);
     APP.aiKesimpulan = k;
 
-    el.innerHTML = kartu('Kesimpulan Konsultan Pendidikan', `
+    el.innerHTML = kartuBrankasKonsultan(k);
+  } catch (err) {
+    el.innerHTML = `<div class="card"><div class="ac-empty">Kesimpulan gagal disusun.</div></div>`;
+    console.warn(err);
+  }
+}
+
+/* =====================================================================
+ * DASHBOARD PIMPINAN — tiga panel berat dibungkus jadi kartu ringkas
+ * =====================================================================
+ * Kesimpulan konsultan, daftar santri prioritas, dan peringkat jenis
+ * pelanggaran adalah blok terpanjang di halaman ini. Ketiganya kini
+ * hanya menampilkan ringkasan yang terbaca sekilas; isi lengkapnya
+ * dibuka sebagai jendela yang bergulir di dalam dirinya sendiri.
+ * ===================================================================== */
+
+/** Isi lengkap kesimpulan konsultan — dipakai di dalam jendela. */
+function htmlKesimpulanLengkap(k) {
+  return `
       <div class="kons-head ${k.kondisi.kode}">
         <div class="kons-ikon"><i class="fa-solid fa-user-tie"></i></div>
         <div>
@@ -7811,14 +7827,209 @@ async function gambarKonsultan() {
           <i class="fa-solid fa-file-code"></i>Salin data mentah</button>
         <button class="btn btn-ghost btn-sm" data-ai="prompt-pimpinan">
           <i class="fa-solid fa-wand-magic-sparkles"></i>Salin instruksi AI</button>
-      </div>`,
-      `<span class="tag ${k.kondisi.kode === 'danger' ? 'tag-berat' : k.kondisi.kode === 'warn' ? 'tag-sedang' : 'tag-ok'}">
-         ${esc(k.kondisi.label)}</span>`,
-      `Sumber analisis: ${esc(k.sumber)} · tinjauan berikutnya ${tgl(k.tinjauan_berikutnya)}`);
-  } catch (err) {
-    el.innerHTML = `<div class="card"><div class="ac-empty">Kesimpulan gagal disusun.</div></div>`;
-    console.warn(err);
-  }
+      </div>
+
+      <p class="kons-sumber">Sumber analisis: ${esc(k.sumber)} · tinjauan berikutnya
+        ${tgl(k.tinjauan_berikutnya)}</p>`;
+}
+
+/** Kartu ringkas kesimpulan konsultan (lebar penuh, di atas grafik). */
+function kartuBrankasKonsultan(k) {
+  const tagKondisi = k.kondisi.kode === 'danger' ? 'tag-berat'
+    : k.kondisi.kode === 'warn' ? 'tag-sedang' : 'tag-ok';
+  const ringkas = String(k.kesimpulan_sementara || '');
+  const potong = ringkas.length > 210 ? ringkas.slice(0, 208).replace(/\s+\S*$/, '') + '…' : ringkas;
+  const angka3 = (k.sorotan_angka || []).slice(0, 3);
+  const disorot = (k.santri_disorot || []).length;
+  const aksi = (k.saran_untuk_guru || []).length + (k.saran_untuk_bk || []).length
+             + (k.saran_untuk_pimpinan || []).length;
+  return `<button type="button" class="brankas wide" title="Klik untuk membaca kesimpulan lengkap">
+    <div class="brk-top">
+      <span class="brk-ico"><i class="fa-solid fa-user-tie"></i></span>
+      <div class="eyebrow"><span class="ar">تحليل</span><span class="rule"></span>
+        <span class="lat">Konsultan Pendidikan</span></div>
+      <span class="tag ${tagKondisi}" style="margin-left:auto">${esc(k.kondisi.label)}</span>
+    </div>
+    <b class="brk-nm">Kesimpulan Konsultan Pendidikan</b>
+    <p class="brk-lead">${esc(potong)}</p>
+    <div class="brk-chips">
+      ${angka3.map(a => `<span class="tag tag-sea">${esc(a.label)}: ${esc(a.nilai)}</span>`).join('')}
+      <span class="tag tag-off">${angka(aksi)} rekomendasi</span>
+      ${disorot ? `<span class="tag tag-violet">${angka(disorot)} santri disorot</span>` : ''}
+    </div>
+    <span class="brk-go"><i class="fa-solid fa-file-lines"></i>Baca kesimpulan lengkap
+      <i class="fa-solid fa-arrow-right brk-arrow"></i></span>
+  </button>`;
+}
+
+function bukaKesimpulanKonsultan() {
+  const k = APP.aiKesimpulan;
+  if (!k) return toast('info', 'Kesimpulan masih disusun. Coba lagi sebentar lagi.');
+  Swal.fire({
+    title: 'Kesimpulan Konsultan Pendidikan',
+    width: 1000, showConfirmButton: false, showCloseButton: true,
+    customClass: { popup: 'dft-popup' },
+    html: `<div class="dft kons-modal">${htmlKesimpulanLengkap(k)}</div>`,
+    didOpen: () => {
+      Swal.getHtmlContainer()?.addEventListener('click', (e) => {
+        const s = e.target.closest('[data-detail]'); if (!s) return;
+        Swal.close();
+        bukaDetailSantri(s.dataset.detail);
+      });
+    }
+  });
+}
+
+/* ---------- Santri yang membutuhkan perhatian ---------- */
+function kartuBrankasPrioritas() {
+  const n = PIM.prio.length;
+  const tiga = PIM.prio.slice(0, 3).map(r => r.nama);
+  return `<button type="button" class="brankas" title="Klik untuk membuka daftar lengkap">
+    <div class="brk-top">
+      <span class="brk-ico"><i class="fa-solid fa-user-shield"></i></span>
+      <div class="eyebrow"><span class="ar">المتابعة</span><span class="rule"></span>
+        <span class="lat">Prioritas</span></div>
+    </div>
+    <b class="brk-nm">Santri Membutuhkan Perhatian</b>
+    <p class="brk-sub">Ranking indikator, bukan keputusan hukuman otomatis.</p>
+    <div class="brk-angka">
+      <span class="brk-v">${angka(n)}</span>
+      <span class="brk-k">santri pada indikator</span>
+    </div>
+    <div class="brk-chips">
+      <span class="tag tag-berat">Kritis ${angka(PIM.kritis)}</span>
+      <span class="tag tag-sedang">Perhatian ${angka(PIM.perhatian)}</span>
+      <span class="tag tag-sea">Monitor ${angka(PIM.monitor)}</span>
+      ${tiga.map(nm => `<span class="tag tag-off">${esc(nm)}</span>`).join('')}
+    </div>
+    <span class="brk-go"><i class="fa-solid fa-list-ul"></i>Buka daftar lengkap
+      <i class="fa-solid fa-arrow-right brk-arrow"></i></span>
+  </button>`;
+}
+
+function bukaSantriPrioritas() {
+  if (!PIM.prio.length) return toast('info', 'Belum ada santri pada indikator prioritas.');
+  Swal.fire({
+    title: 'Santri Membutuhkan Perhatian',
+    width: 1120, showConfirmButton: false, showCloseButton: true,
+    customClass: { popup: 'dft-popup' },
+    html: `<div class="dft">
+      <div class="dft-bar">
+        <input id="prCari" class="input grow" autocomplete="off"
+               placeholder="Cari nama, NISN, kelas, atau bidang…" value="${esc(stPrio.cari)}">
+        <span class="tag tag-off" id="prCount">—</span>
+      </div>
+      <div class="dft-chips" id="prChips">
+        ${['Semua','Kritis','Perhatian Tinggi','Monitor','Observasi'].map(t =>
+          `<button class="chip${stPrio.tier === t ? ' on' : ''}" data-tier="${esc(t)}">${t}</button>`).join('')}
+        <span class="dft-note"><i class="fa-solid fa-circle-info"></i>
+          ${esc(PIM.rentang || '90 hari terakhir')} · klik baris untuk membuka profil</span>
+      </div>
+      <div class="dft-wrap"><table class="dft-tbl">
+        <thead><tr><th>Santri</th><th>Kelas</th><th>Tier</th><th class="center">Kasus 90h</th>
+          <th class="center">Kasus 30h</th><th class="center">Poin</th><th>Bidang Dominan</th>
+          <th class="center">Telat</th><th class="center">Bina</th><th>Alasan</th></tr></thead>
+        <tbody id="tbPrio"></tbody>
+      </table></div>
+    </div>`,
+    didOpen: () => {
+      gambarPrio();
+      $('prCari')?.addEventListener('input', debounce(e => {
+        stPrio.cari = e.target.value.trim(); gambarPrio();
+      }, 200));
+      $('prChips')?.addEventListener('click', (e) => {
+        const c = e.target.closest('[data-tier]'); if (!c) return;
+        stPrio.tier = c.dataset.tier;
+        $('prChips').querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === c));
+        gambarPrio();
+      });
+      Swal.getHtmlContainer()?.addEventListener('click', (e) => {
+        const t = e.target.closest('[data-detail]'); if (!t) return;
+        Swal.close();
+        bukaDetailSantri(t.dataset.detail);
+      });
+    }
+  });
+}
+
+function gambarPrio() {
+  const tb = $('tbPrio'); if (!tb) return;
+  const warnaTier = (t) => t === 'Kritis' ? 'tag-berat' : t === 'Perhatian Tinggi' ? 'tag-sedang'
+    : t === 'Monitor' ? 'tag-sea' : 'tag-off';
+  let rows = PIM.prio;
+  if (stPrio.tier !== 'Semua') rows = rows.filter(r => r.tier === stPrio.tier);
+  rows = cariLokal(rows, stPrio.cari, ['nama','nisn','kelas','bidangDominan','tier','alasan'], 999);
+  const cnt = $('prCount'); if (cnt) cnt.textContent = `${angka(rows.length)} santri`;
+  tb.innerHTML = rows.map(r => `<tr data-detail="${esc(r.nisn)}" style="cursor:pointer">
+    <td style="min-width:186px"><div class="primary">${esc(r.nama)}</div>
+      <div class="secondary">${esc(r.nisn)}</div></td>
+    <td class="nowrap">${esc(r.kelas)}</td>
+    <td><span class="tag ${warnaTier(r.tier)}">${esc(r.tier)}</span></td>
+    <td class="num center">${r.kasus90}</td>
+    <td class="num center">${r.kasus30}</td>
+    <td class="num center">${r.poin90}</td>
+    <td>${esc(r.bidangDominan)}</td>
+    <td class="num center">${r.telat}</td>
+    <td class="num center">${r.bina}</td>
+    <td style="min-width:210px;font-size:12.5px;color:var(--text-2)">${esc(r.alasan)}</td>
+  </tr>`).join('') || barisKosong(10, 'Tidak ada santri yang cocok.',
+    'Ubah kata kunci atau pilih tier lain.');
+}
+
+/* ---------- Jenis pelanggaran terbanyak ---------- */
+function kartuBrankasJenis() {
+  const total = PIM.jenis.reduce((a, [, n]) => a + n, 0);
+  const puncak = PIM.jenis[0];
+  return `<button type="button" class="brankas alt" title="Klik untuk membuka peringkat lengkap">
+    <div class="brk-top">
+      <span class="brk-ico"><i class="fa-solid fa-ranking-star"></i></span>
+      <div class="eyebrow"><span class="ar">أكثر المخالفات</span><span class="rule"></span>
+        <span class="lat">Peringkat</span></div>
+    </div>
+    <b class="brk-nm">Jenis Pelanggaran Terbanyak</b>
+    <p class="brk-sub">${puncak ? 'Teratas: ' + esc(puncak[0]) : 'Belum ada data pada periode ini.'}</p>
+    <div class="brk-angka">
+      <span class="brk-v">${angka(puncak ? puncak[1] : 0)}</span>
+      <span class="brk-k">kejadian pada jenis teratas</span>
+    </div>
+    <div class="brk-chips">
+      <span class="tag tag-sea">${angka(PIM.jenis.length)} jenis tercatat</span>
+      <span class="tag tag-off">${angka(total)} total kejadian</span>
+      ${PIM.jenis.slice(1, 3).map(([nm, n]) =>
+        `<span class="tag tag-off">${esc(nm)} ${n}x</span>`).join('')}
+    </div>
+    <span class="brk-go"><i class="fa-solid fa-list-ol"></i>Buka peringkat lengkap
+      <i class="fa-solid fa-arrow-right brk-arrow"></i></span>
+  </button>`;
+}
+
+function bukaJenisTerbanyak() {
+  if (!PIM.jenis.length) return toast('info', 'Belum ada data pelanggaran pada periode ini.');
+  const maks = PIM.jenis[0][1] || 1;
+  const total = PIM.jenis.reduce((a, [, n]) => a + n, 0);
+  Swal.fire({
+    title: 'Jenis Pelanggaran Terbanyak',
+    width: 720, showConfirmButton: false, showCloseButton: true,
+    customClass: { popup: 'dft-popup' },
+    html: `<div class="dft">
+      <div class="dft-chips">
+        <span class="tag tag-sea">${angka(PIM.jenis.length)} jenis</span>
+        <span class="tag tag-off">${angka(total)} kejadian</span>
+        <span class="dft-note"><i class="fa-solid fa-circle-info"></i>
+          ${esc(PIM.rentang || '90 hari terakhir')}</span>
+      </div>
+      <div class="dft-wrap jns-wrap">
+        ${PIM.jenis.map(([nama, jml], i) => `<div class="jns">
+          <span class="jns-n">${String(i + 1).padStart(2, '0')}</span>
+          <div class="jns-body">
+            <div class="jns-row"><span class="jns-t">${esc(nama)}</span>
+              <span class="jns-c">${angka(jml)}x</span></div>
+            <div class="jns-bar"><i style="width:${Math.max(3, Math.round(jml / maks * 100))}%"></i></div>
+          </div>
+        </div>`).join('')}
+      </div>
+    </div>`
+  });
 }
 
 /** Versi teks datar untuk disalin ke notula atau pesan. */
