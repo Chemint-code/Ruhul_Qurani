@@ -79,7 +79,7 @@ a{color:var(--sea);text-decoration:none}
   opacity:0;transform:scale(1.05);
   transition:opacity 1.1s ease, transform 9s ease;
 }
-.login-art.ready::before{opacity:.45;transform:scale(1)}
+.login-art.ready::before{opacity:.5;transform:scale(1)}
 .login-art::after{
   content:'';position:absolute;inset:0;
   background:var(--girih),
@@ -241,29 +241,42 @@ textarea.input{resize:vertical;min-height:64px}
     justify-content:center;padding:4px 0 10px;gap:0;
   }
   .sidebar:not(:hover) .sb-user .who{display:none}
-  .sidebar:not(:hover) .sb-user .avatar{width:34px;height:34px}
+  .sidebar:not(:hover) .sb-user .avatar{width:38px;height:38px}
   .sidebar:not(:hover) #btnLogout{
     justify-content:center;padding:11px 0;font-size:0;gap:0;
   }
   .sidebar:not(:hover) #btnLogout i{font-size:15px;width:auto}
 }
 
-/* ---------- Foto profil pengguna ----------
-   Aturan ini sebelumnya terkurung di dalam @media(min-width:1025px)
-   dan diawali selector menggantung, sehingga tidak pernah aktif di
-   ponsel maupun saat sidebar sedang dibentangkan. Kini berlaku global. */
+/* ---------- Foto profil pengguna (sidebar) ----------
+   Avatar diperbesar & dijadikan tombol unggah foto sendiri:
+   klik/tap avatar membuka pemilih berkas, lingkar kuningan menandai
+   bisa-diklik, lapisan kamera muncul saat hover/fokus. ---------- */
 .sb-user .avatar{
-  position:relative;display:block;overflow:hidden;padding:0;
-  width:36px;height:36px;border-radius:10px;flex-shrink:0;
+  position:relative;display:block;overflow:hidden;padding:0;cursor:pointer;
+  width:46px;height:46px;border-radius:14px;flex-shrink:0;
   background:linear-gradient(150deg,var(--sea),var(--navy));
-  border:1px solid rgba(255,255,255,.12);
+  border:2px solid rgba(201,162,39,.38);
+  box-shadow:0 8px 18px -9px rgba(201,162,39,.6),0 2px 6px rgba(6,24,38,.35);
+  transition:transform .18s cubic-bezier(.22,1,.36,1),border-color .18s,box-shadow .18s;
 }
+.sb-user .avatar:hover,.sb-user .avatar:focus-visible{
+  transform:translateY(-1px) scale(1.04);border-color:rgba(201,162,39,.78);
+  box-shadow:0 12px 24px -10px rgba(201,162,39,.7),0 3px 8px rgba(6,24,38,.4);
+}
+.sb-user .avatar .av-cam{
+  position:absolute;inset:0;z-index:3;display:flex;align-items:center;justify-content:center;
+  background:rgba(6,24,38,.58);color:#F2E5B8;font-size:13px;opacity:0;
+  transition:opacity .16s ease;
+}
+.sb-user .avatar:hover .av-cam,.sb-user .avatar:focus-visible .av-cam{opacity:1}
 .sb-user .avatar img,
 #guru-avatar-img{
   position:absolute;inset:0;
   width:100%;height:100%;object-fit:cover;display:block;
   border-radius:inherit;transition:opacity .35s ease;
 }
+.sidebar:not(:hover) .sb-user .avatar{width:40px;height:40px;border-radius:12px}
 
 @media(max-width:1024px){
   .sidebar{position:fixed;inset:0 auto 0 0;z-index:60;transform:translateX(-100%);
@@ -413,56 +426,15 @@ td.nowrap{white-space:nowrap}
 .chip.on{background:var(--navy);border-color:var(--navy);color:#fff}
 .izin-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(292px,1fr));
   gap:14px;padding:18px 20px}
-.izin{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:var(--r-lg);
-  padding:16px 16px 16px 19px;background:var(--surface);display:flex;flex-direction:column;gap:12px;
+.izin{border:1px solid var(--line);border-radius:var(--r-lg);padding:16px;
+  background:var(--surface);display:flex;flex-direction:column;gap:12px;
   transition:border-color .15s,box-shadow .15s}
 .izin:hover{border-color:#CFDCE6;box-shadow:var(--shadow)}
-/* Aksen garis kiri sebagai penanda status agar kartu cepat dipindai */
-.izin::before{content:'';position:absolute;top:0;bottom:0;left:0;width:3px;background:var(--line)}
-.izin.st-ok::before{background:var(--teal)}
-.izin.st-telat::before{background:var(--maroon)}
-.izin.st-wait::before{background:var(--amber)}
 .izin .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
-.izin .lines{font-size:12.5px;color:var(--text-2);display:flex;flex-direction:column;gap:6px}
-.izin .lines span{display:flex;align-items:flex-start;line-height:1.55;word-break:break-word}
-.izin .lines i{flex:0 0 14px;width:14px;text-align:center;color:var(--text-3);
-  margin-right:6px;margin-top:3px}
-/* --- Aksi kartu izin: dua kolom agar label utuh terbaca, juga di layar kecil --- */
-.izin .acts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;
-  margin-top:auto;padding-top:12px;border-top:1px solid var(--line-soft)}
-.izin .acts .btn{width:100%;min-height:38px;padding:8px 10px;font-size:12.5px;gap:7px;
-  overflow:hidden;text-overflow:ellipsis}
-.izin .acts .btn i{flex:0 0 auto;font-size:12.5px}
-/* Tombol tunggal atau sisa baris ganjil melebar penuh */
-.izin .acts .btn:only-child,
-.izin .acts.ganjil .btn:last-child{grid-column:1 / -1}
-/* Keputusan izin dibuat pekat supaya menonjol sebagai aksi utama */
-.izin .acts .act-sesuai{background:var(--teal);color:#fff;border-color:var(--teal)}
-.izin .acts .act-sesuai:hover:not(:disabled){background:#0C635C;border-color:#0C635C}
-.izin .acts .act-telat{background:var(--maroon);color:#fff;border-color:var(--maroon)}
-.izin .acts .act-telat:hover:not(:disabled){background:#880E30;border-color:#880E30}
-.izin .acts .act-panjang{background:var(--surface);color:var(--sea);
-  border:1px solid rgba(20,97,139,.28)}
-.izin .acts .act-panjang:hover:not(:disabled){background:#EDF5FA;border-color:var(--sea);color:var(--sea-hi)}
-.izin .acts .act-wa{background:var(--teal-bg);color:var(--teal);
-  border:1px solid rgba(15,118,110,.26)}
-.izin .acts .act-wa:hover:not(:disabled){background:#DBEEEB;color:#0B5A54}
-/* Mode mobile: satu kartu per baris, tombol besar & mudah disentuh */
-@media(max-width:640px){
-  .izin-grid{grid-template-columns:1fr;gap:12px;padding:14px 16px}
-  .izin{padding:15px 15px 15px 18px;gap:11px}
-  .izin .acts{gap:9px;padding-top:13px}
-  .izin .acts .btn{min-height:46px;font-size:13px;font-weight:700;border-radius:var(--r)}
-  .izin .acts .btn i{font-size:14px}
-  .chips{padding:12px 16px;gap:8px}
-  .chip{padding:8px 14px;font-size:13px}
-  .filters{padding:12px 16px}
-}
-/* Layar sangat sempit: tombol ditumpuk satu kolom agar label tak terpotong */
-@media(max-width:400px){
-  .izin .acts{grid-template-columns:1fr}
-  .izin .acts .btn{grid-column:1 / -1}
-}
+.izin .lines{font-size:12.5px;color:var(--text-2);display:flex;flex-direction:column;gap:5px}
+.izin .lines i{width:14px;color:var(--text-3);margin-right:5px}
+.izin .acts{display:flex;gap:8px;padding-top:12px;border-top:1px solid var(--line-soft)}
+.izin .acts .btn{flex:1}
 .tl{display:flex;flex-direction:column;gap:9px;max-height:46vh;overflow-y:auto;padding-right:5px}
 .tl-item{display:flex;gap:12px;padding:13px;border-radius:var(--r);border:1px solid var(--line);
   background:var(--surface);text-align:left}
@@ -778,13 +750,17 @@ td.nowrap{white-space:nowrap}
 .kg-rank.g2{background:linear-gradient(150deg,#DCE4EA,#AFC0CD);color:#2C3B47}
 .kg-rank.g3{background:linear-gradient(150deg,#E4C0A0,#C08A57);color:#3E2711}
 
-.kg-guru{display:flex;align-items:center;gap:11px;min-width:0}
-.kg-av{flex:0 0 34px;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+.kg-guru{display:flex;align-items:center;gap:12px;min-width:0}
+.kg-av{position:relative;flex:0 0 46px;width:46px;height:46px;border-radius:14px;
+  display:grid;place-items:center;overflow:hidden;
   background:linear-gradient(150deg,var(--sea),var(--navy));color:#fff;font-weight:400;
-  font-size:15px;font-family:'Instrument Serif',Georgia,serif;
-  border:1px solid rgba(255,255,255,.14)}
-.kg-tbl tr.top .kg-av{background:linear-gradient(150deg,var(--brass),#8A6D0B)}
-.kg-tbl tr.pasif .kg-av{background:#DFE7ED;color:var(--text-3)}
+  font-size:17px;font-family:'Instrument Serif',Georgia,serif;
+  border:2px solid rgba(255,255,255,.16);
+  box-shadow:0 6px 14px -8px rgba(6,24,38,.5)}
+.kg-av img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit}
+.kg-tbl tr.top .kg-av{background:linear-gradient(150deg,var(--brass),#8A6D0B);
+  border-color:rgba(201,162,39,.55);box-shadow:0 8px 18px -8px rgba(201,162,39,.75)}
+.kg-tbl tr.pasif .kg-av{background:#DFE7ED;color:var(--text-3);border-color:var(--line)}
 .kg-nm{font-weight:600;font-size:13.5px;line-height:1.3;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
@@ -802,9 +778,10 @@ td.nowrap{white-space:nowrap}
   border-top:1px solid var(--line-soft);font-size:11.5px;color:var(--text-3)}
 .kg-formula b{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:6px;
   background:var(--paper);border:1px solid var(--line);color:var(--text-2);font-weight:600}
-@media(max-width:640px){.kg-skor{min-width:70px}.kg-tbl tbody td{padding:10px 12px}}
+@media(max-width:640px){.kg-skor{min-width:70px}.kg-tbl tbody td{padding:10px 12px}
+  .kg-av{width:38px;height:38px;border-radius:11px;font-size:15px}}
 
-  
+
 .pgs-hero{position:relative;overflow:hidden;border-radius:var(--r-lg);
   padding:34px 34px 30px;margin-bottom:20px;color:#fff;
   background:radial-gradient(128% 150% at 10% -10%,#154366 0%,#0B2B45 46%,#061826 100%);
@@ -1329,6 +1306,74 @@ select.per-in{appearance:none;padding-right:14px;
 .pgs-hero :focus-visible,
 .adm-head :focus-visible{outline-color:var(--brass);outline-offset:2px}
 
+/* ============================================================
+   FOTO PROFIL — kartu Manajemen Pengguna (guru/pengguna lain)
+   Avatar besar bergaya modern dengan lingkar identitas per-peran
+   dan overlay "Ganti Foto" saat admin melihat daftar pengguna.
+   ============================================================ */
+.pgu-list{display:flex;flex-direction:column;gap:10px;padding:16px 20px}
+.pgu-card{display:flex;align-items:center;gap:14px;padding:13px 15px;
+  border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface);
+  transition:border-color .15s,box-shadow .15s,transform .15s}
+.pgu-card:hover{border-color:#CFDCE6;box-shadow:var(--shadow);transform:translateY(-1px)}
+.pgu-av{position:relative;flex:0 0 52px;width:52px;height:52px;border-radius:16px;
+  overflow:hidden;display:grid;place-items:center;
+  background:linear-gradient(150deg,var(--sea),var(--navy));color:#fff;
+  font-family:'Instrument Serif',Georgia,serif;font-size:19px;font-weight:400;
+  border:2px solid rgba(201,162,39,.3);box-shadow:0 8px 18px -9px rgba(6,24,38,.45)}
+.pgu-av img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit}
+.pgu-av.nonaktif{filter:grayscale(.7);opacity:.6}
+.pgu-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.pgu-top{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.pgu-nama{font-weight:700;font-size:14.5px;color:var(--text)}
+.pgu-user{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--text-3)}
+.pgu-meta{display:flex;flex-wrap:wrap;gap:6px;font-size:12px;color:var(--text-2)}
+.pgu-acts{display:flex;flex-direction:column;gap:7px;align-items:flex-end;flex-shrink:0}
+@media(max-width:640px){
+  .pgu-card{flex-wrap:wrap}
+  .pgu-acts{flex-direction:row;width:100%;justify-content:flex-end}
+}
+
+/* ---------- Unggah foto (dipakai di dalam modal SweetAlert) ---------- */
+.fu-wrap{display:flex;align-items:center;gap:16px;padding-bottom:2px}
+.fu-preview{position:relative;flex:0 0 84px;width:84px;height:84px;border-radius:22px;
+  overflow:hidden;display:grid;place-items:center;cursor:pointer;
+  background:linear-gradient(150deg,var(--sea),var(--navy));color:#fff;
+  font-family:'Instrument Serif',Georgia,serif;font-size:28px;
+  border:3px solid rgba(201,162,39,.4);box-shadow:0 10px 22px -10px rgba(6,24,38,.5)}
+.fu-preview img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit}
+.fu-preview .fu-cam{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:rgba(6,24,38,.55);color:#F2E5B8;font-size:16px;opacity:0;transition:opacity .15s}
+.fu-preview:hover .fu-cam{opacity:1}
+.fu-info{flex:1;text-align:left}
+.fu-info b{display:block;font-size:12.5px;color:var(--text)}
+.fu-info small{display:block;margin-top:3px;font-size:11.5px;color:var(--text-3);line-height:1.5}
+.fu-status{margin-top:6px;font-size:11.5px;font-weight:600}
+.fu-status.ok{color:var(--teal)}
+.fu-status.err{color:var(--maroon)}
+.fu-status.busy{color:var(--sea)}
+
+/* ---------- Identitas Dayah (Master & Bidang) ---------- */
+.idn-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:18px 20px}
+@media(max-width:820px){.idn-grid{grid-template-columns:1fr}}
+.idn-item{display:flex;flex-direction:column;gap:11px}
+.idn-item .lbl{font-size:10.5px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--text-2)}
+.idn-frame{position:relative;border-radius:var(--r-lg);overflow:hidden;cursor:pointer;
+  border:1.5px dashed #CBE0EC;background:#F7FBFD;min-height:132px;
+  display:flex;align-items:center;justify-content:center;transition:border-color .15s,background .15s}
+.idn-frame:hover{border-color:var(--sea);background:#F1F8FC}
+.idn-frame.filled{border-style:solid;border-color:var(--line)}
+.idn-frame img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.idn-frame .idn-empty{display:flex;flex-direction:column;align-items:center;gap:7px;
+  color:var(--text-3);font-size:12px;font-weight:600;text-align:center;padding:14px}
+.idn-frame .idn-empty i{font-size:20px;color:#B9CCDA}
+.idn-frame .idn-over{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  gap:7px;background:rgba(6,24,38,.6);color:#F2E5B8;font-size:12px;font-weight:700;
+  opacity:0;transition:opacity .15s}
+.idn-frame:hover .idn-over{opacity:1}
+.idn-item small{font-size:11.5px;color:var(--text-3);line-height:1.5}
+
 </style>
 </head>
 <body>
@@ -1408,12 +1453,14 @@ select.per-in{appearance:none;padding-right:14px;
 
     <div class="sb-foot">
       <div class="sb-user">
-        <div class="avatar" id="guru-avatar-container">
+        <button type="button" class="avatar" id="guru-avatar-container" title="Klik untuk ganti foto profil">
           <img id="guru-avatar-img"
                src=""
                alt="Profil"
-               style="width:100%;height:100%;object-fit:cover;display:block;border-radius:10px;">
-        </div>
+               style="width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit;">
+          <span class="av-cam"><i class="fa-solid fa-camera"></i></span>
+        </button>
+        <input type="file" id="inpFotoSaya" accept="image/png,image/jpeg,image/webp" class="hidden">
         <div class="who">
           <b id="guru-nama">Loading...</b>
           <span id="guru-role">-</span>
@@ -1450,7 +1497,7 @@ select.per-in{appearance:none;padding-right:14px;
           <button class="per-x" id="perReset" title="Tampilkan semua periode">
             <i class="fa-solid fa-xmark"></i></button>
         </span>
-         
+
         <span class="sync" id="syncDot"><span class="dot"></span><b id="syncText">Tersinkron</b></span>
         <span class="live" id="liveDot"><span class="dot"></span>Realtime</span>
         <span class="qtime" id="queryTime"></span>
