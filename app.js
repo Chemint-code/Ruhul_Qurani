@@ -839,17 +839,23 @@ function terapkanIdentitasVisual(identitas) {
   if (idn.identitas_latar) ASET.foto = idn.identitas_latar;
   if (idn.identitas_logo) ASET.logo = idn.identitas_logo;
 
-  // Bilah profil atas — foto latar sebagai sampul.
-  const bar = $('profileBar');
-  if (bar) {
-    if (ASET.foto) {
-      bar.style.setProperty('--cover', `url("${ASET.foto.replace(/"/g, '\\"')}")`);
-      bar.classList.add('ready');
-    } else {
-      bar.style.removeProperty('--cover');
-      bar.classList.remove('ready');
-    }
+  // Foto latar dipasang sekali di elemen akar sebagai properti --cover,
+  // lalu diwarisi SEMUA kotak hero (bilah profil, hero ringkasan &
+  // pimpinan, hero Pengasuhan, kepala arsip Administrasi). Kelas
+  // 'ada-latar' menjadi saklarnya di CSS: tanpa foto, seluruh hero
+  // kembali ke gradasi navy aslinya.
+  const akar = document.documentElement;
+  if (ASET.foto) {
+    akar.style.setProperty('--cover', `url("${ASET.foto.replace(/"/g, '\\"')}")`);
+    akar.classList.add('ada-latar');
+  } else {
+    akar.style.removeProperty('--cover');
+    akar.classList.remove('ada-latar');
   }
+
+  // Bilah profil atas memakai lapisan tersendiri agar bisa memudar masuk.
+  const bar = $('profileBar');
+  if (bar) bar.classList.toggle('ready', !!ASET.foto);
   const logoBar = $('pbarLogoImg');
   if (logoBar) {
     if (ASET.logo) { logoBar.src = ASET.logo; logoBar.onload = () => logoBar.classList.add('ready'); }
