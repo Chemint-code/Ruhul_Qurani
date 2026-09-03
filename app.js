@@ -3558,7 +3558,8 @@ async function gambarRb() {
 // ---------------------------------------------------------------------
 // 18. MASTER PELANGGARAN & MASTER BIDANG
 // ---------------------------------------------------------------------
-const stMaster = { cari:'' };
+const stMaster = { cari:'', kategori:'Semua' };
+const stMsBidang = { cari:'', status:'Semua' };
 
 async function viewMaster() {
   if (!bolehMaster()) { $('viewRoot').innerHTML = kosong('Akses dibatasi.',
@@ -3570,48 +3571,234 @@ async function viewMaster() {
   ]);
 
   $('viewRoot').innerHTML = `
-    ${kartu('Master Pelanggaran', `
-      <div class="filters">
-        <input id="msCari" class="input grow" placeholder="Cari kode, nama, kategori, atau bidang…" value="${esc(stMaster.cari)}">
-        <span class="sep"></span>
-        <span class="tag tag-off" id="msCount"></span>
+    <div class="brankas-grid" id="brankasGrid">
+      <div id="brkMaster">${kartuBrankasMaster(master)}</div>
+      <div id="brkBidang">${kartuBrankasBidang(bidang)}</div>
+    </div>
+    ${isAdmin() ? kartuIdentitasDayah(identitas) : ''}`;
+
+  onKlik(async (e) => {
+    if (e.target.closest('#brkAddMaster')) return tambahLaluBukaMaster();
+    if (e.target.closest('#brkAddBidang')) return tambahLaluBukaBidang();
+    if (e.target.closest('#brkMaster .brankas')) return bukaDaftarMaster();
+    if (e.target.closest('#brkBidang .brankas')) return bukaDaftarBidang();
+  });
+
+  if (isAdmin()) pasangIdentitasDayah();
+}
+
+/* =====================================================================
+ * BRANKAS REFERENSI — ringkasan padat, daftar lengkap dibuka di jendela
+ * =====================================================================
+ * Master pelanggaran bisa berisi ratusan baris. Menampilkannya langsung
+ * di halaman memaksa pengguna menggulir jauh hanya untuk mencapai kartu
+ * berikutnya, jadi halaman hanya memuat ringkasan yang bisa dibaca
+ * sekilas; daftar utuh (beserta pencarian & penyaring) dibuka sebagai
+ * jendela bertumpuk yang bergulir di dalam dirinya sendiri.
+ * ===================================================================== */
+
+/** Kartu ringkas Master Pelanggaran: jumlah jenis + sebaran kategori. */
+function kartuBrankasMaster(list) {
+  const rows = lingkupMaster(list || []);
+  const n = (k) => rows.filter(m => m.kategori === k).length;
+  const poin = rows.reduce((a, m) => a + (Number(m.bobot_poin) || 0), 0);
+  const bidangUnik = new Set(rows.map(m => m.bidang).filter(Boolean)).size;
+  return `<button type="button" class="brankas" title="Klik untuk membuka daftar lengkap">
+    <div class="brk-top">
+      <span class="brk-ico"><i class="fa-solid fa-scale-balanced"></i></span>
+      <div class="eyebrow">
+        <span class="ar">قائمة المخالفات</span><span class="rule"></span>
+        <span class="lat">Referensi</span>
       </div>
-      <div class="tbl"><table>
+    </div>
+    <b class="brk-nm">Master Pelanggaran</b>
+    <p class="brk-sub">Unit aktif: ${esc(labelKonteks())}</p>
+    <div class="brk-angka">
+      <span class="brk-v">${angka(rows.length)}</span>
+      <span class="brk-k">jenis pelanggaran</span>
+    </div>
+    <div class="brk-chips">
+      <span class="tag tag-ringan">Ringan ${angka(n('Ringan'))}</span>
+      <span class="tag tag-sedang">Sedang ${angka(n('Sedang'))}</span>
+      <span class="tag tag-berat">Berat ${angka(n('Berat'))}</span>
+      <span class="tag tag-sea">${angka(bidangUnik)} bidang</span>
+      <span class="tag tag-off">${angka(poin)} total poin</span>
+    </div>
+    <span class="brk-go">
+      <i class="fa-solid fa-list-ul"></i>Buka daftar lengkap
+      <i class="fa-solid fa-arrow-right brk-arrow"></i>
+    </span>
+    ${isAdmin() ? `<span class="brk-add" id="brkAddMaster" role="button" tabindex="0"
+        title="Tambah jenis pelanggaran"><i class="fa-solid fa-plus"></i>Tambah</span>` : ''}
+  </button>`;
+}
+
+/** Kartu ringkas Master Bidang: jumlah bidang aktif & nonaktif. */
+function kartuBrankasBidang(list) {
+  const rows = lingkupBidang(list || []);
+  const aktif = rows.filter(b => String(b.aktif ?? 'Ya').toLowerCase() !== 'tidak').length;
+  const contoh = rows.slice(0, 4).map(b => b.nama_bidang).filter(Boolean);
+  return `<button type="button" class="brankas alt" title="Klik untuk membuka daftar lengkap">
+    <div class="brk-top">
+      <span class="brk-ico"><i class="fa-solid fa-diagram-project"></i></span>
+      <div class="eyebrow">
+        <span class="ar">الأقسام</span><span class="rule"></span>
+        <span class="lat">Divisi</span>
+      </div>
+    </div>
+    <b class="brk-nm">Master Bidang</b>
+    <p class="brk-sub">Dasar pengelompokan seluruh laporan per divisi.</p>
+    <div class="brk-angka">
+      <span class="brk-v">${angka(rows.length)}</span>
+      <span class="brk-k">bidang terdaftar</span>
+    </div>
+    <div class="brk-chips">
+      <span class="tag tag-ok">Aktif ${angka(aktif)}</span>
+      <span class="tag tag-off">Nonaktif ${angka(rows.length - aktif)}</span>
+      ${contoh.map(c => `<span class="tag tag-sea">${esc(c)}</span>`).join('')}
+    </div>
+    <span class="brk-go">
+      <i class="fa-solid fa-list-ul"></i>Buka daftar lengkap
+      <i class="fa-solid fa-arrow-right brk-arrow"></i>
+    </span>
+    ${isAdmin() ? `<span class="brk-add" id="brkAddBidang" role="button" tabindex="0"
+        title="Tambah bidang"><i class="fa-solid fa-plus"></i>Tambah</span>` : ''}
+  </button>`;
+}
+
+/** Bidang mengikuti unit operasional aktif, sama seperti lingkupMaster. */
+function lingkupBidang(list) {
+  let rows = list || [];
+  if (APP.ctx.unit !== 'Semua') rows = rows.filter(b => String(b.sumber || '') === APP.ctx.unit);
+  return rows;
+}
+
+/** Segarkan kedua kartu ringkas setelah ada perubahan data. */
+async function perbaruiBrankas() {
+  const m = $('brkMaster'), b = $('brkBidang');
+  if (m) m.innerHTML = kartuBrankasMaster(await muatMaster());
+  if (b) b.innerHTML = kartuBrankasBidang(await muatBidang());
+}
+
+/* ---------- Jendela daftar Master Pelanggaran ---------- */
+async function bukaDaftarMaster() {
+  await Swal.fire({
+    title: 'Master Pelanggaran',
+    width: 1060,
+    showConfirmButton: false,
+    showCloseButton: true,
+    customClass: { popup: 'dft-popup' },
+    html: `<div class="dft">
+      <div class="dft-bar">
+        <input id="msCari" class="input grow" autocomplete="off"
+               placeholder="Cari kode, nama, kategori, atau bidang…" value="${esc(stMaster.cari)}">
+        <span class="tag tag-off" id="msCount">—</span>
+        ${isAdmin() ? `<button class="btn btn-primary btn-sm" id="btnAddMaster">
+          <i class="fa-solid fa-plus"></i>Tambah Jenis</button>` : ''}
+      </div>
+      <div class="dft-chips" id="msChips">
+        ${['Semua','Ringan','Sedang','Berat'].map(k =>
+          `<button class="chip${stMaster.kategori === k ? ' on' : ''}" data-kat="${k}">${k}</button>`).join('')}
+        <span class="dft-note"><i class="fa-solid fa-circle-info"></i>
+          Unit aktif: ${esc(labelKonteks())}</span>
+      </div>
+      <div class="dft-wrap"><table class="dft-tbl">
         <thead><tr><th>Kode</th><th>Nama Pelanggaran</th><th>Kategori</th><th class="center">Bobot</th>
           <th>Sumber</th><th>Bidang</th><th>Jenjang</th><th class="right">Aksi</th></tr></thead>
         <tbody id="tbMaster"></tbody>
       </table></div>
-      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>`,
-      isAdmin() ? `<button class="btn btn-primary btn-sm" id="btnAddMaster"><i class="fa-solid fa-plus"></i>Tambah Jenis</button>` : '',
-      `Menampilkan referensi untuk unit: ${labelKonteks()}`)}
+    </div>`,
+    didOpen: () => {
+      gambarMaster();
+      $('msCari')?.addEventListener('input', debounce(e => {
+        stMaster.cari = e.target.value.trim(); gambarMaster();
+      }, 200));
+      $('msChips')?.addEventListener('click', (e) => {
+        const c = e.target.closest('[data-kat]'); if (!c) return;
+        stMaster.kategori = c.dataset.kat;
+        $('msChips').querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === c));
+        gambarMaster();
+      });
+      $('btnAddMaster')?.addEventListener('click', () => tambahLaluBukaMaster());
+      Swal.getHtmlContainer()?.addEventListener('click', async (e) => {
+        const t = e.target.closest('[data-master]'); if (!t) return;
+        const item = (await muatMaster()).find(x => x.kode_pelanggaran === t.dataset.master);
+        Swal.close();
+        await modalMaster(item);
+        await perbaruiBrankas();
+        bukaDaftarMaster();
+      });
+    }
+  });
+}
 
-    ${kartu('Master Bidang', `
-      <div class="card-note"><i class="fa-solid fa-circle-info"></i>
-        Bidang/divisi menjadi dasar pengelompokan laporan. Nama, kata kunci, dan status aktif
-        dapat diperbarui tanpa mengubah kode aplikasi.</div>
-      <div class="tbl"><table>
+/** Tambah jenis dari dalam jendela daftar, lalu daftar dibuka kembali. */
+async function tambahLaluBukaMaster() {
+  const dariDaftar = !!$('tbMaster');
+  if (dariDaftar) Swal.close();
+  await modalMaster(null);
+  await perbaruiBrankas();
+  bukaDaftarMaster();
+}
+
+/* ---------- Jendela daftar Master Bidang ---------- */
+async function bukaDaftarBidang() {
+  await Swal.fire({
+    title: 'Master Bidang',
+    width: 940,
+    showConfirmButton: false,
+    showCloseButton: true,
+    customClass: { popup: 'dft-popup' },
+    html: `<div class="dft">
+      <div class="dft-bar">
+        <input id="bdCari" class="input grow" autocomplete="off"
+               placeholder="Cari nama bidang, deskripsi, atau kata kunci…" value="${esc(stMsBidang.cari)}">
+        <span class="tag tag-off" id="bdCount">—</span>
+        ${isAdmin() ? `<button class="btn btn-primary btn-sm" id="btnAddBidang">
+          <i class="fa-solid fa-plus"></i>Tambah Bidang</button>` : ''}
+      </div>
+      <div class="dft-chips" id="bdChips">
+        ${['Semua','Aktif','Nonaktif'].map(k =>
+          `<button class="chip${stMsBidang.status === k ? ' on' : ''}" data-st="${k}">${k}</button>`).join('')}
+        <span class="dft-note"><i class="fa-solid fa-circle-info"></i>
+          Nama, kata kunci, dan status dapat diubah tanpa menyentuh kode aplikasi.</span>
+      </div>
+      <div class="dft-wrap"><table class="dft-tbl">
         <thead><tr><th>Bidang</th><th>Deskripsi</th><th>Kata Kunci</th><th>Sumber</th>
           <th>Jenjang</th><th>Status</th><th class="right">Aksi</th></tr></thead>
         <tbody id="tbBidang"></tbody>
-      </table></div>`,
-      isAdmin() ? `<button class="btn btn-primary btn-sm" id="btnAddBidang"><i class="fa-solid fa-plus"></i>Tambah Bidang</button>` : '')}
-
-    ${isAdmin() ? kartuIdentitasDayah(identitas) : ''}`;
-
-  $('msCari').addEventListener('input', debounce(e => { stMaster.cari = e.target.value.trim(); gambarMaster(); }, 220));
-  $('btnAddMaster')?.addEventListener('click', () => modalMaster(null));
-  $('btnAddBidang')?.addEventListener('click', () => modalBidang(null));
-
-  onKlik(async (e) => {
-    const m = e.target.closest('[data-master]');
-    if (m) return modalMaster((await muatMaster()).find(x => x.kode_pelanggaran === m.dataset.master));
-    const b = e.target.closest('[data-bidang]');
-    if (b) return modalBidang((await muatBidang()).find(x => String(x.id_bidang) === b.dataset.bidang));
+      </table></div>
+    </div>`,
+    didOpen: async () => {
+      gambarBidang(await muatBidang());
+      $('bdCari')?.addEventListener('input', debounce(async e => {
+        stMsBidang.cari = e.target.value.trim(); gambarBidang(await muatBidang());
+      }, 200));
+      $('bdChips')?.addEventListener('click', async (e) => {
+        const c = e.target.closest('[data-st]'); if (!c) return;
+        stMsBidang.status = c.dataset.st;
+        $('bdChips').querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === c));
+        gambarBidang(await muatBidang());
+      });
+      $('btnAddBidang')?.addEventListener('click', () => tambahLaluBukaBidang());
+      Swal.getHtmlContainer()?.addEventListener('click', async (e) => {
+        const t = e.target.closest('[data-bidang]'); if (!t) return;
+        const item = (await muatBidang()).find(x => String(x.id_bidang) === t.dataset.bidang);
+        Swal.close();
+        await modalBidang(item);
+        await perbaruiBrankas();
+        bukaDaftarBidang();
+      });
+    }
   });
+}
 
-  gambarMaster();
-  gambarBidang(bidang);
-  if (isAdmin()) pasangIdentitasDayah();
+async function tambahLaluBukaBidang() {
+  const dariDaftar = !!$('tbBidang');
+  if (dariDaftar) Swal.close();
+  await modalBidang(null);
+  await perbaruiBrankas();
+  bukaDaftarBidang();
 }
 
 /** Kartu "Identitas Dayah" — logo & foto latar layar login, khusus Admin. */
@@ -3672,11 +3859,16 @@ function pasangIdentitasDayah() {
 }
 
 async function gambarMaster() {
-  const rows = cariLokal(lingkupMaster(await muatMaster()), stMaster.cari,
+  const tb = $('tbMaster');
+  if (!tb) return;                       // jendela daftar sedang tertutup
+  let dasar = lingkupMaster(await muatMaster());
+  if (stMaster.kategori !== 'Semua') dasar = dasar.filter(m => m.kategori === stMaster.kategori);
+  const rows = cariLokal(dasar, stMaster.cari,
     ['kode_pelanggaran','nama_pelanggaran','kategori','bidang','sumber','jenjang'], 999);
-  $('msCount').textContent = `${angka(rows.length)} jenis`;
-  $('tbMaster').innerHTML = rows.map(m => `<tr>
-    <td class="secondary nowrap" style="padding-top:14px">${esc(m.kode_pelanggaran)}</td>
+  const cnt = $('msCount');
+  if (cnt) cnt.textContent = `${angka(rows.length)} jenis`;
+  tb.innerHTML = rows.map(m => `<tr>
+    <td class="secondary nowrap">${esc(m.kode_pelanggaran)}</td>
     <td><div class="primary">${esc(m.nama_pelanggaran)}</div></td>
     <td><span class="tag ${tagKategori(m.kategori)}">${esc(m.kategori)}</span></td>
     <td class="num center">${m.bobot_poin}</td>
@@ -3686,19 +3878,27 @@ async function gambarMaster() {
     <td class="right">${isAdmin()
       ? `<button class="btn-link" data-master="${esc(m.kode_pelanggaran)}"><i class="fa-solid fa-pen-to-square"></i> Ubah</button>`
       : '<span class="tag tag-off">Hanya baca</span>'}</td>
-  </tr>`).join('') || barisKosong(8, 'Belum ada master pelanggaran pada unit ini.', 'Tambahkan jenis baru atau ganti unit aktif.');
-  tandaiTabelBisaGeser();
+  </tr>`).join('') || barisKosong(8, 'Tidak ada jenis yang cocok.', 'Ubah kata kunci, kategori, atau unit aktif.');
 }
 
 function gambarBidang(list) {
-  let rows = list || [];
-  if (APP.ctx.unit !== 'Semua') rows = rows.filter(b => String(b.sumber||'') === APP.ctx.unit);
-  $('tbBidang').innerHTML = rows.map(b => {
+  const tb = $('tbBidang');
+  if (!tb) return;                       // jendela daftar sedang tertutup
+  let rows = lingkupBidang(list);
+  if (stMsBidang.status !== 'Semua') {
+    const mauAktif = stMsBidang.status === 'Aktif';
+    rows = rows.filter(b => (String(b.aktif ?? 'Ya').toLowerCase() !== 'tidak') === mauAktif);
+  }
+  rows = cariLokal(rows, stMsBidang.cari,
+    ['nama_bidang','deskripsi','kata_kunci','sumber','jenjang'], 999);
+  const cnt = $('bdCount');
+  if (cnt) cnt.textContent = `${angka(rows.length)} bidang`;
+  tb.innerHTML = rows.map(b => {
     const aktif = String(b.aktif ?? 'Ya').toLowerCase() !== 'tidak';
     return `<tr>
       <td><div class="primary">${esc(b.nama_bidang||'-')}</div></td>
       <td style="font-size:12.5px;color:var(--text-2);max-width:280px">${esc(b.deskripsi||'-')}</td>
-      <td class="secondary" style="padding-top:14px">${esc(b.kata_kunci||'-')}</td>
+      <td class="secondary">${esc(b.kata_kunci||'-')}</td>
       <td>${esc(b.sumber||'-')}</td>
       <td>${esc(b.jenjang||'Semua')}</td>
       <td><span class="tag ${aktif?'tag-ok':'tag-off'}">${aktif?'Aktif':'Nonaktif'}</span></td>
@@ -3706,7 +3906,7 @@ function gambarBidang(list) {
         ? `<button class="btn-link" data-bidang="${esc(b.id_bidang||'')}"><i class="fa-solid fa-pen-to-square"></i> Ubah</button>`
         : '<span class="tag tag-off">Hanya baca</span>'}</td>
     </tr>`;
-  }).join('') || barisKosong(7, 'Belum ada Master Bidang.', 'Tambahkan bidang agar laporan per divisi lebih rapi.');
+  }).join('') || barisKosong(7, 'Tidak ada bidang yang cocok.', 'Ubah kata kunci atau penyaring status.');
 }
 
 async function modalMaster(existing) {
@@ -3771,6 +3971,7 @@ async function modalMaster(existing) {
     sync('done', 'Master tersimpan');
     toast('success', ubah ? 'Jenis pelanggaran diperbarui' : 'Jenis pelanggaran ditambahkan');
     gambarMaster();
+    perbaruiBrankas();
   }
 }
 
@@ -3825,6 +4026,7 @@ async function modalBidang(existing) {
     sync('done', 'Bidang tersimpan');
     toast('success', ubah ? 'Master Bidang diperbarui' : 'Master Bidang ditambahkan');
     gambarBidang(await muatBidang());
+    perbaruiBrankas();
   }
 }
 
