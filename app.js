@@ -856,11 +856,17 @@ function terapkanIdentitasVisual(identitas) {
     else { logoBar.removeAttribute('src'); logoBar.classList.remove('ready'); }
   }
 
-  // Layar login — tetap ikut berubah tanpa perlu muat ulang.
-  const art = $('loginArt');
-  if (art && ASET.foto) {
-    art.style.setProperty('--photo', `url("${ASET.foto.replace(/"/g, '\\"')}")`);
-    art.classList.add('ready');
+  // Layar login — foto menutup seluruh layar (termasuk di balik kartu masuk),
+  // jadi properti --photo dipasang di wadah terluar, bukan di kolom kiri.
+  const scr = $('loginScreen');
+  if (scr) {
+    if (ASET.foto) {
+      scr.style.setProperty('--photo', `url("${ASET.foto.replace(/"/g, '\\"')}")`);
+      scr.classList.add('ready');
+    } else {
+      scr.style.removeProperty('--photo');
+      scr.classList.remove('ready');
+    }
   }
   const logoLogin = $('loginLogo');
   if (logoLogin && ASET.logo) {
