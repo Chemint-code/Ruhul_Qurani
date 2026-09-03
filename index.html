@@ -1699,6 +1699,13 @@ select.per-in{appearance:none;padding-right:14px;
   .brk-v{font-size:31px}
 }
 
+/* Kartu ringkas lebar penuh (kesimpulan konsultan) */
+.brankas.wide{grid-column:1 / -1}
+.brk-lead{margin:9px 0 13px;font-size:13.5px;line-height:1.65;color:var(--text-2);max-width:860px}
+.brankas.wide .brk-chips{margin-bottom:15px}
+#konsultanBox{margin-bottom:16px}
+#konsultanBox .card{margin:0}
+
 /* ---------- Jendela daftar (Master Pelanggaran / Master Bidang) ---------- */
 .dft-popup{padding:22px !important;max-width:96vw !important}
 .dft-popup .swal2-html-container{
@@ -1854,6 +1861,39 @@ select.per-in{appearance:none;padding-right:14px;
 @media print{
   .hero,.pgs-hero,.adm-head{background-image:none !important}
 }
+
+/* ---------- Isi kesimpulan konsultan di dalam jendela ---------- */
+.kons-modal{max-height:64vh;overflow-y:auto;padding-right:6px;
+  scrollbar-width:thin;scrollbar-color:#CBD8E2 transparent}
+.kons-modal::-webkit-scrollbar{width:8px}
+.kons-modal::-webkit-scrollbar-thumb{background:#CBD8E2;border-radius:8px}
+.kons-modal .kons-head{margin:0 0 4px}
+.kons-modal .kons-angka,
+.kons-modal .kons-pilar,
+.kons-modal .kons-saran,
+.kons-modal .kons-sorot,
+.kons-modal .ai-actions{padding-left:0;padding-right:0}
+.kons-modal .kons-catatan{margin-left:0;margin-right:0}
+.kons-sumber{margin:14px 0 0;padding-top:12px;border-top:1px solid var(--line-soft);
+  font-size:11.5px;color:var(--text-3)}
+
+/* ---------- Peringkat jenis pelanggaran di dalam jendela ---------- */
+.jns-wrap{padding:6px 4px 6px 0;border:none;max-height:58vh}
+.jns{display:flex;align-items:center;gap:13px;padding:11px 12px;border-radius:var(--r);
+  transition:background .12s}
+.jns:hover{background:#F5F9FB}
+.jns-n{flex:0 0 30px;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;
+  font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:700;
+  background:#F3F0E2;color:#8A6D0B;border:1px solid rgba(201,162,39,.28)}
+.jns:nth-child(n+4) .jns-n{background:#EFF3F6;color:var(--text-3);border-color:var(--line)}
+.jns-body{flex:1;min-width:0}
+.jns-row{display:flex;align-items:baseline;gap:12px}
+.jns-t{flex:1;font-size:13.5px;font-weight:600;color:var(--text);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jns-c{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:13.5px;color:var(--maroon)}
+.jns-bar{height:5px;border-radius:5px;background:var(--line-soft);overflow:hidden;margin-top:7px}
+.jns-bar i{display:block;height:100%;border-radius:5px;
+  background:linear-gradient(90deg,var(--sea),var(--brass))}
 
 /* ---------- Studio Identitas (modal SweetAlert) ---------- */
 .stu-lead{margin:0 0 16px;font-size:12.5px;line-height:1.6;color:var(--text-2);text-align:left}
