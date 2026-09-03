@@ -678,15 +678,17 @@ async function unggahFoto(kategori, relasiId, file, { global = false } = {}) {
   const urlPublik = pub?.publicUrl;
   if (!urlPublik) throw new Error('URL publik foto tidak diperoleh.');
 
-  let nonaktifkan = db.from('foto_aset').update({ is_aktif: false })
+  let nonaktifkan = db.from('foto_aset')
+    .update({ is_aktif: false, tanggal_update: new Date().toISOString() })
     .eq('kategori', kategori).eq('is_aktif', true);
   if (!global) nonaktifkan = nonaktifkan.eq('relasi_id', relasiId);
   await nonaktifkan;
 
   const { error: insErr } = await db.from('foto_aset').insert({
-    kategori, relasi_id: relasiId || null, url_publik: urlPublik,
-    nama_file: file.name, ukuran_px: ukuran, is_aktif: true,
-    tanggal_upload: new Date().toISOString()
+    kategori, relasi_tabel: global ? null : 'profiles', relasi_id: relasiId || null,
+    url_publik: urlPublik, storage_path: path, nama_file: file.name,
+    ukuran_px: ukuran, ukuran_kb: Math.round(file.size / 1024) || null,
+    mime_type: file.type, is_aktif: true
   });
   if (insErr) throw new Error(`Gagal menyimpan data foto: ${insErr.message}`);
 
