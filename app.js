@@ -25,8 +25,17 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // Username tanpa "@" dilengkapi domain ini saat login.
 const DOMAIN_INTERNAL = 'ruhulqurani.local';
 
-// Aset opsional untuk layar login. Kosongkan bila belum ada.
+// Aset opsional untuk layar login (diisi otomatis dari tabel foto_aset
+// oleh visualLogin() di bagian bawah berkas ini — lihat modul FOTO PROFIL).
 const ASET = { logo: '', foto: '' };
+
+// Bucket Supabase Storage tempat seluruh foto (profil guru & identitas
+// dayah) disimpan. Buat bucket ini di Dashboard Supabase → Storage →
+// New bucket → tandai Public, bila belum ada. Tabel foto_aset (kategori,
+// relasi_id, url_publik, nama_file, ukuran_px, is_aktif, tanggal_upload)
+// juga perlu policy INSERT/UPDATE untuk role authenticated.
+const BUCKET_FOTO = 'foto-profil';
+const FOTO_MAKS_MB = 4;
 
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true }
@@ -591,141 +600,247 @@ function pasangPeriode() {
 // ---------------------------------------------------------------------
 
 /**
- * Setup foto profil admin Nyak Al Azwansyah
- * Panggil ini setelah user berhasil login (di viewDashboard atau sejenisnya)
- */
-/**
  * =====================================================================
- * GLOBAL PROFIL SETUP - Reusable untuk Admin, Guru, Walas, semua role
- * Sistem Informasi Pengembangan Santri
+ * FOTO PROFIL & IDENTITAS DAYAH — modul bersama
  * =====================================================================
- * 
- * Fitur:
- * ✅ Ambil user_id dari auth.getUser()
- * ✅ Ambil nama dari APP.profil atau database
- * ✅ Query foto dari foto_aset berdasarkan user_id yang login
- * ✅ Fallback placeholder jika tidak ada foto
- * ✅ Works untuk: Admin, Guru, Guru BK, Walas, Ustadz, dll
- * ✅ Cukup call 1x di viewDashboard(), berlaku untuk semua
+ * Dipakai oleh: avatar sidebar (foto diri sendiri), Panel Kinerja Guru,
+ * Manajemen Pengguna (foto guru/pengguna lain), dan identitas visual
+ * (logo + latar) halaman login.
+ *
+ * Skema yang dipakai (tabel `foto_aset`, sudah ada di database):
+ *   kategori        text        'profil_guru' | 'identitas_logo' | 'identitas_latar'
+ *   relasi_id       uuid        id user pemilik foto. Untuk identitas dayah,
+ *                               diisi id admin pengunggah tapi TIDAK dipakai
+ *                               sebagai filter saat membaca — identitas bersifat global.
+ *   url_publik      text        URL publik hasil unggah ke Supabase Storage
+ *   nama_file       text
+ *   ukuran_px       text        "lebar x tinggi", dihitung otomatis saat unggah
+ *   is_aktif        bool
+ *   tanggal_upload  timestamptz
+ *
+ * Berkas disimpan di Supabase Storage, bucket BUCKET_FOTO (lihat konfigurasi
+ * di bagian atas berkas ini). Bucket dan policy INSERT/UPDATE untuk role
+ * authenticated pada foto_aset perlu dibuat manual bila belum ada.
+ *
+ * ✅ setupProfilUserLogin()  → foto milik user yang SEDANG LOGIN saja (sidebar).
+ * ✅ muatFotoBanyak()        → foto BANYAK user sekaligus dalam satu query
+ *                              (Panel Kinerja Guru, Manajemen Pengguna). Ini
+ *                              yang sebelumnya TIDAK ADA — setupProfilUserLogin()
+ *                              tidak bisa dipakai untuk menampilkan foto guru lain.
+ * ✅ unggahFoto()            → satu fungsi unggah dipakai bersama oleh ketiganya.
+ * =====================================================================
  */
 
-// =====================================================================
-// 1. FUNGSI UTAMA - GENERIC PROFILE SETUP
-// =====================================================================
+/** Ambil dimensi gambar ("lebar x tinggi") dari sebuah File, untuk kolom ukuran_px. */
+function dimensiGambar(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(`${img.naturalWidth}x${img.naturalHeight}`); };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(''); };
+    img.src = url;
+  });
+}
+
+/** Validasi dasar sebelum unggah: tipe gambar & ukuran berkas. */
+function validasiFotoUpload(file) {
+  if (!file) return 'Berkas tidak ditemukan.';
+  if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) return 'Format harus JPG, PNG, atau WEBP.';
+  if (file.size > FOTO_MAKS_MB * 1024 * 1024) return `Ukuran berkas maksimal ${FOTO_MAKS_MB}MB.`;
+  return null;
+}
 
 /**
- * Setup profil untuk user manapun yang login (Admin, Guru, Walas, dll)
- * Cukup dipanggil sekali di viewDashboard(), otomatis work untuk semua user
- * 
- * @returns {Promise<void>}
+ * Unggah satu foto ke Storage lalu catat sebagai baris aktif di foto_aset.
+ * `global:true` dipakai untuk identitas dayah (logo/latar login): foto lama
+ * dinonaktifkan berdasarkan KATEGORI saja (bukan per-pengunggah), karena
+ * identitas bersifat satu untuk seluruh dayah, bukan milik satu akun.
+ *
+ * @returns {Promise<string>} URL publik foto yang baru diunggah.
  */
-async function setupProfilUserLogin() {
-  try {
-    loading(true);
-    
-    // ===== STEP 1: Ambil user yang sedang login =====
-    const { data: authUser, error: authError } = await db.auth.getUser();
-    
-    if (authError || !authUser?.user?.id) {
-      console.warn('[profil] Tidak ada user yang login');
-      loading(false);
-      return;
-    }
+async function unggahFoto(kategori, relasiId, file, { global = false } = {}) {
+  const salah = validasiFotoUpload(file);
+  if (salah) throw new Error(salah);
 
-    const userId = authUser.user.id;
-    console.log('[profil] Loading profil untuk user:', userId);
+  const ukuran = await dimensiGambar(file);
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+  const aman = String(relasiId || 'dayah').replace(/[^a-zA-Z0-9_-]/g, '') || 'dayah';
+  const path = `${kategori}/${aman}/${Date.now()}.${ext}`;
 
-    // ===== STEP 2: Ambil data user dari APP.profil =====
-    // APP.profil sudah di-set sebelumnya saat login/init
-    const namaUser = APP.profil?.nama_lengkap || 
-                     APP.profil?.nama || 
-                     authUser.user.email?.split('@')[0] || 
-                     'User';
-    const roleUser = APP.profil?.role || 'User';
+  const up = await db.storage.from(BUCKET_FOTO).upload(path, file, {
+    upsert: true, cacheControl: '3600', contentType: file.type
+  });
+  if (up.error) throw new Error(`Gagal mengunggah ke penyimpanan: ${up.error.message}`);
 
-    // ===== STEP 3: Query foto dari database berdasarkan user_id =====
-    const { data: fotoData, error: fotoError } = await db.from('foto_aset')
-      .select('url_publik, nama_file, ukuran_px')
-      .eq('kategori', 'profil_guru')
-      .eq('relasi_id', userId)
-      .eq('is_aktif', true)
-      .order('tanggal_upload', { ascending: false })
-      .maybeSingle(); // Ambil 1 foto terbaru
+  const { data: pub } = db.storage.from(BUCKET_FOTO).getPublicUrl(path);
+  const urlPublik = pub?.publicUrl;
+  if (!urlPublik) throw new Error('URL publik foto tidak diperoleh.');
 
-    if (fotoError && fotoError.code !== 'PGRST116') {
-      console.warn('[profil] Query foto error:', fotoError.message);
-    }
+  let nonaktifkan = db.from('foto_aset').update({ is_aktif: false })
+    .eq('kategori', kategori).eq('is_aktif', true);
+  if (!global) nonaktifkan = nonaktifkan.eq('relasi_id', relasiId);
+  await nonaktifkan;
 
-    // ===== STEP 4: Set elemen di UI =====
-    const namaEl = $('guru-nama');
-    const roleEl = $('guru-role');
-    const imgEl = $('guru-avatar-img');
+  const { error: insErr } = await db.from('foto_aset').insert({
+    kategori, relasi_id: relasiId || null, url_publik: urlPublik,
+    nama_file: file.name, ukuran_px: ukuran, is_aktif: true,
+    tanggal_upload: new Date().toISOString()
+  });
+  if (insErr) throw new Error(`Gagal menyimpan data foto: ${insErr.message}`);
 
-    // Set nama
-    if (namaEl) {
-      namaEl.textContent = namaUser;
-      namaEl.title = `User ID: ${userId}`; // Hover untuk lihat ID
-    }
+  return urlPublik;
+}
 
-    // Set role
-    if (roleEl) {
-      roleEl.textContent = roleUser;
-    }
+/** Ambil satu foto aktif terbaru untuk satu relasi (mis. foto diri sendiri). */
+async function muatFotoSatu(kategori, relasiId) {
+  if (!relasiId) return '';
+  const { data, error } = await db.from('foto_aset')
+    .select('url_publik').eq('kategori', kategori).eq('relasi_id', relasiId)
+    .eq('is_aktif', true).order('tanggal_upload', { ascending: false }).maybeSingle();
+  if (error && error.code !== 'PGRST116') console.warn('[foto]', error.message);
+  return data?.url_publik || '';
+}
 
-    // ===== STEP 5: Set foto =====
-    if (imgEl) {
-      if (fotoData?.url_publik) {
-        // Ada foto di database → load
-        imgEl.src = fotoData.url_publik;
-        imgEl.alt = `Profil ${namaUser}`;
-        imgEl.style.opacity = '0';
-        
-        imgEl.onload = () => {
-          imgEl.style.transition = 'opacity 0.5s ease-in-out';
-          imgEl.style.opacity = '1';
-          console.log(`[profil] ✅ Foto loaded: ${fotoData.nama_file}`);
-        };
-        
-        imgEl.onerror = () => {
-          // Foto tidak bisa di-load → gunakan placeholder inisial
-          imgEl.src = generateUserAvatarPlaceholder(namaUser, roleUser);
-          imgEl.style.opacity = '1';
-          console.warn(`[profil] Foto gagal load, using placeholder`);
-        };
-      } else {
-        // Tidak ada foto di database → gunakan placeholder langsung
-        imgEl.src = generateUserAvatarPlaceholder(namaUser, roleUser);
-        imgEl.alt = `Profil ${namaUser} (placeholder)`;
-        console.log(`[profil] Menggunakan placeholder avatar`);
-      }
-    }
+/**
+ * Ambil foto aktif untuk BANYAK relasi sekaligus dalam satu query — dipakai
+ * agar Panel Kinerja Guru dan Manajemen Pengguna bisa menampilkan foto asli
+ * puluhan guru tanpa query satu per satu.
+ *
+ * @returns {Promise<Object<string,string>>} peta { relasi_id: url_publik }
+ */
+async function muatFotoBanyak(kategori, ids) {
+  const unik = [...new Set((ids || []).filter(Boolean).map(String))];
+  if (!unik.length) return {};
+  const { data, error } = await db.from('foto_aset')
+    .select('relasi_id, url_publik, tanggal_upload')
+    .eq('kategori', kategori).eq('is_aktif', true).in('relasi_id', unik)
+    .order('tanggal_upload', { ascending: false });
+  if (error) { console.warn('[foto]', error.message); return {}; }
+  const peta = {};
+  (data || []).forEach(r => { if (!peta[r.relasi_id]) peta[r.relasi_id] = r.url_publik; });
+  return peta;
+}
 
-    console.log(`✅ [profil] Selesai load profil: ${namaUser} (${roleUser})`);
-    loading(false);
+/** Ambil identitas visual dayah (logo + latar login) — global, tanpa filter relasi_id. */
+async function muatIdentitasDayah() {
+  const { data, error } = await db.from('foto_aset')
+    .select('kategori, url_publik, tanggal_upload')
+    .in('kategori', ['identitas_logo', 'identitas_latar']).eq('is_aktif', true)
+    .order('tanggal_upload', { ascending: false });
+  if (error) { console.warn('[identitas]', error.message); return {}; }
+  const hasil = {};
+  (data || []).forEach(r => { if (!hasil[r.kategori]) hasil[r.kategori] = r.url_publik; });
+  return hasil;
+}
 
-  } catch (e) {
-    console.error('[profil] Setup error:', e.message);
-    loading(false);
-  }
+/** Pasang fallback seragam: bila foto asli gagal dimuat, ganti ke placeholder inisial. */
+function pasangFallbackFoto(scopeEl) {
+  (scopeEl || document).querySelectorAll('img[data-fallback-nama]').forEach(img => {
+    img.onerror = () => {
+      img.onerror = null;
+      img.src = generateUserAvatarPlaceholder(img.dataset.fallbackNama || '', img.dataset.fallbackRole || '');
+    };
+  });
 }
 
 // =====================================================================
-// 2. HELPER: Generate Avatar Placeholder dengan Inisial + Warna Dinamis
+// GLOBAL PROFIL SETUP — dipakai Admin, Guru, Walas, semua peran
 // =====================================================================
 
 /**
- * Generate placeholder avatar SVG dengan inisial nama + warna berdasarkan role
- * 
- * @param {string} namaUser - Nama lengkap user (mis: "Joni Suryanto")
- * @param {string} roleUser - Role user (mis: "Admin", "Guru BK", "Walas")
+ * Setup profil untuk user yang SEDANG LOGIN (Admin, Guru, Walas, dll).
+ * Hanya memuat foto MILIK SENDIRI — untuk daftar foto banyak guru/pengguna
+ * lain sekaligus, pakai muatFotoBanyak().
+ * Cukup dipanggil di viewDashboard(); otomatis bekerja untuk siapa pun yang login.
+ */
+async function setupProfilUserLogin() {
+  try {
+    const { data: authUser, error: authError } = await db.auth.getUser();
+    if (authError || !authUser?.user?.id) { console.warn('[profil] Tidak ada user yang login'); return; }
+
+    const userId = authUser.user.id;
+    const namaUser = APP.profil?.nama_lengkap || APP.profil?.nama ||
+                     authUser.user.email?.split('@')[0] || 'User';
+    const roleUser = APP.profil?.role || 'User';
+    APP.fotoSaya = { userId, nama: namaUser, role: roleUser };
+
+    const urlFoto = await muatFotoSatu('profil_guru', userId);
+
+    const namaEl = $('guru-nama'), roleEl = $('guru-role'), imgEl = $('guru-avatar-img');
+    if (namaEl) { namaEl.textContent = namaUser; namaEl.title = `User ID: ${userId}`; }
+    if (roleEl) roleEl.textContent = roleUser;
+
+    if (imgEl) {
+      imgEl.dataset.fallbackNama = namaUser;
+      imgEl.dataset.fallbackRole = roleUser;
+      imgEl.onerror = () => { imgEl.onerror = null; imgEl.src = generateUserAvatarPlaceholder(namaUser, roleUser); };
+      imgEl.style.opacity = '0';
+      imgEl.onload = () => { imgEl.style.transition = 'opacity 0.5s ease-in-out'; imgEl.style.opacity = '1'; };
+      imgEl.src = urlFoto || generateUserAvatarPlaceholder(namaUser, roleUser);
+      imgEl.alt = `Profil ${namaUser}`;
+      console.log(urlFoto ? `[profil] ✅ Foto loaded` : `[profil] Menggunakan placeholder avatar`);
+    }
+
+    console.log(`✅ [profil] Selesai load profil: ${namaUser} (${roleUser})`);
+  } catch (e) {
+    console.error('[profil] Setup error:', e.message);
+  }
+}
+
+/** Klik avatar di sidebar → pilih berkas → unggah langsung sebagai foto profil sendiri. */
+function pasangUploadFotoSaya() {
+  const tombol = $('guru-avatar-container'), inp = $('inpFotoSaya');
+  if (!tombol || !inp) return;
+  tombol.addEventListener('click', () => inp.click());
+  inp.addEventListener('change', async () => {
+    const file = inp.files?.[0]; inp.value = '';
+    if (!file || !APP.fotoSaya?.userId) return;
+    const imgEl = $('guru-avatar-img');
+    sync('saving', 'Mengunggah foto…');
+    try {
+      const url = await unggahFoto('profil_guru', APP.fotoSaya.userId, file);
+      if (imgEl) { imgEl.onerror = null; imgEl.src = url; }
+      sync('done', 'Foto profil diperbarui');
+      toast('success', 'Foto profil diperbarui');
+    } catch (e) {
+      sync('warn', 'Gagal mengunggah foto');
+      fireError(e);
+    }
+  });
+}
+pasangUploadFotoSaya();
+
+// =====================================================================
+// HELPER: Generate Avatar Placeholder dengan Inisial + Warna Dinamis
+// =====================================================================
+
+/**
+ * Generate placeholder avatar SVG dengan inisial nama + warna berdasarkan role.
  * @returns {string} Data URI SVG avatar
  */
 function generateUserAvatarPlaceholder(namaUser, roleUser) {
-  // Ambil inisial dari nama
   const words = (namaUser || 'User').trim().split(' ');
   const initials = words.map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  const bgColor = getRoleColor(roleUser);
+  const svg = `
+    <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'>
+      <defs><style>@font-face{font-family:'Arial';}</style></defs>
+      <circle cx='100' cy='100' r='100' fill='${bgColor}'/>
+      <text x='100' y='120' font-size='60' font-weight='bold' fill='white'
+        text-anchor='middle' font-family='Arial, sans-serif'>${initials}</text>
+    </svg>
+  `;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
 
-  // Pilih warna berdasarkan role
+/** Generate inisial dari nama (versi ringkas). */
+function getInitialsFromName(nama) {
+  const words = (nama || 'User').trim().split(' ');
+  return words.map(w => w[0]).join('').toUpperCase().slice(0, 2);
+}
+
+/** Warna aksen per peran — dipakai placeholder avatar & elemen visual lain. */
+function getRoleColor(role) {
   const roleColors = {
     'Admin': '#4F46E5',           // Indigo
     'Pimpinan': '#7C3AED',        // Violet
@@ -737,139 +852,8 @@ function generateUserAvatarPlaceholder(namaUser, roleUser) {
     'Osis': '#EC4899',            // Pink
     'Klinik': '#8B5CF6',          // Purple
   };
-
-  // Default color jika role tidak ada di list
-  const bgColor = roleColors[roleUser] || '#6366F1';
-
-  // Return SVG data URI
-  const svg = `
-    <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'>
-      <defs>
-        <style>
-          @font-face {
-            font-family: 'Arial';
-          }
-        </style>
-      </defs>
-      <circle cx='100' cy='100' r='100' fill='${bgColor}'/>
-      <text 
-        x='100' y='120' 
-        font-size='60' 
-        font-weight='bold' 
-        fill='white' 
-        text-anchor='middle' 
-        font-family='Arial, sans-serif'
-      >${initials}</text>
-    </svg>
-  `;
-
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
-
-// =====================================================================
-// 3. HELPER: Generate initials dari nama (simple version)
-// =====================================================================
-
-function getInitialsFromName(nama) {
-  const words = (nama || 'User').trim().split(' ');
-  return words.map(w => w[0]).join('').toUpperCase().slice(0, 2);
-}
-
-// =====================================================================
-// 4. HELPER: Get role color (untuk styling lain jika perlu)
-// =====================================================================
-
-function getRoleColor(role) {
-  const roleColors = {
-    'Admin': '#4F46E5',
-    'Pimpinan': '#7C3AED',
-    'Guru': '#0891B2',
-    'Guru BK': '#06B6D4',
-    'Guru Piket': '#3B82F6',
-    'Walas': '#10B981',
-    'Ustadz GEN-Z': '#F59E0B',
-    'Osis': '#EC4899',
-    'Klinik': '#8B5CF6',
-  };
   return roleColors[role] || '#6366F1';
 }
-
-// =====================================================================
-// 5. INTEGRATION DI APP.JS
-// =====================================================================
-
-/*
-TEMPAT MEMANGGIL:
-
-async function viewDashboard() {
-  // Start profil loading (paralel dengan data)
-  const profilePromise = setupProfilUserLogin();  // ← CUKUP PANGGIL INI
-  
-  const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
-    amanKosong(muatSiswa, 'santri'),
-    amanKosong(muatDetail, 'pelanggaran'),
-    amanKosong(muatIzin, 'perizinan'),
-    amanKosong(muatPembinaan, 'pembinaan')
-  ]);
-  
-  // Tunggu profil selesai
-  await profilePromise;
-  
-  // ... rest of code ...
-}
-*/
-
-// =====================================================================
-// 6. TESTING DAN DEBUG
-// =====================================================================
-
-/*
-DI BROWSER CONSOLE (F12), test function:
-
-// Test dengan nama & role yang berbeda
-generateUserAvatarPlaceholder('Joni Suryanto', 'Guru BK');
-// Result: Inisial "JS" dengan warna Sky (#06B6D4)
-
-generateUserAvatarPlaceholder('Siti Nurhaliza', 'Walas');
-// Result: Inisial "SN" dengan warna Emerald (#10B981)
-
-generateUserAvatarPlaceholder('Rahman', 'Admin');
-// Result: Inisial "R" dengan warna Indigo (#4F46E5)
-
-// Get warna role tertentu
-getRoleColor('Pimpinan');
-// Result: '#7C3AED'
-
-// Get inisial
-getInitialsFromName('Nyak Al Azwansyah');
-// Result: 'NA'
-*/
-
-// =====================================================================
-// 7. EXPECTED OUTPUT (Console)
-// =====================================================================
-
-/*
-Saat login sebagai berbeda user:
-
-ADMIN LOGIN (Nyak):
-✅ [profil] Loading profil untuk user: 550e8400-e29b-41d4-a716-446655440000
-✅ [profil] ✅ Foto loaded: nyak_al_azwansyah.png
-✅ [profil] Selesai load profil: Nyak Al Azwansyah, S.Sos. (Admin)
-
-GURU BK LOGIN (Joni):
-✅ [profil] Loading profil untuk user: 660e8401-e39c-42e5-b727-557766551111
-✅ [profil] ✅ Foto loaded: joni_suryanto.png
-✅ [profil] Selesai load profil: Joni Suryanto (Guru BK)
-
-WALAS LOGIN (Rahman):
-✅ [profil] Loading profil untuk user: 770e8402-e49d-43f6-c838-668877662222
-✅ [profil] Menggunakan placeholder avatar
-✅ [profil] Selesai load profil: Rahman (Walas)
-
-Sidebar berubah otomatis sesuai siapa yang login! ✨
-*/ 
-
 
 // 5. LOGIKA PORTING: KASKADE KONVERSI & ANGKATAN
 // ---------------------------------------------------------------------
@@ -1216,8 +1200,18 @@ db.auth.onAuthStateChange((event) => {
   if (event === 'SIGNED_OUT' && APP.profil) location.reload();
 });
 
-// Visual login opsional
-(function visualLogin() {
+// Visual login: latar foto & logo Dayah, diambil dari tabel foto_aset
+// (kategori identitas_latar / identitas_logo — lihat modul FOTO PROFIL
+// di atas, dan kartu "Identitas Dayah" di menu Master & Bidang tempat
+// Admin mengunggahnya). Dibungkus try/catch: bila tabel belum bisa
+// dibaca sebelum login (RLS), layar login tetap tampil normal tanpa foto.
+(async function visualLogin() {
+  try {
+    const identitas = await muatIdentitasDayah();
+    if (identitas.identitas_latar) ASET.foto = identitas.identitas_latar;
+    if (identitas.identitas_logo) ASET.logo = identitas.identitas_logo;
+  } catch (e) { console.warn('[identitas]', e.message); }
+
   if (ASET.foto) {
     const art = $('loginArt');
     art.style.setProperty('--photo', `url("${ASET.foto.replace(/"/g,'\\"')}")`);
@@ -1314,8 +1308,6 @@ function tandaiTabelBisaGeser() {
 // ---------------------------------------------------------------------
 const tagKategori = (k) => k === 'Ringan' ? 'tag-ringan' : k === 'Sedang' ? 'tag-sedang' : 'tag-berat';
 const tagIzin = (s) => s === 'Sesuai Waktu' ? 'tag-ok' : s === 'Telat Balik' ? 'tag-berat' : 'tag-wait';
-/** Kelas aksen garis kiri pada kartu izin, mengikuti status persetujuan. */
-const garisIzin = (s) => s === 'Sesuai Waktu' ? 'st-ok' : s === 'Telat Balik' ? 'st-telat' : 'st-wait';
 
 function stat(label, nilai, ikon, warna, aksen, kaki) {
   return `<div class="stat rise" style="--accent:${aksen}">
@@ -2723,7 +2715,7 @@ async function gambarIzin() {
   $('queryTime').textContent = `perizinan · ${angka(rows.length)} kartu`;
 
   $('izinGrid').innerHTML = hal.map(p => `
-    <div class="izin ${garisIzin(p.status_persetujuan)}">
+    <div class="izin">
       <div class="top">
         <div style="min-width:0">
           <p style="margin:0;font-weight:700;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
@@ -2839,32 +2831,21 @@ function bolehPerpanjang(z) {
 /** Tombol aksi kartu izin — dipakai bersama oleh Perizinan & Pengasuhan. */
 function aksiIzin(z, tandaProses, tandaPanjang) {
   const a = [];
-  const nama = esc(z.siswa?.nama_siswa || z.nisn || 'santri ini');
-
   if (String(z.status_persetujuan) === 'Pending' && bisa('izin.proses') && !hanyaBaca()) {
-    a.push(`<button class="btn btn-danger btn-sm act-telat"
-      data-${tandaProses}="${esc(z.id_izin)}|Telat Balik"
-      title="Tandai telat balik" aria-label="Tandai izin ${nama} telat balik">
+    a.push(`<button class="btn btn-danger btn-sm" data-${tandaProses}="${esc(z.id_izin)}|Telat Balik">
       <i class="fa-solid fa-clock-rotate-left"></i>Telat Balik</button>`);
-    a.push(`<button class="btn btn-ok btn-sm act-sesuai"
-      data-${tandaProses}="${esc(z.id_izin)}|Sesuai Waktu"
-      title="Tandai kembali sesuai waktu" aria-label="Tandai izin ${nama} sesuai waktu">
+    a.push(`<button class="btn btn-ok btn-sm" data-${tandaProses}="${esc(z.id_izin)}|Sesuai Waktu">
       <i class="fa-solid fa-check"></i>Sesuai Waktu</button>`);
   }
   if (bolehPerpanjang(z)) {
-    a.push(`<button class="btn btn-ghost btn-sm act-panjang"
-      data-${tandaPanjang}="${esc(z.id_izin)}"
-      title="Perpanjang masa izin" aria-label="Perpanjang izin ${nama}">
+    a.push(`<button class="btn btn-ghost btn-sm" data-${tandaPanjang}="${esc(z.id_izin)}">
       <i class="fa-solid fa-calendar-plus"></i>Perpanjang</button>`);
   }
   if (bisa('izin.lihat')) {
-    a.push(`<button class="btn btn-ghost btn-sm act-wa" data-wa="${esc(z.id_izin)}"
-      title="Kirim rincian izin ke grup WhatsApp" aria-label="Kirim izin ${nama} ke grup WhatsApp">
+    a.push(`<button class="btn btn-ghost btn-sm" data-wa="${esc(z.id_izin)}">
       <i class="fa-brands fa-whatsapp"></i>Kirim ke Grup</button>`);
   }
-  // Kelas `ganjil` membuat tombol terakhir melebar penuh pada grid dua kolom.
-  const ganjil = a.length % 2 === 1 ? ' ganjil' : '';
-  return a.length ? `<div class="acts${ganjil}">${a.join('')}</div>` : '';
+  return a.length ? `<div class="acts">${a.join('')}</div>` : '';
 }
 
 /** Hitung selisih hari inklusif untuk ditampilkan di modal. */
@@ -3397,7 +3378,9 @@ async function viewMaster() {
     `Role ${role()} tidak memiliki akses ke Master Pelanggaran.`, 'fa-lock'); return; }
 
   cacheHapus('master','bidang');
-  const [master, bidang] = await Promise.all([muatMaster(), muatBidang()]);
+  const [master, bidang, identitas] = await Promise.all([
+    muatMaster(), muatBidang(), isAdmin() ? muatIdentitasDayah() : Promise.resolve({})
+  ]);
 
   $('viewRoot').innerHTML = `
     ${kartu('Master Pelanggaran', `
@@ -3424,7 +3407,9 @@ async function viewMaster() {
           <th>Jenjang</th><th>Status</th><th class="right">Aksi</th></tr></thead>
         <tbody id="tbBidang"></tbody>
       </table></div>`,
-      isAdmin() ? `<button class="btn btn-primary btn-sm" id="btnAddBidang"><i class="fa-solid fa-plus"></i>Tambah Bidang</button>` : '')}`;
+      isAdmin() ? `<button class="btn btn-primary btn-sm" id="btnAddBidang"><i class="fa-solid fa-plus"></i>Tambah Bidang</button>` : '')}
+
+    ${isAdmin() ? kartuIdentitasDayah(identitas) : ''}`;
 
   $('msCari').addEventListener('input', debounce(e => { stMaster.cari = e.target.value.trim(); gambarMaster(); }, 220));
   $('btnAddMaster')?.addEventListener('click', () => modalMaster(null));
@@ -3439,6 +3424,61 @@ async function viewMaster() {
 
   gambarMaster();
   gambarBidang(bidang);
+  if (isAdmin()) pasangIdentitasDayah();
+}
+
+/** Kartu "Identitas Dayah" — logo & foto latar layar login, khusus Admin. */
+function kartuIdentitasDayah(identitas) {
+  const frame = (id, label, url, hint) => `
+    <div class="idn-item">
+      <span class="lbl">${esc(label)}</span>
+      <div class="idn-frame${url ? ' filled' : ''}" id="${id}" title="Klik untuk unggah / ganti">
+        ${url
+          ? `<img src="${esc(url)}" alt="${esc(label)}">`
+          : `<div class="idn-empty"><i class="fa-solid fa-image"></i>Belum ada berkas</div>`}
+        <div class="idn-over"><i class="fa-solid fa-camera"></i>Ganti ${esc(label)}</div>
+      </div>
+      <small>${esc(hint)}</small>
+    </div>`;
+  return kartu('Identitas Dayah', `
+    <div class="card-note"><i class="fa-solid fa-circle-info"></i>
+      Logo dan foto latar ini tampil di layar login. Perubahan berlaku pada
+      percobaan masuk berikutnya (muat ulang halaman login untuk melihatnya).</div>
+    <div class="idn-grid">
+      ${frame('idnLogo', 'Logo Dayah', identitas?.identitas_logo,
+        'Disarankan gambar persegi, latar transparan (PNG).')}
+      ${frame('idnLatar', 'Foto Latar Login', identitas?.identitas_latar,
+        'Disarankan foto lanskap beresolusi tinggi (JPG/WEBP).')}
+    </div>
+    <input type="file" id="idnInput" accept="image/png,image/jpeg,image/webp" class="hidden">`,
+    '', 'Tampil di layar login — hanya Admin yang dapat mengubah');
+}
+
+/** Klik salah satu bingkai Identitas Dayah → pilih berkas → unggah sebagai identitas global. */
+function pasangIdentitasDayah() {
+  const inp = $('idnInput'); if (!inp) return;
+  let target = null;
+  const buka = (kategori, el) => { target = { kategori, el }; inp.click(); };
+  $('idnLogo')?.addEventListener('click', () => buka('identitas_logo', $('idnLogo')));
+  $('idnLatar')?.addEventListener('click', () => buka('identitas_latar', $('idnLatar')));
+  inp.addEventListener('change', async () => {
+    const file = inp.files?.[0]; inp.value = '';
+    if (!file || !target) return;
+    const { el, kategori } = target;
+    sync('saving', 'Mengunggah identitas…');
+    try {
+      const { data: authUser } = await db.auth.getUser();
+      const url = await unggahFoto(kategori, authUser?.user?.id, file, { global: true });
+      el.classList.add('filled');
+      el.innerHTML = `<img src="${esc(url)}" alt="">
+        <div class="idn-over"><i class="fa-solid fa-camera"></i>Ganti</div>`;
+      sync('done', 'Identitas dayah diperbarui');
+      toast('success', 'Tersimpan — akan tampil pada layar login berikutnya');
+    } catch (e) {
+      sync('warn', 'Gagal mengunggah');
+      fireError(e);
+    }
+  });
 }
 
 async function gambarMaster() {
@@ -3601,76 +3641,136 @@ async function modalBidang(existing) {
 // ---------------------------------------------------------------------
 // 19. MANAJEMEN PENGGUNA
 // ---------------------------------------------------------------------
+let PENGGUNA_DATA = [];
+
 async function viewPengguna() {
   const { data } = await q(db.from('profiles').select('*').order('nama'), 'profiles');
+  PENGGUNA_DATA = data || [];
+
+  // Foto guru/pengguna lain — satu query untuk semua baris sekaligus
+  // (lihat muatFotoBanyak di modul FOTO PROFIL & IDENTITAS DAYAH).
+  const petaFoto = await muatFotoBanyak('profil_guru', PENGGUNA_DATA.map(u => u.id));
+  PENGGUNA_DATA.forEach(u => { u._foto = petaFoto[u.id] || ''; });
 
   $('viewRoot').innerHTML = kartu('Manajemen Pengguna', `
     <div class="card-note"><i class="fa-solid fa-circle-info"></i>
       Akun baru dibuat di <b>Dashboard Supabase &gt; Authentication &gt; Users</b>,
-      lalu peran, kelas binaan, dan cakupan unitnya diatur di sini.</div>
-    <div class="tbl"><table>
-      <thead><tr><th>Username</th><th>Nama</th><th>Peran</th><th>Kelas Binaan</th>
-        <th>Cakupan</th><th>Status</th><th class="right">Aksi</th></tr></thead>
-      <tbody>${(data||[]).map(u => `<tr>
-        <td class="secondary nowrap" style="padding-top:14px">${esc(u.username)}</td>
-        <td><div class="primary">${esc(u.nama)}</div></td>
-        <td><span class="tag ${u.role==='Admin'?'tag-ok':u.role==='Pimpinan'?'tag-violet':'tag-sea'}">${esc(u.role)}</span></td>
-        <td style="font-size:12.5px">${esc((u.kelas_binaan||[]).join(', ') || '-')}</td>
-        <td style="font-size:12.5px">${esc(u.unit_akses||'Semua')}${u.jenjang_akses && u.jenjang_akses!=='Semua'?' · '+esc(u.jenjang_akses):''}</td>
-        <td><span class="tag ${u.aktif?'tag-ok':'tag-off'}">${u.aktif?'Aktif':'Nonaktif'}</span></td>
-        <td class="right"><button class="btn-link" data-edit="${esc(u.id)}">
-          <i class="fa-solid fa-pen-to-square"></i> Ubah</button></td>
-      </tr>`).join('') || barisKosong(7,'Belum ada pengguna.','Buat akun terlebih dahulu di dashboard Supabase.')}
-      </tbody></table></div>
-    <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>`);
+      lalu peran, kelas binaan, cakupan unit, dan foto profilnya diatur di sini.</div>
+    <div class="pgu-list" id="pguList"></div>`,
+    '', `${angka(PENGGUNA_DATA.length)} akun terdaftar`);
+
+  gambarPengguna();
 
   onKlik(async (e) => {
     const b = e.target.closest('[data-edit]'); if (!b) return;
-    const u = (data||[]).find(x => x.id === b.dataset.edit);
-    if (!u) return;
-    const res = await Swal.fire({
-      title:'Ubah Pengguna', width: 560, showCancelButton:true,
-      confirmButtonText:'Simpan', cancelButtonText:'Batal', confirmButtonColor:'#14618B',
-      showLoaderOnConfirm:true, allowOutsideClick:() => !Swal.isLoading(),
-      html:`<div class="stack">
-        <div class="field"><label class="label">Nama</label>
-          <input id="uNama" class="input" value="${esc(u.nama)}"></div>
-        <div class="field"><label class="label">Peran</label>
-          <select id="uRole" class="input">${SEMUA_ROLE
-            .map(r => `<option ${r===u.role?'selected':''}>${r}</option>`).join('')}</select>
-          <p class="hint">Guru, Guru BK, dan Walas wajib memiliki kelas binaan.</p></div>
-        <div class="field"><label class="label">Kelas Binaan (pisahkan koma)</label>
-          <input id="uKelas" class="input" value="${esc((u.kelas_binaan||[]).join(', '))}" placeholder="X-A, X-B"></div>
-        <div class="trio">
-          <div class="field"><label class="label">Unit Akses</label>
-            <select id="uUnit" class="input">${['Semua','Pengasuhan','Madrasah']
-              .map(x => `<option ${x===u.unit_akses?'selected':''}>${x}</option>`).join('')}</select></div>
-          <div class="field"><label class="label">Jenjang Akses</label>
-            <select id="uJenjang" class="input">${['Semua','MTs','MA']
-              .map(x => `<option ${x===(u.jenjang_akses||'Semua')?'selected':''}>${x}</option>`).join('')}</select></div>
-          <div class="field"><label class="label">Status</label>
-            <select id="uAktif" class="input">
-              <option value="true" ${u.aktif?'selected':''}>Aktif</option>
-              <option value="false" ${!u.aktif?'selected':''}>Nonaktif</option>
-            </select></div>
-        </div></div>`,
-      preConfirm: async () => {
-        const peran = $('uRole').value;
-        const kelas = $('uKelas').value.split(',').map(x => x.trim()).filter(Boolean);
-        if (['Guru','Guru BK','Walas'].includes(peran) && !kelas.length) {
-          Swal.showValidationMessage(`${peran} wajib memiliki minimal satu kelas binaan.`); return false;
-        }
-        const { error } = await db.from('profiles').update({
-          nama: $('uNama').value.trim(), role: peran, kelas_binaan: kelas,
-          unit_akses: $('uUnit').value, jenjang_akses: $('uJenjang').value,
-          aktif: $('uAktif').value === 'true'
-        }).eq('id', u.id);
-        if (error) { Swal.showValidationMessage(error.message); return false; }
-        return true;
-      }
-    });
-    if (res.isConfirmed) { sync('done','Pengguna diperbarui'); toast('success','Pengguna diperbarui'); viewPengguna(); }
+    const u = PENGGUNA_DATA.find(x => x.id === b.dataset.edit);
+    if (u) await modalPengguna(u);
   });
+}
+
+function gambarPengguna() {
+  const wrap = $('pguList'); if (!wrap) return;
+  wrap.innerHTML = PENGGUNA_DATA.map(u => `
+    <div class="pgu-card">
+      <div class="pgu-av${u.aktif ? '' : ' nonaktif'}" data-uid="${esc(u.id)}">
+        ${u._foto
+          ? `<img src="${esc(u._foto)}" alt="${esc(u.nama)}"
+               data-fallback-nama="${esc(u.nama)}" data-fallback-role="${esc(u.role)}">`
+          : esc(getInitialsFromName(u.nama))}
+      </div>
+      <div class="pgu-body">
+        <div class="pgu-top">
+          <span class="pgu-nama">${esc(u.nama)}</span>
+          <span class="tag ${u.role==='Admin'?'tag-ok':u.role==='Pimpinan'?'tag-violet':'tag-sea'}">${esc(u.role)}</span>
+          <span class="tag ${u.aktif?'tag-ok':'tag-off'}">${u.aktif?'Aktif':'Nonaktif'}</span>
+        </div>
+        <div class="pgu-meta">
+          <span class="pgu-user"><i class="fa-solid fa-at"></i> ${esc(u.username)}</span>
+          ${(u.kelas_binaan||[]).length ? `<span><i class="fa-solid fa-chalkboard"></i> ${esc((u.kelas_binaan||[]).join(', '))}</span>` : ''}
+          <span><i class="fa-solid fa-layer-group"></i> ${esc(u.unit_akses||'Semua')}${u.jenjang_akses && u.jenjang_akses!=='Semua' ? ' · '+esc(u.jenjang_akses) : ''}</span>
+        </div>
+      </div>
+      <div class="pgu-acts">
+        <button class="btn-link" data-edit="${esc(u.id)}"><i class="fa-solid fa-pen-to-square"></i> Ubah</button>
+      </div>
+    </div>`).join('') || kosong('Belum ada pengguna.', 'Buat akun terlebih dahulu di dashboard Supabase.', 'fa-users');
+  pasangFallbackFoto(wrap);
+}
+
+async function modalPengguna(u) {
+  const res = await Swal.fire({
+    title:'Ubah Pengguna', width: 560, showCancelButton:true,
+    confirmButtonText:'Simpan', cancelButtonText:'Batal', confirmButtonColor:'#14618B',
+    showLoaderOnConfirm:true, allowOutsideClick:() => !Swal.isLoading(),
+    html:`<div class="stack">
+      <div class="fu-wrap">
+        <div class="fu-preview" id="fuPrev" title="Klik untuk ganti foto">
+          ${u._foto ? `<img src="${esc(u._foto)}" alt="">` : esc(getInitialsFromName(u.nama))}
+          <span class="fu-cam"><i class="fa-solid fa-camera"></i></span>
+        </div>
+        <div class="fu-info">
+          <b>Foto Profil</b>
+          <small>Klik gambar untuk mengganti. JPG/PNG/WEBP, maksimal ${FOTO_MAKS_MB}MB.</small>
+          <div class="fu-status" id="fuStat"></div>
+        </div>
+        <input type="file" id="fuInput" accept="image/png,image/jpeg,image/webp" class="hidden">
+      </div>
+      <div class="field"><label class="label">Nama</label>
+        <input id="uNama" class="input" value="${esc(u.nama)}"></div>
+      <div class="field"><label class="label">Peran</label>
+        <select id="uRole" class="input">${SEMUA_ROLE
+          .map(r => `<option ${r===u.role?'selected':''}>${r}</option>`).join('')}</select>
+        <p class="hint">Guru, Guru BK, dan Walas wajib memiliki kelas binaan.</p></div>
+      <div class="field"><label class="label">Kelas Binaan (pisahkan koma)</label>
+        <input id="uKelas" class="input" value="${esc((u.kelas_binaan||[]).join(', '))}" placeholder="X-A, X-B"></div>
+      <div class="trio">
+        <div class="field"><label class="label">Unit Akses</label>
+          <select id="uUnit" class="input">${['Semua','Pengasuhan','Madrasah']
+            .map(x => `<option ${x===u.unit_akses?'selected':''}>${x}</option>`).join('')}</select></div>
+        <div class="field"><label class="label">Jenjang Akses</label>
+          <select id="uJenjang" class="input">${['Semua','MTs','MA']
+            .map(x => `<option ${x===(u.jenjang_akses||'Semua')?'selected':''}>${x}</option>`).join('')}</select></div>
+        <div class="field"><label class="label">Status</label>
+          <select id="uAktif" class="input">
+            <option value="true" ${u.aktif?'selected':''}>Aktif</option>
+            <option value="false" ${!u.aktif?'selected':''}>Nonaktif</option>
+          </select></div>
+      </div></div>`,
+    didOpen: () => {
+      const prev = $('fuPrev'), inp = $('fuInput'), stat = $('fuStat');
+      prev.addEventListener('click', () => inp.click());
+      inp.addEventListener('change', async () => {
+        const file = inp.files?.[0]; inp.value = '';
+        if (!file) return;
+        stat.className = 'fu-status busy'; stat.textContent = 'Mengunggah…';
+        try {
+          const url = await unggahFoto('profil_guru', u.id, file);
+          u._foto = url;
+          prev.innerHTML = `<img src="${esc(url)}" alt=""><span class="fu-cam"><i class="fa-solid fa-camera"></i></span>`;
+          stat.className = 'fu-status ok'; stat.textContent = 'Foto tersimpan.';
+          const kartuAv = document.querySelector(`.pgu-av[data-uid="${u.id}"]`);
+          if (kartuAv) kartuAv.innerHTML = `<img src="${esc(url)}" alt="${esc(u.nama)}">`;
+        } catch (e) {
+          stat.className = 'fu-status err'; stat.textContent = e.message || 'Gagal mengunggah.';
+        }
+      });
+    },
+    preConfirm: async () => {
+      const peran = $('uRole').value;
+      const kelas = $('uKelas').value.split(',').map(x => x.trim()).filter(Boolean);
+      if (['Guru','Guru BK','Walas'].includes(peran) && !kelas.length) {
+        Swal.showValidationMessage(`${peran} wajib memiliki minimal satu kelas binaan.`); return false;
+      }
+      const { error } = await db.from('profiles').update({
+        nama: $('uNama').value.trim(), role: peran, kelas_binaan: kelas,
+        unit_akses: $('uUnit').value, jenjang_akses: $('uJenjang').value,
+        aktif: $('uAktif').value === 'true'
+      }).eq('id', u.id);
+      if (error) { Swal.showValidationMessage(error.message); return false; }
+      return true;
+    }
+  });
+  if (res.isConfirmed) { sync('done','Pengguna diperbarui'); toast('success','Pengguna diperbarui'); viewPengguna(); }
 }
 
 // ---------------------------------------------------------------------
@@ -5131,13 +5231,16 @@ async function muatKinerjaGuru() {
   }
 }
 
-function gambarKinerjaGuru() {
+async function gambarKinerjaGuru() {
   const d = stKg.data || {};
   const r = d.ringkasan || {};
   const rank = d.ranking || [];
   const belum = Number(d.belum_terpetakan || 0);
   const b = d.bobot || {};
   const maks = Math.max(1, ...rank.map(g => Number(g.skor_kinerja) || 0));
+
+  // Foto asli banyak guru sekaligus, satu query — lihat modul FOTO PROFIL.
+  const petaFoto = await muatFotoBanyak('profil_guru', rank.map(g => g.guru_id));
 
   const ROLE = ['Semua','Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'];
   const num = (v, warna) => `<td class="kg-num ${v ? '' : 'nol'}"
@@ -5147,11 +5250,16 @@ function gambarKinerjaGuru() {
     const skor = Number(g.skor_kinerja) || 0;
     const kelas = [g.peringkat <= 3 && skor > 0 ? 'top' : '',
                    g.total_aktivitas ? '' : 'pasif'].filter(Boolean).join(' ');
+    const fotoUrl = petaFoto[g.guru_id];
+    const avatarIsi = fotoUrl
+      ? `<img src="${esc(fotoUrl)}" alt="${esc(g.nama || '')}"
+           data-fallback-nama="${esc(g.nama || '')}" data-fallback-role="${esc(g.role || '')}">`
+      : esc((g.nama || '?').charAt(0).toUpperCase());
     return `<tr class="${kelas}">
       <td class="center" style="width:58px">
         <span class="kg-rank ${skor > 0 && g.peringkat <= 3 ? 'g' + g.peringkat : ''}">${g.peringkat}</span></td>
       <td><div class="kg-guru">
-        <div class="kg-av">${esc((g.nama || '?').charAt(0).toUpperCase())}</div>
+        <div class="kg-av">${avatarIsi}</div>
         <div class="kg-nm">${esc(g.nama)}</div></div></td>
       <td><span class="tag ${g.role === 'Admin' ? 'tag-ok'
         : g.role === 'Pimpinan' ? 'tag-violet' : 'tag-sea'}">${esc(g.role)}</span></td>
@@ -5220,6 +5328,7 @@ function gambarKinerjaGuru() {
       `<button class="btn btn-ghost btn-sm" id="kgCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>`,
       `Periode ${tgl(stKg.dari)} – ${tgl(stKg.sampai)}`)}`;
 
+  pasangFallbackFoto($('kgWrap'));
   pasangKinerjaGuru();
   tandaiTabelBisaGeser();
 }
@@ -5877,7 +5986,7 @@ function pgsGambarIzin() {
   $('queryTime').textContent = `perizinan pengasuhan · ${angka(rows.length)} kartu`;
 
   $('pgIzGrid').innerHTML = hal.map(z => `
-    <div class="izin ${garisIzin(z.status_persetujuan)}">
+    <div class="izin">
       <div class="top">
         <div style="min-width:0">
           <p style="margin:0;font-weight:700;font-size:13.5px;overflow:hidden;
