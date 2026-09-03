@@ -221,6 +221,10 @@ const HAK = {
   'cetak'           : ['Admin','Guru','Guru BK','Pimpinan'],
   'pdf'             : ['Admin','Guru','Pimpinan'],
 
+  // --- Pesan tindak lanjut BK ---------------------------------------
+  'pesan.lihat'     : ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Pimpinan'],
+  'pesan.mulai'     : ['Admin','Guru BK'],   // hanya BK yang memulai utas baru
+
   // --- Batasan lingkup ----------------------------------------------
   'lingkup.kelas'   : ['Guru','Guru BK','Walas']   // hanya kelas binaan
 };
@@ -255,6 +259,8 @@ function filterBinaan(rows, field = 'kelas') {
 const MENU_ROLE = {
   dashboard:   ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
   pimpinan:    ['Admin','Pimpinan'],
+  bk:          ['Admin','Guru BK'],
+  pesan:       ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Pimpinan'],
   siswa:       ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
   pelanggaran: ['Admin'],
   rekap:       ['Admin'],
@@ -271,6 +277,8 @@ const MENU_ROLE = {
 const JUDUL = {
   dashboard:  { lat:'Ringkasan',       ar:'الملخّص',            teks:'Ringkasan' },
   pimpinan:   { lat:'Pimpinan',        ar:'لوحة القيادة',       teks:'Dashboard Pimpinan' },
+  bk:         { lat:'Bimbingan',       ar:'لوحة الإرشاد',       teks:'Dashboard Guru BK' },
+  pesan:      { lat:'Pesan',           ar:'الرسائل',            teks:'Pesan Tindak Lanjut' },
   siswa:      { lat:'Santri',          ar:'بيانات الطلاب',      teks:'Profil Santri' },
   pelanggaran:{ lat:'Pelanggaran',     ar:'المخالفات',          teks:'Catatan Pelanggaran' },
   rekap:      { lat:'Rekap',           ar:'حصر المخالفات',      teks:'Rekap Pelanggaran' },
@@ -285,7 +293,7 @@ const JUDUL = {
 };
 
 /** Halaman awal tiap peran — dipakai login maupun fallback navigasi. */
-const RUMAH_ROLE = { Pimpinan:'pimpinan', Klinik:'perizinan' };
+const RUMAH_ROLE = { Pimpinan:'pimpinan', Klinik:'perizinan', 'Guru BK':'bk' };
 const rumah = () => RUMAH_ROLE[role()] || 'dashboard';
 
 // ---------------------------------------------------------------------
@@ -1401,6 +1409,7 @@ async function masukAplikasi() {
   pulihkanPeriode();
   aktifkanRealtime();
   refreshBadgePending();
+  refreshBadgePesan();
 
   // Load foto profil (opsional, bisa dipanggil di sini atau di dashboard)
   setupProfilUserLogin().catch(e => console.warn('[profil]', e));
@@ -1476,6 +1485,8 @@ async function navigateTo(view) {
   try {
     if (view === 'dashboard')        await viewDashboard();
     else if (view === 'pimpinan')    await viewPimpinan();
+    else if (view === 'bk')          await viewBk();
+    else if (view === 'pesan')       await viewPesan();
     else if (view === 'siswa')       await viewSiswa();
     else if (view === 'pelanggaran') await viewPelanggaran();
     else if (view === 'rekap')       await viewRekap();
@@ -1858,7 +1869,15 @@ function analisisEksekutif({ detail30, detailPrev30, bidangUrut, angkatan, izinS
 const PIM = { prio: [], jenis: [], kritis: 0, perhatian: 0, monitor: 0, rentang: '' };
 const stPrio = { cari: '', tier: 'Semua' };
 
-async function viewPimpinan() {
+/**
+ * Dipakai dua peran dengan isi yang sama persis:
+ *   - Pimpinan  : lengkap, ditutup panel Aktivitas & Kinerja Guru.
+ *   - Guru BK   : sama, TANPA panel kinerja guru, ditutup panel
+ *                 "Pesan Tindak Lanjut" (10 santri prioritas -> guru).
+ * Semua kartu, grafik, dan jendela onclick-nya identik.
+ */
+async function viewPimpinan(opsi = {}) {
+  const modeBk = opsi.bk === true;
   const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
     amanKosong(muatSiswa, 'santri'),
     amanKosong(muatDetail, 'pelanggaran'),
@@ -2023,15 +2042,31 @@ async function viewPimpinan() {
   const tierTag = (t) => t === 'Kritis' ? 'tag-berat' : t === 'Perhatian Tinggi' ? 'tag-sedang'
     : t === 'Monitor' ? 'tag-sea' : 'tag-off';
 
+  const heroBk = {
+    ar1:'لوحة الإرشاد', lat:'Bimbingan & Konseling',
+    ar2:'حال الطلاب المحتاجين للرعاية',
+    judul:'Peta santri yang<br>membutuhkan pendampingan.',
+    teks:`Isi dan seluruh jendela rinciannya sama dengan dashboard pimpinan —
+          kedisiplinan, pola pelanggaran, perizinan, pembinaan, dan santri prioritas —
+          diarahkan untuk kerja bimbingan, bukan untuk menilai kinerja guru.`
+  };
+  const heroPim = {
+    ar1:'لوحة القيادة', lat:'Executive · Read Only',
+    ar2:'تقرير حال الدايه',
+    judul:'Analisis kondisi dayah<br>berbasis data.',
+    teks:`Ringkasan untuk membantu pimpinan melihat kedisiplinan, pola pelanggaran,
+          perizinan, pembinaan, dan santri yang membutuhkan perhatian — tanpa masuk
+          ke aktivitas input operasional.`
+  };
+  const H = modeBk ? heroBk : heroPim;
+
   $('viewRoot').innerHTML = `
     <section class="hero">
-      <div class="eyebrow"><span class="ar">لوحة القيادة</span><span class="rule"></span>
-        <span class="lat">Executive · Read Only</span></div>
-      <span class="ar" style="font-size:19px;color:#F2E5B8">تقرير حال الدايه</span>
-      <h2>Analisis kondisi dayah<br>berbasis data.</h2>
-      <p>Ringkasan untuk membantu pimpinan melihat kedisiplinan, pola pelanggaran,
-         perizinan, pembinaan, dan santri yang membutuhkan perhatian — tanpa masuk
-         ke aktivitas input operasional.</p>
+      <div class="eyebrow"><span class="ar">${H.ar1}</span><span class="rule"></span>
+        <span class="lat">${H.lat}</span></div>
+      <span class="ar" style="font-size:19px;color:#F2E5B8">${H.ar2}</span>
+      <h2>${H.judul}</h2>
+      <p>${H.teks}</p>
       <div class="meta">
         <span><i class="fa-solid fa-user-tie"></i>${esc(APP.profil?.nama || '')}</span>
         <span><i class="fa-solid fa-calendar-days"></i>${tgl(kunciTgl(mulai90))} – ${tgl(kunciTgl(akhir))}</span>
@@ -2147,7 +2182,12 @@ async function viewPimpinan() {
       plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:9}}} }});
 
   await gambarKonsultan();
-  await panelKinerjaGuru();
+
+  // Pembeda satu-satunya antara kedua peran:
+  //   Pimpinan -> ringkasan aktivitas & kinerja guru
+  //   Guru BK  -> panel pesan tindak lanjut ke guru (tanpa kinerja guru)
+  if (modeBk) await panelPesanBk();
+  else        await panelKinerjaGuru();
 }
 
 // ---------------------------------------------------------------------
@@ -4801,12 +4841,16 @@ const segarkan = debounce(async (tabel) => {
   if (tabel === 'log_perizinan') {
     cacheHapus('izin'); refreshBadgePending();
     if (APP.view === 'perizinan') gambarIzin();
-    if (['dashboard','pimpinan','pengasuhan'].includes(APP.view)) navigateTo(APP.view);
+    if (['dashboard','pimpinan','bk','pengasuhan'].includes(APP.view)) navigateTo(APP.view);
+  } else if (tabel === 'pesan_bk') {
+    refreshBadgePesan();
+    if (APP.view === 'pesan') muatViewPesan();
+    else if (APP.view === 'bk') gambarPanelPesanBk();
   } else if (tabel === 'log_pelanggaran' || tabel === 'detail_data') {
     cacheHapus('detail','siswa');
     if (APP.view === 'pelanggaran') muatTabelPlg();
     else if (APP.view === 'rekap') gambarRekap();
-    else if (['dashboard','pimpinan','pengasuhan'].includes(APP.view)) navigateTo(APP.view);
+    else if (['dashboard','pimpinan','bk','pengasuhan'].includes(APP.view)) navigateTo(APP.view);
   } else if (tabel === 'log_pembinaan') {
     cacheHapus('pembinaan');
     if (APP.view === 'pembinaan') gambarBina();
@@ -4819,14 +4863,15 @@ function aktifkanRealtime() {
     .on('postgres_changes', { event:'*', schema:'public', table:'log_perizinan' }, () => segarkan('log_perizinan'))
     .on('postgres_changes', { event:'*', schema:'public', table:'log_pelanggaran' }, () => segarkan('log_pelanggaran'))
     .on('postgres_changes', { event:'*', schema:'public', table:'log_pembinaan' }, () => segarkan('log_pembinaan'))
+    .on('postgres_changes', { event:'*', schema:'public', table:'pesan_bk' }, () => segarkan('pesan_bk'))
     .subscribe((status) => {
       $('liveDot').classList.toggle('on', status === 'SUBSCRIBED');
     });
 }
 
-// Perbarui badge izin saat pengguna kembali ke tab.
-window.addEventListener('focus', () => refreshBadgePending());
-setInterval(() => { if (APP.profil) refreshBadgePending(); }, 60_000);
+// Perbarui badge izin & pesan saat pengguna kembali ke tab.
+window.addEventListener('focus', () => { refreshBadgePending(); refreshBadgePesan(); });
+setInterval(() => { if (APP.profil) { refreshBadgePending(); refreshBadgePesan(); } }, 60_000);
 
 // ---------------------------------------------------------------------
 // 23. MODUL MADRASAH — Pemeriksaan Atribut · Pelanggaran · Presensi
@@ -8317,6 +8362,555 @@ document.addEventListener('click', async (e) => {
     if (!z) return toast('error', 'Data izin tidak ditemukan.');
     await waKirimIzin(z, b);
   } catch (err) { fireError(err); }
+});
+
+// ---------------------------------------------------------------------
+// 28. DASHBOARD GURU BK & PESAN TINDAK LANJUT
+//
+//     Guru BK memakai SELURUH isi Dashboard Pimpinan — kartu statistik,
+//     analisis eksekutif, konsultan pendidikan, keenam grafik, serta
+//     kedua kartu brankas beserta jendela onclick-nya — TANPA panel
+//     "Aktivitas & Kinerja Guru". Sebagai penggantinya halaman ditutup
+//     panel percakapan: 10 santri prioritas teratas, lengkap dengan
+//     guru pembina kelasnya dan pesan siap kirim yang meminta guru
+//     tersebut menyuruh ananda menemui Guru BK.
+//
+//     Satu tabel Supabase baru: pesan_bk (lihat SQL_PESAN_BK.sql).
+//     Utas percakapan dikenali dari kolom `utas`:
+//         <nisn>|<id peserta terkecil>|<id peserta terbesar>
+//     sehingga balasan dua arah otomatis menempel pada utas yang sama
+//     tanpa perlu tabel kedua.
+// ---------------------------------------------------------------------
+const PESAN_TABEL = 'pesan_bk';
+const BK_TOP      = 10;                    // 10 santri prioritas teratas
+const ROLE_PENERIMA = ['Guru','Walas','Guru BK','Ustadz GEN-Z','Admin'];
+
+const stBk    = { santri: [], guru: [], utas: [] };
+const stPesan = { rows: [], utas: [], aktif: null, filter: 'Semua', cari: '' };
+
+/** Dashboard Guru BK = dashboard pimpinan tanpa panel kinerja guru. */
+async function viewBk() { await viewPimpinan({ bk: true }); }
+
+const idSaya = () => APP.profil?.id || '';
+
+/** Kunci utas: santri + pasangan peserta (urut, agar dua arah menyatu). */
+function kunciUtas(nisn, a, b) {
+  return [String(nisn || '-'), ...[String(a), String(b)].sort()].join('|');
+}
+
+function waktuPesan(iso) {
+  const d = new Date(iso); if (isNaN(d)) return '-';
+  const jam = d.toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' });
+  if (d.toDateString() === new Date().toDateString()) return jam;
+  return `${d.toLocaleDateString('id-ID', { day:'2-digit', month:'short' })} ${jam}`;
+}
+
+/** Daftar guru aktif (dipakai sebagai calon penerima pesan). */
+async function muatGuruAktif() {
+  const c = cacheGet('guru_aktif'); if (c) return c;
+  const { data } = await q(db.from('profiles')
+    .select('id,nama,role,kelas_binaan,aktif')
+    .eq('aktif', true).order('nama'), 'profiles_guru');
+  return cacheSet('guru_aktif', data || []);
+}
+
+/** Guru yang kelas binaannya memuat kelas santri — calon penerima utama. */
+function guruPembina(list, kelas) {
+  const k = String(kelas || '').trim(); if (!k) return [];
+  return list.filter(g => ROLE_PENERIMA.includes(g.role) && g.id !== idSaya()
+    && (g.kelas_binaan || []).includes(k));
+}
+
+/** Naskah bawaan: inti pesan = minta guru menyuruh ananda menemui BK. */
+function templatePesanBk(s) {
+  const saya  = APP.profil?.nama || 'Guru BK';
+  const butir = [];
+  if (s.berat)   butir.push(`${s.berat} pelanggaran kategori Berat`);
+  if (s.kasus30) butir.push(`${s.kasus30} kasus dalam 30 hari terakhir`);
+  if (s.telat)   butir.push(`${s.telat} kali telat balik izin`);
+  if (s.bina)    butir.push(`${s.bina} pembinaan masih berjalan`);
+  const ringkas = butir.length ? butir.join(', ') : (s.alasan || 'perlu observasi berkala');
+
+  return `Assalamu'alaikum warahmatullahi wabarakatuh.
+
+Mohon bantuan Ustadz/Ustadzah selaku pembina kelas ${s.kelas || '-'}.
+
+Ananda ${s.nama} (NISN ${s.nisn}) termasuk santri yang membutuhkan perhatian khusus: ${ringkas} — tercatat ${s.kasus90} pelanggaran / ${s.poin90} poin dalam 90 hari terakhir (tier ${s.tier}).
+
+Mohon ananda disampaikan agar MENEMUI GURU BK di ruang BK pada waktu istirahat atau jam lain yang memungkinkan, untuk pendampingan lanjutan. Setelah disampaikan, mohon utas ini ditandai "Sudah diantar ke BK".
+
+Jazakumullahu khairan katsiran.
+— ${saya} (Guru BK)`;
+}
+
+// ---------- 28a. Lapisan data pesan ----------------------------------
+
+async function muatPesanSaya() {
+  const uid = idSaya(); if (!uid) return [];
+  const { data } = await q(db.from(PESAN_TABEL).select('*')
+    .or(`pengirim_id.eq.${uid},penerima_id.eq.${uid}`)
+    .order('created_at', { ascending: true }).limit(3000), 'pesan_bk');
+  return data || [];
+}
+
+/** Baris datar -> utas percakapan, terbaru di atas. */
+function kelompokUtas(rows) {
+  const uid = idSaya(), peta = {};
+  rows.forEach(r => {
+    const k = r.utas || kunciUtas(r.nisn, r.pengirim_id, r.penerima_id);
+    if (!peta[k]) peta[k] = { utas:k, nisn:r.nisn, nama_santri:r.nama_santri,
+      kelas:r.kelas, tier:r.tier, pesan:[], belum:0, selesai:false };
+    const u = peta[k];
+    u.pesan.push(r);
+    if (r.penerima_id === uid && !r.dibaca_pada) u.belum++;
+    if (r.status === 'Selesai') u.selesai = true;
+    if (r.nama_santri && !u.nama_santri) u.nama_santri = r.nama_santri;
+  });
+  return Object.values(peta).map(u => {
+    const akhir = u.pesan[u.pesan.length - 1];
+    u.terakhir = akhir;
+    u.waktu    = akhir.created_at;
+    u.saya     = akhir.pengirim_id === uid;
+    u.lawan    = akhir.pengirim_id === uid
+      ? { id:akhir.penerima_id, nama:akhir.penerima_nama, role:akhir.penerima_role }
+      : { id:akhir.pengirim_id, nama:akhir.pengirim_nama, role:akhir.pengirim_role };
+    u.status   = u.selesai ? 'Selesai' : (u.belum ? 'Baru' : 'Berjalan');
+    return u;
+  }).sort((a, b) => String(b.waktu).localeCompare(String(a.waktu)));
+}
+
+async function sisipkanPesan(rows) {
+  const { error } = await db.from(PESAN_TABEL).insert(rows);
+  if (error) throw error;
+  cacheHapus('pesan_bk');
+}
+
+async function tandaiDibaca(utas) {
+  await db.from(PESAN_TABEL)
+    .update({ dibaca_pada: new Date().toISOString(), status: 'Dibaca' })
+    .eq('utas', utas).eq('penerima_id', idSaya()).is('dibaca_pada', null);
+}
+
+async function tandaiUtasSelesai(utas) {
+  const { error } = await db.from(PESAN_TABEL)
+    .update({ status: 'Selesai' }).eq('utas', utas);
+  if (error) throw error;
+}
+
+async function refreshBadgePesan() {
+  const b = $('badgePesan'); if (!b || !APP.profil) return;
+  if (!bisa('pesan.lihat')) return b.classList.add('hidden');
+  try {
+    const { count } = await db.from(PESAN_TABEL)
+      .select('id', { count:'exact', head:true })
+      .eq('penerima_id', idSaya()).is('dibaca_pada', null);
+    b.textContent = count > 99 ? '99+' : String(count || 0);
+    b.classList.toggle('hidden', !count);
+    b.title = count ? `${count} pesan belum dibaca` : '';
+  } catch (e) { b.classList.add('hidden'); }
+}
+
+// ---------- 28b. Panel tindak lanjut di Dashboard Guru BK ------------
+
+/** Menempel sendiri ke #viewRoot pada akhir viewPimpinan({bk:true}). */
+async function panelPesanBk() {
+  const root = $('viewRoot'); if (!root) return;
+  if (!$('bkPesanWrap')) root.insertAdjacentHTML('beforeend', '<div id="bkPesanWrap"></div>');
+  await muatPanelPesanBk();
+}
+
+async function muatPanelPesanBk() {
+  const wrap = $('bkPesanWrap'); if (!wrap) return;
+  wrap.innerHTML = `<section class="card"><div class="card-body"
+    style="text-align:center;color:var(--text-3);padding:34px">
+    <i class="fa-solid fa-circle-notch fa-spin"></i> Menyiapkan daftar tindak lanjut…
+  </div></section>`;
+  try {
+    stBk.santri = PIM.prio.slice(0, BK_TOP);
+    stBk.guru   = await muatGuruAktif();
+    stBk.utas   = kelompokUtas(await muatPesanSaya());
+    gambarPanelPesanBk();
+  } catch (err) {
+    console.error('[pesan bk]', err);
+    wrap.innerHTML = kartu('Pesan Tindak Lanjut ke Guru', `
+      <div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
+        Daftar tindak lanjut tidak dapat dimuat: <b>${esc(err?.message || String(err))}</b></div>
+      <div class="card-body"><p style="margin:0;font-size:12.5px;color:var(--text-2)">
+        Pastikan berkas <b>SQL_PESAN_BK.sql</b> sudah dijalankan di Supabase
+        (tabel <b>pesan_bk</b> beserta kebijakan RLS-nya).</p></div>`);
+  }
+}
+
+/** Utas terakhir untuk seorang santri — dipakai menandai status baris. */
+function utasSantri(nisn) {
+  return stBk.utas.filter(u => String(u.nisn) === String(nisn))[0] || null;
+}
+
+function gambarPanelPesanBk() {
+  const wrap = $('bkPesanWrap'); if (!wrap) return;
+  const tierTag = (t) => t === 'Kritis' ? 'tag-berat' : t === 'Perhatian Tinggi' ? 'tag-sedang'
+    : t === 'Monitor' ? 'tag-sea' : 'tag-off';
+
+  const belumTotal = stBk.utas.reduce((a, u) => a + u.belum, 0);
+  const terkirim   = stBk.santri.filter(s => utasSantri(s.nisn)).length;
+
+  const baris = stBk.santri.map((s, i) => {
+    const pembina = guruPembina(stBk.guru, s.kelas);
+    const u = utasSantri(s.nisn);
+    const statusTag = !u ? `<span class="tag tag-off">Belum dikirim</span>`
+      : u.selesai ? `<span class="tag tag-ok">Sudah diantar</span>`
+      : u.belum   ? `<span class="tag tag-wait">${u.belum} balasan baru</span>`
+      : `<span class="tag tag-sea">Terkirim</span>`;
+    return `<tr>
+      <td class="center"><span class="bkp-no">${String(i + 1).padStart(2, '0')}</span></td>
+      <td style="min-width:180px">
+        <button class="btn-link" data-detail="${esc(s.nisn)}"
+                style="font-weight:600;font-size:13.5px">${esc(s.nama)}</button>
+        <div class="secondary">${esc(s.nisn)} · ${esc(s.kelas || '-')}</div></td>
+      <td><span class="tag ${tierTag(s.tier)}">${esc(s.tier)}</span></td>
+      <td class="num center">${s.kasus90}</td>
+      <td class="num center">${s.poin90}</td>
+      <td style="min-width:190px;font-size:12.5px;color:var(--text-2)">${esc(s.alasan)}</td>
+      <td style="min-width:160px">${pembina.length
+        ? pembina.slice(0, 3).map(g => `<span class="tag tag-off">${esc(g.nama)}</span>`).join(' ')
+          + (pembina.length > 3 ? ` <span class="tag tag-off">+${pembina.length - 3}</span>` : '')
+        : `<span class="tag tag-wait">Belum ada pembina kelas</span>`}</td>
+      <td class="center">${statusTag}</td>
+      <td class="right nowrap">
+        <button class="btn btn-primary btn-sm" data-bk-kirim="${esc(s.nisn)}">
+          <i class="fa-solid fa-paper-plane"></i>${u ? 'Kirim lagi' : 'Kirim pesan'}</button>
+        ${u ? `<button class="btn btn-ghost btn-sm" data-bk-utas="${esc(u.utas)}"
+          style="margin-left:6px"><i class="fa-solid fa-comments"></i>Utas</button>` : ''}
+      </td></tr>`;
+  }).join('');
+
+  wrap.innerHTML = kartu('Pesan Tindak Lanjut ke Guru', `
+    <div class="card-note"><i class="fa-solid fa-circle-info"></i>
+      Sepuluh santri prioritas teratas pada periode <b>${esc(PIM.rentang || '90 hari terakhir')}</b>.
+      Pesan bawaan meminta guru pembina kelas menyuruh ananda <b>menemui Guru BK</b>;
+      naskahnya masih bisa disunting sebelum dikirim.</div>
+    <div class="minis">
+      <div class="mini m"><span>Santri prioritas</span><b>${angka(stBk.santri.length)}</b></div>
+      <div class="mini s"><span>Sudah dikirimi</span><b>${angka(terkirim)}</b></div>
+      <div class="mini a"><span>Balasan baru</span><b>${angka(belumTotal)}</b></div>
+      <div class="mini t"><span>Utas berjalan</span><b>${angka(stBk.utas.length)}</b></div>
+    </div>
+    <div class="tbl" style="margin-top:14px"><table class="bkp-tbl">
+      <thead><tr><th class="center">#</th><th>Santri</th><th>Tier</th>
+        <th class="center">Kasus 90h</th><th class="center">Poin</th><th>Alasan</th>
+        <th>Guru Pembina Kelas</th><th class="center">Status</th>
+        <th class="right">Tindakan</th></tr></thead>
+      <tbody>${baris || barisKosong(9, 'Belum ada santri pada indikator prioritas.',
+        'Panel ini terisi setelah ada catatan pelanggaran pada periode analisis.')}</tbody>
+    </table></div>
+    <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>`,
+    `<button class="btn btn-ghost btn-sm" id="bkKeInbox">
+      <i class="fa-solid fa-inbox"></i>Buka semua percakapan</button>`,
+    'Khusus Guru BK · tidak tampil pada dashboard pimpinan');
+
+  $('bkKeInbox')?.addEventListener('click', () => navigateTo('pesan'));
+  tandaiTabelBisaGeser();
+}
+
+// ---------- 28c. Jendela kirim pesan ---------------------------------
+
+async function modalPesanBk(nisn) {
+  const s = PIM.prio.find(x => String(x.nisn) === String(nisn));
+  if (!s) return toast('error', 'Data santri prioritas tidak ditemukan.');
+
+  const semua   = stBk.guru.length ? stBk.guru : await muatGuruAktif();
+  const pembina = guruPembina(semua, s.kelas);
+  const lain    = semua.filter(g => ROLE_PENERIMA.includes(g.role)
+    && g.id !== idSaya() && !pembina.some(p => p.id === g.id));
+
+  const opsi = (arr, label) => arr.length ? `<optgroup label="${esc(label)}">${arr.map(g =>
+    `<option value="${esc(g.id)}">${esc(g.nama)} — ${esc(g.role)}${
+      (g.kelas_binaan || []).length ? ' · ' + esc((g.kelas_binaan || []).join(', ')) : ''}</option>`
+    ).join('')}</optgroup>` : '';
+
+  if (!pembina.length && !lain.length)
+    return toast('error', 'Belum ada guru aktif yang bisa dijadikan penerima.');
+
+  const res = await Swal.fire({
+    title: 'Kirim Pesan ke Guru', width: 660,
+    showCancelButton: true, confirmButtonText: 'Kirim', cancelButtonText: 'Batal',
+    confirmButtonColor: '#14618B', showLoaderOnConfirm: true,
+    allowOutsideClick: () => !Swal.isLoading(),
+    html: `<div class="stack">
+      <div class="pgs-pick on">
+        <div class="ico"><i class="fa-solid fa-user-graduate"></i></div>
+        <div><small>Santri</small><b>${esc(s.nama)}</b>
+          <div class="secondary">${esc(s.nisn)} · ${esc(s.kelas || '-')} · Tier ${esc(s.tier)}
+            · ${s.kasus90} kasus / ${s.poin90} poin</div></div>
+      </div>
+      <div class="field"><label class="label">Guru Penerima</label>
+        <select id="pbGuru" class="input">
+          ${opsi(pembina, `Pembina kelas ${s.kelas || '-'}`)}
+          ${opsi(lain, 'Guru lain')}
+        </select>
+        <p class="hint">${pembina.length
+          ? `Terisi otomatis dengan pembina kelas ${esc(s.kelas || '-')} — boleh diganti.`
+          : `Kelas ${esc(s.kelas || '-')} belum punya guru pembina terdaftar; pilih guru secara manual.`}</p>
+      </div>
+      ${pembina.length > 1 ? `<label class="ctx-note" style="cursor:pointer">
+        <input type="checkbox" id="pbSemua" style="accent-color:var(--sea)">
+        Kirim sekaligus ke semua pembina kelas ${esc(s.kelas || '-')} (${pembina.length} guru)
+      </label>` : ''}
+      <div class="field"><label class="label">Isi Pesan</label>
+        <textarea id="pbIsi" class="input" rows="11">${esc(templatePesanBk(s))}</textarea>
+        <p class="hint">Inti pesan: guru diminta menyuruh ananda menemui Guru BK.</p>
+      </div>
+    </div>`,
+    didOpen: () => { if (pembina.length) $('pbGuru').value = pembina[0].id; },
+    preConfirm: async () => {
+      const isi = $('pbIsi').value.trim();
+      if (isi.length < 10) { Swal.showValidationMessage('Isi pesan terlalu pendek.'); return false; }
+      const semuaPembina = $('pbSemua')?.checked;
+      const ids = semuaPembina ? pembina.map(g => g.id) : [$('pbGuru').value];
+      if (!ids.filter(Boolean).length) { Swal.showValidationMessage('Penerima belum dipilih.'); return false; }
+      const p = APP.profil;
+      const rows = ids.map(id => {
+        const g = semua.find(x => x.id === id) || {};
+        return {
+          utas: kunciUtas(s.nisn, p.id, id),
+          nisn: String(s.nisn), nama_santri: s.nama, kelas: s.kelas || null, tier: s.tier || null,
+          pengirim_id: p.id, pengirim_nama: p.nama, pengirim_role: p.role,
+          penerima_id: id, penerima_nama: g.nama || '-', penerima_role: g.role || '-',
+          isi, status: 'Terkirim'
+        };
+      });
+      try { await sisipkanPesan(rows); return rows.length; }
+      catch (e) { Swal.showValidationMessage(e.message || 'Gagal mengirim pesan.'); return false; }
+    }
+  });
+
+  if (res.isConfirmed) {
+    sync('done', 'Pesan terkirim');
+    toast('success', `Pesan terkirim ke ${res.value} guru`);
+    await muatPanelPesanBk();
+  }
+}
+
+// ---------- 28d. Halaman percakapan (dua arah) -----------------------
+
+async function viewPesan() {
+  $('viewRoot').innerHTML = kartu('Pesan Tindak Lanjut', `
+    <div class="card-note"><i class="fa-solid fa-circle-info"></i>
+      Percakapan antara <b>Guru BK</b> dan guru pembina kelas mengenai santri yang
+      membutuhkan perhatian khusus. Tandai <b>“Sudah diantar ke BK”</b> bila ananda
+      sudah dikirim menemui Guru BK.</div>
+    <div class="msg">
+      <aside class="msg-side">
+        <div class="msg-bar">
+          <input id="msgCari" class="input" placeholder="Cari santri atau guru…"
+                 value="${esc(stPesan.cari)}">
+        </div>
+        <div class="msg-chips" id="msgChips">
+          ${['Semua','Belum dibaca','Berjalan','Selesai'].map(f =>
+            `<button class="chip${stPesan.filter === f ? ' on' : ''}" data-f="${f}">${f}</button>`).join('')}
+        </div>
+        <div class="msg-list" id="msgList"></div>
+      </aside>
+      <section class="msg-panel" id="msgPanel"></section>
+    </div>`,
+    bisa('pesan.mulai')
+      ? `<button class="btn btn-ghost btn-sm" id="msgKeBk">
+           <i class="fa-solid fa-user-shield"></i>Daftar santri prioritas</button>` : '',
+    'Balasan dua arah · realtime');
+
+  $('msgKeBk')?.addEventListener('click', () => navigateTo('bk'));
+  $('msgCari').addEventListener('input', debounce(e => {
+    stPesan.cari = e.target.value.trim(); gambarDaftarUtas();
+  }, 220));
+  $('msgChips').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-f]'); if (!c) return;
+    stPesan.filter = c.dataset.f;
+    $('msgChips').querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === c));
+    gambarDaftarUtas();
+  });
+
+  onKlik(async (e) => {
+    const u = e.target.closest('[data-utas]');
+    if (u) return bukaUtas(u.dataset.utas);
+    const d = e.target.closest('[data-detail]');
+    if (d) return bukaDetailSantri(d.dataset.detail);
+    if (e.target.closest('#msgKirim'))  return kirimBalasan();
+    if (e.target.closest('#msgSelesai')) return selesaikanUtas();
+  });
+
+  await muatViewPesan();
+}
+
+async function muatViewPesan() {
+  const list = $('msgList'); if (!list) return;
+  list.innerHTML = `<div class="msg-kosong"><i class="fa-solid fa-circle-notch fa-spin"></i>
+    Memuat percakapan…</div>`;
+  try {
+    stPesan.rows = await muatPesanSaya();
+    stPesan.utas = kelompokUtas(stPesan.rows);
+    if (stPesan.aktif && !stPesan.utas.some(u => u.utas === stPesan.aktif)) stPesan.aktif = null;
+    gambarDaftarUtas();
+    if (stPesan.aktif) {
+      gambarUtas();
+      const u = stPesan.utas.find(x => x.utas === stPesan.aktif);
+      if (u?.belum) {
+        try { await tandaiDibaca(u.utas); refreshBadgePesan(); } catch (e) { console.warn('[pesan]', e); }
+      }
+    } else gambarUtasKosong();
+    $('queryTime').textContent = `pesan · ${angka(stPesan.rows.length)} baris`;
+  } catch (err) {
+    list.innerHTML = `<div class="msg-kosong">Gagal memuat: ${esc(err?.message || String(err))}</div>`;
+  }
+}
+
+function saringUtas() {
+  let rows = stPesan.utas;
+  if (stPesan.filter === 'Belum dibaca') rows = rows.filter(u => u.belum > 0);
+  if (stPesan.filter === 'Berjalan')     rows = rows.filter(u => !u.selesai);
+  if (stPesan.filter === 'Selesai')      rows = rows.filter(u => u.selesai);
+  const k = stPesan.cari.toLowerCase();
+  if (k) rows = rows.filter(u =>
+    [u.nama_santri, u.nisn, u.kelas, u.lawan?.nama, u.terakhir?.isi]
+      .some(v => String(v || '').toLowerCase().includes(k)));
+  return rows;
+}
+
+function gambarDaftarUtas() {
+  const list = $('msgList'); if (!list) return;
+  const rows = saringUtas();
+  list.innerHTML = rows.map(u => `
+    <button class="msg-item${u.utas === stPesan.aktif ? ' on' : ''}${u.belum ? ' baru' : ''}"
+            data-utas="${esc(u.utas)}">
+      <span class="msg-av">${esc(getInitialsFromName(u.nama_santri || u.lawan?.nama || '?'))}</span>
+      <span class="msg-body">
+        <span class="msg-top">
+          <b>${esc(u.nama_santri || '(tanpa santri)')}</b>
+          <small>${esc(waktuPesan(u.waktu))}</small>
+        </span>
+        <span class="msg-who"><i class="fa-solid fa-user-tie"></i>
+          ${esc(u.lawan?.nama || '-')} · ${esc(u.lawan?.role || '-')}${
+            u.kelas ? ' · ' + esc(u.kelas) : ''}</span>
+        <span class="msg-prev">${esc(String(u.terakhir?.isi || '').replace(/\s+/g, ' ').slice(0, 76))}…</span>
+        <span class="msg-tags">
+          ${u.selesai ? '<span class="tag tag-ok">Sudah diantar</span>'
+            : u.belum ? `<span class="tag tag-wait">${u.belum} baru</span>`
+            : '<span class="tag tag-sea">Berjalan</span>'}
+          ${u.tier ? `<span class="tag tag-off">${esc(u.tier)}</span>` : ''}
+        </span>
+      </span>
+    </button>`).join('') ||
+    `<div class="msg-kosong"><i class="fa-regular fa-comments"></i>
+      <p>Belum ada percakapan pada saringan ini.</p></div>`;
+}
+
+function gambarUtasKosong() {
+  const p = $('msgPanel'); if (!p) return;
+  p.innerHTML = `<div class="msg-kosong tengah">
+    <i class="fa-regular fa-comments"></i>
+    <p>Pilih satu percakapan di sebelah kiri.</p>
+    <small>${bisa('pesan.mulai')
+      ? 'Percakapan baru dimulai dari Dashboard Guru BK → panel Pesan Tindak Lanjut.'
+      : 'Pesan dari Guru BK akan muncul di sini.'}</small></div>`;
+}
+
+async function bukaUtas(k) {
+  stPesan.aktif = k;
+  gambarDaftarUtas();
+  gambarUtas();
+  const u = stPesan.utas.find(x => x.utas === k);
+  if (u?.belum) {
+    try { await tandaiDibaca(k); refreshBadgePesan(); } catch (e) { console.warn('[pesan]', e); }
+  }
+}
+
+function gambarUtas() {
+  const p = $('msgPanel'); if (!p) return;
+  const u = stPesan.utas.find(x => x.utas === stPesan.aktif);
+  if (!u) return gambarUtasKosong();
+  const uid = idSaya();
+
+  p.innerHTML = `
+    <header class="msg-head">
+      <div>
+        <b>${esc(u.nama_santri || '(tanpa santri)')}</b>
+        <span>${u.nisn ? esc(u.nisn) + ' · ' : ''}${esc(u.kelas || '-')}${
+          u.tier ? ' · Tier ' + esc(u.tier) : ''}</span>
+      </div>
+      <div class="msg-acts">
+        ${u.nisn ? `<button class="btn btn-ghost btn-sm" data-detail="${esc(u.nisn)}">
+          <i class="fa-solid fa-eye"></i>Profil santri</button>` : ''}
+        <button class="btn ${u.selesai ? 'btn-ghost' : 'btn-ok'} btn-sm" id="msgSelesai"
+                ${u.selesai ? 'disabled' : ''}>
+          <i class="fa-solid fa-circle-check"></i>${u.selesai ? 'Sudah diantar' : 'Tandai sudah diantar ke BK'}</button>
+      </div>
+    </header>
+    <div class="msg-thread" id="msgThread">
+      ${u.pesan.map(r => `<article class="bub ${r.pengirim_id === uid ? 'saya' : 'dia'}">
+        <div class="bub-who">${esc(r.pengirim_nama)} · ${esc(r.pengirim_role)}</div>
+        <div class="bub-isi">${esc(r.isi).replace(/\n/g, '<br>')}</div>
+        <div class="bub-kaki">${esc(waktuPesan(r.created_at))}${
+          r.pengirim_id === uid ? (r.dibaca_pada ? ' · dibaca' : ' · terkirim') : ''}</div>
+      </article>`).join('')}
+    </div>
+    <div class="msg-tulis">
+      <textarea id="msgIsi" class="input" rows="2"
+        placeholder="Tulis balasan untuk ${esc(u.lawan?.nama || 'guru')}…"></textarea>
+      <button class="btn btn-primary" id="msgKirim"><i class="fa-solid fa-paper-plane"></i>Kirim</button>
+    </div>`;
+
+  const t = $('msgThread'); if (t) t.scrollTop = t.scrollHeight;
+  $('msgIsi')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); kirimBalasan(); }
+  });
+}
+
+async function kirimBalasan() {
+  const u = stPesan.utas.find(x => x.utas === stPesan.aktif); if (!u) return;
+  const box = $('msgIsi'); const isi = box?.value.trim();
+  if (!isi) return toast('info', 'Isi balasan masih kosong.');
+  const btn = $('msgKirim'); const asli = mulaiSimpan(btn, 'Mengirim…');
+  try {
+    const p = APP.profil;
+    await sisipkanPesan([{
+      utas: u.utas, nisn: u.nisn, nama_santri: u.nama_santri, kelas: u.kelas, tier: u.tier,
+      pengirim_id: p.id, pengirim_nama: p.nama, pengirim_role: p.role,
+      penerima_id: u.lawan.id, penerima_nama: u.lawan.nama, penerima_role: u.lawan.role,
+      isi, status: 'Terkirim'
+    }]);
+    box.value = '';
+    selesaiSimpan(btn, asli, true, 'Balasan terkirim');
+    await muatViewPesan();
+  } catch (err) {
+    selesaiSimpan(btn, asli, false, 'Gagal mengirim');
+    fireError(err);
+  }
+}
+
+async function selesaikanUtas() {
+  const u = stPesan.utas.find(x => x.utas === stPesan.aktif); if (!u || u.selesai) return;
+  const btn = $('msgSelesai'); const asli = mulaiSimpan(btn, 'Menyimpan…');
+  try {
+    await tandaiUtasSelesai(u.utas);
+    selesaiSimpan(btn, asli, true, 'Ditandai selesai');
+    toast('success', 'Utas ditandai: ananda sudah diantar ke BK');
+    await muatViewPesan();
+  } catch (err) {
+    selesaiSimpan(btn, asli, false, 'Gagal menyimpan');
+    fireError(err);
+  }
+}
+
+// Tombol pada panel dashboard BK — satu listener global agar tetap
+// bekerja walau panel dirender ulang oleh realtime.
+document.addEventListener('click', (e) => {
+  const kirim = e.target.closest('[data-bk-kirim]');
+  if (kirim) { e.preventDefault(); return modalPesanBk(kirim.dataset.bkKirim); }
+  const utas = e.target.closest('[data-bk-utas]');
+  if (utas) {
+    e.preventDefault();
+    stPesan.aktif = utas.dataset.bkUtas;
+    return navigateTo('pesan');
+  }
 });
 
 // ---------------------------------------------------------------------
