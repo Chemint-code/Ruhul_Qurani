@@ -1733,6 +1733,128 @@ select.per-in{appearance:none;padding-right:14px;
 .dft-tbl tbody tr:hover{background:#F3F8FB}
 .dft-tbl tbody td .primary{font-weight:600}
 
+/* ============================================================
+   LATAR FOTO PADA SELURUH KOTAK HERO
+   ============================================================
+   Foto latar dayah (kategori identitas_latar) dipasang sebagai
+   properti --cover di elemen akar oleh terapkanIdentitasVisual(),
+   lalu diwarisi setiap kotak hero. Foto TIDAK diberi opacity
+   langsung — yang meredam adalah gradasi navy yang ditumpuk di
+   atasnya dalam satu deklarasi background-image (lapisan pertama =
+   paling atas). Cara ini menjaga teks putih tetap kontras sementara
+   warna senja tetap terbaca, dan tidak memerlukan elemen tambahan
+   sehingga pseudo-element girih & kilau kuningan yang sudah ada
+   tetap utuh.
+
+   Titik fokus dipilih sedikit di atas tengah (center 34–42%) supaya
+   kubah masjid yang jadi subjek foto tidak terpotong oleh teks.
+   ============================================================ */
+.hero,.pgs-hero,.adm-head{
+  background-repeat:no-repeat;
+  background-size:cover;
+  transition:background-image .6s ease;
+}
+
+/* Ringkasan · Dashboard Pimpinan · Evaluasi Bidang — hero paling padat
+   teks, jadi peredamnya paling pekat. */
+:root.ada-latar .hero{
+  background-image:
+    linear-gradient(102deg,
+      rgba(6,24,38,.96) 0%,
+      rgba(6,24,38,.9) 30%,
+      rgba(9,34,54,.74) 58%,
+      rgba(6,24,38,.86) 100%),
+    var(--cover);
+  background-position:center 34%;
+  border:1px solid rgba(201,162,39,.24);
+}
+:root.ada-latar .hero::before{
+  content:'';position:absolute;left:0;right:0;bottom:0;height:2px;z-index:2;
+  background:linear-gradient(90deg,transparent,rgba(201,162,39,.7) 30%,
+             rgba(232,204,107,.9) 50%,rgba(201,162,39,.7) 70%,transparent);
+}
+
+/* Pengasuhan — hero besar dengan ayat; peredam sedikit lebih terbuka
+   di sisi kanan agar langit senja ikut terlihat. */
+:root.ada-latar .pgs-hero{
+  background-image:
+    linear-gradient(100deg,
+      rgba(6,24,38,.95) 0%,
+      rgba(6,24,38,.87) 32%,
+      rgba(9,34,54,.66) 62%,
+      rgba(6,24,38,.86) 100%),
+    var(--cover);
+  background-position:center 40%;
+}
+
+/* Administrasi catatan pelanggaran — kepala arsip; tetap berwibawa,
+   foto hanya sebagai kedalaman di belakang tipografi. */
+:root.ada-latar .adm-head{
+  background-image:
+    linear-gradient(104deg,
+      rgba(6,24,38,.96) 0%,
+      rgba(6,24,38,.89) 30%,
+      rgba(9,34,54,.7) 60%,
+      rgba(6,24,38,.9) 100%),
+    var(--cover);
+  background-position:center 42%;
+}
+
+/* Layar sempit: kotak hero jadi tinggi & ramping, sehingga gradasi
+   mendatar meninggalkan sisi kanan terlalu terang di belakang judul.
+   Di bawah 900px arah gradasi diputar menjadi menurun dan diperpekat. */
+@media(max-width:900px){
+  :root.ada-latar .hero,
+  :root.ada-latar .pgs-hero,
+  :root.ada-latar .adm-head{
+    background-position:center 30%;
+    background-image:
+      linear-gradient(168deg,
+        rgba(6,24,38,.94) 0%,
+        rgba(9,34,54,.82) 46%,
+        rgba(6,24,38,.95) 100%),
+      var(--cover);
+  }
+  :root.ada-latar .pgs-hero{
+    background-image:
+      linear-gradient(168deg,
+        rgba(6,24,38,.92) 0%,
+        rgba(9,34,54,.78) 46%,
+        rgba(6,24,38,.94) 100%),
+      var(--cover);
+  }
+  /* Kepala arsip punya kilau kuningan sendiri di sudut kanan atas,
+     jadi peredamnya dinaikkan sedikit lagi. */
+  :root.ada-latar .adm-head{
+    background-image:
+      linear-gradient(168deg,
+        rgba(6,24,38,.96) 0%,
+        rgba(9,34,54,.88) 46%,
+        rgba(6,24,38,.96) 100%),
+      var(--cover);
+  }
+}
+
+/* Tipografi di atas foto: bayangan halus menjaga huruf tetap tegas
+   ketika kebetulan jatuh di bagian langit yang paling terang. */
+:root.ada-latar .hero h2,
+:root.ada-latar .pgs-hero h2,
+:root.ada-latar .adm-head h2{text-shadow:0 2px 20px rgba(6,24,38,.8)}
+:root.ada-latar .hero p,
+:root.ada-latar .pgs-hero p,
+:root.ada-latar .adm-head p,
+:root.ada-latar .hero .ar,
+:root.ada-latar .pgs-hero .ar,
+:root.ada-latar .adm-head .ar{text-shadow:0 1px 14px rgba(6,24,38,.8)}
+:root.ada-latar .hero .meta span,
+:root.ada-latar .pgs-hero .meta span,
+:root.ada-latar .adm-meta span{backdrop-filter:blur(6px)}
+
+/* Cetak: foto latar tidak ikut tercetak agar hemat tinta & tetap terbaca. */
+@media print{
+  .hero,.pgs-hero,.adm-head{background-image:none !important}
+}
+
 /* ---------- Studio Identitas (modal SweetAlert) ---------- */
 .stu-lead{margin:0 0 16px;font-size:12.5px;line-height:1.6;color:var(--text-2);text-align:left}
 .stu-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;text-align:left}
