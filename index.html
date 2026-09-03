@@ -1296,7 +1296,7 @@ select.per-in{appearance:none;padding-right:14px;
 /* ---------- Cetak: sembunyikan elemen antarmuka ---------- */
 @media print{
   #bar,#scrim,#pdfMask,#pdfStage{display:none !important}
-  .sidebar,.topbar{display:none !important}
+  .sidebar,.topbar,.pbar{display:none !important}
 }
 
 /* ---------- Aksesibilitas: fokus terlihat di latar gelap ---------- */
@@ -1304,6 +1304,7 @@ select.per-in{appearance:none;padding-right:14px;
 .login-art :focus-visible,
 .hero :focus-visible,
 .pgs-hero :focus-visible,
+.pbar :focus-visible,
 .adm-head :focus-visible{outline-color:var(--brass);outline-offset:2px}
 
 /* ============================================================
@@ -1373,6 +1374,163 @@ select.per-in{appearance:none;padding-right:14px;
   opacity:0;transition:opacity .15s}
 .idn-frame:hover .idn-over{opacity:1}
 .idn-item small{font-size:11.5px;color:var(--text-3);line-height:1.5}
+
+/* Bingkai sedang mengunggah — dipakai Studio Identitas */
+.idn-frame.busy{pointer-events:none}
+.idn-frame.busy::after{content:'';position:absolute;inset:0;z-index:4;
+  background:rgba(247,249,251,.72) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34' viewBox='0 0 50 50'%3E%3Ccircle cx='25' cy='25' r='20' fill='none' stroke='%2314618B' stroke-width='5' stroke-linecap='round' stroke-dasharray='80 40'%3E%3CanimateTransform attributeName='transform' type='rotate' from='0 25 25' to='360 25 25' dur='.8s' repeatCount='indefinite'/%3E%3C/circle%3E%3C/svg%3E") center/34px no-repeat}
+
+/* ============================================================
+   BILAH PROFIL ATAS — signature "Path": sampul foto, avatar bulat
+   besar yang menonjol, sapaan, peran, dan pintasan Studio Identitas.
+   Diletakkan paling atas pada kolom utama, di atas topbar.
+   ============================================================ */
+.pbar{
+  position:relative;overflow:hidden;flex:none;
+  background:var(--ink);
+  border-bottom:1px solid rgba(201,162,39,.34);
+  box-shadow:0 14px 30px -26px rgba(6,24,38,.9);
+}
+/* Sampul: memakai foto latar identitas dayah (--cover) */
+.pbar-cover{
+  position:absolute;inset:-3px;z-index:0;
+  background-image:var(--cover,none);
+  background-size:cover;background-position:center 40%;
+  opacity:0;transform:scale(1.09);
+  transition:opacity 1.2s ease,transform 14s ease;
+}
+.pbar.ready .pbar-cover{opacity:.62;transform:scale(1)}
+.pbar-veil{
+  position:absolute;inset:0;z-index:1;pointer-events:none;
+  background:var(--girih),
+    linear-gradient(96deg,rgba(6,24,38,.95) 0%,rgba(11,43,69,.72) 44%,rgba(6,24,38,.9) 100%);
+}
+/* Garis kuningan tipis di dasar bilah — penanda kelas, bukan sekadar border */
+.pbar::after{
+  content:'';position:absolute;left:0;right:0;bottom:0;height:2px;z-index:3;
+  background:linear-gradient(90deg,transparent,rgba(201,162,39,.75) 22%,
+             rgba(232,204,107,.95) 50%,rgba(201,162,39,.75) 78%,transparent);
+}
+.pbar-inner{
+  position:relative;z-index:2;
+  display:flex;align-items:center;gap:17px;
+  padding:17px 26px;max-width:1480px;
+}
+
+/* ---------- Avatar: bulat, besar, dilingkari kuningan ---------- */
+.pbar-av{
+  position:relative;flex:0 0 78px;width:78px;height:78px;padding:0;
+  border-radius:50%;overflow:hidden;cursor:pointer;
+  background:linear-gradient(150deg,var(--sea),var(--navy));
+  box-shadow:
+    0 0 0 3px rgba(6,24,38,.92),
+    0 0 0 5px rgba(201,162,39,.85),
+    0 20px 38px -14px rgba(0,0,0,.85);
+  transition:transform .24s cubic-bezier(.22,1,.36,1),box-shadow .24s;
+}
+.pbar-av::before{
+  content:'';position:absolute;inset:0;z-index:2;border-radius:50%;
+  box-shadow:inset 0 2px 10px rgba(255,255,255,.22),
+             inset 0 -8px 18px rgba(6,24,38,.35);
+  pointer-events:none;
+}
+.pbar-av img{
+  position:absolute;inset:0;width:100%;height:100%;
+  object-fit:cover;display:block;border-radius:50%;
+  transition:opacity .5s ease,transform .5s ease;
+}
+.pbar-av:hover{
+  transform:translateY(-2px) scale(1.035);
+  box-shadow:
+    0 0 0 3px rgba(6,24,38,.92),
+    0 0 0 6px rgba(232,204,107,1),
+    0 26px 46px -14px rgba(0,0,0,.9);
+}
+.pbar-av:hover img{transform:scale(1.06)}
+.pbar-av .cam{
+  position:absolute;inset:0;z-index:3;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(6,24,38,.6);color:#F2E5B8;font-size:16px;
+  opacity:0;transition:opacity .16s ease;
+}
+.pbar-av:hover .cam,.pbar-av:focus-visible .cam{opacity:1}
+
+/* ---------- Identitas pengguna ---------- */
+.pbar-id{min-width:0;flex:1}
+.pbar-id .salam{
+  display:block;font-size:10.5px;font-weight:700;letter-spacing:.16em;
+  text-transform:uppercase;color:rgba(255,255,255,.55);
+}
+.pbar-id b{
+  display:block;margin-top:3px;
+  font-family:'Instrument Serif',Georgia,serif;font-weight:400;
+  font-size:clamp(20px,2.4vw,27px);line-height:1.14;letter-spacing:-.018em;color:#fff;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  text-shadow:0 2px 14px rgba(6,24,38,.55);
+}
+.pbar-role{
+  display:inline-flex;align-items:center;gap:6px;margin-top:8px;
+  padding:3px 11px;border-radius:20px;
+  background:rgba(201,162,39,.16);border:1px solid rgba(201,162,39,.42);
+  color:#F2E5B8;font-size:10.5px;font-weight:700;
+  letter-spacing:.13em;text-transform:uppercase;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+
+/* ---------- Aksi & logo dayah ---------- */
+.pbar-acts{display:flex;align-items:center;gap:11px;margin-left:auto;flex-shrink:0}
+.pbar-btn{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:9px 15px;border-radius:20px;
+  background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.2);
+  color:#E8F0F6;font-size:12px;font-weight:600;
+  backdrop-filter:blur(8px);
+  transition:background .16s,border-color .16s,color .16s,transform .16s;
+}
+.pbar-btn:hover{
+  background:rgba(201,162,39,.22);border-color:rgba(232,204,107,.65);
+  color:#fff;transform:translateY(-1px);
+}
+.pbar-btn i{font-size:12px}
+.pbar-logo{
+  position:relative;width:54px;height:54px;border-radius:17px;
+  display:grid;place-items:center;overflow:hidden;
+  background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.17);
+  backdrop-filter:blur(8px);
+}
+.pbar-logo i{position:absolute;color:#9FC7DE;font-size:19px}
+.pbar-logo img{
+  position:relative;width:40px;height:40px;object-fit:contain;
+  opacity:0;transition:opacity .5s ease;
+}
+.pbar-logo img.ready{opacity:1}
+
+@media(max-width:1024px){
+  .pbar-inner{padding:15px 20px;gap:15px}
+  .pbar-av{flex:0 0 66px;width:66px;height:66px}
+}
+@media(max-width:640px){
+  .pbar-inner{padding:13px 16px;gap:13px}
+  .pbar-av{flex:0 0 56px;width:56px;height:56px}
+  .pbar-id .salam{font-size:9.5px;letter-spacing:.14em}
+  .pbar-role{margin-top:6px;font-size:9.5px;padding:2px 9px}
+  .pbar-btn span{display:none}
+  .pbar-btn{padding:10px 12px}
+  .pbar-logo{display:none}
+}
+
+/* ---------- Studio Identitas (modal SweetAlert) ---------- */
+.stu-lead{margin:0 0 16px;font-size:12.5px;line-height:1.6;color:var(--text-2);text-align:left}
+.stu-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;text-align:left}
+.stu-grid.solo{grid-template-columns:1fr}
+@media(max-width:760px){.stu-grid{grid-template-columns:1fr}}
+.stu-grid .idn-frame{min-height:150px}
+.stu-note{
+  display:flex;align-items:center;gap:8px;margin:16px 0 0;padding:10px 13px;
+  border-radius:var(--r);background:#F1F7FA;border:1px solid #D9E9F2;
+  font-size:12px;color:var(--navy-2);text-align:left;
+}
+.stu-note i{color:var(--sea)}
 
 </style>
 </head>
@@ -1473,6 +1631,34 @@ select.per-in{appearance:none;padding-right:14px;
   </aside>
   <div id="scrim" class="hidden"></div>
   <div class="main">
+
+    <!-- ======= BILAH PROFIL (paling atas) — sampul + avatar bulat besar ======= -->
+    <section class="pbar" id="profileBar">
+      <div class="pbar-cover" id="pbarCover"></div>
+      <div class="pbar-veil"></div>
+      <div class="pbar-inner">
+        <button type="button" class="pbar-av" id="pbarAvatar"
+                title="Klik untuk ganti foto profil" aria-label="Ganti foto profil">
+          <img id="pbarAvatarImg" src="" alt="Foto profil">
+          <span class="cam"><i class="fa-solid fa-camera"></i></span>
+        </button>
+        <div class="pbar-id">
+          <span class="salam" id="pbarSalam">Selamat datang</span>
+          <b id="pbarNama">Memuat…</b>
+          <span class="pbar-role" id="pbarRole">-</span>
+        </div>
+        <div class="pbar-acts">
+          <button type="button" class="pbar-btn" id="pbarBtnStudio" title="Ganti foto profil">
+            <i class="fa-solid fa-images"></i><span>Identitas</span>
+          </button>
+          <div class="pbar-logo" title="Logo dayah">
+            <i class="fa-solid fa-mosque"></i>
+            <img id="pbarLogoImg" alt="">
+          </div>
+        </div>
+      </div>
+    </section>
+
     <header class="topbar">
       <button class="burger" id="btnBurger" aria-label="Buka menu">
         <i class="fa-solid fa-bars"></i>
