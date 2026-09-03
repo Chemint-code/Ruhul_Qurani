@@ -49,7 +49,12 @@ const APP = {
   charts: {},
   channel: null,
   onKlik: null,
-  ctx: { unit: 'Semua', jenjang: 'Semua' }
+  ctx: { unit: 'Semua', jenjang: 'Semua' },
+  // Foto milik user yang sedang login (diisi setupProfilUserLogin)
+  fotoSaya: null,
+  // Identitas visual dayah: { identitas_logo, identitas_latar } — dipakai
+  // bilah profil atas (gaya Path) sekaligus layar login.
+  identitas: {}
 };
 
 // ---------------------------------------------------------------------
@@ -770,40 +775,122 @@ async function setupProfilUserLogin() {
 
     const urlFoto = await muatFotoSatu('profil_guru', userId);
 
-    const namaEl = $('guru-nama'), roleEl = $('guru-role'), imgEl = $('guru-avatar-img');
-    if (namaEl) { namaEl.textContent = namaUser; namaEl.title = `User ID: ${userId}`; }
-    if (roleEl) roleEl.textContent = roleUser;
-
-    if (imgEl) {
-      imgEl.dataset.fallbackNama = namaUser;
-      imgEl.dataset.fallbackRole = roleUser;
-      imgEl.onerror = () => { imgEl.onerror = null; imgEl.src = generateUserAvatarPlaceholder(namaUser, roleUser); };
-      imgEl.style.opacity = '0';
-      imgEl.onload = () => { imgEl.style.transition = 'opacity 0.5s ease-in-out'; imgEl.style.opacity = '1'; };
-      imgEl.src = urlFoto || generateUserAvatarPlaceholder(namaUser, roleUser);
-      imgEl.alt = `Profil ${namaUser}`;
-      console.log(urlFoto ? `[profil] ✅ Foto loaded` : `[profil] Menggunakan placeholder avatar`);
-    }
-
+    terapkanIdentitasPengguna(namaUser, roleUser, userId);
+    terapkanFotoProfilUI(urlFoto, namaUser, roleUser);
+    console.log(urlFoto ? '[profil] ✅ Foto loaded' : '[profil] Menggunakan placeholder avatar');
     console.log(`✅ [profil] Selesai load profil: ${namaUser} (${roleUser})`);
   } catch (e) {
     console.error('[profil] Setup error:', e.message);
   }
 }
 
-/** Klik avatar di sidebar → pilih berkas → unggah langsung sebagai foto profil sendiri. */
+/* =====================================================================
+ * BILAH PROFIL ATAS (gaya Path) — nama, peran, foto profil, latar & logo
+ * =====================================================================
+ * Elemen di index.html: #profileBar (#pbarAvatar, #pbarAvatarImg,
+ * #pbarNama, #pbarRole, #pbarLogoImg, #pbarBtnStudio).
+ * Satu sumber kebenaran untuk foto: fungsi di bawah ini memperbarui
+ * sidebar DAN bilah atas sekaligus, jadi tidak pernah beda tampilan.
+ * ===================================================================== */
+
+/** Tulis nama & peran ke sidebar dan bilah profil atas sekaligus. */
+function terapkanIdentitasPengguna(nama, peran, userId) {
+  const namaEl = $('guru-nama'), roleEl = $('guru-role');
+  if (namaEl) { namaEl.textContent = nama; if (userId) namaEl.title = `User ID: ${userId}`; }
+  if (roleEl) roleEl.textContent = peran;
+  const pn = $('pbarNama'), pr = $('pbarRole');
+  if (pn) pn.textContent = nama;
+  if (pr) pr.textContent = peran;
+  const salam = $('pbarSalam');
+  if (salam) salam.textContent = salamWaktu();
+}
+
+/** Sapaan mengikuti waktu setempat — sentuhan kecil yang membuat bilah terasa hidup. */
+function salamWaktu() {
+  const j = new Date().getHours();
+  if (j < 11) return 'Selamat pagi';
+  if (j < 15) return 'Selamat siang';
+  if (j < 18) return 'Selamat sore';
+  return 'Selamat malam';
+}
+
+/** Pasang foto profil (atau placeholder inisial) ke avatar sidebar & bilah atas. */
+function terapkanFotoProfilUI(url, nama, peran) {
+  const namaX = nama || APP.fotoSaya?.nama || 'User';
+  const peranX = peran || APP.fotoSaya?.role || 'User';
+  const cadangan = generateUserAvatarPlaceholder(namaX, peranX);
+  [$('guru-avatar-img'), $('pbarAvatarImg')].forEach(img => {
+    if (!img) return;
+    img.dataset.fallbackNama = namaX;
+    img.dataset.fallbackRole = peranX;
+    img.onerror = () => { img.onerror = null; img.src = cadangan; };
+    img.style.opacity = '0';
+    img.onload = () => { img.style.transition = 'opacity .5s ease-in-out'; img.style.opacity = '1'; };
+    img.src = url || cadangan;
+    img.alt = `Profil ${namaX}`;
+  });
+  if (APP.fotoSaya) APP.fotoSaya.url = url || '';
+}
+
+/** Terapkan identitas dayah (logo + latar) ke bilah profil dan layar login. */
+function terapkanIdentitasVisual(identitas) {
+  const idn = identitas || APP.identitas || {};
+  APP.identitas = idn;
+  if (idn.identitas_latar) ASET.foto = idn.identitas_latar;
+  if (idn.identitas_logo) ASET.logo = idn.identitas_logo;
+
+  // Bilah profil atas — foto latar sebagai sampul.
+  const bar = $('profileBar');
+  if (bar) {
+    if (ASET.foto) {
+      bar.style.setProperty('--cover', `url("${ASET.foto.replace(/"/g, '\\"')}")`);
+      bar.classList.add('ready');
+    } else {
+      bar.style.removeProperty('--cover');
+      bar.classList.remove('ready');
+    }
+  }
+  const logoBar = $('pbarLogoImg');
+  if (logoBar) {
+    if (ASET.logo) { logoBar.src = ASET.logo; logoBar.onload = () => logoBar.classList.add('ready'); }
+    else { logoBar.removeAttribute('src'); logoBar.classList.remove('ready'); }
+  }
+
+  // Layar login — tetap ikut berubah tanpa perlu muat ulang.
+  const art = $('loginArt');
+  if (art && ASET.foto) {
+    art.style.setProperty('--photo', `url("${ASET.foto.replace(/"/g, '\\"')}")`);
+    art.classList.add('ready');
+  }
+  const logoLogin = $('loginLogo');
+  if (logoLogin && ASET.logo) {
+    logoLogin.src = ASET.logo;
+    logoLogin.onload = () => logoLogin.classList.add('ready');
+  }
+}
+
+/** Baca ulang identitas dayah dari database lalu terapkan ke seluruh antarmuka. */
+async function muatDanTerapkanIdentitas() {
+  try {
+    terapkanIdentitasVisual(await muatIdentitasDayah());
+  } catch (e) { console.warn('[identitas]', e.message); }
+}
+
+/** Klik avatar (sidebar atau bilah atas) → pilih berkas → unggah foto profil sendiri. */
 function pasangUploadFotoSaya() {
-  const tombol = $('guru-avatar-container'), inp = $('inpFotoSaya');
-  if (!tombol || !inp) return;
-  tombol.addEventListener('click', () => inp.click());
+  const inp = $('inpFotoSaya');
+  if (!inp) return;
+  [$('guru-avatar-container'), $('pbarAvatar')].forEach(btn =>
+    btn?.addEventListener('click', () => inp.click()));
+  $('pbarBtnStudio')?.addEventListener('click', () => bukaStudioIdentitas());
+
   inp.addEventListener('change', async () => {
     const file = inp.files?.[0]; inp.value = '';
     if (!file || !APP.fotoSaya?.userId) return;
-    const imgEl = $('guru-avatar-img');
     sync('saving', 'Mengunggah foto…');
     try {
       const url = await unggahFoto('profil_guru', APP.fotoSaya.userId, file);
-      if (imgEl) { imgEl.onerror = null; imgEl.src = url; }
+      terapkanFotoProfilUI(url);
       sync('done', 'Foto profil diperbarui');
       toast('success', 'Foto profil diperbarui');
     } catch (e) {
@@ -813,6 +900,114 @@ function pasangUploadFotoSaya() {
   });
 }
 pasangUploadFotoSaya();
+
+/* ---------------------------------------------------------------------
+ * STUDIO IDENTITAS — satu jendela untuk foto profil, foto latar, dan logo
+ * ---------------------------------------------------------------------
+ * Inilah antarmuka unggah latar & logo yang sebelumnya hanya tersedia di
+ * menu Master & Bidang. Semua peran dapat mengganti foto profilnya;
+ * slot Foto Latar dan Logo Dayah hanya tampil untuk Admin.
+ * ------------------------------------------------------------------- */
+function bingkaiStudio(kategori, label, url, hint) {
+  return `<div class="idn-item">
+    <span class="lbl">${esc(label)}</span>
+    <div class="idn-frame${url ? ' filled' : ''}" data-stu="${kategori}"
+         title="Klik untuk unggah / ganti" role="button" tabindex="0">
+      ${url
+        ? `<img src="${esc(url)}" alt="${esc(label)}">`
+        : `<div class="idn-empty"><i class="fa-solid fa-image"></i>Belum ada berkas</div>`}
+      <div class="idn-over"><i class="fa-solid fa-camera"></i>Ganti ${esc(label)}</div>
+    </div>
+    <small>${esc(hint)}</small>
+  </div>`;
+}
+
+function bukaStudioIdentitas() {
+  const admin = isAdmin();
+  const idn = APP.identitas || {};
+  const fotoSaya = APP.fotoSaya?.url || '';
+
+  Swal.fire({
+    title: 'Studio Identitas',
+    width: admin ? 760 : 420,
+    showConfirmButton: false,
+    showCloseButton: true,
+    html: `
+      <p class="stu-lead">Foto ditayangkan langsung di bilah profil atas${admin ? ', sidebar, dan layar login' : ' dan sidebar'}.
+        Klik bingkai untuk memilih berkas.</p>
+      <div class="stu-grid${admin ? '' : ' solo'}">
+        ${bingkaiStudio('profil_guru', 'Foto Profil', fotoSaya,
+          'Wajah terlihat jelas, potongan persegi, minimal 400×400 piksel.')}
+        ${admin ? bingkaiStudio('identitas_latar', 'Foto Latar', idn.identitas_latar,
+          'Sampul bilah profil & layar login. Lanskap, minimal 1600 piksel.') : ''}
+        ${admin ? bingkaiStudio('identitas_logo', 'Logo Dayah', idn.identitas_logo,
+          'Tampil di bilah atas & layar login. PNG latar transparan.') : ''}
+      </div>
+      <p class="stu-note"><i class="fa-solid fa-circle-info"></i>
+        Maksimal ${FOTO_MAKS_MB} MB · format JPG, PNG, atau WEBP${admin ? '' : ' · latar & logo diatur Admin'}.</p>
+      <input type="file" id="stuInput" accept="image/png,image/jpeg,image/webp" class="hidden">`,
+    didOpen: () => pasangStudioIdentitas()
+  });
+}
+
+function pasangStudioIdentitas() {
+  const wadah = Swal.getHtmlContainer();
+  const inp = wadah?.querySelector('#stuInput');
+  if (!inp) return;
+  let target = null;
+
+  wadah.querySelectorAll('[data-stu]').forEach(el => {
+    const buka = () => { target = el; inp.click(); };
+    el.addEventListener('click', buka);
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); buka(); }
+    });
+  });
+
+  inp.addEventListener('change', async () => {
+    const file = inp.files?.[0]; inp.value = '';
+    if (!file || !target) return;
+    const el = target, kategori = el.dataset.stu;
+    const global = kategori !== 'profil_guru';
+
+    el.classList.add('busy');
+    sync('saving', 'Mengunggah berkas…');
+    try {
+      const { data: authUser } = await db.auth.getUser();
+      const uid = authUser?.user?.id || APP.fotoSaya?.userId;
+      if (!uid) throw new Error('Sesi tidak dikenali. Muat ulang halaman lalu coba lagi.');
+
+      const url = await unggahFoto(kategori, uid, file, { global });
+
+      el.classList.add('filled');
+      el.innerHTML = `<img src="${esc(url)}" alt="">
+        <div class="idn-over"><i class="fa-solid fa-camera"></i>Ganti</div>`;
+
+      if (kategori === 'profil_guru') {
+        terapkanFotoProfilUI(url);
+        toast('success', 'Foto profil diperbarui');
+      } else {
+        APP.identitas = { ...(APP.identitas || {}), [kategori]: url };
+        terapkanIdentitasVisual(APP.identitas);
+        // Kartu Identitas Dayah di Master & Bidang ikut disegarkan bila terbuka.
+        const kembar = $(kategori === 'identitas_logo' ? 'idnLogo' : 'idnLatar');
+        if (kembar) {
+          kembar.classList.add('filled');
+          kembar.innerHTML = `<img src="${esc(url)}" alt="">
+            <div class="idn-over"><i class="fa-solid fa-camera"></i>Ganti</div>`;
+        }
+        toast('success', kategori === 'identitas_logo'
+          ? 'Logo dayah diperbarui' : 'Foto latar diperbarui');
+      }
+      sync('done', 'Berkas tersimpan');
+    } catch (e) {
+      sync('warn', 'Gagal mengunggah');
+      fireError(e);
+    } finally {
+      el.classList.remove('busy');
+    }
+  });
+}
 
 // =====================================================================
 // HELPER: Generate Avatar Placeholder dengan Inisial + Warna Dinamis
@@ -1171,13 +1366,14 @@ async function masukAplikasi() {
   // === GANTI BAGIAN LAMA INI ===
   // Hapus: profileName, profileRole, profileInitial
   // Gunakan ID yang ada di HTML sekarang
-  const namaEl = $('guru-nama');
-  const roleEl = $('guru-role');
-  if (namaEl) namaEl.textContent = profil.nama || 'User';
-  if (roleEl) {
-    roleEl.textContent = profil.role +
-      (profil.kelas_binaan?.length ? ' · ' + profil.kelas_binaan.join(', ') : '');
-  }
+  terapkanIdentitasPengguna(
+    profil.nama || 'User',
+    profil.role + (profil.kelas_binaan?.length ? ' · ' + profil.kelas_binaan.join(', ') : '')
+  );
+  // Slot latar & logo hanya relevan bagi Admin; peran lain tetap bisa
+  // mengganti foto profilnya lewat tombol yang sama.
+  $('pbarBtnStudio')?.setAttribute('title',
+    isAdmin() ? 'Ganti foto profil, foto latar, dan logo dayah' : 'Ganti foto profil');
   // ============================
 
   document.querySelectorAll('.nav-item[data-view]').forEach(b => {
@@ -1196,6 +1392,8 @@ async function masukAplikasi() {
 
   // Load foto profil (opsional, bisa dipanggil di sini atau di dashboard)
   setupProfilUserLogin().catch(e => console.warn('[profil]', e));
+  // Sampul & logo bilah profil atas — dibaca sekali, dipakai seluruh sesi.
+  muatDanTerapkanIdentitas();
 
   navigateTo(rumah());
 }
@@ -1210,22 +1408,7 @@ db.auth.onAuthStateChange((event) => {
 // Admin mengunggahnya). Dibungkus try/catch: bila tabel belum bisa
 // dibaca sebelum login (RLS), layar login tetap tampil normal tanpa foto.
 (async function visualLogin() {
-  try {
-    const identitas = await muatIdentitasDayah();
-    if (identitas.identitas_latar) ASET.foto = identitas.identitas_latar;
-    if (identitas.identitas_logo) ASET.logo = identitas.identitas_logo;
-  } catch (e) { console.warn('[identitas]', e.message); }
-
-  if (ASET.foto) {
-    const art = $('loginArt');
-    art.style.setProperty('--photo', `url("${ASET.foto.replace(/"/g,'\\"')}")`);
-    art.classList.add('ready');
-  }
-  if (ASET.logo) {
-    const img = $('loginLogo');
-    img.src = ASET.logo;
-    img.onload = () => img.classList.add('ready');
-  }
+  await muatDanTerapkanIdentitas();
 })();
 
 // ---------------------------------------------------------------------
@@ -3446,8 +3629,9 @@ function kartuIdentitasDayah(identitas) {
     </div>`;
   return kartu('Identitas Dayah', `
     <div class="card-note"><i class="fa-solid fa-circle-info"></i>
-      Logo dan foto latar ini tampil di layar login. Perubahan berlaku pada
-      percobaan masuk berikutnya (muat ulang halaman login untuk melihatnya).</div>
+      Logo dan foto latar ini tampil di bilah profil atas dan layar login, dan
+      langsung berubah begitu berkas terunggah. Pintasan cepat: tombol
+      <b>Identitas</b> di bilah profil paling atas.</div>
     <div class="idn-grid">
       ${frame('idnLogo', 'Logo Dayah', identitas?.identitas_logo,
         'Disarankan gambar persegi, latar transparan (PNG).')}
@@ -3476,8 +3660,10 @@ function pasangIdentitasDayah() {
       el.classList.add('filled');
       el.innerHTML = `<img src="${esc(url)}" alt="">
         <div class="idn-over"><i class="fa-solid fa-camera"></i>Ganti</div>`;
+      APP.identitas = { ...(APP.identitas || {}), [kategori]: url };
+      terapkanIdentitasVisual(APP.identitas);
       sync('done', 'Identitas dayah diperbarui');
-      toast('success', 'Tersimpan — akan tampil pada layar login berikutnya');
+      toast('success', 'Tersimpan — bilah profil & layar login langsung diperbarui');
     } catch (e) {
       sync('warn', 'Gagal mengunggah');
       fireError(e);
