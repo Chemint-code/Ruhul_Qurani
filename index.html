@@ -1519,6 +1519,112 @@ select.per-in{appearance:none;padding-right:14px;
   .pbar-logo{display:none}
 }
 
+/* ============================================================
+   BRANKAS REFERENSI — ringkasan Master Pelanggaran & Master Bidang
+   Daftar utuh (ratusan baris) dibuka sebagai jendela, bukan digulir
+   di halaman. Kartu ini hanya membawa angka yang terbaca sekilas.
+   ============================================================ */
+.brankas-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+@media(max-width:900px){.brankas-grid{grid-template-columns:1fr}}
+
+.brankas{
+  position:relative;overflow:hidden;width:100%;text-align:left;
+  display:flex;flex-direction:column;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:19px 20px 0;box-shadow:var(--shadow);
+  transition:transform .16s cubic-bezier(.22,1,.36,1),border-color .16s,box-shadow .16s;
+}
+.brankas::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(180deg,var(--brass),rgba(201,162,39,.15));
+}
+.brankas.alt::before{background:linear-gradient(180deg,var(--sea),rgba(20,97,139,.15))}
+.brankas::after{
+  content:'';position:absolute;right:-48px;top:-64px;width:190px;height:190px;
+  border-radius:50%;background:radial-gradient(circle,rgba(20,97,139,.07),transparent 68%);
+  pointer-events:none;
+}
+.brankas:hover{transform:translateY(-2px);border-color:#CFDCE6;box-shadow:var(--shadow-lg)}
+.brankas > *{position:relative;z-index:1}
+
+.brk-top{display:flex;align-items:center;gap:12px;margin-bottom:13px}
+.brk-ico{
+  flex:0 0 42px;width:42px;height:42px;border-radius:12px;display:grid;place-items:center;
+  background:linear-gradient(150deg,var(--sea),var(--navy));color:#F2E5B8;font-size:16px;
+  box-shadow:0 8px 18px -10px rgba(6,24,38,.7);
+}
+.brankas.alt .brk-ico{background:linear-gradient(150deg,#1B7AAD,#0B2B45)}
+.brk-top .eyebrow{margin:0}
+
+.brk-nm{display:block;font-family:'Instrument Serif',Georgia,serif;font-weight:400;
+  font-size:22px;letter-spacing:-.015em;line-height:1.15;color:var(--text)}
+.brk-sub{margin:5px 0 0;font-size:12.5px;color:var(--text-3);line-height:1.5}
+
+.brk-angka{display:flex;align-items:baseline;gap:9px;margin:15px 0 12px}
+.brk-v{font-family:'IBM Plex Mono',monospace;font-size:36px;font-weight:600;
+  letter-spacing:-.03em;line-height:1;color:var(--navy)}
+.brk-k{font-size:10px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--text-3)}
+
+.brk-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+
+.brk-go{
+  display:flex;align-items:center;gap:8px;margin:auto -20px 0;
+  padding:13px 20px;border-top:1px solid var(--line-soft);
+  background:linear-gradient(90deg,rgba(201,162,39,.06),transparent 60%);
+  font-size:12px;font-weight:700;color:var(--sea);
+}
+.brankas.alt .brk-go{background:linear-gradient(90deg,rgba(20,97,139,.06),transparent 60%)}
+.brk-arrow{margin-left:auto;transition:transform .16s}
+.brankas:hover .brk-arrow{transform:translateX(4px)}
+
+.brk-add{
+  position:absolute;top:15px;right:15px;z-index:2;
+  display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:20px;
+  background:#FDF8E9;border:1px solid rgba(201,162,39,.45);color:#8A6D0B;
+  font-size:11.5px;font-weight:700;cursor:pointer;transition:background .14s,border-color .14s;
+}
+.brk-add:hover{background:#F7EFD3;border-color:var(--brass)}
+@media(max-width:640px){
+  .brankas{padding:17px 17px 0}
+  .brk-go{margin:auto -17px 0;padding:12px 17px}
+  .brk-v{font-size:31px}
+}
+
+/* ---------- Jendela daftar (Master Pelanggaran / Master Bidang) ---------- */
+.dft-popup{padding:22px !important;max-width:96vw !important}
+.dft-popup .swal2-html-container{
+  margin:14px 0 0 !important;max-height:none !important;overflow:visible !important;
+}
+.dft{text-align:left}
+.dft-bar{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.dft-bar .input{min-height:40px;padding:9px 12px}
+.dft-bar .grow{flex:1 1 240px;min-width:180px;width:auto}
+.dft-chips{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:12px 0 13px}
+.dft-chips .chip{padding:5px 13px;font-size:12px}
+.dft-note{margin-left:auto;font-size:11.5px;color:var(--text-3);font-weight:600}
+.dft-note i{color:var(--sea);margin-right:5px}
+@media(max-width:760px){.dft-note{display:none}}
+
+.dft-wrap{
+  max-height:56vh;overflow:auto;
+  border:1px solid var(--line);border-radius:var(--r);
+  scrollbar-width:thin;scrollbar-color:#CBD8E2 transparent;
+}
+.dft-wrap::-webkit-scrollbar{width:8px;height:8px}
+.dft-wrap::-webkit-scrollbar-track{background:transparent}
+.dft-wrap::-webkit-scrollbar-thumb{background:#CBD8E2;border-radius:8px}
+.dft-wrap::-webkit-scrollbar-thumb:hover{background:#AEC1D0}
+.dft-tbl{width:100%;border-collapse:separate;border-spacing:0;min-width:760px}
+.dft-tbl thead th{
+  position:sticky;top:0;z-index:3;
+  background:linear-gradient(180deg,#F3F7FA,#EEF3F7);
+  box-shadow:inset 0 -1px 0 #D5E0EA;border-bottom:none;
+}
+.dft-tbl tbody td{padding:11px 16px;vertical-align:middle;font-size:13px}
+.dft-tbl tbody tr:hover{background:#F3F8FB}
+.dft-tbl tbody td .primary{font-weight:600}
+
 /* ---------- Studio Identitas (modal SweetAlert) ---------- */
 .stu-lead{margin:0 0 16px;font-size:12.5px;line-height:1.6;color:var(--text-2);text-align:left}
 .stu-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;text-align:left}
