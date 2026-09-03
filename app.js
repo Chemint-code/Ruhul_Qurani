@@ -30,11 +30,13 @@ const DOMAIN_INTERNAL = 'ruhulqurani.local';
 const ASET = { logo: '', foto: '' };
 
 // Bucket Supabase Storage tempat seluruh foto (profil guru & identitas
-// dayah) disimpan. Buat bucket ini di Dashboard Supabase → Storage →
-// New bucket → tandai Public, bila belum ada. Tabel foto_aset (kategori,
-// relasi_id, url_publik, nama_file, ukuran_px, is_aktif, tanggal_upload)
-// juga perlu policy INSERT/UPDATE untuk role authenticated.
-const BUCKET_FOTO = 'foto-profil';
+// dayah) disimpan — sesuai bucket yang sudah ada: Storage > Buckets > foto.
+// Di dalamnya otomatis terbentuk folder per kategori (mis. profil_guru/,
+// identitas_logo/, identitas_latar/), lalu per user di bawah profil_guru/.
+// Tabel foto_aset (kategori, relasi_id, url_publik, nama_file, ukuran_px,
+// is_aktif, tanggal_upload) & bucket ini perlu policy INSERT/UPDATE untuk
+// role authenticated — lihat catatan penyiapan yang dikirim bersama berkas ini.
+const BUCKET_FOTO = 'foto';
 const FOTO_MAKS_MB = 4;
 
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
