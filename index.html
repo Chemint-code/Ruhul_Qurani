@@ -1908,6 +1908,85 @@ select.per-in{appearance:none;padding-right:14px;
 }
 .stu-note i{color:var(--sea)}
 
+   .bkp-no{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:9px;
+  font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:700;
+  background:#F3F0E2;color:#8A6D0B;border:1px solid rgba(201,162,39,.28)}
+.bkp-tbl tbody tr:nth-child(-n+3) .bkp-no{
+  background:linear-gradient(150deg,#E8CC6B,var(--brass));color:#3D2F05;border-color:#E8CC6B}
+.bkp-tbl tbody td{vertical-align:middle}
+.bkp-tbl .tag{margin-bottom:3px}
+ 
+/* ---------- Halaman percakapan ---------- */
+.msg{display:grid;grid-template-columns:326px 1fr;min-height:560px}
+@media(max-width:960px){.msg{grid-template-columns:1fr}}
+.msg-side{border-right:1px solid var(--line-soft);display:flex;flex-direction:column;min-width:0}
+@media(max-width:960px){.msg-side{border-right:none;border-bottom:1px solid var(--line-soft)}}
+.msg-bar{padding:14px 16px 0}
+.msg-bar .input{min-height:38px;padding:8px 12px;font-size:13px}
+.msg-chips{display:flex;gap:6px;flex-wrap:wrap;padding:12px 16px}
+.msg-chips .chip{padding:4px 11px;font-size:11.5px}
+.msg-list{flex:1;overflow-y:auto;max-height:62vh;padding:0 10px 12px;
+  scrollbar-width:thin;scrollbar-color:#CBD8E2 transparent}
+.msg-list::-webkit-scrollbar{width:7px}
+.msg-list::-webkit-scrollbar-thumb{background:#CBD8E2;border-radius:7px}
+ 
+.msg-item{display:flex;gap:11px;width:100%;text-align:left;padding:11px 12px;
+  border-radius:var(--r);border:1px solid transparent;transition:background .12s,border-color .12s}
+.msg-item:hover{background:#F5F9FB;border-color:var(--line)}
+.msg-item.on{background:#F1F8FC;border-color:#CBE0EC}
+.msg-item.baru{background:#FDF8E9}
+.msg-item.baru.on{background:#FBF3DC;border-color:rgba(201,162,39,.5)}
+.msg-av{flex:0 0 38px;width:38px;height:38px;border-radius:12px;display:grid;place-items:center;
+  background:linear-gradient(150deg,var(--sea),var(--navy));color:#fff;
+  font-family:'Instrument Serif',Georgia,serif;font-size:15px}
+.msg-item.baru .msg-av{background:linear-gradient(150deg,var(--brass),#8A6D0B);color:#2A2003}
+.msg-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.msg-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.msg-top b{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msg-top small{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--text-3);flex:none}
+.msg-who{font-size:11.5px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msg-who i{color:var(--text-3);margin-right:5px;font-size:10px}
+.msg-prev{font-size:12px;color:var(--text-3);line-height:1.45;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.msg-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+ 
+.msg-panel{display:flex;flex-direction:column;min-width:0}
+.msg-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  padding:15px 20px;border-bottom:1px solid var(--line-soft);
+  background:linear-gradient(90deg,rgba(201,162,39,.07),transparent 55%)}
+.msg-head b{display:block;font-family:'Instrument Serif',Georgia,serif;font-weight:400;
+  font-size:19px;letter-spacing:-.015em}
+.msg-head span{display:block;font-family:'IBM Plex Mono',monospace;font-size:11.5px;
+  color:var(--text-3);margin-top:2px}
+.msg-acts{display:flex;gap:8px;flex-wrap:wrap}
+ 
+.msg-thread{flex:1;overflow-y:auto;max-height:52vh;padding:18px 20px;
+  display:flex;flex-direction:column;gap:12px;background:var(--paper);
+  scrollbar-width:thin;scrollbar-color:#CBD8E2 transparent}
+.msg-thread::-webkit-scrollbar{width:7px}
+.msg-thread::-webkit-scrollbar-thumb{background:#CBD8E2;border-radius:7px}
+.bub{max-width:min(560px,86%);border-radius:var(--r-lg);padding:12px 14px;
+  border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow)}
+.bub.saya{align-self:flex-end;background:#F1F8FC;border-color:#CBE0EC}
+.bub.dia{align-self:flex-start}
+.bub-who{font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--text-3);margin-bottom:6px}
+.bub-isi{font-size:13.5px;line-height:1.65;color:var(--text);word-break:break-word}
+.bub-kaki{margin-top:7px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--text-3)}
+ 
+.msg-tulis{display:flex;gap:9px;align-items:flex-end;padding:14px 20px;
+  border-top:1px solid var(--line-soft)}
+.msg-tulis textarea{resize:vertical;min-height:46px}
+.msg-tulis .btn{min-height:46px;flex:none}
+@media(max-width:560px){.msg-tulis{flex-direction:column;align-items:stretch}
+  .msg-tulis .btn{width:100%}}
+ 
+.msg-kosong{padding:34px 20px;text-align:center;color:var(--text-3);font-size:12.5px}
+.msg-kosong.tengah{margin:auto}
+.msg-kosong i{display:block;font-size:24px;color:#C7D6E0;margin-bottom:10px}
+.msg-kosong p{margin:0 0 4px;font-weight:600;color:var(--text-2);font-size:13.5px}
+.msg-kosong small{font-size:12px}
+
 </style>
 </head>
 <body>
@@ -1971,6 +2050,7 @@ select.per-in{appearance:none;padding-right:14px;
       <p class="sb-group" data-group="pantau">Pemantauan</p>
       <button class="nav-item" data-view="dashboard"><i class="fa-solid fa-chart-simple"></i>Ringkasan</button>
       <button class="nav-item" data-view="pimpinan"><i class="fa-solid fa-landmark"></i>Dashboard Pimpinan</button>
+       <button class="nav-item" data-view="bk"><i class="fa-solid fa-user-shield"></i>Dashboard Guru BK</button>
       <button class="nav-item" data-view="siswa"><i class="fa-solid fa-user-graduate"></i>Profil Santri</button>
       <p class="sb-group" data-group="operasional">Operasional</p>
       <button class="nav-item" data-view="pelanggaran"><i class="fa-solid fa-scale-balanced"></i>Catatan Pelanggaran</button>
@@ -1982,6 +2062,8 @@ select.per-in{appearance:none;padding-right:14px;
         <span id="badgePending" class="nav-count hidden"></span></button>
       <button class="nav-item" data-view="pembinaan"><i class="fa-solid fa-hands-praying"></i>Pembinaan</button>
       <button class="nav-item" data-view="rekapbina"><i class="fa-solid fa-clipboard-check"></i>Rekap Pembinaan</button>
+       <button class="nav-item" data-view="pesan"><i class="fa-solid fa-comments"></i>Pesan Tindak Lanjut
+        <span id="badgePesan" class="nav-count hidden"></span></button>
       <p class="sb-group" data-group="pengaturan">Pengaturan</p>
       <button class="nav-item" data-view="master"><i class="fa-solid fa-book"></i>Master &amp; Bidang</button>
       <button class="nav-item" data-view="pengguna"><i class="fa-solid fa-users-gear"></i>Pengguna</button>
