@@ -225,6 +225,23 @@ const HAK = {
   'pesan.lihat'     : ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Pimpinan'],
   'pesan.mulai'     : ['Admin','Guru BK'],   // hanya BK yang memulai utas baru
 
+  // --- Prestasi & apresiasi (poin positif) ---------------------------
+  'prestasi.lihat'  : ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis','Pimpinan'],
+  'prestasi.catat'  : ['Admin','Guru','Walas','Guru BK','Ustadz GEN-Z'],
+  'prestasi.arsip'  : ['Admin','Guru BK'],
+
+  // --- Tahfiz Al-Qur'an ---------------------------------------------
+  'tahfiz.lihat'    : ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Pimpinan'],
+  'tahfiz.setor'    : ['Admin','Guru','Walas','Ustadz GEN-Z'],
+  'tahfiz.target'   : ['Admin','Guru','Walas','Ustadz GEN-Z'],
+
+  // --- Target pembinaan (goal) --------------------------------------
+  'goal.lihat'      : ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Pimpinan'],
+  'goal.tulis'      : ['Admin','Guru','Walas','Guru BK','Ustadz GEN-Z'],
+
+  // --- Jejak audit ---------------------------------------------------
+  'audit.lihat'     : ['Admin','Pimpinan'],
+
   // --- Batasan lingkup ----------------------------------------------
   'lingkup.kelas'   : ['Guru','Guru BK','Walas']   // hanya kelas binaan
 };
@@ -263,6 +280,9 @@ const MENU_ROLE = {
   pesan:       ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Pimpinan'],
   siswa:       ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
   pelanggaran: ['Admin'],
+  prestasi:    ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis','Pimpinan'],
+  tahfiz:      ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Pimpinan'],
+  audit:       ['Admin','Pimpinan'],
   rekap:       ['Admin'],
   bidang:      ['Admin','Guru','Walas','Guru BK','Guru Piket','Pimpinan'],
   pengasuhan:  ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
@@ -281,6 +301,9 @@ const JUDUL = {
   pesan:      { lat:'Pesan',           ar:'الرسائل',            teks:'Pesan Tindak Lanjut' },
   siswa:      { lat:'Santri',          ar:'بيانات الطلاب',      teks:'Profil Santri' },
   pelanggaran:{ lat:'Pelanggaran',     ar:'المخالفات',          teks:'Catatan Pelanggaran' },
+  prestasi:   { lat:'Prestasi',        ar:'الإنجازات',          teks:'Prestasi & Apresiasi' },
+  tahfiz:     { lat:'Tahfiz',          ar:'تحفيظ القرآن',       teks:'Tahfiz Al-Qur\'an' },
+  audit:      { lat:'Jejak Audit',     ar:'سجل التغييرات',      teks:'Jejak Audit Sistem' },
   rekap:      { lat:'Rekap',           ar:'حصر المخالفات',      teks:'Rekap Pelanggaran' },
   bidang:     { lat:'Evaluasi Bidang', ar:'تقويم المجالات',     teks:'Evaluasi Bidang Pelanggaran' },
   pengasuhan: { lat:'Pengasuhan',      ar:'التربية والانضباط',  teks:'Unit Pengasuhan' },
@@ -396,6 +419,42 @@ async function muatDaftarKelas() {
   const c = cacheGet('kelas'); if (c) return c;
   const siswa = await muatSiswa();
   return cacheSet('kelas', [...new Set(siswa.map(s => s.kelas).filter(Boolean))].sort());
+}
+
+/** Data prestasi (poin positif) — pola sama dengan detail_data. */
+async function muatPrestasi() {
+  const c = cacheGet('prestasi'); if (c) return c;
+  return cacheSet('prestasi', await amanKosong(
+    () => ambilSemua('log_prestasi', '*', { order:'tanggal', asc:false }), 'prestasi'));
+}
+/** Data setoran tahfiz. */
+async function muatTahfiz() {
+  const c = cacheGet('tahfiz'); if (c) return c;
+  return cacheSet('tahfiz', await amanKosong(
+    () => ambilSemua('log_tahfiz', '*', { order:'tanggal', asc:false }), 'tahfiz'));
+}
+/** Katalog jenis prestasi. */
+async function muatMasterPrestasi() {
+  const c = cacheGet('masterPrestasi'); if (c) return c;
+  return cacheSet('masterPrestasi', await amanKosong(
+    () => ambilSemua('master_prestasi', '*', { order:'kode_prestasi' }), 'master prestasi'));
+}
+/** Target hafalan per santri per periode. */
+async function muatTargetTahfiz() {
+  const c = cacheGet('targetTahfiz'); if (c) return c;
+  return cacheSet('targetTahfiz', await amanKosong(
+    () => ambilSemua('target_tahfiz', '*', { order:'periode', asc:false }), 'target tahfiz'));
+}
+
+const aktifPrestasi = (r) => String(r.status || 'Active').trim().toLowerCase() !== 'archived';
+const aktifTahfiz   = (r) => String(r.status || 'Active').trim().toLowerCase() !== 'archived';
+
+/** 'yyyy-MM' satu bulan sebelumnya — dipakai loop target antar periode. */
+function bulanSebelum(bulan) {
+  const [th, bl] = String(bulan || '').split('-').map(Number);
+  if (!th || !bl) return '';
+  const d = new Date(th, bl - 2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 const aktifDetail = (r) => String(r.status || '').trim().toLowerCase() !== 'archived';
@@ -1396,12 +1455,12 @@ async function masukAplikasi() {
     isAdmin() ? 'Ganti foto profil, foto latar, dan logo dayah' : 'Ganti foto profil');
   // ============================
 
-  document.querySelectorAll('.nav-item[data-view]').forEach(b => {
+  document.querySelectorAll('[data-view]').forEach(b => {
     b.classList.toggle('hidden', !(MENU_ROLE[b.dataset.view] || []).includes(profil.role));
   });
+  rapikanGrupNav();
 
   if (['Pimpinan','Klinik'].includes(role())) {
-    document.querySelectorAll('#navMenu .sb-group').forEach(p => p.classList.add('hidden'));
     $('ctxBadge')?.classList.add('hidden');
   }
 
@@ -1416,7 +1475,9 @@ async function masukAplikasi() {
   // Sampul & logo bilah profil atas — dibaca sekali, dipakai seluruh sesi.
   muatDanTerapkanIdentitas();
 
-  navigateTo(rumah());
+  // Pintasan PWA (#prestasi, #tahfiz, …) langsung membuka halamannya.
+  const awal = String(location.hash || '').replace('#', '').trim();
+  navigateTo(awal && MENU_ROLE[awal] ? awal : rumah());
 }
 
 db.auth.onAuthStateChange((event) => {
@@ -1440,6 +1501,33 @@ $('navMenu').addEventListener('click', (e) => {
   if (!btn) return;
   navigateTo(btn.dataset.view);
   tutupSidebar();
+});
+
+/**
+ * Sembunyikan kelompok menu yang seluruh isinya tidak boleh diakses,
+ * lalu buka kelompok yang memuat halaman aktif. Dipanggil setelah login
+ * dan setiap kali berpindah halaman — inilah yang membuat bilah sisi
+ * tetap ramping walau jumlah modul bertambah.
+ */
+function rapikanGrupNav(viewAktif) {
+  document.querySelectorAll('#navMenu .nav-grup').forEach(g => {
+    const isi = [...g.querySelectorAll('.nav-item[data-view]')];
+    const tampak = isi.filter(b => !b.classList.contains('hidden'));
+    g.classList.toggle('hidden', tampak.length === 0);
+    if (viewAktif && tampak.some(b => b.dataset.view === viewAktif)) g.open = true;
+  });
+}
+
+/** Bilah tab bawah (ponsel) — berbagi data-view dengan bilah sisi. */
+$('tabBar')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab');
+  if (!btn) return;
+  if (btn.id === 'tabMenu') {
+    $('sidebar').classList.add('open');
+    $('scrim').classList.remove('hidden');
+    return;
+  }
+  if (btn.dataset.view) navigateTo(btn.dataset.view);
 });
 
 $('btnBurger').addEventListener('click', () => {
@@ -1474,8 +1562,9 @@ async function navigateTo(view) {
   $('pageEyebrow').querySelector('.ar').textContent = j.ar;
   $('pageEyebrow').querySelector('.lat').textContent = j.lat;
 
-  document.querySelectorAll('.nav-item[data-view]').forEach(b =>
+  document.querySelectorAll('[data-view]').forEach(b =>
     b.classList.toggle('active', b.dataset.view === view));
+  rapikanGrupNav(view);
 
   Object.values(APP.charts).forEach(c => { try { c.destroy(); } catch(e){} });
   APP.charts = {};
@@ -1489,6 +1578,9 @@ async function navigateTo(view) {
     else if (view === 'pesan')       await viewPesan();
     else if (view === 'siswa')       await viewSiswa();
     else if (view === 'pelanggaran') await viewPelanggaran();
+    else if (view === 'prestasi')    await viewPrestasi();
+    else if (view === 'tahfiz')      await viewTahfiz();
+    else if (view === 'audit')       await viewAudit();
     else if (view === 'rekap')       await viewRekap();
     else if (view === 'bidang')      await viewEvaluasiBidang();
     else if (view === 'pengasuhan')  await viewPengasuhan();
@@ -2300,11 +2392,25 @@ async function bukaDetailSantri(nisn) {
     const izin = data.perizinan || [];
     const bina = data.pembinaan || [];
 
+    // Data modul baru (prestasi, tahfiz, target) — tidak menggagalkan
+    // tampilan bila tabelnya belum dipasang di database.
+    const [prestasi, tahfiz, goals] = await Promise.all([
+      muatPrestasi().then(r => r.filter(aktifPrestasi).filter(x => String(x.nisn) === String(nisn))).catch(() => []),
+      muatTahfiz().then(r => r.filter(aktifTahfiz).filter(x => String(x.nisn) === String(nisn))).catch(() => []),
+      muatGoalSantri(nisn)
+    ]);
+    const poinPrestasi = prestasi.reduce((a, r) => a + (Number(r.poin) || 0), 0);
+    const poinPlg = Number(s.total_poin_pelanggaran) || 0;
+    const skorNet = Math.max(0, poinPlg - poinPrestasi);
+    const halTahfiz = tahfiz.reduce((a, r) => a + (Number(r.capaian_halaman) || 0), 0);
+
     // Timeline gabungan, urut dari yang terbaru
     const timeline = [
       ...riwayat.map(r => ({ tipe:'plg', kunci: kunciTgl(r.tanggal), r })),
       ...izin.map(z => ({ tipe:'izin', kunci: kunciTgl(z.tanggal_mulai), r:z })),
-      ...bina.map(b => ({ tipe:'bina', kunci: kunciTgl(b.tanggal_pembinaan), r:b }))
+      ...bina.map(b => ({ tipe:'bina', kunci: kunciTgl(b.tanggal_pembinaan), r:b })),
+      ...prestasi.map(p => ({ tipe:'prestasi', kunci: kunciTgl(p.tanggal), r:p })),
+      ...tahfiz.map(t => ({ tipe:'tahfiz', kunci: kunciTgl(t.tanggal), r:t }))
     ].sort((a, b) => String(b.kunci).localeCompare(String(a.kunci)));
 
     const item = (t) => {
@@ -2328,6 +2434,27 @@ async function bukaDetailSantri(nisn) {
             <div class="when">${tgl(z.tanggal_mulai)} s/d ${tgl(z.tanggal_selesai)}</div>
             <div class="note">${esc(z.alasan||'-')}</div>
           </div></div>`; }
+      if (t.tipe === 'prestasi') { const p = t.r; return `
+        <div class="tl-item">
+          <div class="mark" style="background:color-mix(in oklab,var(--brass) 18%,white);color:#8A6D0B">
+            <i class="fa-solid fa-award"></i></div>
+          <div class="body">
+            <div class="row1"><p class="ttl" style="margin:0">${esc(p.judul)}</p>
+              <span class="tag ${tagPrestasi(p.kategori)}">${esc(p.kategori)} · +${p.poin}</span></div>
+            <div class="when">${tgl(p.tanggal)} · ${esc(p.bidang||'-')} · ${esc(p.pencatat||'-')}</div>
+            ${p.catatan ? `<div class="note">${esc(p.catatan)}</div>` : ''}
+          </div></div>`; }
+      if (t.tipe === 'tahfiz') { const h = t.r; return `
+        <div class="tl-item">
+          <div class="mark" style="background:var(--teal-bg);color:var(--teal)">
+            <i class="fa-solid fa-book-quran"></i></div>
+          <div class="body">
+            <div class="row1"><p class="ttl" style="margin:0">${esc(h.jenis || 'Setoran')} —
+                ${esc(h.surah || '-')}${h.ayat_dari ? ` : ${h.ayat_dari}${h.ayat_ke ? '–' + h.ayat_ke : ''}` : ''}</p>
+              <span class="${kelasLancar(h.kelancaran)}">${esc(h.kelancaran || '-')}</span></div>
+            <div class="when">${tgl(h.tanggal)} · ${Number(h.capaian_halaman)||0} halaman · ${esc(h.musyrif||'-')}</div>
+            ${h.catatan ? `<div class="note">${esc(h.catatan)}</div>` : ''}
+          </div></div>`; }
       const b = t.r; return `
         <div class="tl-item">
           <div class="mark" style="background:var(--violet-bg);color:var(--violet)">
@@ -2349,9 +2476,24 @@ async function bukaDetailSantri(nisn) {
             <p class="nm">${esc(s.nama_siswa)}</p>
             <p class="id">NISN ${esc(s.nisn)} · Kelas ${esc(s.kelas||'-')}${s.jenjang?' · '+esc(s.jenjang):''}${s.asrama?' · Asrama '+esc(s.asrama):''}</p>
           </div>
-          <div class="poin-badge">
-            <p class="v" style="color:${Number(s.total_poin_pelanggaran)>=50?'var(--maroon)':'var(--text)'}">${s.total_poin_pelanggaran||0}</p>
-            <p class="k">Total Poin</p>
+          <div style="display:flex;gap:9px;flex-wrap:wrap">
+            <div class="poin-badge">
+              <p class="v" style="color:${poinPlg>=50?'var(--maroon)':'var(--text)'}">${poinPlg}</p>
+              <p class="k">Pelanggaran</p>
+            </div>
+            <div class="poin-badge" style="background:color-mix(in oklab,var(--brass) 9%,white);
+                 border-color:color-mix(in oklab,var(--brass) 30%,white)">
+              <p class="v" style="color:#8A6D0B">+${poinPrestasi}</p>
+              <p class="k">Apresiasi</p>
+            </div>
+            <div class="poin-badge" style="background:var(--paper)">
+              <p class="v" style="color:${skorNet>=50?'var(--maroon)':skorNet>0?'var(--amber)':'var(--teal)'}">${skorNet}</p>
+              <p class="k">Skor Net</p>
+            </div>
+            <div class="poin-badge" style="background:var(--teal-bg);border-color:color-mix(in oklab,var(--teal) 24%,white)">
+              <p class="v" style="color:var(--teal)">${juzDari(halTahfiz)}</p>
+              <p class="k">Juz Hafal</p>
+            </div>
           </div>
         </div>
 
@@ -2370,6 +2512,11 @@ async function bukaDetailSantri(nisn) {
           ${bolehTulis() ? `<button class="btn btn-ghost btn-sm" id="dReset"><i class="fa-solid fa-rotate-left"></i>Reset ke Hadir</button>` : ''}
         </div>
 
+        ${trenPanelHTML()}
+
+        <div id="dGoalBox">${goalPanelHTML(goals, nisn)}</div>
+
+        <p class="label" style="margin:18px 0 8px">Linimasa Lengkap</p>
         <div class="tl">
           ${timeline.map(item).join('') ||
             '<p style="text-align:center;color:var(--text-3);padding:28px 0">Belum ada riwayat.</p>'}
@@ -2378,7 +2525,23 @@ async function bukaDetailSantri(nisn) {
         $('dCetak')?.addEventListener('click', () => cetakLaporan(nisn));
         $('dPdf')?.addEventListener('click', () => unduhLaporanPdf(nisn));
         $('dReset')?.addEventListener('click', () => resetStatus(nisn));
-      }
+
+        // Grafik tren — hanya di layar, tidak ikut tercetak.
+        gambarTrenSantri(nisn).catch(e => console.warn('[tren]', e.message));
+
+        // Target pembinaan: SweetAlert tidak bisa bertumpuk, jadi jendela
+        // detail ditutup dulu, lalu dibuka kembali setelah selesai.
+        Swal.getHtmlContainer()?.addEventListener('click', (ev) => {
+          const baru = ev.target.closest('[data-goal-baru]');
+          const eval2 = ev.target.closest('[data-goal-eval]');
+          if (!baru && !eval2) return;
+          ev.preventDefault();
+          const kerja = baru ? () => modalGoalBaru(nisn) : () => modalGoalEvaluasi(eval2.dataset.goalEval);
+          Swal.close();
+          setTimeout(async () => { await kerja(); bukaDetailSantri(nisn); }, 220);
+        });
+      },
+      willClose: () => { try { APP.charts.trenSantri?.destroy(); } catch (e) {} }
     });
   } catch (err) { fireError(err); }
   finally { loading(false); }
@@ -3615,23 +3778,27 @@ async function viewMaster() {
   if (!bolehMaster()) { $('viewRoot').innerHTML = kosong('Akses dibatasi.',
     `Role ${role()} tidak memiliki akses ke Master Pelanggaran.`, 'fa-lock'); return; }
 
-  cacheHapus('master','bidang');
-  const [master, bidang, identitas] = await Promise.all([
-    muatMaster(), muatBidang(), isAdmin() ? muatIdentitasDayah() : Promise.resolve({})
+  cacheHapus('master','bidang','masterPrestasi');
+  const [master, bidang, prestasi, identitas] = await Promise.all([
+    muatMaster(), muatBidang(), muatMasterPrestasi(),
+    isAdmin() ? muatIdentitasDayah() : Promise.resolve({})
   ]);
 
   $('viewRoot').innerHTML = `
     <div class="brankas-grid" id="brankasGrid">
       <div id="brkMaster">${kartuBrankasMaster(master)}</div>
       <div id="brkBidang">${kartuBrankasBidang(bidang)}</div>
+      <div id="brkPrestasi">${kartuBrankasPrestasi(prestasi)}</div>
     </div>
     ${isAdmin() ? kartuIdentitasDayah(identitas) : ''}`;
 
   onKlik(async (e) => {
     if (e.target.closest('#brkAddMaster')) return tambahLaluBukaMaster();
     if (e.target.closest('#brkAddBidang')) return tambahLaluBukaBidang();
+    if (e.target.closest('#brkAddPrestasi')) return modalMasterPrestasi(null);
     if (e.target.closest('#brkMaster .brankas')) return bukaDaftarMaster();
     if (e.target.closest('#brkBidang .brankas')) return bukaDaftarBidang();
+    if (e.target.closest('#brkPrestasi .brankas')) return bukaDaftarPrestasi();
   });
 
   if (isAdmin()) pasangIdentitasDayah();
@@ -4393,10 +4560,28 @@ async function hitungAgregasiSantri(siswa) {
       poin.set(n, (poin.get(n) || 0) + (Number(r.bobot_pelanggaran) || 0));
     });
 
+    // Poin prestasi seluruh santri pada periode yang sama — dipakai agar
+    // ambang tier dihitung dari SKOR NET, bukan dari pelanggaran saja.
+    const prestasi = new Map();
+    try {
+      saringPeriode((await muatPrestasi()).filter(aktifPrestasi), 'tanggal')
+        .forEach(r => {
+          const n = String(r.nisn || ''); if (!n) return;
+          prestasi.set(n, (prestasi.get(n) || 0) + (Number(r.poin) || 0));
+        });
+    } catch (e) { console.warn('poin prestasi tidak terbaca:', e.message); }
+
+    const kunci = new Set([...poin.keys(), ...prestasi.keys()]);
+    const santriData = [...kunci].map(nisn => {
+      const totalPoin = poin.get(nisn) || 0;
+      const poinPrestasi = prestasi.get(nisn) || 0;
+      return { nisn, totalPoin, poinPrestasi, net: Math.max(0, totalPoin - poinPrestasi) };
+    });
+
     return { jenjang, angkatan,
       totalPerJenjang:  jenjang  ? tJenjang  : null,
       totalPerAngkatan: angkatan ? tAngkatan : null,
-      santriData: [...poin.entries()].map(([nisn, totalPoin]) => ({ nisn, totalPoin })) };
+      santriData };
   } catch (e) {
     console.warn('agregasi laporan tidak tersedia:', e.message);
     return kosong;
@@ -4408,7 +4593,8 @@ async function hitungAgregasiSantri(siswa) {
  * datanya cukup (>= 5 santri); selain itu memakai ambang tetap.
  */
 function tierSantri(poin, santriData) {
-  const semua = (santriData || []).map(s => s.totalPoin).filter(isNum).sort((a, b) => a - b);
+  const semua = (santriData || [])
+    .map(s => isNum(s.net) ? s.net : s.totalPoin).filter(isNum).sort((a, b) => a - b);
   const q = (f) => semua[Math.min(semua.length - 1, Math.floor(semua.length * f))];
   const dinamis = semua.length >= 5;
   const amb = dinamis ? { baik: q(0.50), perhatian: q(0.80) } : { baik: 20, perhatian: 50 };
@@ -4436,8 +4622,25 @@ function kesimpulanSementara(data, akumulasi) {
   });
   const areaFokus = Object.entries(perBidang).sort((a, b) => b[1] - a[1])[0]?.[0] || NA_DATA;
 
+  // --- Skor net: poin pelanggaran dikurangi poin prestasi ---------------
+  const prestasi = data.prestasi || [];
+  const poinPrestasi = prestasi.reduce((a, r) => a + (Number(r.poin) || 0), 0);
+  const net = Math.max(0, poin - poinPrestasi);
+  const perApresiasi = {};
+  prestasi.forEach(r => {
+    const k = String(r.kategori || 'Perunggu').trim();
+    perApresiasi[k] = (perApresiasi[k] || 0) + 1;
+  });
+  const bidangPrestasi = {};
+  prestasi.forEach(r => {
+    const b = String(r.bidang || '').trim();
+    if (b) bidangPrestasi[b] = (bidangPrestasi[b] || 0) + 1;
+  });
+  const areaKuat = Object.entries(bidangPrestasi).sort((a, b) => b[1] - a[1])[0]?.[0] || NA_DATA;
+
   return { Z, poin, perKat, katDominan, areaFokus,
-    tier: tierSantri(poin, ag.santriData),
+    poinPrestasi, net, jumlahPrestasi: prestasi.length, perApresiasi, areaKuat,
+    tier: tierSantri(net, ag.santriData),
     jenjang:  ag.jenjang  || NA_DATA,
     angkatan: ag.angkatan || NA_DATA,
     X: isNum(ag.totalPerJenjang)  ? ag.totalPerJenjang  : NA_DATA,
@@ -4465,7 +4668,9 @@ function bagianKesimpulanCetak(k) {
         <tr>${sel('Pelanggaran santri ini', `${k.Z} (${rincian})`)}</tr>
         <tr>${sel('Kontribusi terhadap jenjang', k.pctJenjang)}</tr>
         <tr>${sel('Kontribusi terhadap angkatan', k.pctAngkatan)}</tr>
-        <tr>${sel('Akumulasi poin', k.poin)}</tr>
+        <tr>${sel('Poin pelanggaran (A)', k.poin)}</tr>
+        <tr>${sel(`Poin apresiasi (B) — ${k.jumlahPrestasi} catatan`, k.poinPrestasi)}</tr>
+        <tr style="background:#f8fafc;">${sel('SKOR NET (A − B)', k.net)}</tr>
       </tbody>
     </table>
 
@@ -4473,9 +4678,17 @@ function bagianKesimpulanCetak(k) {
       Santri ini mencatat <b>${k.Z}</b> pelanggaran dari <b>${esc(String(k.X))}</b> total di
       jenjang ${esc(k.jenjang)} (${esc(k.pctJenjang)}), dan ${esc(k.pctAngkatan)} dari angkatan
       ${esc(k.angkatan)}. Mayoritas pada kategori <b>${esc(k.katDominan)}</b>.
+      Pada periode yang sama tercatat <b>${k.jumlahPrestasi}</b> apresiasi
+      senilai <b>${k.poinPrestasi}</b> poin${k.areaKuat && k.areaKuat !== NA_DATA
+        ? `, terkuat pada bidang <b>${esc(k.areaKuat)}</b>` : ''},
+      sehingga skor net menjadi <b>${k.net}</b>.
       Status: <b style="color:${warna};">${esc(k.tier.nama)}</b>${k.tier.dinamis ? ''
         : ' <span style="color:#64748b;">(ambang standar — data pembanding belum mencukupi)</span>'}.
       Memerlukan fokus pada bidang <b>${esc(k.areaFokus)}</b>.
+    </p>
+    <p style="font-size:10px;color:#94a3b8;margin:0 0 6px;">
+      Skor net = poin pelanggaran dikurangi poin apresiasi (minimum 0). Tier dihitung
+      dari skor net, sehingga santri yang aktif memperbaiki diri terbaca membaik.
     </p>
     <p style="font-size:10px;color:#94a3b8;margin:0 0 16px;">
       Tier merupakan indikator prioritas pembinaan, bukan keputusan sanksi.
@@ -4513,12 +4726,20 @@ function saringDataLaporanBulanan(mentah) {
     String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal))));
   const pembinaanPenuh = (data.pembinaan || []).slice();
 
+  const prestasiPenuh = (data.prestasi || []).slice();
+  const tahfizPenuh   = (data.tahfiz || []).slice();
+  const goalPenuh     = (data.goal || []).slice();
+
   if (!p) {
     return { ...data,
       perkembangan: perkembanganPenuh,
       perkembanganPenuh,
       pembinaanPenuh,
       presensi: data.presensi || [],
+      prestasi: prestasiPenuh, prestasiPenuh,
+      tahfiz: tahfizPenuh, tahfizPenuh,
+      goal: goalPenuh, goalPenuh,
+      goalLalu: [],
       rekap: akumulasiUnik(perkembanganPenuh),
       periodeAktif: false,
       labelPeriode: 'Seluruh Periode',
@@ -4538,6 +4759,9 @@ function saringDataLaporanBulanan(mentah) {
     return a <= p.akhir && b >= p.awal;
   });
 
+  // Target/goal: periode berjalan + periode sebelumnya (untuk loop tertutup)
+  const bulanLalu = bulanSebelum(p.bulan);
+
   return { ...data,
     perkembangan,
     perkembanganPenuh,
@@ -4545,6 +4769,13 @@ function saringDataLaporanBulanan(mentah) {
     pembinaanPenuh,
     perizinan,
     presensi: data.presensi || [],          // presensi TIDAK disaring
+    prestasi: prestasiPenuh.filter(r => diBulan(r.tanggal)),
+    prestasiPenuh,
+    tahfiz: tahfizPenuh.filter(r => diBulan(r.tanggal)),
+    tahfizPenuh,
+    goal: goalPenuh.filter(g => String(g.periode) === p.bulan),
+    goalLalu: goalPenuh.filter(g => String(g.periode) === bulanLalu),
+    goalPenuh,
     rekap: akumulasiUnik(perkembangan),
     poinPeriode: perkembangan.reduce((a, r) => a + (Number(r.poin) || 0), 0),
     periodeAktif: true,
@@ -4582,6 +4813,27 @@ function bangunLaporanHTML(data) {
                                data.pembinaanPenuh || data.pembinaan, data.instrumen);
   const kesimpulan = kesimpulanSementara(data, rekap);
   const adaInstrumen = !!(data.instrumen && data.instrumen.size);
+
+  // ---- Bahan bagian 4 (prestasi), 5 (tahfiz) & 7 (target) ----
+  const prestasi = data.prestasi || [];
+  const totalPoinPrestasi = prestasi.reduce((a, r) => a + (Number(r.poin) || 0), 0);
+
+  const tahfiz = data.tahfiz || [];
+  const tahfizPenuh = data.tahfizPenuh || tahfiz;
+  const jml = (arr, f) => arr.reduce((a, r) => a + (Number(r[f]) || 0), 0);
+  const thfZiyadah  = tahfiz.filter(r => /ziyadah/i.test(r.jenis || '')).length;
+  const thfMurajaah = tahfiz.filter(r => /muraja/i.test(r.jenis || '')).length;
+  const thfHalaman  = Math.round(jml(tahfiz, 'capaian_halaman') * 10) / 10;
+  const thfJuz      = Math.round((thfHalaman / HALAMAN_PER_JUZ) * 100) / 100;
+  const thfTotalHalaman = Math.round(jml(tahfizPenuh, 'capaian_halaman') * 10) / 10;
+  const thfTotalJuz = Math.round((thfTotalHalaman / HALAMAN_PER_JUZ) * 100) / 100;
+  const thfLancar = (() => {
+    const h = {};
+    tahfiz.forEach(r => { const k = String(r.kelancaran || '').trim(); if (k) h[k] = (h[k] || 0) + 1; });
+    return Object.entries(h).sort((a, b) => b[1] - a[1])[0]?.[0] || NA_DATA;
+  })();
+
+  const goalGabungan = [...(data.goalLalu || []), ...(data.goal || [])];
 
   const poinTampil = aktif ? (data.poinPeriode || 0) : (s.total_poin_pelanggaran || 0);
   const rentangTeks = aktif && data.periodeAwal
@@ -4650,7 +4902,49 @@ function bangunLaporanHTML(data) {
     </table>
 
     <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
-      4. Riwayat Perizinan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
+      4. Prestasi &amp; Apresiasi${aktif ? ' — ' + esc(labelPer) : ''}</h3>
+    <p style="font-size:10.5px;margin:4px 0 6px;color:#64748b;">
+      Poin apresiasi mengurangi skor net pada bagian kesimpulan.</p>
+    <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:16px;">
+      <thead><tr>${['Tanggal','Kategori','Bentuk Apresiasi','Bidang','Poin'].map(th).join('')}</tr></thead>
+      <tbody>${baris(prestasi, r =>
+        `<tr>${td(tgl(r.tanggal))}${td(r.kategori||'-')}${td(r.judul||'-')}${td(r.bidang||'-')}`
+        + `${td('+' + (Number(r.poin)||0), 'text-align:center;font-weight:bold;color:#8A6D0B')}</tr>`,
+        'Belum ada catatan apresiasi pada periode ini.', 5)}
+        ${prestasi.length ? `<tr><td colspan="4" style="border:1px solid #cbd5e1;padding:5px;
+             text-align:right;font-weight:bold;background:#fafafa;">Total poin apresiasi</td>
+           <td style="border:1px solid #cbd5e1;padding:5px;text-align:center;font-weight:bold;
+             background:#fafafa;color:#8A6D0B;">+${totalPoinPrestasi}</td></tr>` : ''}
+      </tbody>
+    </table>
+
+    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
+      5. Capaian Tahfiz${aktif ? ' — ' + esc(labelPer) : ''}</h3>
+    <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:8px;">
+      <tbody>
+        <tr><td style="border:1px solid #cbd5e1;padding:5px;width:60%;">Setoran ziyadah (hafalan baru)</td>
+            <td style="border:1px solid #cbd5e1;padding:5px;text-align:right;font-weight:bold;">${thfZiyadah} kali</td></tr>
+        <tr><td style="border:1px solid #cbd5e1;padding:5px;">Murajaah (pengulangan)</td>
+            <td style="border:1px solid #cbd5e1;padding:5px;text-align:right;font-weight:bold;">${thfMurajaah} kali</td></tr>
+        <tr><td style="border:1px solid #cbd5e1;padding:5px;">Halaman terkumpul pada periode ini</td>
+            <td style="border:1px solid #cbd5e1;padding:5px;text-align:right;font-weight:bold;">${thfHalaman} hlm (± ${thfJuz} juz)</td></tr>
+        <tr><td style="border:1px solid #cbd5e1;padding:5px;">Akumulasi seluruh riwayat</td>
+            <td style="border:1px solid #cbd5e1;padding:5px;text-align:right;font-weight:bold;">${thfTotalHalaman} hlm (± ${thfTotalJuz} juz)</td></tr>
+        <tr><td style="border:1px solid #cbd5e1;padding:5px;">Kelancaran dominan</td>
+            <td style="border:1px solid #cbd5e1;padding:5px;text-align:right;font-weight:bold;">${esc(thfLancar)}</td></tr>
+      </tbody>
+    </table>
+    <table style="width:100%;font-size:10.5px;border-collapse:collapse;margin-bottom:16px;">
+      <thead><tr>${['Tanggal','Jenis','Surah / Ayat','Halaman','Kelancaran','Musyrif'].map(th).join('')}</tr></thead>
+      <tbody>${baris(tahfiz.slice(0, 20), r =>
+        `<tr>${td(tgl(r.tanggal))}${td(r.jenis||'-')}`
+        + `${td(`${r.surah || '-'}${r.ayat_dari ? ` : ${r.ayat_dari}${r.ayat_ke ? '–' + r.ayat_ke : ''}` : ''}`)}`
+        + `${td(Number(r.capaian_halaman)||0, 'text-align:center')}${td(r.kelancaran||'-')}${td(r.musyrif||'-')}</tr>`,
+        'Belum ada setoran tahfiz pada periode ini.', 6)}</tbody>
+    </table>
+
+    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
+      6. Riwayat Perizinan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
     <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:16px;">
       <thead><tr>${['Mulai','Selesai','Jenis','Alasan','Status'].map(th).join('')}</tr></thead>
       <tbody>${baris(data.perizinan, z =>
@@ -4659,7 +4953,25 @@ function bangunLaporanHTML(data) {
     </table>
 
     <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
-      5. Kesimpulan Sementara${aktif ? ' — ' + esc(labelPer) : ''}</h3>
+      7. Target Pembinaan &amp; Tindak Lanjut</h3>
+    <p style="font-size:10.5px;margin:4px 0 6px;color:#64748b;">
+      Bagian ini menutup lingkaran: target periode lalu dievaluasi lebih dulu,
+      baru target periode berjalan ditetapkan.</p>
+    <table style="width:100%;font-size:10.5px;border-collapse:collapse;margin-bottom:10px;">
+      <thead><tr>${['Periode','Target','Indikator Keberhasilan','Status','Evaluasi'].map(th).join('')}</tr></thead>
+      <tbody>${baris(goalGabungan, g => {
+        const w = /tercapai/i.test(g.status || '') && !/belum/i.test(g.status || '') ? '#0F766E'
+                : /sebagian/i.test(g.status || '') ? '#B45309'
+                : /belum|batal/i.test(g.status || '') ? '#9F1239' : '#14618B';
+        return `<tr>${td(g.periode || '-')}${td(g.judul || '-')}${td(g.indikator || '-')}`
+             + `<td style="border:1px solid #cbd5e1;padding:5px;font-weight:bold;color:${w};">
+                  ${esc(g.status || 'Berjalan')}</td>`
+             + `${td(g.evaluasi || '—')}</tr>`;
+      }, 'Belum ada target pembinaan yang ditetapkan.', 5)}</tbody>
+    </table>
+
+    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
+      8. Kesimpulan Sementara${aktif ? ' — ' + esc(labelPer) : ''}</h3>
     <div style="margin-bottom:24px;">${bagianKesimpulanCetak(kesimpulan)}</div>
 
     <table style="width:100%;font-size:12px;margin-top:28px;page-break-inside:avoid;break-inside:avoid;">
@@ -4711,6 +5023,30 @@ async function ambilLaporan(nisn) {
       console.warn('Presensi cetak tidak tersedia:', e?.message || e);
     }
   }
+
+  // Tabel baru (prestasi, tahfiz, target) belum ada di RPC lama —
+  // diambil terpisah dan tidak menggagalkan laporan bila belum dipasang.
+  const [prestasi, tahfiz, goal] = await Promise.all([
+    amanKosong(async () => {
+      const { data: r, error } = await db.from('log_prestasi').select('*')
+        .eq('nisn', String(nisn)).order('tanggal', { ascending:false });
+      if (error) throw error; return (r || []).filter(aktifPrestasi);
+    }, 'prestasi santri'),
+    amanKosong(async () => {
+      const { data: r, error } = await db.from('log_tahfiz').select('*')
+        .eq('nisn', String(nisn)).order('tanggal', { ascending:false });
+      if (error) throw error; return (r || []).filter(aktifTahfiz);
+    }, 'tahfiz santri'),
+    amanKosong(async () => {
+      const { data: r, error } = await db.from('goal_santri').select('*')
+        .eq('nisn', String(nisn)).order('periode', { ascending:false });
+      if (error) throw error; return r || [];
+    }, 'target santri')
+  ]);
+
+  data.prestasi = prestasi;
+  data.tahfiz = tahfiz;
+  data.goal = goal;
   return data;
 }
 
@@ -4855,6 +5191,13 @@ const segarkan = debounce(async (tabel) => {
     cacheHapus('pembinaan');
     if (APP.view === 'pembinaan') gambarBina();
     else if (APP.view === 'rekapbina') gambarRb();
+  } else if (tabel === 'log_prestasi') {
+    cacheHapus('prestasi');
+    if (APP.view === 'prestasi') gambarPrestasi();
+    else if (['dashboard','pimpinan','bk'].includes(APP.view)) navigateTo(APP.view);
+  } else if (tabel === 'log_tahfiz') {
+    cacheHapus('tahfiz');
+    if (APP.view === 'tahfiz') thfGambarPanel();
   }
 }, 700);
 
@@ -4864,6 +5207,8 @@ function aktifkanRealtime() {
     .on('postgres_changes', { event:'*', schema:'public', table:'log_pelanggaran' }, () => segarkan('log_pelanggaran'))
     .on('postgres_changes', { event:'*', schema:'public', table:'log_pembinaan' }, () => segarkan('log_pembinaan'))
     .on('postgres_changes', { event:'*', schema:'public', table:'pesan_bk' }, () => segarkan('pesan_bk'))
+    .on('postgres_changes', { event:'*', schema:'public', table:'log_prestasi' }, () => segarkan('log_prestasi'))
+    .on('postgres_changes', { event:'*', schema:'public', table:'log_tahfiz' }, () => segarkan('log_tahfiz'))
     .subscribe((status) => {
       $('liveDot').classList.toggle('on', status === 'SUBSCRIBED');
     });
@@ -8912,6 +9257,1742 @@ document.addEventListener('click', (e) => {
     return navigateTo('pesan');
   }
 });
+
+
+
+// =====================================================================
+// 30. FITUR BARU — KONSTANTA BERSAMA
+// =====================================================================
+
+/** Mushaf standar: 20 halaman per juz (604 halaman / 30 juz ≈ 20,1). */
+const HALAMAN_PER_JUZ = 20;
+
+const KELANCARAN = ['Mumtaz','Jayyid Jiddan','Jayyid','Maqbul','Rasib'];
+const kelasLancar = (v) => 'thf-lancar ' + String(v || '')
+  .trim().toLowerCase().replace(/\s+/g, '-');
+
+const KAT_PRESTASI = ['Emas','Perak','Perunggu'];
+const URUT_PRESTASI = { Emas:0, Perak:1, Perunggu:2 };
+const dotPrestasi = (k) => k === 'Emas' ? 'g' : k === 'Perak' ? 'p' : 'u';
+const tagPrestasi = (k) => k === 'Emas' ? 'tag-emas' : k === 'Perak' ? 'tag-sea' : 'tag-ok';
+
+/** 114 surah: nama & jumlah ayat — dipakai saran input setoran. */
+const SURAH = [
+  ['Al-Fatihah',7],['Al-Baqarah',286],['Ali Imran',200],['An-Nisa',176],['Al-Maidah',120],
+  ['Al-Anam',165],['Al-Araf',206],['Al-Anfal',75],['At-Taubah',129],['Yunus',109],
+  ['Hud',123],['Yusuf',111],['Ar-Rad',43],['Ibrahim',52],['Al-Hijr',99],
+  ['An-Nahl',128],['Al-Isra',111],['Al-Kahfi',110],['Maryam',98],['Taha',135],
+  ['Al-Anbiya',112],['Al-Hajj',78],['Al-Muminun',118],['An-Nur',64],['Al-Furqan',77],
+  ['Asy-Syuara',227],['An-Naml',93],['Al-Qasas',88],['Al-Ankabut',69],['Ar-Rum',60],
+  ['Luqman',34],['As-Sajdah',30],['Al-Ahzab',73],['Saba',54],['Fatir',45],
+  ['Yasin',83],['As-Saffat',182],['Sad',88],['Az-Zumar',75],['Gafir',85],
+  ['Fussilat',54],['Asy-Syura',53],['Az-Zukhruf',89],['Ad-Dukhan',59],['Al-Jasiyah',37],
+  ['Al-Ahqaf',35],['Muhammad',38],['Al-Fath',29],['Al-Hujurat',18],['Qaf',45],
+  ['Az-Zariyat',60],['At-Tur',49],['An-Najm',62],['Al-Qamar',55],['Ar-Rahman',78],
+  ['Al-Waqiah',96],['Al-Hadid',29],['Al-Mujadilah',22],['Al-Hasyr',24],['Al-Mumtahanah',13],
+  ['As-Saff',14],['Al-Jumuah',11],['Al-Munafiqun',11],['At-Tagabun',18],['At-Talaq',12],
+  ['At-Tahrim',12],['Al-Mulk',30],['Al-Qalam',52],['Al-Haqqah',52],['Al-Maarij',44],
+  ['Nuh',28],['Al-Jinn',28],['Al-Muzzammil',20],['Al-Muddassir',56],['Al-Qiyamah',40],
+  ['Al-Insan',31],['Al-Mursalat',50],['An-Naba',40],['An-Naziat',46],['Abasa',42],
+  ['At-Takwir',29],['Al-Infitar',19],['Al-Mutaffifin',36],['Al-Insyiqaq',25],['Al-Buruj',22],
+  ['At-Tariq',17],['Al-Ala',19],['Al-Gasyiyah',26],['Al-Fajr',30],['Al-Balad',20],
+  ['Asy-Syams',15],['Al-Lail',21],['Ad-Duha',11],['Asy-Syarh',8],['At-Tin',8],
+  ['Al-Alaq',19],['Al-Qadr',5],['Al-Bayyinah',8],['Az-Zalzalah',8],['Al-Adiyat',11],
+  ['Al-Qariah',11],['At-Takasur',8],['Al-Asr',3],['Al-Humazah',9],['Al-Fil',5],
+  ['Quraisy',4],['Al-Maun',7],['Al-Kausar',3],['Al-Kafirun',6],['An-Nasr',3],
+  ['Al-Lahab',5],['Al-Ikhlas',4],['Al-Falaq',5],['An-Nas',6]
+];
+
+function saranSurah(input, onPilih) {
+  lampirkanSaran(input, {
+    ambil: async (kata) => {
+      const k = String(kata || '').toLowerCase();
+      return SURAH.map(([nama, ayat], i) => ({ nama, ayat, no: i + 1 }))
+        .filter(s => !k || s.nama.toLowerCase().includes(k) || String(s.no) === k)
+        .slice(0, 30);
+    },
+    minKetik: 0,
+    kosong: 'Nama surah tidak ditemukan.',
+    keItem: (s) => ({ huruf: String(s.no), judul: esc(s.nama), sub: `${s.ayat} ayat` }),
+    keTeks: (s) => s.nama,
+    onPilih: (s) => { input.dataset.ayat = s.ayat; onPilih?.(s); }
+  });
+}
+
+// =====================================================================
+// 31. PWA — pemasangan, status luring, dan antrean tulis
+//     Tujuannya sederhana: pencatatan di asrama tidak boleh gagal hanya
+//     karena sinyal hilang. Simpanan yang gagal dimasukkan ke antrean
+//     lokal, lalu dikirim ulang begitu koneksi pulih.
+// =====================================================================
+const ANTREAN_KUNCI = 'rq_antrean_v1';
+
+function antreanBaca() {
+  try { return JSON.parse(localStorage.getItem(ANTREAN_KUNCI) || '[]'); }
+  catch (e) { return []; }
+}
+function antreanTulis(list) {
+  try { localStorage.setItem(ANTREAN_KUNCI, JSON.stringify(list)); } catch (e) {}
+  gambarBadgeAntrean();
+}
+function gambarBadgeAntrean() {
+  const n = antreanBaca().length;
+  const el = $('antreBadge'); if (!el) return;
+  el.classList.toggle('on', n > 0);
+  const t = $('antreText'); if (t) t.textContent = String(n);
+  el.title = n ? `${n} perubahan menunggu koneksi` : '';
+}
+function gambarBadgeLuring() {
+  $('luringBadge')?.classList.toggle('on', !navigator.onLine);
+}
+
+/**
+ * Simpan satu baris ke Supabase; bila gagal karena jaringan, masukkan
+ * antrean lokal supaya tidak hilang. Mengembalikan:
+ *   { ok:true }            -> tersimpan di server
+ *   { ok:true, antre:true} -> disimpan lokal, menunggu koneksi
+ */
+async function simpanAman(tabel, payload, opsi = {}) {
+  if (navigator.onLine) {
+    try {
+      const { error } = await db.from(tabel).insert(payload);
+      if (error) throw error;
+      return { ok: true };
+    } catch (err) {
+      const jaringan = !navigator.onLine ||
+        /fetch|network|failed to fetch|timeout/i.test(err?.message || '');
+      if (!jaringan) throw err;
+    }
+  }
+  if (opsi.wajibDaring) throw new Error('Fitur ini memerlukan koneksi internet.');
+  const q = antreanBaca();
+  q.push({ id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), tabel, payload, pada: new Date().toISOString() });
+  antreanTulis(q);
+  return { ok: true, antre: true };
+}
+
+/** Kirim ulang seluruh antrean. Dipanggil otomatis saat koneksi pulih. */
+async function kirasAntrean(diam) {
+  const q = antreanBaca();
+  if (!q.length || !navigator.onLine) return 0;
+  let terkirim = 0;
+  const sisa = [];
+  for (const item of q) {
+    try {
+      const { error } = await db.from(item.tabel).insert(item.payload);
+      if (error) throw error;
+      terkirim++;
+    } catch (e) { sisa.push(item); }
+  }
+  antreanTulis(sisa);
+  if (terkirim) {
+    cacheHapus('prestasi','tahfiz','detail','siswa','pembinaan');
+    if (!diam) toast('success', `${terkirim} catatan tertunda berhasil dikirim`);
+    if (APP.profil) navigateTo(APP.view);
+  }
+  return terkirim;
+}
+
+window.addEventListener('online',  () => { gambarBadgeLuring(); kirasAntrean(); });
+window.addEventListener('offline', () => { gambarBadgeLuring(); toast('info', 'Mode luring — catatan disimpan sementara di perangkat.'); });
+
+/** Registrasi service worker + tombol "Pasang". */
+let promptPasang = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  promptPasang = e;
+  $('btnPasang')?.classList.add('on');
+});
+$('btnPasang')?.addEventListener('click', async () => {
+  if (!promptPasang) return toast('info', 'Aplikasi sudah terpasang atau belum siap dipasang.');
+  promptPasang.prompt();
+  const { outcome } = await promptPasang.userChoice;
+  if (outcome === 'accepted') toast('success', 'Aplikasi dipasang di perangkat ini.');
+  promptPasang = null;
+  $('btnPasang')?.classList.remove('on');
+});
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js')
+      .then(() => console.info('[PWA] service worker aktif'))
+      .catch(e => console.warn('[PWA] service worker gagal:', e.message));
+  });
+}
+
+gambarBadgeLuring();
+gambarBadgeAntrean();
+setTimeout(() => kirasAntrean(true), 4000);
+
+
+// =====================================================================
+// 32. MODUL PRESTASI & APRESIASI  (fitur 1 — poin positif)
+//     Pasangan setara modul pelanggaran: memakai master katalog,
+//     pintasan cepat, papan santri teladan, dan neraca poin.
+// =====================================================================
+const stPrs = { page:1, size:20, cari:'', kategori:'', bidang:'', kode:'', panel:'catat' };
+
+/** Prestasi dalam lingkup konteks + kelas binaan + periode aktif. */
+function lingkupPrestasi(rows, pakaiPeriode = true) {
+  let out = (rows || []).filter(aktifPrestasi);
+  const { unit, jenjang } = APP.ctx;
+  if (unit === 'Pengasuhan') out = out.filter(r => String(r.sumber || 'Pengasuhan').trim() === 'Pengasuhan');
+  if (unit === 'Madrasah') {
+    out = out.filter(r => String(r.sumber || '').trim() === 'Madrasah');
+    if (jenjang !== 'Semua') out = out.filter(r => String(r.jenjang || '').trim() === jenjang);
+  }
+  out = filterBinaan(out, 'kelas');
+  return pakaiPeriode ? saringPeriode(out, 'tanggal') : out;
+}
+
+async function viewPrestasi() {
+  const master = (await muatMasterPrestasi()).filter(m => m.aktif !== false);
+  const bolehCatat = bisa('prestasi.catat') && !hanyaBaca();
+
+  $('viewRoot').innerHTML = `
+    <section class="prs-hero">
+      <div class="eyebrow"><span class="ar">الإنجازات</span><span class="rule"></span>
+        <span class="lat">Apresiasi Santri</span></div>
+      <span class="ar" style="display:block;font-size:21px;color:#F2E5B8;line-height:1.95">
+        وَأَن لَّيْسَ لِلْإِنسَانِ إِلَّا مَا سَعَىٰ</span>
+      <h2>Yang baik pun dicatat.</h2>
+      <p>Poin apresiasi berdiri sejajar dengan catatan pelanggaran dan langsung
+         mengurangi skor net santri pada laporan perkembangan. Tujuannya bukan
+         menghapus kesalahan, melainkan memastikan usaha perbaikan ikut terbaca.</p>
+      <div class="meta">
+        <span><i class="fa-solid fa-layer-group"></i>${esc(labelKonteks())}</span>
+        <span><i class="fa-regular fa-calendar-days"></i>${esc(labelPeriode())}</span>
+        <span><i class="fa-solid fa-book"></i>${angka(master.length)} jenis apresiasi</span>
+      </div>
+    </section>
+
+    <div class="stats" id="prsStat"></div>
+
+    <div class="grid-2">
+      <div>
+        ${bolehCatat ? `
+        <section class="card" id="prsKartuCatat">
+          <div class="card-head">
+            <div><h3>Catat Apresiasi</h3>
+              <p class="sub">Pilih santri, tentukan bentuk apresiasi, simpan.</p></div>
+          </div>
+          <div class="prs-quick" id="prsQuick">
+            <span class="lbl"><i class="fa-solid fa-bolt"></i>Pintasan</span>
+            ${master.slice(0, 8).map(m => `
+              <button class="prs-chip" data-kode="${esc(m.kode_prestasi)}">
+                <span class="dot ${dotPrestasi(m.kategori)}"></span>
+                ${esc(m.nama_prestasi.length > 34 ? m.nama_prestasi.slice(0, 33) + '…' : m.nama_prestasi)}
+                <b>+${Number(m.bobot_poin) || 0}</b>
+              </button>`).join('') || '<span class="hint">Master prestasi belum diisi.</span>'}
+          </div>
+          <div class="pgs-pick" id="prsPick">
+            <div class="ico"><i class="fa-solid fa-user-graduate"></i></div>
+            <div><small>Santri terpilih</small><b id="prsPickNama">Belum dipilih</b></div>
+          </div>
+          <div class="prs-form">
+            <div class="field ac-wrap">
+              <label class="label" for="prsSantri">Nama / NISN santri</label>
+              <input id="prsSantri" class="input" placeholder="Ketik minimal 2 huruf…" autocomplete="off">
+            </div>
+            <div class="field ac-wrap">
+              <label class="label" for="prsJenis">Bentuk apresiasi</label>
+              <input id="prsJenis" class="input" placeholder="Pilih dari katalog…" autocomplete="off">
+            </div>
+            <div class="field">
+              <label class="label" for="prsKategori">Kategori</label>
+              <select id="prsKategori" class="input">
+                ${KAT_PRESTASI.map(k => `<option${k==='Perunggu'?' selected':''}>${k}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label class="label" for="prsPoin">Poin</label>
+              <input id="prsPoin" type="number" min="1" max="100" class="input mono" value="5">
+            </div>
+            <div class="field">
+              <label class="label" for="prsBidang">Bidang</label>
+              <input id="prsBidang" class="input" placeholder="Ubudiyah / Akademik / Tahfiz…" autocomplete="off">
+            </div>
+            <div class="field">
+              <label class="label" for="prsTanggal">Tanggal</label>
+              <input id="prsTanggal" type="date" class="input" value="${hariIni()}">
+            </div>
+            <div class="field wide">
+              <label class="label" for="prsCatatan">Catatan (opsional)</label>
+              <textarea id="prsCatatan" class="input" rows="2"
+                placeholder="Keterangan singkat yang membantu wali kelas memahami konteks…"></textarea>
+            </div>
+          </div>
+          <div class="pgs-bar">
+            <span class="note"><i class="fa-solid fa-circle-info"></i>
+              Poin apresiasi mengurangi skor net, bukan menghapus riwayat pelanggaran.</span>
+            <button class="btn btn-brass" id="prsSimpan"><i class="fa-solid fa-award"></i>Simpan Apresiasi</button>
+          </div>
+        </section>` : ''}
+
+        <section class="card">
+          <div class="card-head">
+            <div><h3>Riwayat Apresiasi</h3><p class="sub" id="prsSub">Memuat…</p></div>
+            <div class="actions">
+              <button class="btn btn-ghost btn-sm" id="prsCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>
+            </div>
+          </div>
+          <div class="filters">
+            <input id="prsCari" class="input grow" placeholder="Cari nama, NISN, atau bentuk apresiasi…">
+            <select id="prsFKat" class="input">
+              <option value="">Semua kategori</option>
+              ${KAT_PRESTASI.map(k => `<option>${k}</option>`).join('')}
+            </select>
+            <input id="prsFBidang" class="input" placeholder="Semua bidang" autocomplete="off">
+            <span class="sep"></span>
+            <button class="btn btn-ghost btn-sm" id="prsReset"><i class="fa-solid fa-rotate-left"></i>Reset</button>
+          </div>
+          <div class="tbl"><table>
+            <thead><tr><th>Tanggal</th><th>Santri</th><th>Bentuk Apresiasi</th>
+              <th>Kategori</th><th class="center">Poin</th><th class="right">Aksi</th></tr></thead>
+            <tbody id="prsBody"><tr><td colspan="6" style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</td></tr></tbody>
+          </table></div>
+          <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
+          <div id="prsPager"></div>
+        </section>
+      </div>
+
+      <div>
+        <section class="card">
+          <div class="card-head"><div><h3>Santri Teladan</h3>
+            <p class="sub">Peringkat poin apresiasi pada periode aktif.</p></div></div>
+          <div class="prs-board" id="prsBoard"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><div><h3>Neraca Poin Unit</h3>
+            <p class="sub">Perbandingan beban pelanggaran dan apresiasi.</p></div></div>
+          <div class="neraca" id="prsNeraca"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><div><h3>Sebaran Bidang Apresiasi</h3>
+            <p class="sub">Bidang mana yang paling sering diapresiasi.</p></div></div>
+          ${chartBox('chPrsBidang')}
+        </section>
+      </div>
+    </div>`;
+
+  if (bolehCatat) {
+    saranSantri($('prsSantri'), (s) => {
+      $('prsPickNama').textContent = `${s.nama_siswa} · ${s.kelas || '-'}`;
+      $('prsPick').classList.add('on');
+      $('prsSantri').dataset.nama = s.nama_siswa || '';
+      $('prsSantri').dataset.kelas = s.kelas || '';
+      $('prsSantri').dataset.jenjang = s.jenjang || '';
+    });
+    prsSaranJenis($('prsJenis'));
+    saranBidang($('prsBidang'));
+    $('prsSimpan').addEventListener('click', prsSimpan);
+    $('prsQuick').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-kode]'); if (!b) return;
+      prsPilihCepat(b.dataset.kode, master);
+      [...$('prsQuick').querySelectorAll('.prs-chip')].forEach(c => c.classList.toggle('on', c === b));
+    });
+  }
+
+  $('prsCari').addEventListener('input', debounce(e => {
+    stPrs.cari = e.target.value.trim(); stPrs.page = 1; gambarPrestasi();
+  }, 260));
+  $('prsFKat').addEventListener('change', e => { stPrs.kategori = e.target.value; stPrs.page = 1; gambarPrestasi(); });
+  saranBidang($('prsFBidang'), (b) => {
+    stPrs.bidang = b?.nama_bidang || ''; stPrs.page = 1; gambarPrestasi();
+  });
+  $('prsFBidang').addEventListener('input', debounce(e => {
+    if (!e.target.value.trim()) { stPrs.bidang = ''; stPrs.page = 1; gambarPrestasi(); }
+  }, 260));
+  $('prsReset').addEventListener('click', () => {
+    Object.assign(stPrs, { page:1, cari:'', kategori:'', bidang:'' });
+    $('prsCari').value = ''; $('prsFKat').value = ''; $('prsFBidang').value = '';
+    gambarPrestasi();
+  });
+  $('prsCsv').addEventListener('click', prsEksporCsv);
+
+  onKlik(async (e) => {
+    const d = e.target.closest('[data-detail]');
+    if (d) return bukaDetailSantri(d.dataset.detail);
+    const a = e.target.closest('[data-prs-arsip]');
+    if (a) return prsArsipkan(a.dataset.prsArsip);
+    const p = e.target.closest('[data-pg]');
+    if (p && p.dataset.pg.startsWith('prs:')) {
+      stPrs.page = Number(p.dataset.pg.split(':')[1]); gambarPrestasi();
+    }
+  });
+
+  await gambarPrestasi();
+}
+
+function prsSaranJenis(input) {
+  lampirkanSaran(input, {
+    ambil: async (kata) => cariLokal(
+      (await muatMasterPrestasi()).filter(m => m.aktif !== false), kata,
+      ['kode_prestasi','nama_prestasi','kategori','bidang'], 40),
+    minKetik: 0,
+    kosong: 'Jenis apresiasi tidak ditemukan.',
+    keItem: (m) => ({
+      huruf: esc((m.kategori || '?').charAt(0)),
+      judul: `${esc(m.kode_prestasi)} — ${esc(m.nama_prestasi)}`,
+      sub: `${esc(m.kategori)} · +${m.bobot_poin} poin · ${esc(m.bidang || '-')}`
+    }),
+    keTeks: (m) => `${m.kode_prestasi} — ${m.nama_prestasi}`,
+    onPilih: (m) => {
+      input.dataset.kode = m.kode_prestasi;
+      input.dataset.nama = m.nama_prestasi;
+      $('prsKategori').value = m.kategori || 'Perunggu';
+      $('prsPoin').value = Number(m.bobot_poin) || 5;
+      if (m.bidang) $('prsBidang').value = m.bidang;
+    }
+  });
+}
+
+function prsPilihCepat(kode, master) {
+  const m = (master || []).find(x => x.kode_prestasi === kode); if (!m) return;
+  const inp = $('prsJenis');
+  inp.value = `${m.kode_prestasi} — ${m.nama_prestasi}`;
+  inp.dataset.kode = m.kode_prestasi;
+  inp.dataset.nama = m.nama_prestasi;
+  $('prsKategori').value = m.kategori || 'Perunggu';
+  $('prsPoin').value = Number(m.bobot_poin) || 5;
+  if (m.bidang) $('prsBidang').value = m.bidang;
+}
+
+async function prsSimpan() {
+  const inpS = $('prsSantri'), inpJ = $('prsJenis');
+  const nisn = inpS.dataset.picked;
+  const judul = (inpJ.dataset.kode && inpJ.dataset.nama)
+    ? inpJ.dataset.nama
+    : inpJ.value.replace(/^[^—]*—\s*/, '').trim();
+  if (!nisn)  return toast('error', 'Pilih santri terlebih dahulu.');
+  if (!judul) return toast('error', 'Tentukan bentuk apresiasinya.');
+
+  const poin = Math.max(1, Number($('prsPoin').value) || 0);
+  const btn = $('prsSimpan');
+  const asli = mulaiSimpan(btn, 'Menyimpan…');
+  try {
+    const hasil = await simpanAman('log_prestasi', {
+      nisn: String(nisn),
+      nama_siswa: inpS.dataset.nama || null,
+      kelas: inpS.dataset.kelas || null,
+      jenjang: inpS.dataset.jenjang || null,
+      tanggal: $('prsTanggal').value || hariIni(),
+      kode_prestasi: inpJ.dataset.kode || null,
+      judul,
+      kategori: $('prsKategori').value || 'Perunggu',
+      bidang: $('prsBidang').value.trim() || null,
+      poin,
+      catatan: $('prsCatatan').value.trim() || null,
+      sumber: APP.ctx.unit === 'Madrasah' ? 'Madrasah' : 'Pengasuhan',
+      pencatat: APP.profil?.nama || null,
+      pencatat_id: APP.profil?.id || null
+    });
+    selesaiSimpan(btn, asli, true, hasil.antre ? 'Tersimpan luring' : 'Apresiasi tersimpan');
+    if (hasil.antre) toast('info', 'Tersimpan di perangkat — akan dikirim saat koneksi pulih.');
+    else toast('success', `Apresiasi +${poin} poin dicatat.`);
+
+    inpS.value = ''; inpS.removeAttribute('data-picked');
+    inpJ.value = ''; inpJ.removeAttribute('data-kode');
+    $('prsCatatan').value = '';
+    $('prsPickNama').textContent = 'Belum dipilih';
+    $('prsPick').classList.remove('on');
+    cacheHapus('prestasi');
+    await gambarPrestasi();
+  } catch (err) {
+    selesaiSimpan(btn, asli, false, 'Gagal menyimpan');
+    fireError(err);
+  }
+}
+
+async function prsArsipkan(id) {
+  const konf = await Swal.fire({
+    icon:'warning', title:'Arsipkan catatan ini?',
+    text:'Catatan tidak dihapus, hanya dikeluarkan dari perhitungan poin.',
+    showCancelButton:true, confirmButtonText:'Ya, arsipkan',
+    cancelButtonText:'Batal', confirmButtonColor:'#9F1239'
+  });
+  if (!konf.isConfirmed) return;
+  try {
+    const { error } = await db.from('log_prestasi').update({ status:'archived' }).eq('id', id);
+    if (error) throw error;
+    cacheHapus('prestasi');
+    toast('success', 'Catatan diarsipkan.');
+    await gambarPrestasi();
+  } catch (err) { fireError(err); }
+}
+
+function prsSaring(rows) {
+  let out = rows;
+  if (stPrs.kategori) out = out.filter(r => r.kategori === stPrs.kategori);
+  if (stPrs.bidang)   out = out.filter(r => String(r.bidang || '') === stPrs.bidang);
+  if (stPrs.cari) {
+    const k = stPrs.cari.toLowerCase();
+    out = out.filter(r => [r.nama_siswa, r.nisn, r.judul, r.bidang, r.pencatat]
+      .some(v => String(v || '').toLowerCase().includes(k)));
+  }
+  return out;
+}
+
+async function gambarPrestasi() {
+  if (APP.view !== 'prestasi') return;
+  const [semua, peta] = await Promise.all([muatPrestasi(), petaSiswa()]);
+  const lingkup = lingkupPrestasi(semua);
+  const rows = prsSaring(lingkup).slice()
+    .sort((a, b) => String(kunciTgl(b.tanggal)).localeCompare(String(kunciTgl(a.tanggal))));
+
+  // ---------- papan statistik ----------
+  const totalPoin = lingkup.reduce((a, r) => a + (Number(r.poin) || 0), 0);
+  const santriUnik = new Set(lingkup.map(r => String(r.nisn))).size;
+  const perKat = {};
+  lingkup.forEach(r => { perKat[r.kategori || 'Perunggu'] = (perKat[r.kategori || 'Perunggu'] || 0) + 1; });
+  const emas = perKat['Emas'] || 0;
+
+  $('prsStat').innerHTML =
+      stat('Catatan Apresiasi', angka(lingkup.length), 'fa-solid fa-award',
+        'background:var(--amber-bg);color:#8A6D0B', 'var(--brass)', esc(labelPeriode()))
+    + stat('Total Poin Positif', '+' + angka(totalPoin), 'fa-solid fa-plus',
+        'background:var(--teal-bg);color:var(--teal)', 'var(--teal)', 'Mengurangi skor net santri')
+    + stat('Santri Terapresiasi', angka(santriUnik), 'fa-solid fa-user-graduate',
+        'background:#E7F1F7;color:var(--sea)', 'var(--sea)', 'Santri berbeda pada periode ini')
+    + stat('Apresiasi Emas', angka(emas), 'fa-solid fa-medal',
+        'background:var(--violet-bg);color:var(--violet)', 'var(--violet)', 'Kategori tertinggi');
+
+  // ---------- tabel ----------
+  const pages = Math.max(1, Math.ceil(rows.length / stPrs.size));
+  if (stPrs.page > pages) stPrs.page = pages;
+  const from = (stPrs.page - 1) * stPrs.size;
+  const hal = rows.slice(from, from + stPrs.size);
+  const bolehArsip = bisa('prestasi.arsip');
+
+  $('prsSub').textContent = `${angka(rows.length)} catatan · ${esc(labelKonteks())} · ${labelPeriode()}`;
+  $('prsBody').innerHTML = hal.map(r => {
+    const s = peta[String(r.nisn)] || {};
+    const nama = r.nama_siswa || s.nama_siswa || '(tanpa nama)';
+    return `<tr>
+      <td class="nowrap">${tgl(r.tanggal)}
+        <div class="secondary">${esc(r.pencatat || '-')}</div></td>
+      <td><button class="adm-santri" data-detail="${esc(r.nisn)}">
+            <span class="av">${esc(String(nama).charAt(0).toUpperCase())}</span>
+            <span class="who"><span class="nm">${esc(nama)}</span>
+              <span class="secondary">${esc(r.nisn)} · ${esc(r.kelas || s.kelas || '-')}</span></span>
+          </button></td>
+      <td><div class="primary">${esc(r.judul)}</div>
+        ${r.catatan ? `<div class="adm-note">${esc(r.catatan)}</div>` : ''}
+        ${r.bidang ? `<div class="secondary">${esc(r.bidang)}</div>` : ''}</td>
+      <td><span class="tag ${tagPrestasi(r.kategori)}">${esc(r.kategori || '-')}</span></td>
+      <td class="center"><span class="poin-pill" style="background:color-mix(in oklab,var(--brass) 16%,white);color:#7A5F05">+${Number(r.poin)||0}</span></td>
+      <td class="right">${bolehArsip
+        ? `<button class="btn-link" data-prs-arsip="${r.id}" style="color:var(--maroon)">
+             <i class="fa-solid fa-box-archive"></i> Arsip</button>` : '—'}</td>
+    </tr>`;
+  }).join('') || barisKosong(6, 'Belum ada catatan apresiasi.',
+      'Catat apresiasi pertama lewat panel di samping.');
+  $('prsPager').innerHTML = pager('prs', stPrs.page, rows.length, stPrs.size);
+
+  // ---------- papan santri teladan ----------
+  const board = new Map();
+  lingkup.forEach(r => {
+    const n = String(r.nisn);
+    if (!board.has(n)) board.set(n, { nisn:n, nama: r.nama_siswa || peta[n]?.nama_siswa || n,
+      kelas: r.kelas || peta[n]?.kelas || '-', poin:0, jml:0 });
+    const o = board.get(n); o.poin += Number(r.poin) || 0; o.jml++;
+  });
+  const top = [...board.values()].sort((a, b) => b.poin - a.poin || b.jml - a.jml).slice(0, 10);
+  $('prsBoard').innerHTML = top.map((t, i) => `
+    <div class="prs-row">
+      <div class="prs-medal">${i + 1}</div>
+      <div class="prs-who">
+        <b>${esc(t.nama)}</b><span>${esc(t.nisn)} · ${esc(t.kelas)}</span>
+      </div>
+      <div class="prs-poin"><b>+${angka(t.poin)}</b><small>${t.jml} catatan</small></div>
+    </div>`).join('') || kosong('Belum ada peringkat.', 'Catatan apresiasi akan muncul di sini.', 'fa-ranking-star');
+
+  // ---------- neraca poin ----------
+  const detail = lingkupDetail(await muatDetail());
+  const poinNeg = detail.reduce((a, r) => a + (Number(r.bobot_pelanggaran) || 0), 0);
+  const jml = Math.max(1, poinNeg + totalPoin);
+  const net = poinNeg - totalPoin;
+  $('prsNeraca').innerHTML = `
+    <div class="neraca-bar">
+      <i class="neg" style="width:${(poinNeg / jml * 100).toFixed(1)}%"></i>
+      <i class="pos" style="width:${(totalPoin / jml * 100).toFixed(1)}%"></i>
+    </div>
+    <div class="neraca-ket">
+      <span class="kiri">Pelanggaran ${angka(poinNeg)} poin</span>
+      <span class="kanan">Apresiasi ${angka(totalPoin)} poin</span>
+    </div>
+    <div class="neraca-net">
+      <b style="color:${net > 0 ? 'var(--maroon)' : 'var(--teal)'}">${net > 0 ? '+' : ''}${angka(net)}</b>
+      <small>Skor net unit</small>
+    </div>
+    <p class="hint" style="margin:0">${net > 0
+      ? 'Beban pelanggaran masih lebih besar daripada apresiasi. Perbanyak pencatatan hal baik agar gambaran unit seimbang.'
+      : 'Apresiasi sudah mengimbangi catatan pelanggaran pada periode ini.'}</p>`;
+
+  // ---------- grafik bidang ----------
+  const perBidang = {};
+  lingkup.forEach(r => {
+    const b = String(r.bidang || 'Belum Dipetakan').trim();
+    perBidang[b] = (perBidang[b] || 0) + (Number(r.poin) || 0);
+  });
+  const urut = Object.entries(perBidang).sort((a, b) => b[1] - a[1]).slice(0, 7);
+  buatChart('prsBidang', 'chPrsBidang', {
+    type:'doughnut',
+    data:{ labels: urut.map(x => x[0]),
+      datasets:[{ data: urut.map(x => x[1]), backgroundColor: PALET, borderWidth:0 }] },
+    options:{ responsive:true, maintainAspectRatio:false, cutout:'62%',
+      plugins:{ legend:{ position:'bottom', labels:{ boxWidth:10, font:{ size:11 } } } } }
+  });
+
+  tandaiTabelBisaGeser();
+}
+
+function prsEksporCsv() {
+  muatPrestasi().then(all => {
+    const rows = prsSaring(lingkupPrestasi(all));
+    if (!rows.length) return toast('error', 'Tidak ada data untuk diekspor.');
+    unduhCsv(`prestasi-${berkasPeriode()}.csv`, [
+      ['Tanggal','NISN','Nama','Kelas','Kategori','Bentuk Apresiasi','Bidang','Poin','Pencatat','Catatan'],
+      ...rows.map(r => [kunciTgl(r.tanggal), r.nisn, r.nama_siswa, r.kelas, r.kategori,
+        r.judul, r.bidang, r.poin, r.pencatat, r.catatan])
+    ]);
+  });
+}
+
+
+// =====================================================================
+// 33. MODUL TAHFIZ AL-QUR'AN  (fitur 2)
+//     Tiga pilar laporan santri kini lengkap: akademik (Madrasah),
+//     akhlak (Pengasuhan), dan hafalan (modul ini).
+// =====================================================================
+const stThf = { page:1, size:15, cari:'', jenis:'', nisn:'', namaPilih:'' };
+
+function lingkupTahfiz(rows, pakaiPeriode = true) {
+  let out = filterBinaan((rows || []).filter(aktifTahfiz), 'kelas');
+  const { unit, jenjang } = APP.ctx;
+  if (unit === 'Madrasah' && jenjang !== 'Semua') {
+    out = out.filter(r => String(r.jenjang || '').trim() === jenjang);
+  }
+  return pakaiPeriode ? saringPeriode(out, 'tanggal') : out;
+}
+
+const juzDari = (hal) => Math.round((Number(hal || 0) / HALAMAN_PER_JUZ) * 100) / 100;
+
+async function viewTahfiz() {
+  const bolehSetor = bisa('tahfiz.setor') && !hanyaBaca();
+
+  $('viewRoot').innerHTML = `
+    <section class="thf-hero">
+      <div class="eyebrow"><span class="ar">تحفيظ القرآن</span><span class="rule"></span>
+        <span class="lat">Capaian Hafalan</span></div>
+      <span class="ar">وَلَقَدْ يَسَّرْنَا الْقُرْآنَ لِلذِّكْرِ فَهَلْ مِن مُّدَّكِرٍ</span>
+      <h2>Hafalan yang terukur.</h2>
+      <p>Setoran ziyadah dan murajaah dicatat per santri, dijumlahkan menjadi
+         halaman dan juz, lalu dibandingkan dengan target bulanan. Ringkasannya
+         ikut tercetak pada Laporan Perkembangan Santri.</p>
+      <div class="meta">
+        <span><i class="fa-solid fa-layer-group"></i>${esc(labelKonteks())}</span>
+        <span><i class="fa-regular fa-calendar-days"></i>${esc(labelPeriode())}</span>
+        <span><i class="fa-solid fa-book-open"></i>1 juz ≈ ${HALAMAN_PER_JUZ} halaman</span>
+      </div>
+    </section>
+
+    <div class="stats" id="thfStat"></div>
+
+    <div class="grid-2">
+      <div>
+        ${bolehSetor ? `
+        <section class="card">
+          <div class="card-head">
+            <div><h3>Catat Setoran</h3>
+              <p class="sub">Ziyadah untuk hafalan baru, murajaah untuk pengulangan.</p></div>
+          </div>
+          <div class="pgs-pick" id="thfPick">
+            <div class="ico"><i class="fa-solid fa-user-graduate"></i></div>
+            <div><small>Santri terpilih</small><b id="thfPickNama">Belum dipilih</b></div>
+          </div>
+          <div class="thf-form">
+            <div class="field ac-wrap wide">
+              <label class="label" for="thfSantri">Nama / NISN santri</label>
+              <input id="thfSantri" class="input" placeholder="Ketik minimal 2 huruf…" autocomplete="off">
+            </div>
+            <div class="field">
+              <label class="label" for="thfJenis">Jenis setoran</label>
+              <select id="thfJenis" class="input">
+                <option>Ziyadah</option><option>Murajaah</option><option>Ujian</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="label" for="thfTanggal">Tanggal</label>
+              <input id="thfTanggal" type="date" class="input" value="${hariIni()}">
+            </div>
+            <div class="field ac-wrap">
+              <label class="label" for="thfSurah">Surah</label>
+              <input id="thfSurah" class="input" placeholder="Ketik nama surah…" autocomplete="off">
+            </div>
+            <div class="field">
+              <label class="label" for="thfDari">Ayat dari</label>
+              <input id="thfDari" type="number" min="1" class="input mono" placeholder="1">
+            </div>
+            <div class="field">
+              <label class="label" for="thfKe">Ayat sampai</label>
+              <input id="thfKe" type="number" min="1" class="input mono" placeholder="10">
+            </div>
+            <div class="field">
+              <label class="label" for="thfHalaman">Jumlah halaman</label>
+              <input id="thfHalaman" type="number" min="0" step="0.5" class="input mono" value="1">
+            </div>
+            <div class="field">
+              <label class="label" for="thfJuzInp">Juz ke-</label>
+              <input id="thfJuzInp" type="number" min="1" max="30" class="input mono" placeholder="30">
+            </div>
+            <div class="field">
+              <label class="label" for="thfLancar">Kelancaran</label>
+              <select id="thfLancar" class="input">
+                ${KELANCARAN.map(k => `<option${k==='Jayyid'?' selected':''}>${k}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field wide">
+              <label class="label" for="thfCatatan">Catatan musyrif (opsional)</label>
+              <textarea id="thfCatatan" class="input" rows="2"
+                placeholder="Misal: makhraj huruf ḍād perlu diperbaiki…"></textarea>
+            </div>
+          </div>
+          <div class="pgs-bar">
+            <span class="note"><i class="fa-solid fa-circle-info"></i>
+              Halaman boleh pecahan (0,5 = setengah halaman).</span>
+            <button class="btn btn-primary" id="thfSimpan"><i class="fa-solid fa-floppy-disk"></i>Simpan Setoran</button>
+          </div>
+        </section>` : ''}
+
+        <section class="card">
+          <div class="card-head">
+            <div><h3>Riwayat Setoran</h3><p class="sub" id="thfSub">Memuat…</p></div>
+            <div class="actions">
+              <button class="btn btn-ghost btn-sm" id="thfCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>
+            </div>
+          </div>
+          <div class="filters">
+            <input id="thfCari" class="input grow" placeholder="Cari nama, NISN, atau surah…">
+            <select id="thfFJenis" class="input">
+              <option value="">Semua jenis</option>
+              <option>Ziyadah</option><option>Murajaah</option><option>Ujian</option>
+            </select>
+            <span class="sep"></span>
+            <button class="btn btn-ghost btn-sm" id="thfReset"><i class="fa-solid fa-rotate-left"></i>Reset</button>
+          </div>
+          <div class="tbl"><table>
+            <thead><tr><th>Tanggal</th><th>Santri</th><th>Bacaan</th>
+              <th class="center">Hlm</th><th>Kelancaran</th><th>Jenis</th></tr></thead>
+            <tbody id="thfBody"><tr><td colspan="6" style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</td></tr></tbody>
+          </table></div>
+          <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
+          <div id="thfPager"></div>
+        </section>
+      </div>
+
+      <div>
+        <section class="card">
+          <div class="card-head">
+            <div><h3>Target Bulanan</h3><p class="sub">Pilih santri untuk melihat capaiannya.</p></div>
+          </div>
+          <div class="card-body" style="padding-bottom:0">
+            <div class="field ac-wrap" style="margin:0">
+              <label class="label" for="thfCariTarget">Santri</label>
+              <input id="thfCariTarget" class="input" placeholder="Ketik nama santri…" autocomplete="off">
+            </div>
+          </div>
+          <div id="thfTargetBox"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><div><h3>Peringkat Hafalan</h3>
+            <p class="sub">Halaman terkumpul pada periode aktif.</p></div></div>
+          <div class="prs-board" id="thfBoard"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><div><h3>Ritme Setoran</h3>
+            <p class="sub">Halaman per pekan pada 8 pekan terakhir.</p></div></div>
+          ${chartBox('chThfRitme')}
+        </section>
+      </div>
+    </div>`;
+
+  if (bolehSetor) {
+    saranSantri($('thfSantri'), (s) => {
+      $('thfPickNama').textContent = `${s.nama_siswa} · ${s.kelas || '-'}`;
+      $('thfPick').classList.add('on');
+      $('thfSantri').dataset.nama = s.nama_siswa || '';
+      $('thfSantri').dataset.kelas = s.kelas || '';
+      $('thfSantri').dataset.jenjang = s.jenjang || '';
+    });
+    saranSurah($('thfSurah'));
+    $('thfSimpan').addEventListener('click', thfSimpan);
+  }
+
+  saranSantri($('thfCariTarget'), (s) => {
+    stThf.nisn = String(s.nisn); stThf.namaPilih = s.nama_siswa || '';
+    thfGambarTarget();
+  });
+
+  $('thfCari').addEventListener('input', debounce(e => {
+    stThf.cari = e.target.value.trim(); stThf.page = 1; thfGambarPanel();
+  }, 260));
+  $('thfFJenis').addEventListener('change', e => { stThf.jenis = e.target.value; stThf.page = 1; thfGambarPanel(); });
+  $('thfReset').addEventListener('click', () => {
+    Object.assign(stThf, { page:1, cari:'', jenis:'' });
+    $('thfCari').value = ''; $('thfFJenis').value = '';
+    thfGambarPanel();
+  });
+  $('thfCsv').addEventListener('click', thfEksporCsv);
+
+  onKlik(async (e) => {
+    const d = e.target.closest('[data-detail]');
+    if (d) return bukaDetailSantri(d.dataset.detail);
+    const t = e.target.closest('[data-thf-target]');
+    if (t) return thfModalTarget(t.dataset.thfTarget);
+    const p = e.target.closest('[data-pg]');
+    if (p && p.dataset.pg.startsWith('thf:')) {
+      stThf.page = Number(p.dataset.pg.split(':')[1]); thfGambarPanel();
+    }
+  });
+
+  await thfGambarPanel();
+  await thfGambarTarget();
+}
+
+async function thfSimpan() {
+  const inpS = $('thfSantri');
+  const nisn = inpS.dataset.picked;
+  if (!nisn) return toast('error', 'Pilih santri terlebih dahulu.');
+  const halaman = Number($('thfHalaman').value) || 0;
+  if (halaman <= 0) return toast('error', 'Jumlah halaman harus lebih dari nol.');
+
+  const btn = $('thfSimpan');
+  const asli = mulaiSimpan(btn, 'Menyimpan…');
+  try {
+    const hasil = await simpanAman('log_tahfiz', {
+      nisn: String(nisn),
+      nama_siswa: inpS.dataset.nama || null,
+      kelas: inpS.dataset.kelas || null,
+      jenjang: inpS.dataset.jenjang || null,
+      tanggal: $('thfTanggal').value || hariIni(),
+      jenis: $('thfJenis').value || 'Ziyadah',
+      surah: $('thfSurah').value.trim() || null,
+      ayat_dari: Number($('thfDari').value) || null,
+      ayat_ke: Number($('thfKe').value) || null,
+      juz: Number($('thfJuzInp').value) || null,
+      capaian_halaman: halaman,
+      kelancaran: $('thfLancar').value || 'Jayyid',
+      musyrif: APP.profil?.nama || null,
+      musyrif_id: APP.profil?.id || null,
+      catatan: $('thfCatatan').value.trim() || null
+    });
+    selesaiSimpan(btn, asli, true, hasil.antre ? 'Tersimpan luring' : 'Setoran tersimpan');
+    if (hasil.antre) toast('info', 'Tersimpan di perangkat — akan dikirim saat koneksi pulih.');
+    else toast('success', 'Setoran tahfiz tercatat.');
+
+    $('thfDari').value = ''; $('thfKe').value = ''; $('thfCatatan').value = '';
+    cacheHapus('tahfiz');
+    await thfGambarPanel();
+    await thfGambarTarget();
+  } catch (err) {
+    selesaiSimpan(btn, asli, false, 'Gagal menyimpan');
+    fireError(err);
+  }
+}
+
+function thfSaring(rows) {
+  let out = rows;
+  if (stThf.jenis) out = out.filter(r => r.jenis === stThf.jenis);
+  if (stThf.cari) {
+    const k = stThf.cari.toLowerCase();
+    out = out.filter(r => [r.nama_siswa, r.nisn, r.surah, r.musyrif]
+      .some(v => String(v || '').toLowerCase().includes(k)));
+  }
+  return out;
+}
+
+async function thfGambarPanel() {
+  if (APP.view !== 'tahfiz') return;
+  const [semua, peta] = await Promise.all([muatTahfiz(), petaSiswa()]);
+  const lingkup = lingkupTahfiz(semua);
+  const rows = thfSaring(lingkup).slice()
+    .sort((a, b) => String(kunciTgl(b.tanggal)).localeCompare(String(kunciTgl(a.tanggal))));
+
+  const halaman = lingkup.reduce((a, r) => a + (Number(r.capaian_halaman) || 0), 0);
+  const santriUnik = new Set(lingkup.map(r => String(r.nisn))).size;
+  const ziyadah = lingkup.filter(r => /ziyadah/i.test(r.jenis || '')).length;
+  const mumtaz = lingkup.filter(r => /mumtaz/i.test(r.kelancaran || '')).length;
+
+  $('thfStat').innerHTML =
+      stat('Total Setoran', angka(lingkup.length), 'fa-solid fa-book-quran',
+        'background:var(--teal-bg);color:var(--teal)', 'var(--teal)', esc(labelPeriode()))
+    + stat('Halaman Terkumpul', angka(Math.round(halaman * 10) / 10), 'fa-solid fa-file-lines',
+        'background:#E7F1F7;color:var(--sea)', 'var(--sea)', `± ${juzDari(halaman)} juz`)
+    + stat('Santri Menyetor', angka(santriUnik), 'fa-solid fa-user-graduate',
+        'background:var(--amber-bg);color:var(--amber)', 'var(--amber)', `${ziyadah} setoran ziyadah`)
+    + stat('Predikat Mumtaz', angka(mumtaz), 'fa-solid fa-star',
+        'background:var(--violet-bg);color:var(--violet)', 'var(--brass)', 'Setoran berpredikat tertinggi');
+
+  const pages = Math.max(1, Math.ceil(rows.length / stThf.size));
+  if (stThf.page > pages) stThf.page = pages;
+  const from = (stThf.page - 1) * stThf.size;
+  const hal = rows.slice(from, from + stThf.size);
+
+  $('thfSub').textContent = `${angka(rows.length)} setoran · ${labelPeriode()}`;
+  $('thfBody').innerHTML = hal.map(r => {
+    const s = peta[String(r.nisn)] || {};
+    const nama = r.nama_siswa || s.nama_siswa || '(tanpa nama)';
+    return `<tr>
+      <td class="nowrap">${tgl(r.tanggal)}<div class="secondary">${esc(r.musyrif || '-')}</div></td>
+      <td><button class="adm-santri" data-detail="${esc(r.nisn)}">
+            <span class="av">${esc(String(nama).charAt(0).toUpperCase())}</span>
+            <span class="who"><span class="nm">${esc(nama)}</span>
+              <span class="secondary">${esc(r.kelas || s.kelas || '-')}</span></span>
+          </button></td>
+      <td><div class="primary">${esc(r.surah || '-')}${r.ayat_dari
+            ? ` : ${r.ayat_dari}${r.ayat_ke ? '–' + r.ayat_ke : ''}` : ''}</div>
+        ${r.juz ? `<div class="secondary">Juz ${esc(r.juz)}</div>` : ''}
+        ${r.catatan ? `<div class="adm-note">${esc(r.catatan)}</div>` : ''}</td>
+      <td class="center num">${Number(r.capaian_halaman) || 0}</td>
+      <td><span class="${kelasLancar(r.kelancaran)}">${esc(r.kelancaran || '-')}</span></td>
+      <td><span class="tag ${/ziyadah/i.test(r.jenis||'') ? 'tag-ok' : /ujian/i.test(r.jenis||'') ? 'tag-violet' : 'tag-sea'}">${esc(r.jenis || '-')}</span></td>
+    </tr>`;
+  }).join('') || barisKosong(6, 'Belum ada setoran tahfiz.',
+      'Catat setoran pertama lewat panel di samping.');
+  $('thfPager').innerHTML = pager('thf', stThf.page, rows.length, stThf.size);
+
+  // ---------- peringkat hafalan ----------
+  const board = new Map();
+  lingkup.forEach(r => {
+    const n = String(r.nisn);
+    if (!board.has(n)) board.set(n, { nisn:n, nama: r.nama_siswa || peta[n]?.nama_siswa || n,
+      kelas: r.kelas || peta[n]?.kelas || '-', hal:0, jml:0 });
+    const o = board.get(n); o.hal += Number(r.capaian_halaman) || 0; o.jml++;
+  });
+  const top = [...board.values()].sort((a, b) => b.hal - a.hal).slice(0, 10);
+  $('thfBoard').innerHTML = top.map((t, i) => `
+    <div class="prs-row">
+      <div class="prs-medal">${i + 1}</div>
+      <div class="prs-who"><b>${esc(t.nama)}</b><span>${esc(t.nisn)} · ${esc(t.kelas)}</span></div>
+      <div class="prs-poin"><b>${Math.round(t.hal * 10) / 10}</b><small>${juzDari(t.hal)} juz</small></div>
+    </div>`).join('') || kosong('Belum ada peringkat.', 'Setoran akan muncul di sini.', 'fa-ranking-star');
+
+  // ---------- ritme mingguan ----------
+  const pekan = {};
+  lingkupTahfiz(semua, false).forEach(r => {
+    const d = tglDari(kunciTgl(r.tanggal)); if (!d) return;
+    const k = kunciTgl(awalPekan(d));
+    pekan[k] = (pekan[k] || 0) + (Number(r.capaian_halaman) || 0);
+  });
+  const kunci = Object.keys(pekan).sort().slice(-8);
+  buatChart('thfRitme', 'chThfRitme', {
+    type:'bar',
+    data:{ labels: kunci.map(labelPekan),
+      datasets:[{ label:'Halaman', data: kunci.map(k => Math.round(pekan[k] * 10) / 10),
+        backgroundColor:'#0F766E', borderRadius:6, maxBarThickness:34 }] },
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:false } },
+      scales:{ y:{ beginAtZero:true, grid:{ color:'#EEF3F7' } }, x:{ grid:{ display:false } } } }
+  });
+
+  tandaiTabelBisaGeser();
+}
+
+async function thfGambarTarget() {
+  const box = $('thfTargetBox'); if (!box) return;
+  if (!stThf.nisn) {
+    box.innerHTML = kosong('Belum ada santri dipilih.',
+      'Ketik nama santri di atas untuk melihat capaian dan targetnya.', 'fa-bullseye');
+    return;
+  }
+  const [semua, targets] = await Promise.all([muatTahfiz(), muatTargetTahfiz()]);
+  const p = batasPeriode();
+  const periode = p ? p.bulan : bulanIni();
+  const milik = (semua || []).filter(aktifTahfiz).filter(r => String(r.nisn) === stThf.nisn);
+  const bulanan = milik.filter(r => bulanDari(kunciTgl(r.tanggal)) === periode);
+  const halBulan = bulanan.reduce((a, r) => a + (Number(r.capaian_halaman) || 0), 0);
+  const halTotal = milik.reduce((a, r) => a + (Number(r.capaian_halaman) || 0), 0);
+  const t = (targets || []).find(x => String(x.nisn) === stThf.nisn && String(x.periode) === periode);
+  const target = Number(t?.target_halaman) || 0;
+  const pct = target > 0 ? Math.min(100, Math.round(halBulan / target * 100)) : 0;
+  const bolehTarget = bisa('tahfiz.target') && !hanyaBaca();
+
+  box.innerHTML = `
+    <div class="thf-target">
+      <div class="thf-ring" style="--pct:${pct}">
+        <div class="isi"><b>${pct}%</b><small>Target</small></div>
+      </div>
+      <div class="ket">
+        <b>${esc(stThf.namaPilih || stThf.nisn)}</b>
+        <p>Periode <b>${esc(periode)}</b> · tercapai
+           <b>${Math.round(halBulan * 10) / 10}</b> dari
+           <b>${target || '—'}</b> halaman.</p>
+        <p style="margin-top:4px">Akumulasi seluruh riwayat:
+           <b>${Math.round(halTotal * 10) / 10}</b> halaman (± ${juzDari(halTotal)} juz).</p>
+        ${bolehTarget ? `<button class="btn btn-ghost btn-sm" data-thf-target="${esc(stThf.nisn)}"
+            style="margin-top:10px"><i class="fa-solid fa-bullseye"></i>
+            ${target ? 'Ubah target' : 'Tetapkan target'}</button>` : ''}
+      </div>
+    </div>
+    <div class="thf-grid">
+      <div class="thf-kartu"><small>Ziyadah</small>
+        <b>${bulanan.filter(r => /ziyadah/i.test(r.jenis||'')).length}</b>
+        <span class="kaki">setoran hafalan baru</span></div>
+      <div class="thf-kartu"><small>Murajaah</small>
+        <b>${bulanan.filter(r => /muraja/i.test(r.jenis||'')).length}</b>
+        <span class="kaki">pengulangan</span></div>
+      <div class="thf-kartu"><small>Juz bulan ini</small>
+        <b>${juzDari(halBulan)}</b><span class="kaki">± dari halaman</span></div>
+    </div>`;
+}
+
+async function thfModalTarget(nisn) {
+  const p = batasPeriode();
+  const periode = p ? p.bulan : bulanIni();
+  const targets = await muatTargetTahfiz();
+  const t = (targets || []).find(x => String(x.nisn) === String(nisn) && String(x.periode) === periode);
+
+  const r = await Swal.fire({
+    title:'Target hafalan bulanan',
+    html:`<div class="stack">
+      <div class="ctx-note"><i class="fa-solid fa-circle-info"></i>
+        Periode ${esc(periode)} · ${esc(stThf.namaPilih || nisn)}</div>
+      <div class="field">
+        <label class="label">Target halaman</label>
+        <input id="swTarget" type="number" min="1" step="0.5" class="input mono"
+          value="${Number(t?.target_halaman) || 20}">
+        <p class="hint">Setara ± ${juzDari(Number(t?.target_halaman) || 20)} juz per bulan.</p>
+      </div>
+      <div class="field">
+        <label class="label">Catatan (opsional)</label>
+        <textarea id="swTargetNote" class="input" rows="2">${esc(t?.catatan || '')}</textarea>
+      </div>
+    </div>`,
+    showCancelButton:true, confirmButtonText:'Simpan target',
+    cancelButtonText:'Batal', confirmButtonColor:'#14618B',
+    preConfirm: () => {
+      const v = Number(document.getElementById('swTarget').value);
+      if (!v || v <= 0) { Swal.showValidationMessage('Target harus lebih dari nol.'); return false; }
+      return { target: v, catatan: document.getElementById('swTargetNote').value.trim() };
+    }
+  });
+  if (!r.isConfirmed) return;
+
+  try {
+    const { error } = await db.from('target_tahfiz').upsert({
+      nisn: String(nisn), periode,
+      target_halaman: r.value.target,
+      catatan: r.value.catatan || null,
+      dibuat_oleh: APP.profil?.nama || null,
+      dibuat_oleh_id: APP.profil?.id || null
+    }, { onConflict: 'nisn,periode' });
+    if (error) throw error;
+    cacheHapus('targetTahfiz');
+    toast('success', 'Target hafalan disimpan.');
+    await thfGambarTarget();
+  } catch (err) { fireError(err); }
+}
+
+function thfEksporCsv() {
+  muatTahfiz().then(all => {
+    const rows = thfSaring(lingkupTahfiz(all));
+    if (!rows.length) return toast('error', 'Tidak ada data untuk diekspor.');
+    unduhCsv(`tahfiz-${berkasPeriode()}.csv`, [
+      ['Tanggal','NISN','Nama','Kelas','Jenis','Surah','Ayat Dari','Ayat Ke','Juz','Halaman','Kelancaran','Musyrif','Catatan'],
+      ...rows.map(r => [kunciTgl(r.tanggal), r.nisn, r.nama_siswa, r.kelas, r.jenis, r.surah,
+        r.ayat_dari, r.ayat_ke, r.juz, r.capaian_halaman, r.kelancaran, r.musyrif, r.catatan])
+    ]);
+  });
+}
+
+
+// =====================================================================
+// 34. JEJAK AUDIT  (fitur 5)
+//     Ditulis oleh trigger SECURITY DEFINER di database, jadi tidak bisa
+//     dipalsukan atau dihapus dari aplikasi. Halaman ini hanya membaca.
+// =====================================================================
+const stAud = { page:1, size:25, cari:'', tabel:'', aksi:'', dari:'', sampai:'', rows:null };
+
+const TABEL_AUDIT = ['log_pelanggaran','log_pembinaan','log_perizinan','log_prestasi',
+  'log_tahfiz','goal_santri','target_tahfiz','master_pelanggaran','master_prestasi',
+  'master_pembinaan','master_bidang','data_presensi','siswa','profiles'];
+
+async function viewAudit() {
+  if (!bisa('audit.lihat')) { toast('error','Tidak memiliki akses.'); return navigateTo(rumah()); }
+
+  $('viewRoot').innerHTML = `
+    <section class="aud-head">
+      <div>
+        <div class="eyebrow"><span class="ar">سجل التغييرات</span><span class="rule"></span>
+          <span class="lat">Akuntabilitas</span></div>
+        <h2>Setiap catatan adalah amanah.</h2>
+        <p>Seluruh penambahan, perubahan, dan penghapusan data tercatat lengkap dengan
+           pelakunya. Jejak ini ditulis langsung oleh database — aplikasi hanya boleh
+           membacanya, tidak bisa mengubah atau menghapusnya.</p>
+      </div>
+      <div class="adm-actions">
+        <button class="btn btn-onnavy" id="audMuat"><i class="fa-solid fa-rotate"></i>Muat Ulang</button>
+        <button class="btn btn-brass" id="audCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>
+      </div>
+    </section>
+
+    <div class="stats" id="audStat"></div>
+
+    <section class="card">
+      <div class="card-head">
+        <div><h3>Riwayat Perubahan</h3><p class="sub" id="audSub">Memuat…</p></div>
+      </div>
+      <div class="filters adm-filters">
+        <input id="audCari" class="input grow" placeholder="Cari pelaku, NISN, atau ringkasan…">
+        <select id="audFTabel" class="input">
+          <option value="">Semua tabel</option>
+          ${TABEL_AUDIT.map(t => `<option>${t}</option>`).join('')}
+        </select>
+        <select id="audFAksi" class="input">
+          <option value="">Semua aksi</option>
+          <option>INSERT</option><option>UPDATE</option><option>DELETE</option>
+        </select>
+        <input id="audDari" type="date" class="input" title="Dari tanggal">
+        <input id="audSampai" type="date" class="input" title="Sampai tanggal">
+        <span class="sep"></span>
+        <button class="btn btn-ghost btn-sm" id="audReset"><i class="fa-solid fa-rotate-left"></i>Reset</button>
+      </div>
+      <div class="tbl"><table class="adm-tbl aud-tbl">
+        <thead><tr><th>Waktu</th><th>Pelaku</th><th>Tabel</th><th>Aksi</th>
+          <th>Ringkasan</th><th class="right">Rincian</th></tr></thead>
+        <tbody id="audBody"><tr><td colspan="6" style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</td></tr></tbody>
+      </table></div>
+      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
+      <div id="audPager"></div>
+    </section>`;
+
+  $('audCari').addEventListener('input', debounce(e => {
+    stAud.cari = e.target.value.trim(); stAud.page = 1; audGambar();
+  }, 260));
+  $('audFTabel').addEventListener('change', e => { stAud.tabel = e.target.value; stAud.page = 1; audGambar(); });
+  $('audFAksi').addEventListener('change', e => { stAud.aksi = e.target.value; stAud.page = 1; audGambar(); });
+  $('audDari').addEventListener('change', e => { stAud.dari = e.target.value; stAud.page = 1; audGambar(); });
+  $('audSampai').addEventListener('change', e => { stAud.sampai = e.target.value; stAud.page = 1; audGambar(); });
+  $('audReset').addEventListener('click', () => {
+    Object.assign(stAud, { page:1, cari:'', tabel:'', aksi:'', dari:'', sampai:'' });
+    ['audCari','audFTabel','audFAksi','audDari','audSampai'].forEach(id => { $(id).value = ''; });
+    audGambar();
+  });
+  $('audMuat').addEventListener('click', async () => { stAud.rows = null; await audMuat(); await audGambar(); });
+  $('audCsv').addEventListener('click', audEksporCsv);
+
+  onKlik((e) => {
+    const d = e.target.closest('[data-aud]');
+    if (d) return audModalRincian(d.dataset.aud);
+    const p = e.target.closest('[data-pg]');
+    if (p && p.dataset.pg.startsWith('aud:')) {
+      stAud.page = Number(p.dataset.pg.split(':')[1]); audGambar();
+    }
+  });
+
+  await audMuat();
+  await audGambar();
+}
+
+async function audMuat() {
+  if (stAud.rows) return stAud.rows;
+  stAud.rows = await amanKosong(async () => {
+    const { data, error } = await db.from('audit_log').select('*')
+      .order('waktu', { ascending:false }).limit(3000);
+    if (error) throw error;
+    return data || [];
+  }, 'audit_log');
+  return stAud.rows;
+}
+
+function audSaring(rows) {
+  let out = rows || [];
+  if (stAud.tabel) out = out.filter(r => r.tabel === stAud.tabel);
+  if (stAud.aksi)  out = out.filter(r => r.aksi === stAud.aksi);
+  if (stAud.dari)   out = out.filter(r => kunciTgl(r.waktu) >= stAud.dari);
+  if (stAud.sampai) out = out.filter(r => kunciTgl(r.waktu) <= stAud.sampai);
+  if (stAud.cari) {
+    const k = stAud.cari.toLowerCase();
+    out = out.filter(r => [r.user_nama, r.user_role, r.nisn, r.ringkas, r.tabel, r.baris_id]
+      .some(v => String(v || '').toLowerCase().includes(k)));
+  }
+  return out;
+}
+
+async function audGambar() {
+  if (APP.view !== 'audit') return;
+  const semua = await audMuat();
+  const rows = audSaring(semua);
+
+  const hariIniKunci = hariIni();
+  const hariIniJml = semua.filter(r => kunciTgl(r.waktu) === hariIniKunci).length;
+  const pelaku = new Set(semua.map(r => r.user_nama).filter(Boolean)).size;
+  const hapus = semua.filter(r => r.aksi === 'DELETE').length;
+
+  $('audStat').innerHTML =
+      stat('Jejak Tercatat', angka(semua.length), 'fa-solid fa-fingerprint',
+        'background:#E7F1F7;color:var(--sea)', 'var(--sea)', 'Maksimum 3.000 terbaru')
+    + stat('Perubahan Hari Ini', angka(hariIniJml), 'fa-solid fa-bolt',
+        'background:var(--teal-bg);color:var(--teal)', 'var(--teal)', tgl(hariIniKunci))
+    + stat('Pelaku Berbeda', angka(pelaku), 'fa-solid fa-user-shield',
+        'background:var(--amber-bg);color:var(--amber)', 'var(--amber)', 'Akun yang pernah mengubah data')
+    + stat('Penghapusan', angka(hapus), 'fa-solid fa-trash-can',
+        'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)', 'Perlu perhatian khusus');
+
+  const pages = Math.max(1, Math.ceil(rows.length / stAud.size));
+  if (stAud.page > pages) stAud.page = pages;
+  const from = (stAud.page - 1) * stAud.size;
+  const hal = rows.slice(from, from + stAud.size);
+
+  $('audSub').textContent = `${angka(rows.length)} jejak ditampilkan`;
+  $('audBody').innerHTML = hal.map(r => `
+    <tr>
+      <td class="aud-waktu">${waktuAudit(r.waktu)}</td>
+      <td><div class="aud-user">
+        <span class="av">${esc(String(r.user_nama || '?').charAt(0).toUpperCase())}</span>
+        <span class="who"><b>${esc(r.user_nama || '(sistem)')}</b>
+          <span>${esc(r.user_role || '-')}</span></span>
+      </div></td>
+      <td class="aud-tabel">${esc(r.tabel)}${r.nisn ? `<div class="secondary">NISN ${esc(r.nisn)}</div>` : ''}</td>
+      <td><span class="aud-aksi ${esc(r.aksi)}">${esc(r.aksi)}</span></td>
+      <td><div class="aud-ring">${esc(r.ringkas || '—')}</div></td>
+      <td class="right"><button class="btn-link" data-aud="${r.id}">
+        <i class="fa-solid fa-code"></i> Lihat</button></td>
+    </tr>`).join('') || barisKosong(6, 'Belum ada jejak yang cocok.',
+      'Jejak muncul otomatis setelah SQL_FITUR_BARU.sql dijalankan.');
+  $('audPager').innerHTML = pager('aud', stAud.page, rows.length, stAud.size);
+  tandaiTabelBisaGeser();
+}
+
+function waktuAudit(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return String(iso || '-');
+  return d.toLocaleString('id-ID', { day:'2-digit', month:'short', year:'2-digit',
+    hour:'2-digit', minute:'2-digit' });
+}
+
+/** Rincian perubahan: kolom yang berubah ditandai. */
+async function audModalRincian(id) {
+  const r = (await audMuat()).find(x => String(x.id) === String(id));
+  if (!r) return;
+  const lama = r.data_lama || {}, baru = r.data_baru || {};
+  const kunci = [...new Set([...Object.keys(lama), ...Object.keys(baru)])].sort();
+  const beda = (k) => JSON.stringify(lama[k]) !== JSON.stringify(baru[k]);
+  const nilai = (v) => v === null || v === undefined ? '—'
+    : typeof v === 'object' ? JSON.stringify(v) : String(v);
+
+  const kolom = (obj, sisi) => kunci.map(k =>
+    `<div${beda(k) ? ' class="ubah"' : ''}>${esc(k)}: ${esc(nilai(obj[k]))}</div>`).join('');
+
+  await Swal.fire({
+    width: 860, showConfirmButton:false, showCloseButton:true,
+    title: `${r.aksi} · ${r.tabel}`,
+    html: `<div style="text-align:left">
+      <div class="ctx-note" style="margin-bottom:14px">
+        <i class="fa-solid fa-user-shield"></i>
+        ${esc(r.user_nama || '(sistem)')} · ${esc(r.user_role || '-')} · ${waktuAudit(r.waktu)}
+        ${r.nisn ? ` · NISN ${esc(r.nisn)}` : ''}
+      </div>
+      <div class="aud-diff">
+        <section><h5>Sebelum</h5><div class="isi">${
+          r.data_lama ? kolom(lama, 'lama') : '<i>(baris baru — tidak ada data sebelumnya)</i>'}</div></section>
+        <section><h5>Sesudah</h5><div class="isi">${
+          r.data_baru ? kolom(baru, 'baru') : '<i>(baris dihapus)</i>'}</div></section>
+      </div>
+      <p class="hint" style="margin-top:12px">Baris bertanda kuning adalah kolom yang berubah.</p>
+    </div>`
+  });
+}
+
+function audEksporCsv() {
+  const rows = audSaring(stAud.rows || []);
+  if (!rows.length) return toast('error', 'Tidak ada data untuk diekspor.');
+  unduhCsv(`jejak-audit-${hariIni()}.csv`, [
+    ['Waktu','Pelaku','Peran','Tabel','Aksi','ID Baris','NISN','Ringkasan'],
+    ...rows.map(r => [r.waktu, r.user_nama, r.user_role, r.tabel, r.aksi, r.baris_id, r.nisn, r.ringkas])
+  ]);
+}
+
+// =====================================================================
+// 35. TARGET PEMBINAAN PER SANTRI  (fitur 7 — loop tertutup)
+// =====================================================================
+const kelasGoal = (s) => {
+  const t = String(s || '').toLowerCase();
+  if (t.includes('tercapai') && !t.includes('belum')) return 'st-tercapai';
+  if (t.includes('sebagian')) return 'st-sebagian';
+  if (t.includes('belum') || t.includes('batal')) return 'st-belum';
+  return 'st-berjalan';
+};
+
+async function muatGoalSantri(nisn) {
+  return amanKosong(async () => {
+    const { data, error } = await db.from('goal_santri').select('*')
+      .eq('nisn', String(nisn)).order('periode', { ascending:false });
+    if (error) throw error;
+    return data || [];
+  }, 'goal santri');
+}
+
+function goalPanelHTML(list, nisn) {
+  const p = batasPeriode();
+  const periode = p ? p.bulan : bulanIni();
+  const lalu = bulanSebelum(periode);
+  const kini = (list || []).filter(g => String(g.periode) === periode);
+  const sebelum = (list || []).filter(g => String(g.periode) === lalu);
+  const bolehTulis = bisa('goal.tulis') && !hanyaBaca();
+
+  const kartu = (g) => `
+    <div class="goal ${kelasGoal(g.status)}">
+      <div class="atas">
+        <b>${esc(g.judul)}</b>
+        <span class="tag ${/tercapai/i.test(g.status||'') && !/belum/i.test(g.status||'') ? 'tag-ok'
+          : /sebagian/i.test(g.status||'') ? 'tag-sedang'
+          : /belum|batal/i.test(g.status||'') ? 'tag-berat' : 'tag-sea'}">${esc(g.status || 'Berjalan')}</span>
+      </div>
+      ${g.indikator ? `<p class="ind">${esc(g.indikator)}</p>` : ''}
+      ${g.evaluasi ? `<div class="eval"><b>Evaluasi:</b> ${esc(g.evaluasi)}
+        ${g.dievaluasi_oleh ? `<span style="color:var(--text-3)"> — ${esc(g.dievaluasi_oleh)}</span>` : ''}</div>` : ''}
+      <div class="kaki">
+        <span class="per"><i class="fa-regular fa-calendar"></i> ${esc(g.periode)}</span>
+        ${g.bidang ? `<span>· ${esc(g.bidang)}</span>` : ''}
+        ${g.dibuat_oleh ? `<span>· ${esc(g.dibuat_oleh)}</span>` : ''}
+        ${bolehTulis ? `<button class="btn-link" data-goal-eval="${g.id}" style="margin-left:auto">
+          <i class="fa-solid fa-clipboard-check"></i> Evaluasi</button>` : ''}
+      </div>
+    </div>`;
+
+  return `
+    <div class="tren-wrap" style="margin-top:16px">
+      <div class="tren-head">
+        <div><b>Target Pembinaan</b>
+          <small>Periode berjalan ${esc(periode)} · evaluasi periode ${esc(lalu)}</small></div>
+        ${bolehTulis ? `<button class="btn btn-ghost btn-sm" data-goal-baru="${esc(nisn)}">
+          <i class="fa-solid fa-plus"></i>Target baru</button>` : ''}
+      </div>
+      <div style="padding:14px 15px">
+        ${sebelum.length ? `<p class="label" style="margin-bottom:8px">Periode sebelumnya</p>
+          <div class="goal-list" style="margin-bottom:14px">${sebelum.map(kartu).join('')}</div>` : ''}
+        <p class="label" style="margin-bottom:8px">Periode berjalan</p>
+        <div class="goal-list">${kini.map(kartu).join('')
+          || `<div class="goal-kosong">Belum ada target untuk periode ini.
+              ${bolehTulis ? 'Tetapkan satu target yang spesifik dan terukur.' : ''}</div>`}</div>
+      </div>
+    </div>`;
+}
+
+async function modalGoalBaru(nisn) {
+  const p = batasPeriode();
+  const periode = p ? p.bulan : bulanIni();
+  const r = await Swal.fire({
+    title:'Target pembinaan baru',
+    html:`<div class="stack">
+      <div class="ctx-note"><i class="fa-solid fa-bullseye"></i>
+        Periode ${esc(periode)} · target akan dievaluasi bulan berikutnya.</div>
+      <div class="field">
+        <label class="label">Target (spesifik &amp; terukur)</label>
+        <input id="swGoalJudul" class="input" placeholder="Misal: hadir shalat subuh berjamaah tanpa terlambat">
+      </div>
+      <div class="field">
+        <label class="label">Indikator keberhasilan</label>
+        <textarea id="swGoalInd" class="input" rows="2"
+          placeholder="Misal: tidak ada catatan keterlambatan subuh selama 4 pekan"></textarea>
+      </div>
+      <div class="duo">
+        <div class="field">
+          <label class="label">Bidang</label>
+          <input id="swGoalBidang" class="input" placeholder="Ubudiyah / Bahasa / Kebersihan…">
+        </div>
+        <div class="field">
+          <label class="label">Prioritas</label>
+          <select id="swGoalPrio" class="input">
+            <option>Tinggi</option><option selected>Sedang</option><option>Rendah</option>
+          </select>
+        </div>
+      </div>
+    </div>`,
+    showCancelButton:true, confirmButtonText:'Simpan target',
+    cancelButtonText:'Batal', confirmButtonColor:'#14618B',
+    preConfirm: () => {
+      const j = document.getElementById('swGoalJudul').value.trim();
+      if (!j) { Swal.showValidationMessage('Target belum diisi.'); return false; }
+      return { judul:j,
+        indikator: document.getElementById('swGoalInd').value.trim(),
+        bidang: document.getElementById('swGoalBidang').value.trim(),
+        prioritas: document.getElementById('swGoalPrio').value };
+    }
+  });
+  if (!r.isConfirmed) return null;
+
+  const hasil = await simpanAman('goal_santri', {
+    nisn: String(nisn), periode,
+    judul: r.value.judul,
+    indikator: r.value.indikator || null,
+    bidang: r.value.bidang || null,
+    prioritas: r.value.prioritas,
+    status: 'Berjalan',
+    dibuat_oleh: APP.profil?.nama || null,
+    dibuat_oleh_id: APP.profil?.id || null
+  });
+  toast(hasil.antre ? 'info' : 'success',
+    hasil.antre ? 'Target disimpan luring — menunggu koneksi.' : 'Target pembinaan tersimpan.');
+  return true;
+}
+
+async function modalGoalEvaluasi(id) {
+  const { data: g } = await db.from('goal_santri').select('*').eq('id', id).single();
+  if (!g) return;
+  const r = await Swal.fire({
+    title:'Evaluasi target',
+    html:`<div class="stack">
+      <div class="ctx-note"><i class="fa-solid fa-flag-checkered"></i>${esc(g.judul)}</div>
+      <div class="field">
+        <label class="label">Status akhir</label>
+        <select id="swEvStatus" class="input">
+          ${['Berjalan','Tercapai','Sebagian','Belum Tercapai','Dibatalkan']
+            .map(s => `<option${s === g.status ? ' selected' : ''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label class="label">Catatan evaluasi</label>
+        <textarea id="swEvNote" class="input" rows="3"
+          placeholder="Apa yang berubah, apa yang belum, dan apa langkah berikutnya…">${esc(g.evaluasi || '')}</textarea>
+      </div>
+    </div>`,
+    showCancelButton:true, confirmButtonText:'Simpan evaluasi',
+    cancelButtonText:'Batal', confirmButtonColor:'#0F766E',
+    preConfirm: () => ({
+      status: document.getElementById('swEvStatus').value,
+      evaluasi: document.getElementById('swEvNote').value.trim()
+    })
+  });
+  if (!r.isConfirmed) return null;
+
+  try {
+    const { error } = await db.from('goal_santri').update({
+      status: r.value.status,
+      evaluasi: r.value.evaluasi || null,
+      dievaluasi_oleh: APP.profil?.nama || null,
+      dievaluasi_oleh_id: APP.profil?.id || null,
+      tanggal_evaluasi: hariIni()
+    }).eq('id', id);
+    if (error) throw error;
+    toast('success', 'Evaluasi tersimpan.');
+    return true;
+  } catch (err) { fireError(err); return null; }
+}
+
+// =====================================================================
+// 36. GRAFIK TREN PER SANTRI  (fitur 6)
+//     Sengaja HANYA tampil di layar (detail santri). Lembar cetak &
+//     PDF tidak memuat grafik ini — sesuai permintaan.
+// =====================================================================
+async function dataTrenSantri(nisn, jumlahBulan = 6) {
+  const kini = new Date();
+  const bulan = [];
+  for (let i = jumlahBulan - 1; i >= 0; i--) {
+    const d = new Date(kini.getFullYear(), kini.getMonth() - i, 1);
+    bulan.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  const kosongPeta = () => Object.fromEntries(bulan.map(b => [b, 0]));
+  const poin = kosongPeta(), apres = kosongPeta(), hafal = kosongPeta();
+
+  const [detail, prestasi, tahfiz] = await Promise.all([
+    muatDetail().catch(() => []),
+    muatPrestasi().catch(() => []),
+    muatTahfiz().catch(() => [])
+  ]);
+
+  (detail || []).filter(aktifDetail)
+    .filter(r => String(r.nisn) === String(nisn))
+    .forEach(r => {
+      const b = bulanDari(kunciTgl(r.tanggal));
+      if (b in poin) poin[b] += Number(r.bobot_pelanggaran) || 0;
+    });
+  (prestasi || []).filter(aktifPrestasi)
+    .filter(r => String(r.nisn) === String(nisn))
+    .forEach(r => {
+      const b = bulanDari(kunciTgl(r.tanggal));
+      if (b in apres) apres[b] += Number(r.poin) || 0;
+    });
+  (tahfiz || []).filter(aktifTahfiz)
+    .filter(r => String(r.nisn) === String(nisn))
+    .forEach(r => {
+      const b = bulanDari(kunciTgl(r.tanggal));
+      if (b in hafal) hafal[b] += Number(r.capaian_halaman) || 0;
+    });
+
+  const label = bulan.map(b => {
+    const [th, bl] = b.split('-').map(Number);
+    return `${['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'][bl - 1]} ${String(th).slice(2)}`;
+  });
+  const net = bulan.map(b => Math.max(0, poin[b] - apres[b]));
+  return {
+    bulan, label,
+    poin: bulan.map(b => poin[b]),
+    apresiasi: bulan.map(b => apres[b]),
+    hafalan: bulan.map(b => Math.round(hafal[b] * 10) / 10),
+    net,
+    adaData: bulan.some(b => poin[b] || apres[b] || hafal[b])
+  };
+}
+
+function trenPanelHTML() {
+  return `
+    <div class="tren-wrap">
+      <div class="tren-head">
+        <div><b>Tren 6 Bulan Terakhir</b>
+          <small>Tampilan layar saja — tidak ikut tercetak pada laporan.</small></div>
+        <div class="tren-legend">
+          <span><i style="background:#9F1239"></i>Poin pelanggaran</span>
+          <span><i style="background:#C9A227"></i>Poin apresiasi</span>
+          <span><i style="background:#0F766E"></i>Halaman hafalan</span>
+        </div>
+      </div>
+      <div class="tren-box"><canvas id="chTrenSantri"></canvas></div>
+      <div class="tren-mini" id="trenMini"></div>
+    </div>`;
+}
+
+async function gambarTrenSantri(nisn) {
+  const t = await dataTrenSantri(nisn, 6);
+  const box = document.getElementById('chTrenSantri');
+  if (!box) return;
+
+  if (!t.adaData) {
+    box.closest('.tren-box').innerHTML =
+      '<div class="tren-kosong">Belum ada data yang cukup untuk menggambar tren.</div>';
+  } else {
+    buatChart('trenSantri', 'chTrenSantri', {
+      data: {
+        labels: t.label,
+        datasets: [
+          { type:'bar', label:'Poin pelanggaran', data:t.poin,
+            backgroundColor:'#9F1239', borderRadius:5, maxBarThickness:22, order:2 },
+          { type:'bar', label:'Poin apresiasi', data:t.apresiasi,
+            backgroundColor:'#C9A227', borderRadius:5, maxBarThickness:22, order:2 },
+          { type:'line', label:'Skor net', data:t.net,
+            borderColor:'#0B2B45', backgroundColor:'#0B2B45', borderWidth:2,
+            tension:.35, pointRadius:3, order:1 },
+          { type:'line', label:'Halaman hafalan', data:t.hafalan, yAxisID:'y2',
+            borderColor:'#0F766E', backgroundColor:'#0F766E', borderWidth:2,
+            borderDash:[5,4], tension:.35, pointRadius:3, order:1 }
+        ]
+      },
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        interaction:{ mode:'index', intersect:false },
+        plugins:{ legend:{ display:false } },
+        scales:{
+          y:{ beginAtZero:true, grid:{ color:'#EEF3F7' }, title:{ display:false } },
+          y2:{ beginAtZero:true, position:'right', grid:{ display:false } },
+          x:{ grid:{ display:false } }
+        }
+      }
+    });
+  }
+
+  const n = t.bulan.length - 1;
+  const arah = (arr) => {
+    const a = arr[n], b = arr[n - 1] ?? 0;
+    if (a === b) return 'datar';
+    return a > b ? 'naik' : 'turun';
+  };
+  const mini = document.getElementById('trenMini');
+  if (mini) mini.innerHTML = `
+    <div><small>Poin bulan ini</small><b style="color:var(--maroon)">${t.poin[n]}</b>
+      <span class="hint">${arah(t.poin)} dari bulan lalu</span></div>
+    <div><small>Apresiasi</small><b style="color:#8A6D0B">+${t.apresiasi[n]}</b>
+      <span class="hint">${arah(t.apresiasi)} dari bulan lalu</span></div>
+    <div><small>Skor net</small><b>${t.net[n]}</b>
+      <span class="hint">${arah(t.net)} dari bulan lalu</span></div>
+    <div><small>Hafalan</small><b style="color:var(--teal)">${t.hafalan[n]}</b>
+      <span class="hint">halaman bulan ini</span></div>`;
+}
+
+
+
+
+// =====================================================================
+// 37. MASTER PRESTASI — katalog apresiasi (menyatu di menu Master & Bidang)
+// =====================================================================
+function kartuBrankasPrestasi(list) {
+  const rows = (list || []);
+  const n = (k) => rows.filter(m => m.kategori === k).length;
+  const poin = rows.reduce((a, m) => a + (Number(m.bobot_poin) || 0), 0);
+  return `
+    <button class="brankas alt" type="button">
+      ${isAdmin() ? `<span class="brk-add" id="brkAddPrestasi" role="button">
+        <i class="fa-solid fa-plus"></i>Tambah</span>` : ''}
+      <div class="brk-top">
+        <div class="brk-ico" style="background:linear-gradient(150deg,#E8CC6B,#8A6D0B);color:#2A2003">
+          <i class="fa-solid fa-award"></i></div>
+        <div>
+          <div class="eyebrow"><span class="ar">دليل الإنجازات</span><span class="rule"></span>
+            <span class="lat">Katalog</span></div>
+          <span class="brk-nm">Master Prestasi</span>
+        </div>
+      </div>
+      <p class="brk-sub">Daftar bentuk apresiasi beserta bobot poin positifnya.</p>
+      <div class="brk-angka"><span class="brk-v">${angka(rows.length)}</span>
+        <span class="brk-k">Jenis apresiasi</span></div>
+      <div class="brk-chips">
+        <span class="tag tag-emas">Emas ${n('Emas')}</span>
+        <span class="tag tag-sea">Perak ${n('Perak')}</span>
+        <span class="tag tag-ok">Perunggu ${n('Perunggu')}</span>
+        <span class="tag tag-off">${angka(poin)} total poin</span>
+      </div>
+      <span class="brk-go">Buka daftar lengkap
+        <i class="fa-solid fa-arrow-right brk-arrow"></i></span>
+    </button>`;
+}
+
+const stDftPrs = { cari:'', kategori:'' };
+
+async function bukaDaftarPrestasi() {
+  const semua = await muatMasterPrestasi();
+  const gambar = () => {
+    let rows = semua;
+    if (stDftPrs.kategori) rows = rows.filter(m => m.kategori === stDftPrs.kategori);
+    if (stDftPrs.cari) {
+      const k = stDftPrs.cari.toLowerCase();
+      rows = rows.filter(m => [m.kode_prestasi, m.nama_prestasi, m.bidang]
+        .some(v => String(v || '').toLowerCase().includes(k)));
+    }
+    rows = rows.slice().sort((a, b) =>
+      (URUT_PRESTASI[a.kategori] ?? 9) - (URUT_PRESTASI[b.kategori] ?? 9) ||
+      String(a.kode_prestasi).localeCompare(String(b.kode_prestasi)));
+
+    const body = document.getElementById('dftPrsBody');
+    if (!body) return;
+    body.innerHTML = rows.map(m => `
+      <tr>
+        <td class="mono">${esc(m.kode_prestasi)}</td>
+        <td><div class="primary">${esc(m.nama_prestasi)}</div>
+          ${m.keterangan ? `<div class="secondary">${esc(m.keterangan)}</div>` : ''}</td>
+        <td><span class="tag ${tagPrestasi(m.kategori)}">${esc(m.kategori)}</span></td>
+        <td>${esc(m.bidang || '-')}</td>
+        <td class="center num" style="color:#8A6D0B">+${Number(m.bobot_poin) || 0}</td>
+        <td class="center">${m.aktif === false
+          ? '<span class="tag tag-off">Nonaktif</span>' : '<span class="tag tag-ok">Aktif</span>'}</td>
+        <td class="right">${isAdmin()
+          ? `<button class="btn-link" data-prs-edit="${esc(m.kode_prestasi)}">
+               <i class="fa-solid fa-pen-to-square"></i> Ubah</button>` : '—'}</td>
+      </tr>`).join('') || barisKosong(7, 'Tidak ada jenis apresiasi yang cocok.', 'Ubah kata kunci atau filter.');
+    const info = document.getElementById('dftPrsInfo');
+    if (info) info.textContent = `${rows.length} dari ${semua.length} jenis`;
+  };
+
+  await Swal.fire({
+    width: 1040, showConfirmButton:false, showCloseButton:true,
+    customClass: { popup:'dft-popup' },
+    title: 'Master Prestasi',
+    html: `<div class="dft">
+      <div class="dft-bar">
+        <input id="dftPrsCari" class="input grow" placeholder="Cari kode, nama, atau bidang…">
+        <select id="dftPrsKat" class="input">
+          <option value="">Semua kategori</option>
+          ${KAT_PRESTASI.map(k => `<option>${k}</option>`).join('')}
+        </select>
+        ${isAdmin() ? `<button class="btn btn-brass btn-sm" id="dftPrsTambah">
+          <i class="fa-solid fa-plus"></i>Tambah</button>` : ''}
+      </div>
+      <div class="dft-chips">
+        <span class="dft-note" id="dftPrsInfo"><i class="fa-solid fa-circle-info"></i></span>
+      </div>
+      <div class="dft-wrap"><table class="dft-tbl">
+        <thead><tr><th>Kode</th><th>Nama Apresiasi</th><th>Kategori</th><th>Bidang</th>
+          <th class="center">Poin</th><th class="center">Status</th><th class="right">Aksi</th></tr></thead>
+        <tbody id="dftPrsBody"></tbody>
+      </table></div>
+    </div>`,
+    didOpen: () => {
+      gambar();
+      document.getElementById('dftPrsCari').addEventListener('input',
+        debounce(e => { stDftPrs.cari = e.target.value.trim(); gambar(); }, 200));
+      document.getElementById('dftPrsKat').addEventListener('change',
+        e => { stDftPrs.kategori = e.target.value; gambar(); });
+      document.getElementById('dftPrsTambah')?.addEventListener('click', () => {
+        Swal.close(); setTimeout(() => modalMasterPrestasi(null), 200);
+      });
+      Swal.getHtmlContainer().addEventListener('click', (e) => {
+        const b = e.target.closest('[data-prs-edit]'); if (!b) return;
+        const m = semua.find(x => x.kode_prestasi === b.dataset.prsEdit);
+        Swal.close(); setTimeout(() => modalMasterPrestasi(m), 200);
+      });
+    }
+  });
+}
+
+async function modalMasterPrestasi(existing) {
+  if (!isAdmin()) return toast('error', 'Hanya Admin yang dapat mengubah master.');
+  const m = existing || {};
+  const r = await Swal.fire({
+    title: existing ? 'Ubah jenis apresiasi' : 'Jenis apresiasi baru',
+    width: 640,
+    html: `<div class="stack">
+      <div class="duo">
+        <div class="field"><label class="label">Kode</label>
+          <input id="mpKode" class="input mono" value="${esc(m.kode_prestasi || '')}"
+            ${existing ? 'readonly' : 'placeholder="A106"'}></div>
+        <div class="field"><label class="label">Kategori</label>
+          <select id="mpKat" class="input">
+            ${KAT_PRESTASI.map(k => `<option${k === (m.kategori || 'Perunggu') ? ' selected' : ''}>${k}</option>`).join('')}
+          </select></div>
+      </div>
+      <div class="field"><label class="label">Nama apresiasi</label>
+        <input id="mpNama" class="input" value="${esc(m.nama_prestasi || '')}"
+          placeholder="Misal: Menjadi imam shalat berjamaah sepekan penuh"></div>
+      <div class="duo">
+        <div class="field"><label class="label">Bidang</label>
+          <input id="mpBidang" class="input" value="${esc(m.bidang || '')}"
+            placeholder="Ubudiyah / Akademik / Tahfiz…"></div>
+        <div class="field"><label class="label">Bobot poin (positif)</label>
+          <input id="mpPoin" type="number" min="1" max="100" class="input mono"
+            value="${Number(m.bobot_poin) || 5}"></div>
+      </div>
+      <div class="field"><label class="label">Keterangan</label>
+        <textarea id="mpKet" class="input" rows="2">${esc(m.keterangan || '')}</textarea></div>
+      <div class="field">
+        <label class="label">Status</label>
+        <select id="mpAktif" class="input">
+          <option value="true"${m.aktif !== false ? ' selected' : ''}>Aktif</option>
+          <option value="false"${m.aktif === false ? ' selected' : ''}>Nonaktif</option>
+        </select>
+      </div>
+    </div>`,
+    showCancelButton:true, confirmButtonText:'Simpan',
+    cancelButtonText:'Batal', confirmButtonColor:'#14618B',
+    preConfirm: () => {
+      const kode = document.getElementById('mpKode').value.trim();
+      const nama = document.getElementById('mpNama').value.trim();
+      if (!kode || !nama) { Swal.showValidationMessage('Kode dan nama wajib diisi.'); return false; }
+      return {
+        kode_prestasi: kode,
+        nama_prestasi: nama,
+        kategori: document.getElementById('mpKat').value,
+        bidang: document.getElementById('mpBidang').value.trim() || null,
+        bobot_poin: Math.max(1, Number(document.getElementById('mpPoin').value) || 1),
+        keterangan: document.getElementById('mpKet').value.trim() || null,
+        aktif: document.getElementById('mpAktif').value === 'true'
+      };
+    }
+  });
+  if (!r.isConfirmed) return;
+
+  try {
+    const { error } = await db.from('master_prestasi')
+      .upsert(r.value, { onConflict: 'kode_prestasi' });
+    if (error) throw error;
+    cacheHapus('masterPrestasi');
+    toast('success', 'Master prestasi tersimpan.');
+    if (APP.view === 'master') navigateTo('master');
+  } catch (err) { fireError(err); }
+}
 
 // ---------------------------------------------------------------------
 // 22. START — pulihkan sesi bila masih berlaku
