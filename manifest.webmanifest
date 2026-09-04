@@ -1,0 +1,39 @@
+{
+  "name": "Pengembangan Santri — Dayah Ruhul Qurani",
+  "short_name": "Santri RQ",
+  "description": "Pencatatan kedisiplinan, prestasi, hafalan, perizinan, dan pembinaan santri.",
+  "lang": "id",
+  "dir": "ltr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#061826",
+  "theme_color": "#0B2B45",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='42' fill='%230B2B45'/%3E%3Cpath d='M96 34 158 96 96 158 34 96Z' fill='none' stroke='%23C9A227' stroke-width='7'/%3E%3Crect x='60' y='60' width='72' height='72' fill='none' stroke='%23C9A227' stroke-width='5'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='112' fill='%230B2B45'/%3E%3Cpath d='M256 90 422 256 256 422 90 256Z' fill='none' stroke='%23C9A227' stroke-width='18'/%3E%3Crect x='160' y='160' width='192' height='192' fill='none' stroke='%23C9A227' stroke-width='13'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' fill='%230B2B45'/%3E%3Cpath d='M256 130 382 256 256 382 130 256Z' fill='none' stroke='%23C9A227' stroke-width='20'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    { "name": "Catat Prestasi", "url": "./index.html#prestasi", "description": "Catat apresiasi santri" },
+    { "name": "Setoran Tahfiz", "url": "./index.html#tahfiz", "description": "Catat setoran hafalan" },
+    { "name": "Profil Santri", "url": "./index.html#siswa", "description": "Cari data santri" }
+  ]
+}
