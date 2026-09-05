@@ -1598,12 +1598,98 @@ async function navigateTo(view) {
 /** Petunjuk geser untuk tabel lebar di layar kecil. */
 function tandaiTabelBisaGeser() {
   requestAnimationFrame(() => {
+    siapkanTabelKartu();
     document.querySelectorAll('.tbl').forEach(w => {
       const hint = w.parentElement?.querySelector('.scroll-hint');
-      if (hint) hint.classList.toggle('on', w.scrollWidth > w.clientWidth + 4);
+      if (!hint) return;
+      // Di mode kartu (ponsel) tidak ada yang perlu digeser lagi.
+      const modeKartu = w.hasAttribute('data-kartu') && window.matchMedia('(max-width: 760px)').matches;
+      hint.classList.toggle('on', !modeKartu && w.scrollWidth > w.clientWidth + 4);
     });
   });
 }
+
+/**
+ * Menyalin judul kolom dari <thead> ke atribut data-l pada setiap sel.
+ *
+ * Dengan begitu CSS bisa mengubah tabel apa pun menjadi kartu berlabel
+ * di ponsel (lihat blok "TABEL BERUBAH MENJADI KARTU" di index.html)
+ * TANPA perlu menyentuh satu pun fungsi render — berlaku otomatis untuk
+ * tabel santri, pelanggaran, rekap, perizinan, pembinaan, audit, dst.
+ *
+ * Kolom dipetakan memakai peta okupansi supaya rowspan & colspan
+ * (yang dipakai tabel rekap) tetap mendapat label kolom yang benar.
+ */
+function siapkanTabelKartu(akar) {
+  (akar || document).querySelectorAll('.tbl table').forEach(tabel => {
+    if (tabel.dataset.kartuSiap === '1') return;
+
+    const kepala = tabel.tHead && tabel.tHead.rows[tabel.tHead.rows.length - 1];
+    if (!kepala) return;
+
+    const judul = [];
+    Array.from(kepala.cells).forEach(sel => {
+      const teks = (sel.textContent || '').trim();
+      for (let k = 0; k < (sel.colSpan || 1); k++) judul.push(teks);
+    });
+    if (judul.length < 3) return;   // tabel sempit: biarkan apa adanya
+
+    Array.from(tabel.tBodies).forEach(tubuh => {
+      const terisi = [];            // peta okupansi untuk rowspan/colspan
+      Array.from(tubuh.rows).forEach((baris, r) => {
+        terisi[r] = terisi[r] || [];
+        let k = 0;
+        Array.from(baris.cells).forEach(sel => {
+          while (terisi[r][k]) k++;
+          const lebar = sel.colSpan || 1, tinggi = sel.rowSpan || 1;
+          if (lebar >= judul.length) sel.setAttribute('data-penuh', '');
+          else if (!sel.hasAttribute('data-l')) sel.setAttribute('data-l', judul[k] || '');
+          for (let dr = 0; dr < tinggi; dr++) {
+            terisi[r + dr] = terisi[r + dr] || [];
+            for (let dk = 0; dk < lebar; dk++) terisi[r + dr][k + dk] = 1;
+          }
+          k += lebar;
+        });
+      });
+    });
+
+    tabel.dataset.kartuSiap = '1';
+    const bungkus = tabel.closest('.tbl');
+    if (bungkus) bungkus.setAttribute('data-kartu', '');
+  });
+}
+
+/* Jaring pengaman: tabel yang dirender di luar alur navigasi (mis. di
+   dalam jendela SweetAlert) ikut diberi label. Pengamat ini hanya
+   menjadwalkan satu pekerjaan saat peramban sedang senggang, jadi tidak
+   menambah beban saat pengguna sedang berinteraksi. */
+(function pantauTabelBaru() {
+  if (typeof MutationObserver !== 'function') return;
+  const santai = window.requestIdleCallback || ((f) => setTimeout(f, 120));
+  let terjadwal = false;
+  const jadwalkan = () => {
+    if (terjadwal) return;
+    terjadwal = true;
+    santai(() => { terjadwal = false; try { siapkanTabelKartu(); } catch (e) {} });
+  };
+  new MutationObserver(jadwalkan)
+    .observe(document.documentElement, { childList: true, subtree: true });
+})();
+
+/* Perangkat kelas bawah / mode hemat data: matikan efek hias yang mahal
+   (kaca buram, paralaks, kilau) lewat kelas `hemat` di elemen <html>.
+   Aturan CSS-nya sudah disiapkan di index.html. */
+(function tandaiPerangkatHemat() {
+  try {
+    const n = navigator;
+    const koneksi = n.connection || n.mozConnection || n.webkitConnection;
+    const lambat = !!(koneksi && (koneksi.saveData ||
+                    /(^|-)2g$/.test(String(koneksi.effectiveType || ''))));
+    const kecil = (n.hardwareConcurrency && n.hardwareConcurrency <= 4) ||
+                  (n.deviceMemory && n.deviceMemory <= 3);
+    if (lambat || kecil) document.documentElement.classList.add('hemat');
+  } catch (e) {}
+})();
 
 // ---------------------------------------------------------------------
 // 9. KOMPONEN BERSAMA
@@ -5071,6 +5157,409 @@ async function cetakLaporan(nisn) {
 
 window.addEventListener('afterprint', () => { $('printArea').innerHTML = ''; });
 
+/* =====================================================================
+   20a-1. PENANGKAL GALAT WARNA PADA UNDUH PDF
+   =====================================================================
+   Gejala: menekan "Unduh PDF" berakhir dengan pesan semacam
+     "Attempting to parse an unsupported color function 'oklab'"
+   (atau 'oklch' / 'color-mix').
+
+   Sebabnya: html2pdf memakai html2canvas, yang parser warnanya hanya
+   mengenal sRGB gaya lama — #hex, rgb(), rgba(), dan nama warna.
+   Sistem desain aplikasi ini memakai oklch() dan color-mix(in oklab, …);
+   nilai TERHITUNG-nya di Chrome berbentuk oklab()/oklch(), sehingga
+   html2canvas menyerah begitu membaca gaya apa pun yang mewarisinya.
+
+   Penting: menimpa variabel warna di #pdfStage saja TIDAK cukup, karena
+   html2pdf MEMINDAHKAN elemen laporan keluar dari #pdfStage ke wadahnya
+   sendiri (.html2pdf__overlay) di dalam <body> — begitu berpindah,
+   penimpaan itu tidak berlaku lagi dan seluruh gaya aplikasi kembali
+   mengenai laporan. Itulah sebabnya perbaikan sebelumnya tidak mempan.
+
+   Penyelesaiannya dua lapis, keduanya bekerja pada SALINAN dokumen
+   (onclone) sehingga tampilan yang dilihat pengguna tidak berubah:
+
+     Lapis 1 — seluruh <style> aplikasi dilepas dari salinan, diganti
+       gaya cetak khusus yang hanya memakai hex. Aman sepenuhnya:
+       bangunLaporanHTML() menghasilkan gaya sebaris (inline) dan satu
+       kelas .laporan saja, jadi tidak ada gaya yang benar-benar hilang.
+
+     Lapis 2 — jaring pengaman: nilai warna modern yang masih tersisa
+       (mis. dari gaya sebaris) diterjemahkan sendiri ke rgb() sebelum
+       html2canvas sempat membacanya.
+   ===================================================================== */
+
+/** Gaya cetak hex-saja yang dipasang pada salinan dokumen. */
+const GAYA_AMAN_PDF = `
+  html, body {
+    margin:0; padding:0; background:#FFFFFF; color:#0E2233;
+    font-family:Arial, Helvetica, sans-serif;
+    -webkit-print-color-adjust:exact; print-color-adjust:exact;
+  }
+  *, *::before, *::after {
+    box-sizing:border-box;
+    animation:none !important; transition:none !important;
+    filter:none !important; -webkit-backdrop-filter:none !important;
+    backdrop-filter:none !important; text-shadow:none !important;
+    box-shadow:none !important;
+  }
+  .html2pdf__overlay, .html2pdf__container { background:#FFFFFF !important; }
+  /* Ukuran dasar disamakan persis dengan gaya aplikasi supaya tata letak
+     PDF identik dengan hasil cetak (font-size 14px, line-height 1.55). */
+  body { font-size:14px; line-height:1.55; }
+  .laporan { background:#FFFFFF; }
+  .laporan table { width:100%; border-collapse:collapse; }
+  .laporan table thead { display:table-header-group; }
+  .laporan table tr { break-inside:avoid; page-break-inside:avoid; }
+  .laporan h1, .laporan h2, .laporan h3, .laporan h4 { color:#0E2233; }
+  .laporan h3 { break-after:avoid; page-break-after:avoid; }
+  .laporan img { max-width:100%; }
+`;
+
+/** Properti CSS yang boleh membawa warna dan dibaca html2canvas. */
+const SIFAT_WARNA_PDF = [
+  'color', 'background-color', 'background-image',
+  'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color',
+  'outline-color', 'text-decoration-color', 'column-rule-color', 'caret-color',
+  'box-shadow', 'text-shadow', 'fill', 'stroke',
+  '-webkit-text-fill-color', '-webkit-text-stroke-color'
+];
+
+const RE_WARNA_MODERN = /oklch\(|oklab\(|color-mix\(|\blab\(|\blch\(|\bcolor\(/i;
+
+let _ctxWarnaPdf;
+function ctxWarnaPdf() {
+  if (_ctxWarnaPdf === undefined) {
+    try { _ctxWarnaPdf = document.createElement('canvas').getContext('2d'); }
+    catch (e) { _ctxWarnaPdf = null; }
+  }
+  return _ctxWarnaPdf;
+}
+
+/** oklab → sRGB (rumus resmi CSS Color 4). */
+function oklabKeRgb(L, a, b, alfa) {
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+  const l = l_ * l_ * l_, m = m_ * m_ * m_, s = s_ * s_ * s_;
+
+  const lurus = [
+     4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+  ];
+  const gamma = (c) => {
+    c = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(c, 0), 1 / 2.4) - 0.055;
+    return Math.round(Math.min(1, Math.max(0, c)) * 255);
+  };
+  const [r, g, bi] = lurus.map(gamma);
+  const a2 = (alfa == null || !isFinite(alfa)) ? 1 : Math.min(1, Math.max(0, alfa));
+  return a2 >= 1 ? `rgb(${r}, ${g}, ${bi})` : `rgba(${r}, ${g}, ${bi}, ${Math.round(a2 * 1000) / 1000})`;
+}
+
+/** Warna apa pun → [r, g, b, a] dengan r/g/b 0–255. null bila gagal. */
+function uraiRgba(teks) {
+  let t = String(teks || '').trim().toLowerCase();
+  if (!t) return null;
+  if (t === 'transparent') return [0, 0, 0, 0];
+  if (t === 'currentcolor' || t === 'none') return null;
+
+  if (t[0] === '#') {
+    const h = t.slice(1);
+    const p = (s) => parseInt(s, 16);
+    if (h.length === 3 || h.length === 4) {
+      return [p(h[0] + h[0]), p(h[1] + h[1]), p(h[2] + h[2]),
+              h.length === 4 ? p(h[3] + h[3]) / 255 : 1];
+    }
+    if (h.length === 6 || h.length === 8) {
+      return [p(h.slice(0, 2)), p(h.slice(2, 4)), p(h.slice(4, 6)),
+              h.length === 8 ? p(h.slice(6, 8)) / 255 : 1];
+    }
+    return null;
+  }
+
+  const m = /^rgba?\(([^)]*)\)$/.exec(t);
+  if (m) {
+    const bag = m[1].split(/[\s,/]+/).filter(Boolean);
+    if (bag.length < 3) return null;
+    const n = (v, skala) => v.endsWith('%') ? parseFloat(v) / 100 * skala : parseFloat(v);
+    const a = bag[3] == null ? 1 : (bag[3].endsWith('%') ? parseFloat(bag[3]) / 100 : parseFloat(bag[3]));
+    return [n(bag[0], 255), n(bag[1], 255), n(bag[2], 255), isFinite(a) ? a : 1];
+  }
+
+  if (RE_WARNA_MODERN.test(t)) {
+    const hasil = hitungWarnaModern(t);
+    return hasil ? uraiRgba(hasil) : null;
+  }
+
+  // Nama warna yang benar-benar dipakai berkas ini — dijawab langsung
+  // supaya tidak bergantung pada dukungan peramban.
+  const NAMA = {
+    white: [255, 255, 255, 1], black: [0, 0, 0, 1],
+    silver: [192, 192, 192, 1], gray: [128, 128, 128, 1], grey: [128, 128, 128, 1]
+  };
+  if (NAMA[t]) return NAMA[t].slice();
+
+  // Nama warna lain — serahkan ke peramban.
+  const ctx = ctxWarnaPdf();
+  if (ctx) {
+    try {
+      ctx.fillStyle = '#010203';
+      ctx.fillStyle = t;
+      const hasil = ctx.fillStyle;
+      if (typeof hasil === 'string' && hasil !== '#010203') return uraiRgba(hasil);
+    } catch (e) {}
+  }
+  return null;
+}
+
+function rgbaKeTeks(r, g, b, a) {
+  const k = (c) => Math.round(Math.min(255, Math.max(0, c)));
+  const a2 = (a == null || !isFinite(a)) ? 1 : Math.min(1, Math.max(0, a));
+  return a2 >= 1 ? `rgb(${k(r)}, ${k(g)}, ${k(b)})`
+                 : `rgba(${k(r)}, ${k(g)}, ${k(b)}, ${Math.round(a2 * 1000) / 1000})`;
+}
+
+/**
+ * Pengganti color-mix(). Pencampuran dilakukan di ruang sRGB dengan
+ * alfa terpramultiplikasi — persis seperti aturan CSS untuk kasus yang
+ * dipakai berkas ini (campuran dengan `transparent` dan dengan `white`),
+ * sehingga hasilnya sama dengan yang dilihat pengguna di layar.
+ */
+function campurWarna(isi) {
+  const bagian = [];
+  let dalam = 0, kini = '';
+  for (const c of isi) {
+    if (c === '(') dalam++;
+    if (c === ')') dalam--;
+    if (c === ',' && dalam === 0) { bagian.push(kini); kini = ''; }
+    else kini += c;
+  }
+  bagian.push(kini);
+  if (bagian.length < 3) return null;
+
+  const ambil = (teks) => {
+    const t = teks.trim();
+    const m = /^([\s\S]+?)\s+([\d.]+)%$/.exec(t) || /^([\d.]+)%\s+([\s\S]+)$/.exec(t);
+    if (!m) return { warna: t, bagi: null };
+    return /%$/.test(m[2] + '%') && /^[\d.]+$/.test(m[2])
+      ? { warna: m[1].trim(), bagi: parseFloat(m[2]) / 100 }
+      : { warna: m[2].trim(), bagi: parseFloat(m[1]) / 100 };
+  };
+
+  const a = ambil(bagian[1]), b = ambil(bagian[2]);
+  let pa = a.bagi, pb = b.bagi;
+  if (pa == null && pb == null) { pa = pb = 0.5; }
+  else if (pa == null) pa = 1 - pb;
+  else if (pb == null) pb = 1 - pa;
+  const total = pa + pb;
+  if (!total) return null;
+  pa /= total; pb /= total;
+
+  const ca = uraiRgba(a.warna), cb = uraiRgba(b.warna);
+  if (!ca || !cb) return null;
+
+  const alfa = ca[3] * pa + cb[3] * pb;
+  if (alfa <= 0) return 'rgba(0, 0, 0, 0)';
+  const kanal = (i) => (ca[i] * ca[3] * pa + cb[i] * cb[3] * pb) / alfa;
+  return rgbaKeTeks(kanal(0), kanal(1), kanal(2), alfa);
+}
+
+/** Menghitung sendiri oklch()/oklab()/color(srgb …)/color-mix() → rgb(). */
+function hitungWarnaModern(teks) {
+  const m = /^\s*([a-z-]+)\(([\s\S]*)\)\s*$/i.exec(String(teks).trim());
+  if (!m) return null;
+  const nama = m[1].toLowerCase();
+  if (nama === 'color-mix') return campurWarna(m[2]);
+  const potong = m[2].split('/');
+  const bagian = potong[0].trim().split(/[\s,]+/).filter(Boolean);
+
+  let alfa = 1;
+  if (potong.length > 1) {
+    const t = potong[potong.length - 1].trim();
+    alfa = t.endsWith('%') ? parseFloat(t) / 100 : parseFloat(t);
+  }
+  const angka = (t, skala) => {
+    t = String(t == null ? '' : t).trim();
+    if (t === 'none' || t === '') return 0;
+    return t.endsWith('%') ? (parseFloat(t) / 100) * skala : parseFloat(t);
+  };
+
+  if (nama === 'oklab' || nama === 'oklch') {
+    if (bagian.length < 3) return null;
+    const L = angka(bagian[0], 1);
+    let A, B;
+    if (nama === 'oklch') {
+      const C = angka(bagian[1], 0.4);
+      const H = String(bagian[2]).trim();
+      let sudut = parseFloat(H) || 0;
+      if (/rad$/i.test(H)) sudut = sudut * 180 / Math.PI;
+      else if (/turn$/i.test(H)) sudut *= 360;
+      else if (/grad$/i.test(H)) sudut *= 0.9;
+      const r = sudut * Math.PI / 180;
+      A = C * Math.cos(r); B = C * Math.sin(r);
+    } else {
+      A = angka(bagian[1], 0.4); B = angka(bagian[2], 0.4);
+    }
+    if (![L, A, B].every(isFinite)) return null;
+    return oklabKeRgb(L, A, B, alfa);
+  }
+
+  if (nama === 'color') {
+    const ruang = (bagian.shift() || '').toLowerCase();
+    if (!/^(srgb|srgb-linear|display-p3|a98-rgb|prophoto-rgb|rec2020)$/.test(ruang)) return null;
+    if (bagian.length < 3) return null;
+    let [r, g, b] = bagian.slice(0, 3).map(t => angka(t, 1));
+    if (ruang === 'srgb-linear') {
+      const gamma = (c) => c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(c, 0), 1 / 2.4) - 0.055;
+      r = gamma(r); g = gamma(g); b = gamma(b);
+    }
+    const k = (c) => Math.round(Math.min(1, Math.max(0, c)) * 255);
+    const a2 = isFinite(alfa) ? Math.min(1, Math.max(0, alfa)) : 1;
+    return a2 >= 1 ? `rgb(${k(r)}, ${k(g)}, ${k(b)})`
+                   : `rgba(${k(r)}, ${k(g)}, ${k(b)}, ${a2})`;
+  }
+  return null;
+}
+
+/** Satu nilai warna apa pun → sRGB yang dimengerti html2canvas. */
+function warnaKeSrgb(nilai) {
+  const teks = String(nilai || '').trim();
+  if (!teks) return null;
+
+  // 1) Biarkan mesin peramban yang menghitung, bila ia mau.
+  const ctx = ctxWarnaPdf();
+  if (ctx) {
+    try {
+      ctx.fillStyle = '#010203';
+      ctx.fillStyle = teks;
+      const hasil = ctx.fillStyle;
+      if (typeof hasil === 'string' && /^(#|rgb)/i.test(hasil) &&
+          !(hasil.toLowerCase() === '#010203' && !/^#010203$/i.test(teks))) {
+        return hasil;
+      }
+    } catch (e) { /* lanjut ke perhitungan manual */ }
+  }
+  // 2) Hitung sendiri.
+  return hitungWarnaModern(teks);
+}
+
+/**
+ * Mengganti setiap fungsi warna modern di dalam sebuah nilai CSS
+ * (termasuk yang bersarang di gradasi & bayangan) dengan rgb().
+ * Tanda kurung dihitung berpasangan supaya gradasi rumit tetap utuh.
+ */
+function gantiFungsiWarna(teks) {
+  const re = /\b(color-mix|oklch|oklab|lab|lch|color)\(/gi;
+  let hasil = '', i = 0, m;
+  while ((m = re.exec(teks)) !== null) {
+    const mulai = m.index;
+    let j = re.lastIndex, dalam = 1;
+    while (j < teks.length && dalam > 0) {
+      const c = teks[j];
+      if (c === '(') dalam++;
+      else if (c === ')') dalam--;
+      j++;
+    }
+    const potongan = teks.slice(mulai, j);
+    hasil += teks.slice(i, mulai) + (warnaKeSrgb(potongan) || 'rgba(0, 0, 0, 0)');
+    i = j; re.lastIndex = j;
+  }
+  return hasil + teks.slice(i);
+}
+
+/** Jaring pengaman: terjemahkan sisa warna modern di salinan dokumen. */
+function normalisasiWarnaPdf(doc, akar) {
+  const jendela = doc.defaultView || window;
+  const daftar = [];
+  if (doc.documentElement) daftar.push(doc.documentElement);
+  if (doc.body) daftar.push(doc.body);
+  const pangkal = akar || doc.body || doc.documentElement;
+  if (pangkal) {
+    daftar.push(pangkal);
+    pangkal.querySelectorAll('*').forEach(el => daftar.push(el));
+  }
+  daftar.forEach(el => {
+    let gaya;
+    try { gaya = jendela.getComputedStyle(el); } catch (e) { return; }
+    if (!gaya) return;
+    for (const sifat of SIFAT_WARNA_PDF) {
+      let nilai;
+      try { nilai = gaya.getPropertyValue(sifat); } catch (e) { continue; }
+      if (!nilai || !RE_WARNA_MODERN.test(nilai)) continue;
+      try { el.style.setProperty(sifat, gantiFungsiWarna(nilai), 'important'); } catch (e) {}
+    }
+  });
+}
+
+/**
+ * AKAR MASALAHNYA ADA DI SINI.
+ *
+ * Sebelum menyalin apa pun, html2canvas membaca warna latar <html> dan
+ * <body> dari HALAMAN ASLI — bukan dari salinan:
+ *
+ *     documentBackgroundColor = parseColor(getComputedStyle(
+ *         ownerDocument.documentElement).backgroundColor)
+ *     bodyBackgroundColor     = parseColor(getComputedStyle(
+ *         ownerDocument.body).backgroundColor)
+ *
+ * `body { background: var(--paper) }` bernilai oklch(98% .005 240) di
+ * Chrome, dan html2canvas langsung menyerah di baris itu — jauh sebelum
+ * laporan sempat disentuh. Itulah sebabnya semua percobaan menimpa warna
+ * di #pdfStage tidak pernah berhasil: yang dibaca bukan #pdfStage.
+ *
+ * Penyelesaiannya: selama beberapa saat proses render, latar <html> dan
+ * <body> asli ditulis sebagai hex sRGB, lalu dikembalikan persis seperti
+ * semula. Pengguna tidak melihat apa pun berubah karena layar sedang
+ * tertutup #pdfMask.
+ */
+function amankanLatarDokumen() {
+  const el = document.documentElement, body = document.body;
+  const lamaEl = el.style.backgroundColor;
+  const lamaBody = body.style.backgroundColor;
+  let latarBody = '#F6F9FC';
+  try { latarBody = warnaKeSrgb(getComputedStyle(body).backgroundColor) || latarBody; } catch (e) {}
+  el.style.backgroundColor = '#FFFFFF';
+  body.style.backgroundColor = latarBody;
+  return () => {
+    el.style.backgroundColor = lamaEl;
+    body.style.backgroundColor = lamaBody;
+  };
+}
+
+/** Dipanggil html2canvas atas salinan dokumen, sebelum dilukis. */
+function siapkanKlonPdf(doc) {
+  try {
+    // Lapis 1 — lepas seluruh gaya aplikasi, pasang gaya cetak hex-saja.
+    doc.querySelectorAll('style').forEach(n => n.remove());
+    doc.querySelectorAll('link[rel="stylesheet"]').forEach(n => {
+      const href = n.getAttribute('href') || '';
+      if (!/fonts\.googleapis\.com|font-?awesome/i.test(href)) n.remove();
+    });
+    const gaya = doc.createElement('style');
+    gaya.textContent = GAYA_AMAN_PDF;
+    (doc.head || doc.documentElement).appendChild(gaya);
+
+    // Buang bagian aplikasi yang tidak ikut dicetak (mempercepat render).
+    doc.querySelectorAll('#loginScreen, #appShell, #bar, #scrim, .tabbar, #pdfMask, #pdfStage, #printArea, .swal2-container')
+       .forEach(n => n.remove());
+
+    if (doc.documentElement) {
+      doc.documentElement.removeAttribute('class');
+      doc.documentElement.style.background = '#FFFFFF';
+    }
+    if (doc.body) {
+      doc.body.style.background = '#FFFFFF';
+      doc.body.style.color = '#0E2233';
+    }
+
+    // Lapis 2 — jaring pengaman untuk gaya sebaris yang tersisa.
+    normalisasiWarnaPdf(doc, doc.querySelector('.laporan') || doc.body);
+  } catch (e) {
+    console.warn('[PDF] Penyiapan salinan gagal, lanjut apa adanya:', e);
+  }
+}
+
 /**
  * Unduh PDF memakai panggung render terpisah (#pdfStage), bukan #printArea.
  * html2canvas berjalan pada media screen sehingga elemen harus benar-benar
@@ -5084,11 +5573,14 @@ async function unduhLaporanPdf(nisn) {
   }
 
   const stage = $('pdfStage'), mask = $('pdfMask');
+  let htmlLaporan = '';
+  let pulihkanLatar = () => {};
   loading(true);
   try {
     const dataMentah = await ambilLaporan(nisn);
     const data = await lengkapiLaporan(saringDataLaporanBulanan(dataMentah));
-    stage.innerHTML = bangunLaporanHTML(data);
+    htmlLaporan = bangunLaporanHTML(data);
+    stage.innerHTML = htmlLaporan;
     stage.classList.add('on');
     mask.classList.add('on');
 
@@ -5103,18 +5595,41 @@ async function unduhLaporanPdf(nisn) {
     }
 
     const nama = namaBerkasLaporan(data.siswa?.nama_siswa);
+    pulihkanLatar = amankanLatarDokumen();
 
     await window.html2pdf().set({
       margin: [8,8,8,8], filename: nama,
       image: { type:'jpeg', quality:0.98 },
-      html2canvas: { scale:2, useCORS:true, backgroundColor:'#ffffff', logging:false, scrollX:0, scrollY:0 },
-      jsPDF: { unit:'mm', format:'a4', orientation:'portrait' },
+      html2canvas: {
+        scale: Math.min(2, Math.max(1.5, window.devicePixelRatio || 1.5)),
+        useCORS:true, backgroundColor:'#ffffff', logging:false,
+        scrollX:0, scrollY:0, imageTimeout:15000,
+        onclone: siapkanKlonPdf
+      },
+      jsPDF: { unit:'mm', format:'a4', orientation:'portrait', compress:true },
       pagebreak: { mode:['css','legacy'], avoid:['tr','h3'] }
     }).from(root).save();
 
     toast('success', `PDF ${data.periodeAktif ? labelPeriode() : 'lengkap'} berhasil diunduh.`);
-  } catch (err) { fireError(err); }
+  } catch (err) {
+    // Bila peramban tetap menolak (mis. versi lama tanpa dukungan warna
+    // yang dipakai perangkat pengguna), laporan tidak dibiarkan hilang:
+    // dialihkan ke dialog cetak, dan dari sana bisa "Simpan sebagai PDF".
+    const pesan = String(err && (err.message || err));
+    if (/unsupported color|color function|oklab|oklch|color-mix/i.test(pesan) && htmlLaporan) {
+      console.warn('[PDF] html2canvas menolak warna, beralih ke dialog cetak:', pesan);
+      toast('warning', 'Peramban menolak render warna. Dialihkan ke dialog cetak — pilih "Simpan sebagai PDF".');
+      $('printArea').innerHTML = htmlLaporan;
+      pulihkanLatar();
+      stage.classList.remove('on'); stage.innerHTML = '';
+      mask.classList.remove('on'); loading(false);
+      setTimeout(() => window.print(), 220);
+      return;
+    }
+    fireError(err);
+  }
   finally {
+    pulihkanLatar();
     stage.classList.remove('on'); stage.innerHTML = '';
     mask.classList.remove('on');
     loading(false);
