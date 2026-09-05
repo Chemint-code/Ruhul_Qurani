@@ -2436,7 +2436,7 @@ async function bukaDetailSantri(nisn) {
           </div></div>`; }
       if (t.tipe === 'prestasi') { const p = t.r; return `
         <div class="tl-item">
-          <div class="mark" style="background:color-mix(in oklab,var(--brass) 18%,white);color:#8A6D0B">
+          <div class="mark" style="background:#f5eed8;color:#8A6D0B">
             <i class="fa-solid fa-award"></i></div>
           <div class="body">
             <div class="row1"><p class="ttl" style="margin:0">${esc(p.judul)}</p>
@@ -2481,8 +2481,8 @@ async function bukaDetailSantri(nisn) {
               <p class="v" style="color:${poinPlg>=50?'var(--maroon)':'var(--text)'}">${poinPlg}</p>
               <p class="k">Pelanggaran</p>
             </div>
-            <div class="poin-badge" style="background:color-mix(in oklab,var(--brass) 9%,white);
-                 border-color:color-mix(in oklab,var(--brass) 30%,white)">
+            <div class="poin-badge" style="background:#faf6eb;
+                 border-color:#eee3be">
               <p class="v" style="color:#8A6D0B">+${poinPrestasi}</p>
               <p class="k">Apresiasi</p>
             </div>
@@ -2490,7 +2490,7 @@ async function bukaDetailSantri(nisn) {
               <p class="v" style="color:${skorNet>=50?'var(--maroon)':skorNet>0?'var(--amber)':'var(--teal)'}">${skorNet}</p>
               <p class="k">Skor Net</p>
             </div>
-            <div class="poin-badge" style="background:var(--teal-bg);border-color:color-mix(in oklab,var(--teal) 24%,white)">
+            <div class="poin-badge" style="background:var(--teal-bg);border-color:#c5dedc">
               <p class="v" style="color:var(--teal)">${juzDari(halTahfiz)}</p>
               <p class="k">Juz Hafal</p>
             </div>
@@ -9782,7 +9782,7 @@ async function gambarPrestasi() {
         ${r.catatan ? `<div class="adm-note">${esc(r.catatan)}</div>` : ''}
         ${r.bidang ? `<div class="secondary">${esc(r.bidang)}</div>` : ''}</td>
       <td><span class="tag ${tagPrestasi(r.kategori)}">${esc(r.kategori || '-')}</span></td>
-      <td class="center"><span class="poin-pill" style="background:color-mix(in oklab,var(--brass) 16%,white);color:#7A5F05">+${Number(r.poin)||0}</span></td>
+      <td class="center"><span class="poin-pill" style="background:#f6f0dc;color:#7A5F05">+${Number(r.poin)||0}</span></td>
       <td class="right">${bolehArsip
         ? `<button class="btn-link" data-prs-arsip="${r.id}" style="color:var(--maroon)">
              <i class="fa-solid fa-box-archive"></i> Arsip</button>` : '—'}</td>
