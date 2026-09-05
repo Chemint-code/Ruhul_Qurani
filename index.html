@@ -395,6 +395,186 @@
   .login-form .sub { color:var(--text-2); font-size:13px; margin:0 0 28px; }
   .login-card .input { background: color-mix(in oklab, white 92%, transparent); }
 
+  /* ============================================================
+     LOGIN — TATA GERAK
+
+     Satu prinsip memandu seluruh blok ini: gerak yang berwibawa
+     adalah gerak yang MASUK CEPAT LALU MENGENDAP PANJANG, bukan
+     gerak yang meluncur rata. Kurva --lengkung sudah melakukan
+     itu; yang perlu diatur tinggal urutan dan jeda.
+
+     Urutannya mengikuti cara mata membaca halaman ini: segel dan
+     nama lembaga lebih dulu, baru ayat, baru judul, baru kalimat
+     penjelas, terakhir kartu masuk. Jeda antaranya 0,12-0,2 detik
+     — cukup untuk terbaca sebagai urutan, terlalu singkat untuk
+     terasa sebagai antrean.
+     ============================================================ */
+
+  @keyframes masukNaik {
+    from { opacity:0; transform:translate3d(0, 18px, 0); }
+    to   { opacity:1; transform:none; }
+  }
+  /* Judul memakai kabur yang menghilang, bukan sekadar naik.
+     Efeknya seperti tulisan yang mengambil fokus — mahal di mata,
+     murah di GPU karena hanya satu lapis. */
+  @keyframes masukJudul {
+    from { opacity:0; transform:translate3d(0, 24px, 0); filter:blur(9px); }
+    to   { opacity:1; transform:none; filter:blur(0); }
+  }
+  @keyframes masukGaris { from { transform:scaleX(0); } to { transform:scaleX(1); } }
+  @keyframes segelMuncul {
+    from { opacity:0; transform:scale(.8) rotate(-7deg); }
+    to   { opacity:1; transform:none; }
+  }
+  @keyframes sapuKilauLogin {
+    0%   { transform:translateX(-150%) skewX(-18deg); opacity:0; }
+    18%  { opacity:.9; }
+    100% { transform:translateX(260%) skewX(-18deg); opacity:0; }
+  }
+
+  .brandmark        { animation: masukNaik .9s var(--lengkung) .10s both; }
+  .brandmark .seal  { animation: segelMuncul .95s var(--lengkung) .16s both; }
+  .login-verse .ar  { animation: masukNaik .9s var(--lengkung) .34s both; }
+  .login-verse h1   { animation: masukJudul 1.15s var(--lengkung) .46s both; }
+  .login-verse p    { animation: masukNaik .9s var(--lengkung) .66s both; }
+  .login-foot       { animation: masukNaik .9s var(--lengkung) .84s both; }
+
+  /* Logo tidak sekadar muncul: ia mengendap dari sedikit lebih besar,
+     lalu sebilah cahaya menyapu sekali. Sapuan itu dipotong oleh
+     overflow:hidden milik .seal, jadi terbaca sebagai kilau pada
+     logam — bukan sebagai kotak yang lewat. */
+  .brandmark .seal img {
+    transform:scale(1.16);
+    transition:opacity .8s ease, transform .8s var(--lengkung);
+  }
+  .brandmark .seal img.ready { opacity:1; transform:none; }
+  .brandmark .seal::after {
+    content:''; position:absolute; inset:-45% -60%; pointer-events:none;
+    background:linear-gradient(90deg, transparent,
+               color-mix(in oklab, white 72%, transparent), transparent);
+    animation: sapuKilauLogin 1.5s var(--lengkung) 1.15s both;
+  }
+
+  /* Kartu masuk — menggantikan animasi `naik` bawaan dengan yang
+     lebih panjang dan sejalan dengan sisi kiri. */
+  .login-card { animation: masukNaik 1s var(--lengkung) .30s both; }
+  .login-card::before {
+    transform-origin:left;
+    animation: masukGaris 1.2s var(--lengkung) .55s both;
+  }
+  .login-card > *            { animation: masukNaik .75s var(--lengkung) both; }
+  .login-card > .eyebrow     { animation-delay:.54s; }
+  .login-card > h2           { animation-delay:.62s; }
+  .login-card > .sub         { animation-delay:.69s; }
+  /* Bukan :nth-of-type — itu menghitung per tag <div>, dan .eyebrow
+     yang juga <div> ikut terhitung sehingga kolom pertama tidak pernah
+     kena jedanya. Pasangan selektor di bawah menghitung per KELAS:
+     .field mana pun yang didahului .field lain adalah yang kedua. */
+  .login-card > .field           { animation-delay:.76s; }
+  .login-card > .field ~ .field  { animation-delay:.83s; }
+  .login-card > .btn         { animation-delay:.91s; }
+
+  /* --------------------------------------------------------------
+     Setelah kemunculan selesai, animasinya DILEPAS.
+
+     Ini bukan kerapian belaka. `animation-fill-mode: both` menahan
+     nilai akhir keyframe selamanya, dan nilai transform yang
+     tertahan itu mengalahkan transform deklaratif — artinya
+     kemiringan mengikuti kursor tidak akan pernah terlihat selama
+     animasinya masih menempel. Kelas .usai dipasang dari app.js.
+     -------------------------------------------------------------- */
+  .login-card.usai, .login-card.usai > *, .login-card.usai::before { animation:none; }
+  .login-card.usai {
+    transform: perspective(1200px)
+               rotateX(var(--miringX, 0deg)) rotateY(var(--miringY, 0deg));
+    transition: transform .4s var(--lengkung), box-shadow .5s ease;
+  }
+  #loginScreen.sorot .login-card.usai {
+    transition: transform .14s linear, box-shadow .5s ease;
+    box-shadow:0 2px 6px rgba(6,24,38,.12), 0 58px 96px -44px rgba(0,0,0,.95);
+  }
+
+  /* Sorot spekular pada kartu: satu lingkaran cahaya lembut yang
+     duduk di titik kursor. Inilah yang membuat kaca terasa punya
+     permukaan, bukan sekadar kotak putih. */
+  .login-card::after {
+    content:''; position:absolute; inset:0; border-radius:inherit;
+    pointer-events:none; opacity:0; transition:opacity .5s ease;
+    background:radial-gradient(420px 420px at var(--kilauX,50%) var(--kilauY,0%),
+               color-mix(in oklab, white 58%, transparent), transparent 62%);
+  }
+  #loginScreen.sorot .login-card::after { opacity:.55; }
+
+  /* Cahaya sekitar yang mengikuti kursor melintasi seluruh layar.
+     z-index 1 menaruhnya tepat di atas .login-wash dan di bawah
+     .login-art, jadi ia menerangi foto tanpa pernah mengaburkan
+     satu huruf pun. */
+  #loginScreen::after {
+    content:''; position:fixed; inset:0; z-index:1; pointer-events:none;
+    opacity:0; transition:opacity .8s ease;
+    background:radial-gradient(340px 340px at var(--mx,50%) var(--my,50%),
+               color-mix(in oklab, var(--brass) 14%, transparent), transparent 68%);
+  }
+  #loginScreen.sorot::after { opacity:1; }
+
+  /* Kolom isian: naik setipis satu piksel saat disentuh kursor,
+     dan cincin fokus yang mekar alih-alih menyala mendadak. */
+  .login-card .input {
+    transition: border-color .3s ease, background .3s ease,
+                box-shadow .4s var(--lengkung), transform .35s var(--lengkung);
+  }
+  .login-card .input:hover:not(:focus) { transform:translateY(-1px); }
+  .login-card .input:focus {
+    box-shadow:0 0 0 4px color-mix(in oklab, var(--sea) 16%, transparent),
+               0 10px 22px -14px rgba(6,24,38,.6);
+  }
+  .login-card .label { transition: color .3s ease; }
+  .login-card .field:focus-within .label { color:var(--sea); }
+
+  /* Tombol masuk — tertarik lembut ke arah kursor yang mendekat
+     (--tarikX/--tarikY diisi app.js), dan disapu kilau sekali saat
+     kursor berada di atasnya. */
+  .login-card .btn-primary {
+    position:relative; overflow:hidden;
+    transform:translate3d(var(--tarikX, 0px), var(--tarikY, 0px), 0);
+    transition: transform .5s var(--lengkung), box-shadow .35s ease, filter .3s ease;
+  }
+  .login-card.usai > .btn-primary:hover { filter:brightness(1.06); }
+  .login-card .btn-primary::after {
+    content:''; position:absolute; top:0; bottom:0; width:44%;
+    pointer-events:none; opacity:0;
+    transform:translateX(-160%) skewX(-18deg);
+    background:linear-gradient(90deg, transparent,
+               color-mix(in oklab, white 38%, transparent), transparent);
+  }
+  .login-card .btn-primary:hover::after { animation: sapuKilauLogin 1s var(--lengkung); }
+  .login-card .btn-primary i { transition: transform .35s var(--lengkung); }
+  .login-card .btn-primary:hover i { transform:translateX(4px); }
+
+  /* Layar sentuh tidak punya kursor yang "mendekat" — semua efek
+     kedekatan dimatikan supaya tidak ada yang tersangkut menyala. */
+  @media (hover:none), (pointer:coarse) {
+    #loginScreen::after, .login-card::after { display:none; }
+    .login-card.usai { transform:none; }
+    .login-card .btn-primary { transform:none; }
+  }
+
+  /* Menghormati setelan sistem: bila pengguna meminta gerak
+     dikurangi, seluruh halaman tampil utuh seketika tanpa animasi. */
+  @media (prefers-reduced-motion: reduce) {
+    #loginScreen *, #loginScreen *::before, #loginScreen *::after {
+      animation:none !important;
+      transition:none !important;
+    }
+    .brandmark, .brandmark .seal, .login-verse .ar, .login-verse h1,
+    .login-verse p, .login-foot, .login-card, .login-card > * {
+      opacity:1 !important; transform:none !important; filter:none !important;
+    }
+    .login-bg { opacity:1 !important; transform:none !important; }
+    .login-card::before { transform:none !important; }
+    #loginScreen::after, .login-card::after { display:none; }
+  }
+
   @media (min-width:901px) and (max-height:760px) {
     .login-art { padding:34px 46px; }
     .login-form { padding:34px 40px; }
