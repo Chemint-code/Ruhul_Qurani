@@ -4899,6 +4899,23 @@ function blokPenutupCetak(pj, dicetak) {
   const garis = (n) => Array.from({ length: n })
     .map(() => `<div style="height:21px;border-bottom:1px dashed #cbd5e1;"></div>`).join('');
 
+  /* ---- Takaran panel tanda tangan ------------------------------------
+     Kedua kolom disusun dari tumpukan tinggi yang PERSIS SAMA, sehingga
+     garis tanda tangan musyrif dan wali santri jatuh pada satu ketinggian
+     dan sama panjang. Sebelumnya kolom kiri memakai perataan bawah pada
+     tabel foto sedangkan kolom kanan memakai pengganjal tetap — selisih
+     ±16 px, dan pada dokumen resmi selisih sekecil itu langsung terlihat.
+     Angka-angka di bawah ini adalah satu-satunya sumber tinggi baris;
+     jangan mengubah salah satunya tanpa mengubah pasangannya. */
+  const T_KET   = 'height:15px;font-size:10px;line-height:15px;color:#64748b;';
+  const T_JAB   = 'height:17px;font-size:11px;line-height:17px;font-weight:bold;color:#0f172a;';
+  const T_SELA  = 'height:12px;';
+  const T_RUANG = 'height:84px;';   // ruang membubuhkan tanda tangan
+  const T_GARIS = 'border-top:1px solid #334155;font-size:0;line-height:0;';
+  const T_NAMA  = 'height:23px;padding-top:5px;font-size:11.5px;line-height:18px;'
+                + 'font-weight:bold;color:#0f172a;';
+  const T_SUB   = 'font-size:9.5px;line-height:14px;color:#94a3b8;';
+
   return `
   <div class="blok-utuh" style="margin-top:22px;page-break-inside:avoid;break-inside:avoid;">
 
@@ -4910,34 +4927,34 @@ function blokPenutupCetak(pj, dicetak) {
       ${garis(5)}
     </div>
 
-    <table style="width:100%;font-size:11px;margin-top:20px;border-collapse:collapse;">
+    <table style="width:100%;font-size:11px;margin-top:20px;border-collapse:collapse;
+                  table-layout:fixed;">
       <tr>
-        <td style="width:54%;vertical-align:top;padding:0;">
-          <p style="margin:0 0 1px;font-size:10px;color:#64748b;">Mengetahui dan bertanggung jawab,</p>
-          <p style="margin:0 0 11px;font-size:11px;font-weight:bold;color:#0f172a;">Musyrif Asrama</p>
-          <table style="border-collapse:collapse;"><tr>
-            <td style="padding:0;vertical-align:bottom;width:74px;">
-              <div style="width:62px;height:83px;border:1px solid #cbd5e1;
-                          background-color:#eef2f6;background-image:url('${foto}');
-                          background-size:cover;background-position:center 28%;
-                          background-repeat:no-repeat;"></div>
-            </td>
-            <td style="padding:0;vertical-align:bottom;">
-              <div style="height:46px;"></div>
-              <div style="border-bottom:1px solid #334155;padding-bottom:3px;
-                          font-size:11.5px;font-weight:bold;color:#0f172a;">${esc(nama)}</div>
-              <div style="margin-top:4px;font-size:9.5px;color:#94a3b8;">
-                ${peran ? esc(peran) + ' · ' : ''}Diterbitkan ${esc(dicetak)}</div>
-            </td>
-          </tr></table>
+        <!-- ================= Musyrif Asrama (penanggung jawab) ================= -->
+        <td style="width:50%;vertical-align:top;padding:0 16px 0 0;text-align:center;">
+          <div style="${T_KET}text-align:left;">Mengetahui dan bertanggung jawab,</div>
+          <div style="${T_JAB}text-align:left;">Musyrif Asrama</div>
+          <div style="${T_SELA}"></div>
+          <div style="${T_RUANG}">
+            <div style="width:64px;height:84px;box-sizing:border-box;
+                        border:1px solid #cbd5e1;background-color:#eef2f6;
+                        background-image:url('${foto}');background-size:cover;
+                        background-position:center 28%;background-repeat:no-repeat;"></div>
+          </div>
+          <div style="${T_GARIS}">&nbsp;</div>
+          <div style="${T_NAMA}">${esc(nama)}</div>
+          <div style="${T_SUB}">${peran ? esc(peran) + ' · ' : ''}Diterbitkan ${esc(dicetak)}</div>
         </td>
-        <td style="width:46%;vertical-align:top;padding:0 0 0 18px;text-align:center;">
-          <p style="margin:0 0 1px;font-size:10px;color:#64748b;text-align:right;">
-            ${esc(dicetak)}</p>
-          <p style="margin:0 0 11px;font-size:11px;font-weight:bold;color:#0f172a;">Wali Santri</p>
-          <div style="height:83px;"></div>
-          <div style="border-top:1px solid #334155;padding-top:4px;margin:0 8px;
-                      font-size:9.5px;color:#94a3b8;">Nama terang &amp; tanda tangan</div>
+
+        <!-- ================= Wali Santri ================= -->
+        <td style="width:50%;vertical-align:top;padding:0 0 0 16px;text-align:center;">
+          <div style="${T_KET}text-align:right;">${esc(dicetak)}</div>
+          <div style="${T_JAB}text-align:left;">Wali Santri</div>
+          <div style="${T_SELA}"></div>
+          <div style="${T_RUANG}"></div>
+          <div style="${T_GARIS}">&nbsp;</div>
+          <div style="${T_NAMA}">(&nbsp;………………………………&nbsp;)</div>
+          <div style="${T_SUB}">Nama terang &amp; tanda tangan</div>
         </td>
       </tr>
     </table>
@@ -4950,7 +4967,6 @@ function blokPenutupCetak(pj, dicetak) {
     </p>
   </div>`;
 }
-
 
 // ---------- 20e. Penyaringan periode ----------------------------------
 
