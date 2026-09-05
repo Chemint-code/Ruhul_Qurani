@@ -2626,6 +2626,471 @@
     }
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   PENYEMPURNAAN v2.1 — GERAK RINGAN & PONSEL OTOMATIS   (September 2026)
+
+   Blok ini sengaja diletakkan PALING AKHIR pada lapisan `utilitas`.
+   Karena `utilitas` adalah lapisan terakhir dalam urutan @layer, semua
+   aturan di sini pasti menang tanpa satu pun !important — jadi seluruh
+   penyetelan halus bisa dibaca terpusat di satu tempat, bukan tersebar.
+
+   Tiga sasaran:
+
+   1. RINGAN.  Biang keladi "web terasa berat" di ponsel adalah
+      backdrop-filter (kaca buram): untuk SETIAP bingkai, GPU wajib
+      membaca ulang piksel di belakang elemen lalu mengaburkannya.
+      Di layar ≤1024px, di perangkat hemat, dan saat pengguna memilih
+      hemat data, semua kaca buram diganti latar padat yang tampak
+      sama mewahnya tetapi nol biaya. Kaca hanya bertahan di desktop.
+
+   2. INDAH.  Gerak dibatasi pada transform & opacity — dua properti
+      yang ditangani murni oleh compositor GPU, tidak pernah memicu
+      layout atau paint ulang. Ditambah animasi berbasis gulir
+      (scroll-driven, `animation-timeline`) yang berjalan DI LUAR utas
+      utama, sehingga sekencang apa pun pengguna menggulir, antarmuka
+      tidak pernah tersendat.
+
+   3. OTOMATIS DI PONSEL.  Tabel lebar berubah sendiri menjadi kartu
+      berlabel, baris filter menjadi kisi dua kolom, dan pemilih
+      periode yang sebelumnya disembunyikan kini kembali muncul.
+   ══════════════════════════════════════════════════════════════════════ */
+
+@layer utilitas {
+
+  /* ═══════════════════ 1 · TAKARAN GERAK ═══════════════════
+     Semua durasi diperpendek. Riset gerak antarmuka: transisi di
+     bawah ~200 ms terbaca sebagai "responsif", di atas ~350 ms mulai
+     terbaca sebagai "menunggu". Web ini dipakai puluhan kali sehari,
+     jadi setiap 100 ms yang dihemat terasa nyata. */
+  :root {
+    --cepat:  .13s var(--lengkung);
+    --sedang: .19s var(--lengkung);
+    --lambat: .3s  var(--lengkung);
+
+    /* Satu tuas untuk seluruh efek kaca. Diubah jadi `none` di bawah. */
+    --kaca: blur(12px) saturate(1.32);
+    --kaca-tipis: blur(7px);
+  }
+
+  /* Perangkat yang tidak boleh membayar ongkos kaca buram. */
+  @media (max-width: 1024px) { :root { --kaca: none; --kaca-tipis: none; } }
+  @media (update: slow)      { :root { --kaca: none; --kaca-tipis: none; } }
+  :root.hemat                { --kaca: none; --kaca-tipis: none; }
+
+  /* Mode hemat juga mematikan animasi hias (bukan animasi umpan balik). */
+  :root.hemat .login-bg,
+  :root.hemat .pbar-cover { transition: opacity .35s ease; transform: none; }
+  :root.hemat .btn-primary::after,
+  :root.hemat .nav-item::after { display: none; }
+
+  /* ═══════════════════ 2 · GRADASI PERSEPTUAL ═══════════════════
+     Gradasi biasa diinterpolasi di ruang sRGB — bagian tengahnya
+     selalu kusam ("lumpur abu"). Interpolasi di ruang oklch menjaga
+     kecerahan tetap merata sepanjang gradasi, jadi peralihan warnanya
+     bersih dan mahal di mata. */
+  @supports (background: linear-gradient(in oklch, red, blue)) {
+    :root {
+      --g-navy: linear-gradient(152deg in oklch, #1B5480 0%, #0B2B45 54%, #061826 100%);
+      --g-sea:  linear-gradient(140deg in oklch, var(--sea-hi), var(--navy));
+      --g-brass:linear-gradient(140deg in oklch, var(--brass-hi), #8A6D0B);
+      --g-teal: linear-gradient(140deg in oklch, #14958B, #0B4F45);
+    }
+  }
+
+  /* ═══════════════════ 3 · MENCOPOT KACA BURAM ═══════════════════ */
+
+  .topbar {
+    -webkit-backdrop-filter: var(--kaca);
+            backdrop-filter: var(--kaca);
+  }
+  /* Tanpa kaca, latar wajib padat — kalau tidak, isi halaman akan
+     terlihat menembus bilah atas saat digulir. */
+  @media (max-width: 1024px) { .topbar { background: var(--surface); } }
+  @media (update: slow)      { .topbar { background: var(--surface); } }
+  :root.hemat .topbar        { background: var(--surface); }
+
+  #scrim {
+    background: rgba(6, 24, 38, .52);
+    -webkit-backdrop-filter: var(--kaca-tipis);
+            backdrop-filter: var(--kaca-tipis);
+  }
+
+  .pbar-btn, .pbar-logo, .brandmark .seal {
+    -webkit-backdrop-filter: var(--kaca-tipis);
+            backdrop-filter: var(--kaca-tipis);
+  }
+
+  /* Kartu masuk sudah 94–96% putih; kaburnya praktis tak terlihat,
+     tetapi ongkosnya penuh. Di desktop disisakan tipis saja. */
+  .login-card {
+    -webkit-backdrop-filter: var(--kaca);
+            backdrop-filter: var(--kaca);
+  }
+  @media (max-width: 1024px) { .login-card { background: #FBFDFE; } }
+
+  :root.ada-latar :is(.hero, .pgs-hero, .aud-head) .meta span,
+  :root.ada-latar .adm-meta span {
+    -webkit-backdrop-filter: var(--kaca-tipis);
+            backdrop-filter: var(--kaca-tipis);
+  }
+
+  /* Bilah tab bawah HANYA hidup di ponsel — jadi kacanya selalu
+     dicopot dan diganti latar padat bergradasi halus. */
+  @media (max-width: 1024px) {
+    .tabbar {
+      background:
+        linear-gradient(180deg, color-mix(in oklab, var(--surface) 96%, var(--paper)), var(--surface));
+      -webkit-backdrop-filter: none;
+              backdrop-filter: none;
+      box-shadow: 0 -1px 0 var(--line), 0 -10px 26px -22px rgba(6, 24, 38, .5);
+      contain: layout paint style;
+    }
+  }
+
+  /* ═══════════════════ 4 · MEMENDEKKAN ANIMASI PANJANG ═══════════════════
+     Transisi 12–18 detik pada gambar besar memaksa GPU menahan lapisan
+     komposit selama itu — di ponsel, memori tekstur langsung penuh dan
+     seluruh halaman ikut tersendat. Efek "zoom perlahan" tetap ada,
+     hanya diselesaikan dalam hitungan detik lalu lapisannya dilepas. */
+  .login-bg  { transition: opacity .8s ease, transform 1.6s var(--lengkung); }
+  .pbar-cover{ transition: opacity .6s ease, transform 1.3s var(--lengkung); }
+
+  /* Bilah sisi melebar saat disentuh tetikus. `contain` mengurung
+     perhitungan tata letak di dalam bilah itu saja, jadi isi halaman
+     tidak ikut dihitung ulang tiap bingkai. */
+  @media (min-width: 1025px) {
+    .sidebar { contain: layout style; }
+  }
+
+  /* ═══════════════════ 5 · MASUKNYA ELEMEN, BERTAHAP ═══════════════════
+     Gelombang berjenjang (stagger) membuat halaman terasa "disusun",
+     bukan "dilempar". Jedanya sangat pendek supaya total tetap < 0,3 s. */
+  @keyframes naik {
+    from { opacity: 0; transform: translate3d(0, 9px, 0); }
+    to   { opacity: 1; transform: none; }
+  }
+  .rise { animation: naik .26s var(--lengkung) both; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    :is(.stats, .duo, .trio, .minis) > .rise:nth-child(2) { animation-delay: .035s; }
+    :is(.stats, .duo, .trio, .minis) > .rise:nth-child(3) { animation-delay: .07s;  }
+    :is(.stats, .duo, .trio, .minis) > .rise:nth-child(4) { animation-delay: .105s; }
+    :is(.stats, .duo, .trio, .minis) > .rise:nth-child(5) { animation-delay: .14s;  }
+    :is(.stats, .duo, .trio, .minis) > .rise:nth-child(6) { animation-delay: .175s; }
+  }
+
+  /* Kartu yang baru dipasang ke DOM ikut masuk halus — tanpa keyframes,
+     tanpa JS, memakai @starting-style. */
+  @supports (transition-behavior: allow-discrete) {
+    .card, .stat {
+      transition:
+        opacity .24s var(--lengkung),
+        transform .24s var(--lengkung),
+        box-shadow var(--sedang),
+        border-color var(--sedang);
+      @starting-style { opacity: 0; transform: translate3d(0, 5px, 0); }
+    }
+  }
+
+  /* ═══════════════════ 6 · ANIMASI BERBASIS GULIR ═══════════════════
+     `animation-timeline` menjalankan animasi dari posisi gulir, BUKAN
+     dari waktu — Chrome menjalankannya di utas compositor, jadi tidak
+     ada satu pun event listener JavaScript dan tidak ada jank.
+     Dipakai hanya untuk hiasan yang tidak menyembunyikan isi apa pun,
+     supaya di peramban lama tidak ada risiko konten tak terlihat. */
+  @supports (animation-timeline: scroll()) {
+    @media (prefers-reduced-motion: no-preference) {
+
+      /* Garis kuningan tipis di bawah bilah atas yang memanjang
+         seiring halaman digulir — penanda kemajuan membaca. */
+      .topbar::after {
+        content: ''; position: absolute; left: 0; right: 0; bottom: -1px;
+        height: 2px; background: var(--g-garis);
+        transform-origin: left center; transform: scaleX(0);
+        animation: bacaKemajuan linear both;
+        animation-timeline: scroll(root block);
+        pointer-events: none;
+      }
+      @keyframes bacaKemajuan { to { transform: scaleX(1); } }
+
+      /* Foto sampul bilah profil bergerak sangat pelan saat digulir
+         (parallax) — kedalaman gratis, murni transform. */
+      .pbar-cover {
+        animation: sampulParalaks linear both;
+        animation-timeline: scroll(root block);
+        animation-range: 0 340px;
+      }
+      @keyframes sampulParalaks { to { transform: translate3d(0, 22px, 0) scale(1.06); } }
+    }
+  }
+  :root.hemat .topbar::after { display: none; }
+  :root.hemat .pbar-cover    { animation: none; }
+
+  /* ═══════════════════ 7 · SENTUHAN MIKRO ═══════════════════ */
+
+  /* Kilau menyapu tombol utama saat disentuh — sekali jalan,
+     murni translateX, tidak ada animasi tak berujung. */
+  .btn-primary { position: relative; overflow: hidden; }
+  .btn-primary::after {
+    content: ''; position: absolute; top: -20%; bottom: -20%;
+    left: -50%; width: 36%; z-index: 1; pointer-events: none; opacity: 0;
+    background: linear-gradient(100deg, transparent,
+                color-mix(in oklab, white 32%, transparent), transparent);
+    transform: translateX(0) skewX(-18deg);
+  }
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .btn-primary:hover:not(:disabled)::after {
+      opacity: 1; animation: sapuKilau .72s var(--lengkung) 1;
+    }
+  }
+  @keyframes sapuKilau { to { transform: translateX(430%) skewX(-18deg); } }
+
+  /* Umpan balik tekan — penting di ponsel: memberi kepastian bahwa
+     ketukan sudah diterima, jauh sebelum data selesai dimuat. */
+  .btn:active:not(:disabled),
+  .tabbar .tab:active,
+  .nav-item:active { transform: scale(.972); }
+  .btn, .tabbar .tab, .nav-item, .per-x, .burger {
+    touch-action: manipulation;
+    transition: transform .1s var(--lengkung), background var(--cepat),
+                color var(--cepat), border-color var(--cepat),
+                box-shadow var(--cepat);
+  }
+
+  /* Menghilangkan tarik-untuk-muat-ulang yang tidak sengaja terpicu
+     saat pengguna menggulir tabel di dalam kartu. */
+  .tbl, .view, .sb-nav, .msg-utas { overscroll-behavior: contain; }
+
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  /* Kolom isian yang tumbuh mengikuti isinya — tanpa JS. */
+  @supports (field-sizing: content) {
+    textarea.input { field-sizing: content; min-height: 76px; max-height: 40vh; }
+  }
+
+  /* ═══════════════════ 8 · PERALIHAN ANTAR HALAMAN ═══════════════════
+     Lebih pendek dari sebelumnya supaya perpindahan menu terasa instan. */
+  ::view-transition-old(isi) { animation: vtKeluar .11s ease both; }
+  ::view-transition-new(isi) { animation: vtMasuk .17s var(--lengkung) both; }
+  @keyframes vtKeluar { to   { opacity: 0; transform: translate3d(0, -3px, 0); } }
+  @keyframes vtMasuk  { from { opacity: 0; transform: translate3d(0, 6px, 0); } }
+
+  /* ══════════════════════════════════════════════════════════════════
+     9 · TABEL BERUBAH MENJADI KARTU DI PONSEL
+
+     Selama ini tabel lebar hanya bisa digeser ke samping — pengguna
+     harus mengingat kolom mana yang sedang dilihat. Di bawah 760px,
+     setiap baris kini menjadi satu kartu dan setiap sel membawa nama
+     kolomnya sendiri (diambil otomatis dari <thead> oleh app.js,
+     jadi tidak ada satu pun fungsi render yang perlu diubah).
+     ══════════════════════════════════════════════════════════════════ */
+  @media (max-width: 760px) {
+    .tbl[data-kartu] {
+      overflow-x: visible;
+      padding: 4px 0 10px;
+    }
+    .tbl[data-kartu] > table,
+    .tbl[data-kartu] > table > tbody,
+    .tbl[data-kartu] > table > tbody > tr,
+    .tbl[data-kartu] > table > tbody > tr > td { display: block; width: auto; }
+
+    .tbl[data-kartu] > table > thead { display: none; }
+
+    .tbl[data-kartu] > table > tbody > tr {
+      position: relative;
+      margin: 10px var(--pad) 0;
+      padding: 12px 14px 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--r);
+      background: var(--surface);
+      box-shadow: var(--sh-1);
+      transition: transform .12s var(--lengkung), box-shadow var(--cepat);
+    }
+    .tbl[data-kartu] > table > tbody > tr:active { transform: scale(.99); }
+    .tbl[data-kartu] > table > tbody > tr:hover  { background: var(--surface); }
+
+    /* Garis aksen tipis di tepi kiri kartu — kaitan visual ke kartu induk. */
+    .tbl[data-kartu] > table > tbody > tr::before {
+      content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px;
+      border-radius: 0 3px 3px 0;
+      background: linear-gradient(180deg, var(--sea), color-mix(in oklab, var(--sea) 18%, transparent));
+      opacity: .5;
+    }
+
+    .tbl[data-kartu] > table > tbody > tr > td {
+      display: grid;
+      grid-template-columns: minmax(78px, 34%) 1fr;
+      align-items: start;
+      gap: 12px;
+      padding: 6px 0;
+      border: 0;
+      border-bottom: 1px dashed var(--line-soft);
+      text-align: left !important;
+      white-space: normal;
+    }
+    .tbl[data-kartu] > table > tbody > tr > td:last-child { border-bottom: 0; padding-bottom: 0; }
+
+    .tbl[data-kartu] > table > tbody > tr > td::before {
+      content: attr(data-l);
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 9.5px; font-weight: 600; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--text-3);
+      padding-top: 3px; line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
+    /* Sel pertama = identitas baris. Ditampilkan sebagai judul kartu. */
+    .tbl[data-kartu] > table > tbody > tr > td:first-child {
+      grid-template-columns: 1fr;
+      gap: 2px;
+      padding: 0 0 9px;
+      margin-bottom: 3px;
+      border-bottom: 1px solid var(--line-soft);
+      font-size: 14px; font-weight: 600; color: var(--text);
+    }
+    .tbl[data-kartu] > table > tbody > tr > td:first-child::before {
+      display: block; padding-top: 0; margin-bottom: 1px;
+    }
+
+    /* Sel kosong tidak perlu memakan ruang di kartu. */
+    .tbl[data-kartu] > table > tbody > tr > td:empty { display: none; }
+
+    /* Baris "tidak ada data" / sel yang membentang penuh: tanpa label. */
+    .tbl[data-kartu] > table > tbody > tr > td[data-penuh] {
+      display: block; grid-template-columns: none; border-bottom: 0;
+      text-align: center !important; color: var(--text-3);
+    }
+    .tbl[data-kartu] > table > tbody > tr > td[data-penuh]::before { content: none; }
+    .tbl[data-kartu] > table > tbody > tr:has(> td[data-penuh]:only-child) {
+      border-style: dashed; background: transparent; box-shadow: none;
+    }
+    .tbl[data-kartu] > table > tbody > tr:has(> td[data-penuh]:only-child)::before { display: none; }
+
+    /* Isi sel merapat ke kiri, bukan melebar memenuhi kolom — supaya
+       lencana kategori dan tombol tidak terlihat "molor". */
+    .tbl[data-kartu] > table > tbody > tr > td > * { justify-self: start; }
+    .tbl[data-kartu] > table > tbody > tr > td > .btn,
+    .tbl[data-kartu] > table > tbody > tr > td > .btn-sm { min-height: 38px; }
+    .tbl[data-kartu] > table > tbody > tr > td:has(> .btn, > .btn-sm, > .btn-ikon) {
+      align-items: center;
+    }
+
+    /* Petunjuk "geser ke samping" tidak relevan lagi di mode kartu. */
+    :has(> .tbl[data-kartu]) > .scroll-hint,
+    .card:has(.tbl[data-kartu]) .scroll-hint { display: none !important; }
+
+    .card > .tbl[data-kartu]:last-child { padding-bottom: 14px; }
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     10 · FILTER & PEMILIH PERIODE DI PONSEL
+
+     Sebelumnya: dropdown periode (dasar penyaringan) benar-benar
+     di-`display:none` di bawah 1024px — jadi pengguna ponsel TIDAK
+     PERNAH bisa mengganti dasar penyaringan. Itu dikembalikan.
+     ══════════════════════════════════════════════════════════════════ */
+
+  /* Kembalikan pemilih "Kejadian / Input" di semua ukuran layar. */
+  @media (max-width: 1024px) {
+    .periode select.per-in { display: inline-block; }
+    .periode { padding: 3px 5px 3px 9px; }
+  }
+
+  @media (max-width: 760px) {
+    /* Bilah atas menjadi dua baris: judul di atas, semua penanda &
+       kendali di baris kedua yang bisa digeser mendatar. Dengan begitu
+       tidak ada lagi elemen yang "dihilangkan" hanya karena sempit. */
+    .topbar { flex-wrap: wrap; row-gap: 9px; align-items: center; }
+    .topbar > div:not(.meta) { flex: 1 1 auto; min-width: 0; }
+    .topbar .meta {
+      order: 9; width: 100%; min-width: 0; max-width: 100%; flex: 0 0 100%;
+      margin-left: 0;
+      justify-content: flex-start; flex-wrap: nowrap;
+      overflow-x: auto; overscroll-behavior-x: contain;
+      scrollbar-width: none; -ms-overflow-style: none;
+      scroll-snap-type: x proximity;
+      padding: 0 2px 1px 0;
+    }
+    .topbar .meta::-webkit-scrollbar { display: none; }
+    .topbar .meta > * { flex: none; scroll-snap-align: start; }
+
+    /* Label yang tadinya disembunyikan kini muat lagi. */
+    .ctx-badge span { display: inline; }
+    .sync b { display: inline; }
+    .sync { max-width: none; }
+    .periode > i { display: inline-block; }
+    .periode .per-in { max-width: none; }
+  }
+
+  @media (max-width: 640px) {
+    /* Baris filter menjadi kisi dua kolom: seluruh kendali terlihat
+       sekaligus tanpa perlu digeser, dan tidak ada yang terpotong. */
+    .filters {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding: 12px 15px;
+      align-items: stretch;
+    }
+    .filters .input { width: 100%; min-width: 0; flex: none; }
+    .filters .grow  { grid-column: 1 / -1; }
+    .filters .sep   { display: none; }
+    .filters .btn   { justify-content: center; min-height: 42px; }
+    .filters > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+
+    /* iOS memperbesar halaman sendiri bila kolom TEKS berukuran < 16px.
+       Hanya kolom teks yang perlu disamakan — <select> membuka pemilih
+       bawaan sistem, jadi boleh tetap ringkas supaya labelnya utuh. */
+    input.input, textarea.input, .swal2-input, .swal2-textarea,
+    input.per-in { font-size: 16px; }
+    .filters .input { padding: 10px 11px; min-height: 44px; }
+    .filters select.input { font-size: 13.5px; padding-right: 26px; }
+    .periode { font-size: 12.5px; }
+    .periode .per-in { padding: 3px 2px; }
+    .periode select.per-in { font-size: 12.5px; }
+  }
+
+  /* Ruang untuk bilah tab bawah, termasuk area aman iPhone. */
+  @media (max-width: 1024px) {
+    .main { padding-bottom: calc(66px + env(safe-area-inset-bottom)); }
+    .tabbar .tab { transition: color var(--cepat), background var(--cepat), transform .12s var(--lengkung); }
+    .tabbar .tab.active { transform: translateY(-1px); }
+  }
+
+  /* ═══════════════════ 11 · GAYA AMAN UNTUK UNDUH PDF ═══════════════════
+     html2canvas (mesin di balik html2pdf) hanya mengenal warna sRGB
+     lama: #hex, rgb(), rgba(), dan nama warna. Sistem desain ini
+     memakai oklch() dan color-mix(in oklab, …) — nilai terhitungnya
+     berupa oklab()/oklch(), sehingga html2canvas menolak dengan pesan
+     "Attempting to parse an unsupported color function".
+
+     Perbaikan sesungguhnya ada di app.js: saat merender, SELURUH
+     lembar gaya aplikasi dilepas dari salinan dokumen lalu diganti
+     gaya cetak hex-saja. Aturan di bawah hanya lapis kedua, untuk
+     panggung render sebelum html2pdf mengambil alih. */
+  #pdfStage, #pdfStage * {
+    --ink:#1E293B; --navy:#0B2B45; --navy-2:#123C5E;
+    --sea:#14618B; --sea-hi:#1B7AAD;
+    --brass:#C9A227; --brass-hi:#E8CC6B;
+    --paper:#F6F9FC; --surface:#FFFFFF;
+    --line:#E3EAF0; --line-soft:#EEF3F7;
+    --text:#0E2233; --text-2:#4A6076; --text-3:#8298AC;
+    --sh-1:0 1px 2px rgba(30,41,59,.07);
+    --shadow:0 1px 2px rgba(30,41,59,.06);
+    --shadow-lg:0 2px 4px rgba(30,41,59,.07);
+    --shadow-naik:0 2px 5px rgba(30,41,59,.08);
+    --ring:0 0 0 3px rgba(20,97,139,.16);
+    --g-garis:linear-gradient(90deg, transparent, rgba(201,162,39,.78) 26%,
+              #E8CC6B 50%, rgba(201,162,39,.78) 74%, transparent);
+    animation: none !important;
+    transition: none !important;
+  }
+  #pdfStage { background: #FFFFFF; color: #0E2233; }
+  #pdfMask { background: rgba(246,249,252,.94); }
+}
+
 </style>
 </head>
 <body>
