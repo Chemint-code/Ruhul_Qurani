@@ -4754,9 +4754,9 @@ function bagianKesimpulanCetak(k) {
         <tr>${sel('Pelanggaran santri ini', `${k.Z} (${rincian})`)}</tr>
         <tr>${sel('Kontribusi terhadap jenjang', k.pctJenjang)}</tr>
         <tr>${sel('Kontribusi terhadap angkatan', k.pctAngkatan)}</tr>
-        <tr>${sel('Poin pelanggaran (A)', k.poin)}</tr>
-        <tr>${sel(`Poin apresiasi (B) — ${k.jumlahPrestasi} catatan`, k.poinPrestasi)}</tr>
-        <tr style="background:#f8fafc;">${sel('SKOR NET (A − B)', k.net)}</tr>
+        <tr>${sel('Poin pelanggaran', k.poin)}</tr>
+        <tr>${sel(`Poin apresiasi — ${k.jumlahPrestasi} catatan`, k.poinPrestasi)}</tr>
+        <tr style="background:#f8fafc;">${sel('Skor Net', k.net)}</tr>
       </tbody>
     </table>
 
@@ -4768,16 +4768,8 @@ function bagianKesimpulanCetak(k) {
       senilai <b>${k.poinPrestasi}</b> poin${k.areaKuat && k.areaKuat !== NA_DATA
         ? `, terkuat pada bidang <b>${esc(k.areaKuat)}</b>` : ''},
       sehingga skor net menjadi <b>${k.net}</b>.
-      Status: <b style="color:${warna};">${esc(k.tier.nama)}</b>${k.tier.dinamis ? ''
-        : ' <span style="color:#64748b;">(ambang standar — data pembanding belum mencukupi)</span>'}.
+      Status: <b style="color:${warna};">${esc(k.tier.nama)}</b>.
       Memerlukan fokus pada bidang <b>${esc(k.areaFokus)}</b>.
-    </p>
-    <p style="font-size:10px;color:#94a3b8;margin:0 0 6px;">
-      Skor net = poin pelanggaran dikurangi poin apresiasi (minimum 0). Tier dihitung
-      dari skor net, sehingga santri yang aktif memperbaiki diri terbaca membaik.
-    </p>
-    <p style="font-size:10px;color:#94a3b8;margin:0;">
-      Tier merupakan indikator prioritas pembinaan, bukan keputusan sanksi.
     </p>`;
   // Kotak catatan & tanda tangan tidak lagi dibuat di sini — keduanya
   // disatukan pada blokPenutupCetak() supaya tidak pernah terbelah halaman.
@@ -4833,10 +4825,17 @@ function pasFotoPengganti(nama, peran) {
   const inisial = getInitialsFromName(nama);
   const warna = getRoleColor(peran);
   try {
+    /* Digambar dua kali lipat ukuran logisnya (600x800 piksel) lalu
+       diperkecil oleh tata letak. Kotak pas foto pada lembar hanya
+       64x84 px CSS, tetapi printer melukisnya pada resolusi jauh lebih
+       tinggi — tanpa cadangan piksel ini, hasilnya pecah di atas kertas.
+       Seluruh koordinat di bawah tetap memakai ukuran logis 300x400. */
+    const S = 2;
     const kanvas = document.createElement('canvas');
-    kanvas.width = 300; kanvas.height = 400;
+    kanvas.width = 300 * S; kanvas.height = 400 * S;
     const g = kanvas.getContext('2d');
     if (!g) return '';
+    g.scale(S, S);
 
     g.fillStyle = '#EEF2F6';
     g.fillRect(0, 0, 300, 400);
@@ -5079,7 +5078,6 @@ function bangunLaporanHTML(data) {
      terakhir. Ini yang membuat laporan terbaca rapi, bukan hiasan. */
   const H3    = 'font-size:12.5px;font-weight:bold;color:#0f172a;letter-spacing:.2px;'
               + 'margin:21px 0 6px;padding:0 0 4px;border-bottom:1px solid #cbd5e1;';
-  const NOTA  = 'font-size:10px;line-height:1.5;color:#64748b;margin:0 0 7px;';
   const TABEL = 'width:100%;border-collapse:collapse;margin:0 0 2px;';
   /* Sel tabel identitas diberi padding sebaris sendiri. Bukan kerapian
      semata: sel tanpa gaya sebaris akan mewarisi padding dari sumber yang
@@ -5093,7 +5091,6 @@ function bangunLaporanHTML(data) {
   const riwayat = riwayatCetak(perkembangan, data.perkembanganPenuh,
                                data.pembinaanPenuh || data.pembinaan, data.instrumen);
   const kesimpulan = kesimpulanSementara(data, rekap);
-  const adaInstrumen = !!(data.instrumen && data.instrumen.size);
 
   // ---- Bahan bagian 4 (prestasi), 5 (tahfiz) & 7 (target) ----
   const prestasi = data.prestasi || [];
@@ -5145,8 +5142,6 @@ function bangunLaporanHTML(data) {
     </table>
 
     <h3 style="${H3}">1. Presensi Madrasah</h3>
-    <p style="${NOTA}">
-      Rekap presensi ditampilkan seluruhnya, tidak mengikuti penyaringan bulan.</p>
     <table style="${TABEL}font-size:11px;">
       <thead><tr>${['Bulan','Hadir','Izin','Sakit','Alpa'].map(th).join('')}</tr></thead>
       <tbody>${baris(data.presensi, p =>
@@ -5156,8 +5151,6 @@ function bangunLaporanHTML(data) {
 
     <h3 style="${H3}">
       2. Akumulasi Perkembangan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
-    <p style="${NOTA}">
-      Dihitung per jenis pelanggaran tanpa konversi antar kategori.</p>
     <table style="${TABEL}font-size:11px;">
       <thead><tr>${['Kategori','Catatan','Jumlah'].map(th).join('')}</tr></thead>
       <tbody>${baris(rekap, r =>
@@ -5167,9 +5160,6 @@ function bangunLaporanHTML(data) {
 
     <h3 style="${H3}">
       3. Riwayat Perkembangan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
-    <p style="${NOTA}">
-      Diurutkan per kategori, lalu tanggal terlama ke terbaru.${adaInstrumen ? ''
-        : ' Aturan pembinaan belum terisi di Master Pembinaan — validasi batas modul dilewati.'}</p>
     <table style="${TABEL}font-size:10.5px;">
       <thead><tr>${['Tanggal','Bidang','Catatan','Kategori','Poin','Bentuk Pembinaan'].map(th).join('')}</tr></thead>
       <tbody>${baris(riwayat, p => {
@@ -5187,8 +5177,6 @@ function bangunLaporanHTML(data) {
 
     <h3 style="${H3}">
       4. Prestasi &amp; Apresiasi${aktif ? ' — ' + esc(labelPer) : ''}</h3>
-    <p style="${NOTA}">
-      Poin apresiasi mengurangi skor net pada bagian kesimpulan.</p>
     <table style="${TABEL}font-size:11px;">
       <thead><tr>${['Tanggal','Kategori','Bentuk Apresiasi','Bidang','Poin'].map(th).join('')}</tr></thead>
       <tbody>${baris(prestasi, r =>
@@ -5238,9 +5226,6 @@ function bangunLaporanHTML(data) {
 
     <h3 style="${H3}">
       7. Target Pembinaan &amp; Tindak Lanjut</h3>
-    <p style="${NOTA}">
-      Bagian ini menutup lingkaran: target periode lalu dievaluasi lebih dulu,
-      baru target periode berjalan ditetapkan.</p>
     <table style="${TABEL}font-size:10.5px;">
       <thead><tr>${['Periode','Target','Indikator Keberhasilan','Status','Evaluasi'].map(th).join('')}</tr></thead>
       <tbody>${baris(goalGabungan, g => {
@@ -5959,7 +5944,16 @@ async function unduhLaporanPdf(nisn) {
     const kakiSantri = `${data.siswa?.nama_siswa || 'Santri'} · ${data.siswa?.nisn || ''}`.trim();
     pulihkanLatar = amankanLatarDokumen();
 
-    const skala = Math.min(2, Math.max(1.5, window.devicePixelRatio || 1.5));
+    /* Ketajaman lembar ditentukan di sini, bukan oleh layar.
+       Sebelumnya skala mengikuti devicePixelRatio, sehingga laptop biasa
+       merender pada 1,5x — setara +-145 dpi. Itulah penyebab foto dan
+       huruf terlihat kabur begitu dicetak. Sasarannya kini tetap 3x
+       (+-290 dpi, setara mutu cetak), dan hanya diturunkan otomatis bila
+       laporannya sangat panjang sehingga luas kanvas mendekati batas
+       aman peramban. */
+    const LUAS_KANVAS_MAKS = 2.4e8;
+    const skala = Math.max(2, Math.min(3,
+      Math.sqrt(LUAS_KANVAS_MAKS / Math.max(1, rect.width * rect.height))));
     _halamanPdf = {
       skala,
       rasio: (TINGGI_KERTAS_MM - MARGIN_MM * 2) / (LEBAR_KERTAS_MM - MARGIN_MM * 2)
@@ -5967,7 +5961,7 @@ async function unduhLaporanPdf(nisn) {
 
     const pekerja = window.html2pdf().set({
       margin: [MARGIN_MM, MARGIN_MM, MARGIN_MM, MARGIN_MM], filename: nama,
-      image: { type:'jpeg', quality:0.98 },
+      image: { type:'jpeg', quality:1 },
       html2canvas: {
         scale: skala,
         useCORS:true, backgroundColor:'#ffffff', logging:false,
