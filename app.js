@@ -4778,111 +4778,473 @@ function bagianKesimpulanCetak(k) {
 /* =====================================================================
    20f-0. PENANGGUNG JAWAB LAPORAN (musyrif penanda tangan)
    =====================================================================
-   Setiap lembar laporan membawa wajah dan nama musyrif yang
-   menerbitkannya — bukan sekadar garis tanda tangan kosong. Tujuannya
-   sederhana: laporan menjadi tanggung jawab seseorang yang jelas, bukan
-   dokumen tanpa pemilik.
+   Setiap lembar laporan membawa nama musyrif yang menerbitkannya —
+   bukan sekadar garis tanda tangan kosong. Tujuannya sederhana: laporan
+   menjadi tanggung jawab seseorang yang jelas, bukan dokumen tanpa
+   pemilik.
 
-   Fotonya diambil dari tabel `foto_aset` (kategori `profil_guru`) milik
-   pengguna yang sedang login, lalu DIUBAH LEBIH DULU menjadi data URI.
-   Ini bukan hiasan teknis: html2canvas tidak boleh mengunduh gambar
-   lintas domain sendiri — hasilnya kanvas ternoda atau foto muncul
-   kosong di PDF. Sebagai data URI, foto sudah berada di dalam dokumen
-   sehingga selalu ikut tercetak.
+   Sejak v2.4 jejak itu berupa KODE QR, bukan pas foto.
+
+   Alasannya bukan selera. Pas foto adalah sebuah bitmap berwarna yang
+   ikut diraster bersama seluruh halaman, dan pada 400 santri biayanya
+   menumpuk sampai ratusan megabita. Kode QR hanya hitam-putih, terbentuk
+   dari beberapa ratus persegi — praktis gratis di dalam raster, dan
+   justru lebih berguna: dipindai kamera HP mana pun, ia langsung
+   menampilkan nama lengkap, jabatan, dan tanggal terbit tanpa perlu
+   jaringan, tanpa akun, dan tanpa memasang apa pun.
    ===================================================================== */
 
-/** Unduh satu gambar dan ubah menjadi data URI (aman untuk html2canvas). */
-async function keDataUri(url) {
-  if (!url) return '';
-  if (/^data:/i.test(url)) return url;
+/* =====================================================================
+   QR CODE MANDIRI — mode bita, versi 1-10, koreksi galat L/M
+
+   Ditulis sendiri, bukan diambil dari CDN. Alasannya satu: lembar
+   laporan harus tetap terbit ketika dayah sedang tanpa jaringan, dan
+   service worker hanya menyimpan berkas inti aplikasi. Pustaka QR dari
+   CDN akan menjadi titik gagal yang tidak terlihat sampai listrik atau
+   internet padam — tepat pada saat laporan paling dibutuhkan.
+
+   Cakupannya sengaja dibatasi pada yang benar-benar dipakai:
+   mode bita (teks Latin), versi 1 sampai 10, koreksi galat L dan M.
+   Itu sudah memuat ±150 karakter, jauh di atas kebutuhan panel tanda
+   tangan.
+   ===================================================================== */
+
+// ---------- Aritmetika lapangan Galois GF(256), polinom 0x11D --------
+const QR_EXP = new Uint8Array(512);
+const QR_LOG = new Uint8Array(256);
+(function () {
+  let x = 1;
+  for (let i = 0; i < 255; i++) {
+    QR_EXP[i] = x;
+    QR_LOG[x] = i;
+    x <<= 1;
+    if (x & 0x100) x ^= 0x11D;
+  }
+  for (let i = 255; i < 512; i++) QR_EXP[i] = QR_EXP[i - 255];
+})();
+
+const qrKali = (a, b) => (a === 0 || b === 0) ? 0 : QR_EXP[QR_LOG[a] + QR_LOG[b]];
+
+/** Polinom pembangkit Reed-Solomon berderajat n. */
+function qrPolinom(n) {
+  let poly = [1];
+  for (let i = 0; i < n; i++) {
+    const baru = new Array(poly.length + 1).fill(0);
+    for (let j = 0; j < poly.length; j++) {
+      baru[j] ^= poly[j];
+      baru[j + 1] ^= qrKali(poly[j], QR_EXP[i]);
+    }
+    poly = baru;
+  }
+  return poly;
+}
+
+/** Kata koreksi galat untuk satu blok data. */
+function qrKoreksi(data, panjangEc) {
+  const gen = qrPolinom(panjangEc);
+  const sisa = new Uint8Array(data.length + panjangEc);
+  sisa.set(data, 0);
+  for (let i = 0; i < data.length; i++) {
+    const c = sisa[i];
+    if (!c) continue;
+    for (let j = 1; j < gen.length; j++) sisa[i + j] ^= qrKali(gen[j], c);
+  }
+  return sisa.slice(data.length);
+}
+
+/* Tabel blok per versi: [ecPerBlok, blokG1, dataG1, blokG2, dataG2].
+   Hanya versi 1-10 untuk tingkat L dan M. */
+const QR_BLOK = {
+  L: [
+    [7, 1, 19, 0, 0], [10, 1, 34, 0, 0], [15, 1, 55, 0, 0], [20, 1, 80, 0, 0],
+    [26, 1, 108, 0, 0], [18, 2, 68, 0, 0], [20, 2, 78, 0, 0], [24, 2, 97, 0, 0],
+    [30, 2, 116, 0, 0], [18, 2, 68, 2, 69]
+  ],
+  M: [
+    [10, 1, 16, 0, 0], [16, 1, 28, 0, 0], [26, 1, 44, 0, 0], [18, 2, 32, 0, 0],
+    [24, 2, 43, 0, 0], [16, 4, 27, 0, 0], [18, 4, 31, 0, 0], [22, 2, 38, 2, 39],
+    [22, 3, 36, 2, 37], [26, 4, 43, 1, 44]
+  ]
+};
+
+/* Titik tengah pola perataan per versi (versi 1 tidak punya). */
+const QR_RATA = [
+  [], [6, 18], [6, 22], [6, 26], [6, 30],
+  [6, 34], [6, 22, 38], [6, 24, 42], [6, 26, 46], [6, 28, 50]
+];
+
+const QR_BIT_ECL = { L: 1, M: 0, Q: 3, H: 2 };
+
+/** 15 bit informasi format (BCH 15,5) — sudah termasuk masker 0x5412. */
+function qrBitFormat(ecl, mask) {
+  const data = (QR_BIT_ECL[ecl] << 3) | mask;
+  let sisa = data;
+  for (let i = 0; i < 10; i++) sisa = (sisa << 1) ^ ((sisa >> 9) * 0x537);
+  return ((data << 10) | sisa) ^ 0x5412;
+}
+
+/** 18 bit informasi versi (BCH 18,6) — hanya dipakai versi >= 7. */
+function qrBitVersi(v) {
+  let sisa = v;
+  for (let i = 0; i < 12; i++) sisa = (sisa << 1) ^ ((sisa >> 11) * 0x1F25);
+  return (v << 12) | sisa;
+}
+
+const QR_MASK = [
+  (i, j) => (i + j) % 2 === 0,
+  (i) => i % 2 === 0,
+  (i, j) => j % 3 === 0,
+  (i, j) => (i + j) % 3 === 0,
+  (i, j) => (((i / 2) | 0) + ((j / 3) | 0)) % 2 === 0,
+  (i, j) => ((i * j) % 2) + ((i * j) % 3) === 0,
+  (i, j) => (((i * j) % 2) + ((i * j) % 3)) % 2 === 0,
+  (i, j) => (((i + j) % 2) + ((i * j) % 3)) % 2 === 0
+];
+
+/** Ubah teks menjadi bita UTF-8. */
+function qrKeBita(teks) {
+  if (typeof TextEncoder === 'function') return Array.from(new TextEncoder().encode(teks));
+  const out = [];
+  for (const ch of String(teks)) {
+    let c = ch.codePointAt(0);
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xC0 | (c >> 6), 0x80 | (c & 63));
+    else if (c < 0x10000) out.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    else out.push(0xF0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+  }
+  return out;
+}
+
+/**
+ * Matriks QR untuk sebuah teks.
+ * @returns {{ukuran:number, modul:Uint8Array}} modul bernilai 1 = gelap.
+ */
+function qrMatriks(teks, ecl = 'M') {
+  const bita = qrKeBita(teks);
+  const tabel = QR_BLOK[ecl] || QR_BLOK.M;
+
+  // --- Pilih versi terkecil yang memuat data ---------------------------
+  let versi = 0, spek = null, totalData = 0;
+  for (let v = 1; v <= tabel.length; v++) {
+    const t = tabel[v - 1];
+    const kapasitas = t[1] * t[2] + t[3] * t[4];
+    const bitHitung = v <= 9 ? 8 : 16;
+    if (4 + bitHitung + bita.length * 8 <= kapasitas * 8) {
+      versi = v; spek = t; totalData = kapasitas; break;
+    }
+  }
+  if (!versi) throw new Error('Teks terlalu panjang untuk QR versi 10.');
+
+  const [ecPerBlok, blokG1, dataG1, blokG2, dataG2] = spek;
+  const bitHitung = versi <= 9 ? 8 : 16;
+
+  // --- Rangkai aliran bit ----------------------------------------------
+  const bit = [];
+  const tulis = (nilai, panjang) => {
+    for (let i = panjang - 1; i >= 0; i--) bit.push((nilai >> i) & 1);
+  };
+  tulis(0b0100, 4);                 // penanda mode bita
+  tulis(bita.length, bitHitung);
+  bita.forEach(b => tulis(b, 8));
+
+  const kapasitasBit = totalData * 8;
+  for (let i = 0; i < 4 && bit.length < kapasitasBit; i++) bit.push(0);   // terminator
+  while (bit.length % 8) bit.push(0);                                     // rapatkan ke bita
+
+  const kata = [];
+  for (let i = 0; i < bit.length; i += 8) {
+    let b = 0;
+    for (let j = 0; j < 8; j++) b = (b << 1) | bit[i + j];
+    kata.push(b);
+  }
+  const isian = [0xEC, 0x11];
+  for (let i = 0; kata.length < totalData; i++) kata.push(isian[i % 2]);
+
+  // --- Bagi per blok, hitung koreksi galat, lalu jalin -----------------
+  const blokData = [], blokEc = [];
+  let pos = 0;
+  for (let i = 0; i < blokG1 + blokG2; i++) {
+    const n = i < blokG1 ? dataG1 : dataG2;
+    const d = Uint8Array.from(kata.slice(pos, pos + n));
+    pos += n;
+    blokData.push(d);
+    blokEc.push(qrKoreksi(d, ecPerBlok));
+  }
+
+  const akhir = [];
+  const maksData = Math.max(dataG1, dataG2);
+  for (let i = 0; i < maksData; i++) {
+    for (const d of blokData) if (i < d.length) akhir.push(d[i]);
+  }
+  for (let i = 0; i < ecPerBlok; i++) {
+    for (const e of blokEc) akhir.push(e[i]);
+  }
+
+  // --- Siapkan matriks dan modul fungsi --------------------------------
+  const ukuran = versi * 4 + 17;
+  const modul = new Uint8Array(ukuran * ukuran);
+  const kunci = new Uint8Array(ukuran * ukuran);   // 1 = modul fungsi, tak boleh ditimpa
+  const idx = (r, c) => r * ukuran + c;
+  const set = (r, c, v) => {
+    if (r < 0 || c < 0 || r >= ukuran || c >= ukuran) return;
+    modul[idx(r, c)] = v ? 1 : 0;
+    kunci[idx(r, c)] = 1;
+  };
+
+  // Pola pencari + pemisahnya, di tiga sudut
+  const pencari = (br, bc) => {
+    for (let r = -1; r <= 7; r++) {
+      for (let c = -1; c <= 7; c++) {
+        const rr = br + r, cc = bc + c;
+        if (rr < 0 || cc < 0 || rr >= ukuran || cc >= ukuran) continue;
+        const di = Math.max(Math.abs(r - 3), Math.abs(c - 3));
+        set(rr, cc, di !== 2 && di <= 3);
+      }
+    }
+  };
+  pencari(0, 0); pencari(0, ukuran - 7); pencari(ukuran - 7, 0);
+
+  // Pola waktu
+  for (let i = 8; i < ukuran - 8; i++) {
+    set(6, i, i % 2 === 0);
+    set(i, 6, i % 2 === 0);
+  }
+
+  // Pola perataan
+  const titik = QR_RATA[versi - 1];
+  for (const r of titik) {
+    for (const c of titik) {
+      if ((r === 6 && c === 6) || (r === 6 && c === ukuran - 7) || (r === ukuran - 7 && c === 6)) continue;
+      for (let dr = -2; dr <= 2; dr++) {
+        for (let dc = -2; dc <= 2; dc++) {
+          set(r + dr, c + dc, Math.max(Math.abs(dr), Math.abs(dc)) !== 1);
+        }
+      }
+    }
+  }
+
+  /* Ruang informasi format. Nilainya diisi belakangan (setelah masker
+     dipilih), di sini hanya dipesan. Indeks 6 sengaja dilewati: baris
+     dan kolom ke-6 milik pola waktu, dan menimpanya membuat pemindai
+     kehilangan acuan koordinat. */
+  for (let i = 0; i <= 8; i++) {
+    if (i !== 6) { set(8, i, 0); set(i, 8, 0); }
+  }
+  for (let i = 0; i < 8; i++) { set(8, ukuran - 1 - i, 0); set(ukuran - 1 - i, 8, 0); }
+  set(ukuran - 8, 8, 1);            // modul gelap tetap
+
+  // Ruang informasi versi
+  if (versi >= 7) {
+    for (let i = 0; i < 18; i++) {
+      set((i / 3) | 0, ukuran - 11 + (i % 3), 0);
+      set(ukuran - 11 + (i % 3), (i / 3) | 0, 0);
+    }
+  }
+
+  // --- Tempatkan data secara zigzag ------------------------------------
+  const dataBit = [];
+  akhir.forEach(b => { for (let i = 7; i >= 0; i--) dataBit.push((b >> i) & 1); });
+
+  let p = 0, naik = true;
+  for (let kanan = ukuran - 1; kanan > 0; kanan -= 2) {
+    if (kanan === 6) kanan = 5;                    // lewati kolom pola waktu
+    for (let v = 0; v < ukuran; v++) {
+      const r = naik ? ukuran - 1 - v : v;
+      for (let s = 0; s < 2; s++) {
+        const c = kanan - s;
+        if (kunci[idx(r, c)]) continue;
+        modul[idx(r, c)] = p < dataBit.length ? dataBit[p] : 0;
+        p++;
+      }
+    }
+    naik = !naik;
+  }
+
+  // --- Pilih masker dengan denda terkecil ------------------------------
+  let terbaik = null, dendaTerbaik = Infinity;
+  for (let m = 0; m < 8; m++) {
+    const uji = Uint8Array.from(modul);
+    for (let r = 0; r < ukuran; r++) {
+      for (let c = 0; c < ukuran; c++) {
+        if (!kunci[idx(r, c)] && QR_MASK[m](r, c)) uji[idx(r, c)] ^= 1;
+      }
+    }
+    qrTulisFormat(uji, ukuran, ecl, m, versi);
+    const d = qrDenda(uji, ukuran);
+    if (d < dendaTerbaik) { dendaTerbaik = d; terbaik = uji; }
+  }
+
+  return { ukuran, modul: terbaik, versi };
+}
+
+/**
+ * Tuliskan informasi format (dan versi) ke dalam matriks.
+ *
+ * Kedua salinan informasi format memakai penempatan baku: satu menyusuri
+ * kolom 8 dari atas, satu lagi menyusuri baris 8 dari kanan. Loncatan
+ * indeks pada i = 6 dan i = 8 bukan kekeliruan — di situlah pola waktu
+ * memotong jalur, dan modulnya harus dilewati.
+ */
+function qrTulisFormat(mat, ukuran, ecl, mask, versi) {
+  const f = qrBitFormat(ecl, mask);
+  const amb = (i) => (f >> i) & 1;
+  const taruh = (r, c, v) => { mat[r * ukuran + c] = v; };
+
+  // Salinan 1 — menurun pada kolom 8, lalu mendatar pada baris 8
+  for (let i = 0; i < 15; i++) {
+    const b = amb(i);
+    if (i < 6)      taruh(i, 8, b);
+    else if (i < 8) taruh(i + 1, 8, b);
+    else            taruh(ukuran - 15 + i, 8, b);
+  }
+  // Salinan 2 — mendatar pada baris 8 dari kanan, lalu kembali ke kiri
+  for (let i = 0; i < 15; i++) {
+    const b = amb(i);
+    if (i < 8)      taruh(8, ukuran - 1 - i, b);
+    else if (i < 9) taruh(8, 7, b);
+    else            taruh(8, 14 - i, b);
+  }
+  taruh(ukuran - 8, 8, 1);          // modul gelap tetap
+
+  if (versi >= 7) {
+    const v = qrBitVersi(versi);
+    for (let i = 0; i < 18; i++) {
+      const b = (v >> i) & 1;
+      mat[(((i / 3) | 0)) * ukuran + (ukuran - 11 + (i % 3))] = b;
+      mat[(ukuran - 11 + (i % 3)) * ukuran + (((i / 3) | 0))] = b;
+    }
+  }
+}
+
+/** Denda masker menurut empat aturan baku. */
+function qrDenda(mat, n) {
+  const at = (r, c) => mat[r * n + c];
+  let denda = 0;
+
+  // Aturan 1 — deretan lima modul sewarna atau lebih
+  for (let r = 0; r < n; r++) {
+    let jalanR = 1, jalanC = 1;
+    for (let c = 1; c < n; c++) {
+      jalanR = at(r, c) === at(r, c - 1) ? jalanR + 1 : 1;
+      if (jalanR === 5) denda += 3; else if (jalanR > 5) denda += 1;
+      jalanC = at(c, r) === at(c - 1, r) ? jalanC + 1 : 1;
+      if (jalanC === 5) denda += 3; else if (jalanC > 5) denda += 1;
+    }
+  }
+
+  // Aturan 2 — blok 2x2 sewarna
+  for (let r = 0; r < n - 1; r++) {
+    for (let c = 0; c < n - 1; c++) {
+      const v = at(r, c);
+      if (v === at(r, c + 1) && v === at(r + 1, c) && v === at(r + 1, c + 1)) denda += 3;
+    }
+  }
+
+  // Aturan 3 — pola mirip pencari (1:1:3:1:1 dengan ruang kosong)
+  const pola1 = [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0];
+  const pola2 = [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1];
+  const cocok = (ambil, i) => {
+    let a = true, b = true;
+    for (let k = 0; k < 11; k++) {
+      const v = ambil(i + k);
+      if (v !== pola1[k]) a = false;
+      if (v !== pola2[k]) b = false;
+    }
+    return a || b;
+  };
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c + 11 <= n; c++) {
+      if (cocok((k) => at(r, k), c)) denda += 40;
+      if (cocok((k) => at(k, r), c)) denda += 40;
+    }
+  }
+
+  // Aturan 4 — ketimpangan jumlah modul gelap
+  let gelap = 0;
+  for (let i = 0; i < n * n; i++) gelap += mat[i];
+  const persen = (gelap * 100) / (n * n);
+  denda += Math.floor(Math.abs(persen - 50) / 5) * 10;
+
+  return denda;
+}
+
+/**
+ * Kode QR sebagai data URI PNG, siap dipasang pada `background-image`.
+ *
+ * Digambar lewat <canvas> dan bukan SVG dengan alasan yang sama seperti
+ * pas foto dahulu: html2canvas tidak dapat diandalkan melukis SVG yang
+ * dipakai sebagai latar, sedangkan PNG selalu berhasil.
+ *
+ * `pikselPerModul` sengaja 8, jauh di atas kebutuhan layar. Pada render
+ * PDF 3x kotak QR menjadi sekitar 280 piksel nyata, jadi sumber yang
+ * lebih besar menjaga tepi tiap modul tetap tegas alih-alih melebur saat
+ * diperkecil. Tanpa zona sunyi bawaan — ruang putih halaman di
+ * sekelilingnya sudah menjadi zona sunyi yang sah.
+ *
+ * Mengembalikan jumlah modul juga, karena penelepon perlu tahu seberapa
+ * besar kotaknya harus digambar (lihat MODUL_MM di bawah).
+ *
+ * @returns {{uri:string, modul:number}}
+ */
+function qrDataUri(teks, ecl = 'M', pikselPerModul = 8) {
   try {
-    const res = await fetch(url, { mode: 'cors', cache: 'force-cache' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const blob = await res.blob();
-    if (blob.size > 4_000_000) throw new Error('berkas foto terlalu besar');
-    return await new Promise((selesai, gagal) => {
-      const fr = new FileReader();
-      fr.onload = () => selesai(String(fr.result || ''));
-      fr.onerror = () => gagal(fr.error || new Error('gagal membaca foto'));
-      fr.readAsDataURL(blob);
-    });
+    const { ukuran, modul } = qrMatriks(teks, ecl);
+    const kanvas = document.createElement('canvas');
+    kanvas.width = kanvas.height = ukuran * pikselPerModul;
+    const g = kanvas.getContext('2d');
+    if (!g) return { uri: '', modul: 0 };
+
+    g.fillStyle = '#FFFFFF';
+    g.fillRect(0, 0, kanvas.width, kanvas.height);
+    g.fillStyle = '#000000';        // hitam penuh — kontras terbaik di kertas
+    for (let r = 0; r < ukuran; r++) {
+      for (let c = 0; c < ukuran; c++) {
+        if (modul[r * ukuran + c]) {
+          g.fillRect(c * pikselPerModul, r * pikselPerModul, pikselPerModul, pikselPerModul);
+        }
+      }
+    }
+    return { uri: kanvas.toDataURL('image/png'), modul: ukuran };
   } catch (e) {
-    console.warn('[laporan] Foto penanggung jawab tidak dapat disematkan:', e.message);
-    return '';
+    console.warn('[laporan] Kode QR gagal dibuat:', e.message);
+    return { uri: '', modul: 0 };   // panel tetap terbit, hanya tanpa QR
   }
 }
 
 /**
- * Pas foto pengganti berformat 3:4 bila foto asli belum diunggah.
+ * Lebar kotak QR dalam piksel CSS.
  *
- * Dibuat sebagai PNG lewat <canvas>, bukan SVG: html2canvas tidak dapat
- * diandalkan melukis SVG yang dipakai sebagai background-image, sedangkan
- * PNG selalu berhasil. Bentuknya sengaja meniru pas foto resmi — kepala
- * berinisial di atas siluet bahu — supaya kolom tanda tangan tetap
- * terlihat pantas walau fotonya belum diunggah.
+ * Kotaknya TIDAK dipatok pada satu angka. Nama musyrif yang panjang dan
+ * bergelar memaksa QR naik versi — 37 modul menjadi 45 — dan pada kotak
+ * berukuran tetap, tiap modul menyusut dari 0,60 mm ke 0,49 mm. Di bawah
+ * ±0,5 mm kamera ponsel mulai gagal mengunci pola, jadi kotaknya justru
+ * harus ikut membesar. Angka 2,3 px per modul menjaga lebar satu modul
+ * tetap di sekitar 0,6 mm di atas kertas, berapa pun panjang namanya.
  */
-function pasFotoPengganti(nama, peran) {
-  const inisial = getInitialsFromName(nama);
-  const warna = getRoleColor(peran);
-  try {
-    /* Digambar dua kali lipat ukuran logisnya (600x800 piksel) lalu
-       diperkecil oleh tata letak. Kotak pas foto pada lembar hanya
-       64x84 px CSS, tetapi printer melukisnya pada resolusi jauh lebih
-       tinggi — tanpa cadangan piksel ini, hasilnya pecah di atas kertas.
-       Seluruh koordinat di bawah tetap memakai ukuran logis 300x400. */
-    const S = 2;
-    const kanvas = document.createElement('canvas');
-    kanvas.width = 300 * S; kanvas.height = 400 * S;
-    const g = kanvas.getContext('2d');
-    if (!g) return '';
-    g.scale(S, S);
+const qrLebarPanel = (jumlahModul) =>
+  Math.min(96, Math.max(76, Math.round((jumlahModul || 37) * 2.3)));
 
-    g.fillStyle = '#EEF2F6';
-    g.fillRect(0, 0, 300, 400);
-
-    g.fillStyle = warna;
-    g.globalAlpha = 0.26;                       // siluet bahu
-    g.beginPath(); g.arc(150, 406, 104, Math.PI, 0); g.closePath(); g.fill();
-    g.globalAlpha = 1;
-
-    g.beginPath(); g.arc(150, 168, 68, 0, Math.PI * 2); g.fill();   // kepala
-
-    g.fillStyle = '#FFFFFF';
-    g.font = 'bold 56px Arial, Helvetica, sans-serif';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText(inisial, 150, 172);
-
-    return kanvas.toDataURL('image/png');
-  } catch (e) {
-    return '';   // kotak polos masih lebih baik daripada laporan gagal terbit
-  }
-}
-
-let _pjLaporan = null;
-
-/** Identitas + pas foto musyrif yang menerbitkan laporan (disimpan sementara). */
+/** Identitas musyrif yang menerbitkan laporan. */
 async function ambilPenanggungJawab() {
   const nama  = APP.fotoSaya?.nama || APP.profil?.nama_lengkap || APP.profil?.nama || '—';
   const peran = APP.fotoSaya?.role || APP.profil?.role || '';
   const uid   = APP.fotoSaya?.userId || '';
+  return { uid, nama, peran };
+}
 
-  if (_pjLaporan && _pjLaporan.uid === uid && _pjLaporan.nama === nama) return _pjLaporan;
-
-  let foto = '';
-  try {
-    const url = uid ? await muatFotoSatu('profil_guru', uid) : '';
-    foto = await keDataUri(url);
-  } catch (e) { /* laporan tetap terbit walau foto gagal dimuat */ }
-  if (!foto) foto = pasFotoPengganti(nama, peran);
-
-  _pjLaporan = { uid, nama, peran, foto };
-  return _pjLaporan;
+/** Isi kode QR pada panel tanda tangan — teks biasa, terbaca luring. */
+function teksVerifikasiQr(nama, dicetak) {
+  return [
+    String(nama || '—'),
+    'Musyrif Asrama',
+    'Dayah Ruhul Qurani, Aceh Barat',
+    'Diterbitkan ' + String(dicetak || '-')
+  ].join('\n');
 }
 
 /**
  * Blok penutup laporan: kotak catatan musyrif + panel tanda tangan
- * berfoto + baris keabsahan.
+ * berkode QR + baris keabsahan.
  *
  * Ketiganya sengaja dibungkus SATU wadah dengan `page-break-inside:avoid`
  * dan kelas `blok-utuh` (didaftarkan pada opsi pagebreak html2pdf), jadi
@@ -4892,8 +5254,8 @@ async function ambilPenanggungJawab() {
 function blokPenutupCetak(pj, dicetak) {
   const p     = pj || {};
   const nama  = p.nama || '—';
-  const peran = p.peran || '';
-  const foto  = p.foto || pasFotoPengganti(nama, peran);
+  const qr    = qrDataUri(teksVerifikasiQr(nama, dicetak));
+  const qrPx  = qrLebarPanel(qr.modul);
 
   const garis = (n) => Array.from({ length: n })
     .map(() => `<div style="height:21px;border-bottom:1px dashed #cbd5e1;"></div>`).join('');
@@ -4909,7 +5271,12 @@ function blokPenutupCetak(pj, dicetak) {
   const T_KET   = 'height:15px;font-size:10px;line-height:15px;color:#64748b;';
   const T_JAB   = 'height:17px;font-size:11px;line-height:17px;font-weight:bold;color:#0f172a;';
   const T_SELA  = 'height:12px;';
-  const T_RUANG = 'height:84px;';   // ruang membubuhkan tanda tangan
+  /* Ruang tanda tangan dinaikkan dari 84 px ke 112 px. Bukan soal
+     kelonggaran: kode QR menempati sampai 96 px paling atas, dan sisanya
+     adalah zona sunyi di bawahnya. Tanpa jeda putih itu garis tanda
+     tangan menempel pada modul terluar dan pemindai kehilangan tepi.
+     Tetapan ini dipakai KEDUA kolom, jadi tingginya tetap setara. */
+  const T_RUANG = 'height:112px;';
   const T_GARIS = 'border-top:1px solid #334155;font-size:0;line-height:0;';
   const T_NAMA  = 'height:23px;padding-top:5px;font-size:11.5px;line-height:18px;'
                 + 'font-weight:bold;color:#0f172a;';
@@ -4935,19 +5302,19 @@ function blokPenutupCetak(pj, dicetak) {
           <div style="${T_JAB}text-align:left;">Musyrif Asrama</div>
           <div style="${T_SELA}"></div>
           <div style="${T_RUANG}">
-            <div style="width:64px;height:84px;box-sizing:border-box;
-                        border:1px solid #cbd5e1;background-color:#eef2f6;
-                        background-image:url('${foto}');background-size:cover;
-                        background-position:center 28%;background-repeat:no-repeat;"></div>
+            ${qr.uri ? `<div style="width:${qrPx}px;height:${qrPx}px;box-sizing:border-box;
+                        background-color:#FFFFFF;background-image:url('${qr.uri}');
+                        background-size:100% 100%;background-repeat:no-repeat;
+                        image-rendering:pixelated;"></div>` : ''}
           </div>
           <div style="${T_GARIS}">&nbsp;</div>
           <div style="${T_NAMA}">${esc(nama)}</div>
-          <div style="${T_SUB}">${peran ? esc(peran) + ' · ' : ''}Diterbitkan ${esc(dicetak)}</div>
+          <div style="${T_SUB}">Diterbitkan ${esc(dicetak)}</div>
         </td>
 
         <!-- ================= Wali Santri ================= -->
         <td style="width:50%;vertical-align:top;padding:0 0 0 16px;text-align:center;">
-          <div style="${T_KET}text-align:right;">${esc(dicetak)}</div>
+          <div style="${T_KET}">&nbsp;</div>
           <div style="${T_JAB}text-align:left;">Wali Santri</div>
           <div style="${T_SELA}"></div>
           <div style="${T_RUANG}"></div>
@@ -4961,7 +5328,7 @@ function blokPenutupCetak(pj, dicetak) {
     <p style="margin:18px 0 0;padding-top:7px;border-top:1px solid #e2e8f0;
               font-size:8.5px;line-height:1.6;color:#94a3b8;">
       Diterbitkan oleh Sistem Informasi Pengembangan Santri — Dayah Ruhul Qurani,
-      ${esc(dicetak)}, atas tanggung jawab ${esc(nama)}${peran ? ` (${esc(peran)})` : ''}.
+      ${esc(dicetak)}, atas tanggung jawab ${esc(nama)}.
       Laporan dinyatakan sah setelah dibubuhi tanda tangan musyrif asrama.
     </p>
   </div>`;
@@ -5961,7 +6328,11 @@ async function unduhLaporanPdf(nisn) {
 
     const pekerja = window.html2pdf().set({
       margin: [MARGIN_MM, MARGIN_MM, MARGIN_MM, MARGIN_MM], filename: nama,
-      image: { type:'jpeg', quality:1 },
+      /* 0,90 bukan 1,0. Pada halaman berisi teks dan garis tabel selisih
+         keduanya tidak terlihat mata, sedangkan ukuran berkasnya berbeda
+         tiga sampai empat kali lipat — dan itu yang menentukan apakah 400
+         laporan muat di satu folder atau tidak. */
+      image: { type:'jpeg', quality:0.90 },
       html2canvas: {
         scale: skala,
         useCORS:true, backgroundColor:'#ffffff', logging:false,
@@ -11897,7 +12268,96 @@ async function modalMasterPrestasi(existing) {
 
 // ---------------------------------------------------------------------
 // 22. START — pulihkan sesi bila masih berlaku
+
+/* =====================================================================
+   26. LAYAR LOGIN — INTERAKSI KURSOR
+
+   Yang dikerjakan JavaScript di sini hanya SATU: menyediakan angka.
+   Seluruh gerak, jeda, dan kurvanya tinggal di CSS. Pembagian itu
+   disengaja — gerak yang ditulis di CSS dijalankan compositor tanpa
+   membangunkan thread utama, sedangkan gerak yang dijalankan JS ikut
+   tersendat setiap kali ada pekerjaan lain.
+
+   Tiga angka yang dihitung:
+     --mx / --my            posisi kursor untuk cahaya sekitar
+     --miringX / --miringY  kemiringan kartu terhadap pusatnya
+     --tarikX / --tarikY    tarikan magnet tombol saat kursor mendekat
+
+   Semuanya dibungkus requestAnimationFrame, jadi seberapa sering pun
+   pointermove menyala, penulisan gaya tetap sekali per bingkai.
+   ===================================================================== */
+function hidupkanLayarLogin() {
+  const scr = document.getElementById('loginScreen');
+  if (!scr) return;
+  const kartu  = scr.querySelector('.login-card');
+  const tombol = document.getElementById('btnLogin');
+
+  /* Lepas animasi kemunculan setelah rangkaiannya tuntas (jeda
+     terpanjang 0,91s + durasi 0,75s). Selama animasi masih menempel,
+     nilai transform yang ditahannya mengalahkan kemiringan kursor. */
+  if (kartu) setTimeout(() => kartu.classList.add('usai'), 1800);
+
+  const kursorHalus = window.matchMedia('(pointer:fine)').matches;
+  const gerakDikurangi = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!kursorHalus || gerakDikurangi) return;
+
+  let bingkai = 0, px = 0, py = 0;
+  const jepit = (v) => Math.max(-1, Math.min(1, v));
+
+  const gambar = () => {
+    bingkai = 0;
+    scr.style.setProperty('--mx', px + 'px');
+    scr.style.setProperty('--my', py + 'px');
+
+    if (kartu) {
+      const r = kartu.getBoundingClientRect();
+      if (r.width) {
+        const dx = jepit((px - (r.left + r.width  / 2)) / (r.width  / 2));
+        const dy = jepit((py - (r.top  + r.height / 2)) / (r.height / 2));
+        // 3,2 dan 2,4 derajat. Lebih dari itu kartu terbaca sebagai
+        // mainan, bukan sebagai permukaan yang menangkap cahaya.
+        kartu.style.setProperty('--miringY', (dx *  3.2).toFixed(2) + 'deg');
+        kartu.style.setProperty('--miringX', (dy * -2.4).toFixed(2) + 'deg');
+        kartu.style.setProperty('--kilauX', (((px - r.left) / r.width)  * 100).toFixed(1) + '%');
+        kartu.style.setProperty('--kilauY', (((py - r.top)  / r.height) * 100).toFixed(1) + '%');
+      }
+    }
+
+    if (tombol) {
+      const r = tombol.getBoundingClientRect();
+      if (r.width) {
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        const JANGKAU = 150;                       // piksel
+        const jarak = Math.hypot(px - cx, py - cy);
+        const tarik = jarak < JANGKAU ? 1 - jarak / JANGKAU : 0;
+        tombol.style.setProperty('--tarikX', ((px - cx) * 0.14 * tarik).toFixed(2) + 'px');
+        tombol.style.setProperty('--tarikY', ((py - cy) * 0.20 * tarik).toFixed(2) + 'px');
+      }
+    }
+  };
+
+  scr.addEventListener('pointermove', (e) => {
+    px = e.clientX; py = e.clientY;
+    scr.classList.add('sorot');
+    if (!bingkai) bingkai = requestAnimationFrame(gambar);
+  }, { passive: true });
+
+  scr.addEventListener('pointerleave', () => {
+    scr.classList.remove('sorot');
+    if (kartu) {
+      kartu.style.setProperty('--miringX', '0deg');
+      kartu.style.setProperty('--miringY', '0deg');
+    }
+    if (tombol) {
+      tombol.style.setProperty('--tarikX', '0px');
+      tombol.style.setProperty('--tarikY', '0px');
+    }
+  });
+}
+
 // ---------------------------------------------------------------------
+hidupkanLayarLogin();
+
 (async function start() {
   const { data: { session } } = await db.auth.getSession();
   if (session) await masukAplikasi();
