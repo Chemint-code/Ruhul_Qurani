@@ -4776,19 +4776,179 @@ function bagianKesimpulanCetak(k) {
       Skor net = poin pelanggaran dikurangi poin apresiasi (minimum 0). Tier dihitung
       dari skor net, sehingga santri yang aktif memperbaiki diri terbaca membaik.
     </p>
-    <p style="font-size:10px;color:#94a3b8;margin:0 0 16px;">
+    <p style="font-size:10px;color:#94a3b8;margin:0;">
       Tier merupakan indikator prioritas pembinaan, bukan keputusan sanksi.
-    </p>
+    </p>`;
+  // Kotak catatan & tanda tangan tidak lagi dibuat di sini — keduanya
+  // disatukan pada blokPenutupCetak() supaya tidak pernah terbelah halaman.
+}
 
-    <div style="border:1px solid #cbd5e1;border-radius:5px;background:#fafafa;
-                padding:10px 14px;page-break-inside:avoid;break-inside:avoid;">
-      <p style="margin:0 0 8px;font-size:11px;font-weight:bold;letter-spacing:.4px;
-                text-transform:uppercase;color:#334155;">Catatan Musyrif Asrama</p>
-      ${Array.from({ length: 6 }).map(() =>
-        `<div style="height:22px;border-bottom:1px dashed #cbd5e1;"></div>`).join('')}
-      <p style="margin:10px 0 0;font-size:10px;text-align:right;color:#64748b;">
-        Musyrif: _________________&nbsp;&nbsp;&nbsp;Tanggal: ____________</p>
-    </div>`;
+/* =====================================================================
+   20f-0. PENANGGUNG JAWAB LAPORAN (musyrif penanda tangan)
+   =====================================================================
+   Setiap lembar laporan membawa wajah dan nama musyrif yang
+   menerbitkannya — bukan sekadar garis tanda tangan kosong. Tujuannya
+   sederhana: laporan menjadi tanggung jawab seseorang yang jelas, bukan
+   dokumen tanpa pemilik.
+
+   Fotonya diambil dari tabel `foto_aset` (kategori `profil_guru`) milik
+   pengguna yang sedang login, lalu DIUBAH LEBIH DULU menjadi data URI.
+   Ini bukan hiasan teknis: html2canvas tidak boleh mengunduh gambar
+   lintas domain sendiri — hasilnya kanvas ternoda atau foto muncul
+   kosong di PDF. Sebagai data URI, foto sudah berada di dalam dokumen
+   sehingga selalu ikut tercetak.
+   ===================================================================== */
+
+/** Unduh satu gambar dan ubah menjadi data URI (aman untuk html2canvas). */
+async function keDataUri(url) {
+  if (!url) return '';
+  if (/^data:/i.test(url)) return url;
+  try {
+    const res = await fetch(url, { mode: 'cors', cache: 'force-cache' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const blob = await res.blob();
+    if (blob.size > 4_000_000) throw new Error('berkas foto terlalu besar');
+    return await new Promise((selesai, gagal) => {
+      const fr = new FileReader();
+      fr.onload = () => selesai(String(fr.result || ''));
+      fr.onerror = () => gagal(fr.error || new Error('gagal membaca foto'));
+      fr.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.warn('[laporan] Foto penanggung jawab tidak dapat disematkan:', e.message);
+    return '';
+  }
+}
+
+/**
+ * Pas foto pengganti berformat 3:4 bila foto asli belum diunggah.
+ *
+ * Dibuat sebagai PNG lewat <canvas>, bukan SVG: html2canvas tidak dapat
+ * diandalkan melukis SVG yang dipakai sebagai background-image, sedangkan
+ * PNG selalu berhasil. Bentuknya sengaja meniru pas foto resmi — kepala
+ * berinisial di atas siluet bahu — supaya kolom tanda tangan tetap
+ * terlihat pantas walau fotonya belum diunggah.
+ */
+function pasFotoPengganti(nama, peran) {
+  const inisial = getInitialsFromName(nama);
+  const warna = getRoleColor(peran);
+  try {
+    const kanvas = document.createElement('canvas');
+    kanvas.width = 300; kanvas.height = 400;
+    const g = kanvas.getContext('2d');
+    if (!g) return '';
+
+    g.fillStyle = '#EEF2F6';
+    g.fillRect(0, 0, 300, 400);
+
+    g.fillStyle = warna;
+    g.globalAlpha = 0.26;                       // siluet bahu
+    g.beginPath(); g.arc(150, 406, 104, Math.PI, 0); g.closePath(); g.fill();
+    g.globalAlpha = 1;
+
+    g.beginPath(); g.arc(150, 168, 68, 0, Math.PI * 2); g.fill();   // kepala
+
+    g.fillStyle = '#FFFFFF';
+    g.font = 'bold 56px Arial, Helvetica, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(inisial, 150, 172);
+
+    return kanvas.toDataURL('image/png');
+  } catch (e) {
+    return '';   // kotak polos masih lebih baik daripada laporan gagal terbit
+  }
+}
+
+let _pjLaporan = null;
+
+/** Identitas + pas foto musyrif yang menerbitkan laporan (disimpan sementara). */
+async function ambilPenanggungJawab() {
+  const nama  = APP.fotoSaya?.nama || APP.profil?.nama_lengkap || APP.profil?.nama || '—';
+  const peran = APP.fotoSaya?.role || APP.profil?.role || '';
+  const uid   = APP.fotoSaya?.userId || '';
+
+  if (_pjLaporan && _pjLaporan.uid === uid && _pjLaporan.nama === nama) return _pjLaporan;
+
+  let foto = '';
+  try {
+    const url = uid ? await muatFotoSatu('profil_guru', uid) : '';
+    foto = await keDataUri(url);
+  } catch (e) { /* laporan tetap terbit walau foto gagal dimuat */ }
+  if (!foto) foto = pasFotoPengganti(nama, peran);
+
+  _pjLaporan = { uid, nama, peran, foto };
+  return _pjLaporan;
+}
+
+/**
+ * Blok penutup laporan: kotak catatan musyrif + panel tanda tangan
+ * berfoto + baris keabsahan.
+ *
+ * Ketiganya sengaja dibungkus SATU wadah dengan `page-break-inside:avoid`
+ * dan kelas `blok-utuh` (didaftarkan pada opsi pagebreak html2pdf), jadi
+ * penutup laporan tidak pernah terbelah antar halaman — masalah yang
+ * membuat kotak catatan sebelumnya terpotong di tengah.
+ */
+function blokPenutupCetak(pj, dicetak) {
+  const p     = pj || {};
+  const nama  = p.nama || '—';
+  const peran = p.peran || '';
+  const foto  = p.foto || pasFotoPengganti(nama, peran);
+
+  const garis = (n) => Array.from({ length: n })
+    .map(() => `<div style="height:21px;border-bottom:1px dashed #cbd5e1;"></div>`).join('');
+
+  return `
+  <div class="blok-utuh" style="margin-top:22px;page-break-inside:avoid;break-inside:avoid;">
+
+    <div style="border:1px solid #cbd5e1;border-radius:4px;background:#fcfdfe;
+                padding:11px 14px 13px;">
+      <p style="margin:0 0 9px;font-size:10px;font-weight:bold;letter-spacing:.7px;
+                text-transform:uppercase;color:#334155;">
+        Catatan &amp; Rekomendasi Musyrif Asrama</p>
+      ${garis(5)}
+    </div>
+
+    <table style="width:100%;font-size:11px;margin-top:20px;border-collapse:collapse;">
+      <tr>
+        <td style="width:54%;vertical-align:top;padding:0;">
+          <p style="margin:0 0 1px;font-size:10px;color:#64748b;">Mengetahui dan bertanggung jawab,</p>
+          <p style="margin:0 0 11px;font-size:11px;font-weight:bold;color:#0f172a;">Musyrif Asrama</p>
+          <table style="border-collapse:collapse;"><tr>
+            <td style="padding:0;vertical-align:bottom;width:74px;">
+              <div style="width:62px;height:83px;border:1px solid #cbd5e1;
+                          background-color:#eef2f6;background-image:url('${foto}');
+                          background-size:cover;background-position:center 28%;
+                          background-repeat:no-repeat;"></div>
+            </td>
+            <td style="padding:0;vertical-align:bottom;">
+              <div style="height:46px;"></div>
+              <div style="border-bottom:1px solid #334155;padding-bottom:3px;
+                          font-size:11.5px;font-weight:bold;color:#0f172a;">${esc(nama)}</div>
+              <div style="margin-top:4px;font-size:9.5px;color:#94a3b8;">
+                ${peran ? esc(peran) + ' · ' : ''}Diterbitkan ${esc(dicetak)}</div>
+            </td>
+          </tr></table>
+        </td>
+        <td style="width:46%;vertical-align:top;padding:0 0 0 18px;text-align:center;">
+          <p style="margin:0 0 1px;font-size:10px;color:#64748b;text-align:right;">
+            ${esc(dicetak)}</p>
+          <p style="margin:0 0 11px;font-size:11px;font-weight:bold;color:#0f172a;">Wali Santri</p>
+          <div style="height:83px;"></div>
+          <div style="border-top:1px solid #334155;padding-top:4px;margin:0 8px;
+                      font-size:9.5px;color:#94a3b8;">Nama terang &amp; tanda tangan</div>
+        </td>
+      </tr>
+    </table>
+
+    <p style="margin:18px 0 0;padding-top:7px;border-top:1px solid #e2e8f0;
+              font-size:8.5px;line-height:1.6;color:#94a3b8;">
+      Diterbitkan oleh Sistem Informasi Pengembangan Santri — Dayah Ruhul Qurani,
+      ${esc(dicetak)}, atas tanggung jawab ${esc(nama)}${peran ? ` (${esc(peran)})` : ''}.
+      Laporan dinyatakan sah setelah dibubuhi tanda tangan musyrif asrama.
+    </p>
+  </div>`;
 }
 
 
@@ -4872,11 +5032,12 @@ function saringDataLaporanBulanan(mentah) {
 
 /** Lengkapi data laporan dengan master instrumen + agregasi jenjang/angkatan. */
 async function lengkapiLaporan(data) {
-  const [aturan, agregasi] = await Promise.all([
+  const [aturan, agregasi, penanggungJawab] = await Promise.all([
     muatMasterPembinaan(),
-    hitungAgregasiSantri(data.siswa || {})
+    hitungAgregasiSantri(data.siswa || {}),
+    ambilPenanggungJawab()
   ]);
-  return { ...data, instrumen: petaInstrumen(aturan), agregasi };
+  return { ...data, instrumen: petaInstrumen(aturan), agregasi, penanggungJawab };
 }
 
 // ---------- 20f. Template lembar cetak --------------------------------
@@ -4892,6 +5053,24 @@ function bangunLaporanHTML(data) {
   const baris = (arr, kolom, kosongTeks, span) => arr && arr.length
     ? arr.map(kolom).join('')
     : `<tr><td colspan="${span}" style="text-align:center;padding:10px;color:#94a3b8;">${esc(kosongTeks)}</td></tr>`;
+
+  /* ---- Takaran jarak tunggal untuk seluruh lembar --------------------
+     Sebelumnya tiap bagian memakai angka margin sendiri-sendiri (16, 10,
+     8, 24, 28 px) sehingga jarak antarbagian terlihat naik-turun. Tiga
+     tetapan di bawah ini menjadi satu-satunya sumber jarak: judul bagian
+     memberi ruang di ATAS, tabel hampir tidak memberi ruang di bawah,
+     jadi irama vertikalnya tetap sama dari halaman pertama sampai
+     terakhir. Ini yang membuat laporan terbaca rapi, bukan hiasan. */
+  const H3    = 'font-size:12.5px;font-weight:bold;color:#0f172a;letter-spacing:.2px;'
+              + 'margin:21px 0 6px;padding:0 0 4px;border-bottom:1px solid #cbd5e1;';
+  const NOTA  = 'font-size:10px;line-height:1.5;color:#64748b;margin:0 0 7px;';
+  const TABEL = 'width:100%;border-collapse:collapse;margin:0 0 2px;';
+  /* Sel tabel identitas diberi padding sebaris sendiri. Bukan kerapian
+     semata: sel tanpa gaya sebaris akan mewarisi padding dari sumber yang
+     berbeda antara dokumen hidup dan salinannya, dan selisih tinggi itulah
+     yang dulu menggeser batas halaman. */
+  const ID_K = 'padding:2px 0;vertical-align:top;';
+  const ID_V = 'padding:2px 0;vertical-align:top;';
 
   const perkembangan = data.perkembangan || [];
   const rekap = (data.rekap && data.rekap.length) ? data.rekap : akumulasiUnik(perkembangan);
@@ -4926,53 +5105,56 @@ function bangunLaporanHTML(data) {
     ? `${tgl(data.periodeAwal)} s/d ${tgl(data.periodeAkhir)}` : 'Seluruh riwayat tercatat';
 
   return `
-  <div class="laporan" style="font-family:Arial,sans-serif;color:#1e293b;padding:18px;">
-    <div style="text-align:center;border-bottom:2px solid #1e293b;padding-bottom:12px;margin-bottom:16px;">
-      <h1 style="font-size:17px;margin:0;letter-spacing:.3px;">LAPORAN PERKEMBANGAN SANTRI</h1>
-      <p style="font-size:11px;margin:4px 0 0;color:#64748b;">
-        Dayah Ruhul Qurani · Periode ${esc(labelPer)} · Dicetak ${dicetak}</p>
+  <div class="laporan" style="font-family:Arial,Helvetica,sans-serif;color:#1e293b;
+              padding:0 3px 10px;font-size:11px;line-height:1.5;">
+    <div style="text-align:center;border-bottom:2px solid #0f172a;padding:0 0 11px;margin:0 0 16px;">
+      <h1 style="font-size:16.5px;margin:0;letter-spacing:1.1px;color:#0f172a;">
+        LAPORAN PERKEMBANGAN SANTRI</h1>
+      <p style="font-size:10px;margin:5px 0 0;color:#64748b;letter-spacing:.3px;">
+        DAYAH RUHUL QURANI &nbsp;·&nbsp; PERIODE ${esc(String(labelPer).toUpperCase())}
+        &nbsp;·&nbsp; DICETAK ${esc(String(dicetak).toUpperCase())}</p>
     </div>
 
-    <table style="width:100%;font-size:12px;margin-bottom:16px;">
-      <tr><td style="width:170px;padding:2px 0;"><b>Nama Santri</b></td><td>: ${esc(s.nama_siswa)}</td></tr>
-      <tr><td style="padding:2px 0;"><b>NISN</b></td><td>: ${esc(s.nisn)}</td></tr>
-      <tr><td style="padding:2px 0;"><b>Jenjang / Kelas</b></td><td>: ${esc(s.jenjang||'-')} / ${esc(s.kelas||'-')}</td></tr>
-      <tr><td style="padding:2px 0;"><b>Asrama</b></td><td>: ${esc(s.asrama||'-')}</td></tr>
-      <tr><td style="padding:2px 0;"><b>Periode Laporan</b></td><td>: ${esc(labelPer)} (${esc(rentangTeks)})</td></tr>
-      <tr><td style="padding:2px 0;"><b>${aktif ? 'Total Poin Periode' : 'Total Poin'}</b></td>
-          <td>: ${poinTampil}${aktif
-            ? ` <span style="color:#64748b;font-size:10.5px;">(akumulasi seluruh riwayat: ${s.total_poin_pelanggaran||0})</span>`
+    <table style="width:100%;font-size:11.5px;margin:0 0 4px;">
+      <tr><td style="${ID_K}width:168px;"><b>Nama Santri</b></td><td style="${ID_V}">: ${esc(s.nama_siswa)}</td></tr>
+      <tr><td style="${ID_K}"><b>NISN</b></td><td style="${ID_V}">: ${esc(s.nisn)}</td></tr>
+      <tr><td style="${ID_K}"><b>Jenjang / Kelas</b></td><td style="${ID_V}">: ${esc(s.jenjang||'-')} / ${esc(s.kelas||'-')}</td></tr>
+      <tr><td style="${ID_K}"><b>Asrama</b></td><td style="${ID_V}">: ${esc(s.asrama||'-')}</td></tr>
+      <tr><td style="${ID_K}"><b>Periode Laporan</b></td><td style="${ID_V}">: ${esc(labelPer)} (${esc(rentangTeks)})</td></tr>
+      <tr><td style="${ID_K}"><b>${aktif ? 'Total Poin Periode' : 'Total Poin'}</b></td>
+          <td style="${ID_V}">: ${poinTampil}${aktif
+            ? ` <span style="color:#64748b;font-size:10px;">(akumulasi seluruh riwayat: ${s.total_poin_pelanggaran||0})</span>`
             : ''}</td></tr>
-      <tr><td style="padding:2px 0;"><b>Status Saat Ini</b></td><td>: ${esc(s.status_keberadaan||'Hadir')}</td></tr>
+      <tr><td style="${ID_K}"><b>Status Saat Ini</b></td><td style="${ID_V}">: ${esc(s.status_keberadaan||'Hadir')}</td></tr>
     </table>
 
-    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">1. Presensi Madrasah</h3>
-    <p style="font-size:10.5px;margin:4px 0 6px;color:#64748b;">
+    <h3 style="${H3}">1. Presensi Madrasah</h3>
+    <p style="${NOTA}">
       Rekap presensi ditampilkan seluruhnya, tidak mengikuti penyaringan bulan.</p>
-    <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:16px;">
+    <table style="${TABEL}font-size:11px;">
       <thead><tr>${['Bulan','Hadir','Izin','Sakit','Alpa'].map(th).join('')}</tr></thead>
       <tbody>${baris(data.presensi, p =>
         `<tr>${td(p.bulan)}${td(p.hadir,'text-align:center')}${td(p.izin,'text-align:center')}${td(p.sakit,'text-align:center')}${td(p.alpa,'text-align:center')}</tr>`,
         'Belum ada data presensi.', 5)}</tbody>
     </table>
 
-    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
+    <h3 style="${H3}">
       2. Akumulasi Perkembangan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
-    <p style="font-size:10.5px;margin:4px 0 6px;color:#64748b;">
+    <p style="${NOTA}">
       Dihitung per jenis pelanggaran tanpa konversi antar kategori.</p>
-    <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:16px;">
+    <table style="${TABEL}font-size:11px;">
       <thead><tr>${['Kategori','Catatan','Jumlah'].map(th).join('')}</tr></thead>
       <tbody>${baris(rekap, r =>
         `<tr>${td(r.kategori)}${td(r.deskripsi)}${td(r.jumlah,'text-align:center;font-weight:bold')}</tr>`,
         'Tidak ada akumulasi pada periode ini.', 3)}</tbody>
     </table>
 
-    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
+    <h3 style="${H3}">
       3. Riwayat Perkembangan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
-    <p style="font-size:10.5px;margin:4px 0 6px;color:#64748b;">
+    <p style="${NOTA}">
       Diurutkan per kategori, lalu tanggal terlama ke terbaru.${adaInstrumen ? ''
         : ' Aturan pembinaan belum terisi di Master Pembinaan — validasi batas modul dilewati.'}</p>
-    <table style="width:100%;font-size:10.5px;border-collapse:collapse;margin-bottom:16px;">
+    <table style="${TABEL}font-size:10.5px;">
       <thead><tr>${['Tanggal','Bidang','Catatan','Kategori','Poin','Bentuk Pembinaan'].map(th).join('')}</tr></thead>
       <tbody>${baris(riwayat, p => {
         const bg = p.overflow ? 'background:#fff4f4;' : '';
@@ -4987,11 +5169,11 @@ function bangunLaporanHTML(data) {
       }, 'Tidak ada catatan perkembangan pada periode ini.', 6)}</tbody>
     </table>
 
-    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
+    <h3 style="${H3}">
       4. Prestasi &amp; Apresiasi${aktif ? ' — ' + esc(labelPer) : ''}</h3>
-    <p style="font-size:10.5px;margin:4px 0 6px;color:#64748b;">
+    <p style="${NOTA}">
       Poin apresiasi mengurangi skor net pada bagian kesimpulan.</p>
-    <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:16px;">
+    <table style="${TABEL}font-size:11px;">
       <thead><tr>${['Tanggal','Kategori','Bentuk Apresiasi','Bidang','Poin'].map(th).join('')}</tr></thead>
       <tbody>${baris(prestasi, r =>
         `<tr>${td(tgl(r.tanggal))}${td(r.kategori||'-')}${td(r.judul||'-')}${td(r.bidang||'-')}`
@@ -5004,9 +5186,9 @@ function bangunLaporanHTML(data) {
       </tbody>
     </table>
 
-    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
+    <h3 style="${H3}">
       5. Capaian Tahfiz${aktif ? ' — ' + esc(labelPer) : ''}</h3>
-    <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:8px;">
+    <table style="${TABEL}font-size:11px;margin-bottom:7px;">
       <tbody>
         <tr><td style="border:1px solid #cbd5e1;padding:5px;width:60%;">Setoran ziyadah (hafalan baru)</td>
             <td style="border:1px solid #cbd5e1;padding:5px;text-align:right;font-weight:bold;">${thfZiyadah} kali</td></tr>
@@ -5020,7 +5202,7 @@ function bangunLaporanHTML(data) {
             <td style="border:1px solid #cbd5e1;padding:5px;text-align:right;font-weight:bold;">${esc(thfLancar)}</td></tr>
       </tbody>
     </table>
-    <table style="width:100%;font-size:10.5px;border-collapse:collapse;margin-bottom:16px;">
+    <table style="${TABEL}font-size:10.5px;">
       <thead><tr>${['Tanggal','Jenis','Surah / Ayat','Halaman','Kelancaran','Musyrif'].map(th).join('')}</tr></thead>
       <tbody>${baris(tahfiz.slice(0, 20), r =>
         `<tr>${td(tgl(r.tanggal))}${td(r.jenis||'-')}`
@@ -5029,21 +5211,21 @@ function bangunLaporanHTML(data) {
         'Belum ada setoran tahfiz pada periode ini.', 6)}</tbody>
     </table>
 
-    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
+    <h3 style="${H3}">
       6. Riwayat Perizinan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
-    <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:16px;">
+    <table style="${TABEL}font-size:11px;">
       <thead><tr>${['Mulai','Selesai','Jenis','Alasan','Status'].map(th).join('')}</tr></thead>
       <tbody>${baris(data.perizinan, z =>
         `<tr>${td(tgl(z.tanggal_mulai))}${td(tgl(z.tanggal_selesai))}${td(z.jenis_izin)}${td(z.alasan||'-')}${td(z.status_persetujuan)}</tr>`,
         'Tidak ada perizinan pada periode ini.', 5)}</tbody>
     </table>
 
-    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
+    <h3 style="${H3}">
       7. Target Pembinaan &amp; Tindak Lanjut</h3>
-    <p style="font-size:10.5px;margin:4px 0 6px;color:#64748b;">
+    <p style="${NOTA}">
       Bagian ini menutup lingkaran: target periode lalu dievaluasi lebih dulu,
       baru target periode berjalan ditetapkan.</p>
-    <table style="width:100%;font-size:10.5px;border-collapse:collapse;margin-bottom:10px;">
+    <table style="${TABEL}font-size:10.5px;">
       <thead><tr>${['Periode','Target','Indikator Keberhasilan','Status','Evaluasi'].map(th).join('')}</tr></thead>
       <tbody>${baris(goalGabungan, g => {
         const w = /tercapai/i.test(g.status || '') && !/belum/i.test(g.status || '') ? '#0F766E'
@@ -5056,17 +5238,11 @@ function bangunLaporanHTML(data) {
       }, 'Belum ada target pembinaan yang ditetapkan.', 5)}</tbody>
     </table>
 
-    <h3 style="font-size:13px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;">
+    <h3 style="${H3}">
       8. Kesimpulan Sementara${aktif ? ' — ' + esc(labelPer) : ''}</h3>
-    <div style="margin-bottom:24px;">${bagianKesimpulanCetak(kesimpulan)}</div>
+    ${bagianKesimpulanCetak(kesimpulan)}
 
-    <table style="width:100%;font-size:12px;margin-top:28px;page-break-inside:avoid;break-inside:avoid;">
-      <tr><td style="width:50%;text-align:center;">Musyrif Asrama</td>
-          <td style="width:50%;text-align:center;">Wali Santri</td></tr>
-      <tr><td style="height:58px;"></td><td></td></tr>
-      <tr><td style="text-align:center;">(________________________)</td>
-          <td style="text-align:center;">(________________________)</td></tr>
-    </table>
+    ${blokPenutupCetak(data.penanggungJawab, dicetak)}
   </div>`;
 }
 
@@ -5147,6 +5323,7 @@ async function cetakLaporan(nisn) {
   if (!bolehCetak()) return toast('error', `Role ${role()} tidak memiliki izin cetak.`);
   loading(true);
   try {
+    pastikanGayaLembarLaporan();
     const dataMentah = await ambilLaporan(nisn);
     const data = await lengkapiLaporan(saringDataLaporanBulanan(dataMentah));
     $('printArea').innerHTML = bangunLaporanHTML(data);
@@ -5189,6 +5366,67 @@ window.addEventListener('afterprint', () => { $('printArea').innerHTML = ''; });
        html2canvas sempat membacanya.
    ===================================================================== */
 
+/* ---------------------------------------------------------------------
+   GAYA LEMBAR LAPORAN — SATU SUMBER, DIPAKAI DI DUA TEMPAT
+
+   Ini bagian yang paling mudah diremehkan tetapi paling menentukan.
+
+   html2pdf menghitung letak batas halaman dari dokumen HIDUP (panggung
+   #pdfStage), sedangkan html2canvas melukis dari SALINAN dokumen. Bila
+   kedua dokumen itu tidak menghasilkan tata letak yang sama persis,
+   pembatas halaman yang sudah dihitung akan meleset — dan blok yang
+   seharusnya utuh tetap terbelah. Itulah yang terjadi pada kotak
+   catatan musyrif: di panggung, judul tabel memakai huruf monospace
+   kapital dari gaya aplikasi; di salinan, gaya itu sudah dilepas.
+
+   Karena itu aturan di bawah dipasang DUA KALI dengan isi identik —
+   sekali pada panggung, sekali pada salinan — sehingga lembar laporan
+   terlepas sepenuhnya dari sistem desain aplikasi dan tampil sama di
+   layar, di kertas, dan di PDF.
+   --------------------------------------------------------------------- */
+function gayaLembarLaporan(lingkup) {
+  return `
+    ${lingkup}, ${lingkup} * {
+      box-sizing:border-box;
+      font-family:Arial, Helvetica, sans-serif;
+      text-wrap:wrap; letter-spacing:normal; word-spacing:normal;
+      animation:none; transition:none; filter:none;
+      -webkit-backdrop-filter:none; backdrop-filter:none;
+      text-shadow:none; box-shadow:none;
+    }
+    ${lingkup} { background:#FFFFFF; color:#1e293b; font-size:11px; line-height:1.5; }
+    ${lingkup} table { width:100%; border-collapse:collapse; }
+    ${lingkup} th, ${lingkup} td { padding:5px 6px; }
+    ${lingkup} thead { display:table-header-group; }
+    ${lingkup} thead th {
+      text-align:left; vertical-align:middle; white-space:normal;
+      font-size:9.5px; font-weight:bold; letter-spacing:.5px;
+      text-transform:uppercase; color:#475569;
+    }
+    ${lingkup} tbody td { vertical-align:top; }
+    ${lingkup} tr { break-inside:avoid; page-break-inside:avoid; }
+    ${lingkup} h1, ${lingkup} h3 { break-after:avoid; page-break-after:avoid; }
+    ${lingkup} img { max-width:100%; }
+  `;
+}
+
+/** Pasang gaya lembar pada dokumen hidup (panggung PDF & area cetak). */
+function pastikanGayaLembarLaporan() {
+  if (document.getElementById('gaya-lembar-laporan')) return;
+  const el = document.createElement('style');
+  el.id = 'gaya-lembar-laporan';
+  /* Lingkupnya `.laporan` saja — BUKAN `#pdfStage .laporan`.
+     Alasannya penting: html2pdf MEMINDAHKAN elemen laporan keluar dari
+     #pdfStage ke wadahnya sendiri, dan justru di wadah itulah batas
+     halaman dihitung. Kalau aturannya terikat pada #pdfStage, gaya itu
+     lepas tepat pada saat paling menentukan — persis penyebab kotak
+     catatan tetap terbelah. Kelas .laporan hanya dipakai lembar cetak,
+     jadi aman dipakai global. Tanpa @layer, selalu menang atas gaya
+     aplikasi. */
+  el.textContent = gayaLembarLaporan('.laporan');
+  document.head.appendChild(el);
+}
+
 /** Gaya cetak hex-saja yang dipasang pada salinan dokumen. */
 const GAYA_AMAN_PDF = `
   html, body {
@@ -5207,14 +5445,11 @@ const GAYA_AMAN_PDF = `
   /* Ukuran dasar disamakan persis dengan gaya aplikasi supaya tata letak
      PDF identik dengan hasil cetak (font-size 14px, line-height 1.55). */
   body { font-size:14px; line-height:1.55; }
-  .laporan { background:#FFFFFF; }
-  .laporan table { width:100%; border-collapse:collapse; }
-  .laporan table thead { display:table-header-group; }
-  .laporan table tr { break-inside:avoid; page-break-inside:avoid; }
-  .laporan h1, .laporan h2, .laporan h3, .laporan h4 { color:#0E2233; }
-  .laporan h3 { break-after:avoid; page-break-after:avoid; }
-  .laporan img { max-width:100%; }
 `;
+
+/* Gaya lembar yang sama persis dengan panggung — inilah yang menjamin
+   tata letak salinan identik dengan yang dipakai menghitung halaman. */
+const GAYA_LEMBAR_PDF = gayaLembarLaporan('.laporan');
 
 /** Properti CSS yang boleh membawa warna dan dibaca html2canvas. */
 const SIFAT_WARNA_PDF = [
@@ -5527,6 +5762,82 @@ function amankanLatarDokumen() {
   };
 }
 
+/* ---------------------------------------------------------------------
+   PAGINASI BLOK UTUH — DIKERJAKAN SENDIRI, DI ATAS SALINAN
+
+   Mesin paginasi bawaan html2pdf memakai tinggi halaman
+   `pageSize.inner.px.height` (dibulatkan ke bawah dari milimeter),
+   sedangkan pemotong gambarnya memakai `canvas.width × rasio`. Kedua
+   angka itu berbeda sekitar 0,7 px per halaman — cukup untuk membuat
+   sebuah blok yang "menurut hitungan" masih muat, ternyata terpotong
+   beberapa piksel di bawah garis halaman. Ditambah lagi, hitungannya
+   dilakukan pada dokumen HIDUP, sementara yang benar-benar dilukis
+   adalah SALINANNYA.
+
+   Karena itu penataan blok penting (penutup laporan) dikerjakan di sini:
+   pada salinan, tepat sebelum dilukis, dengan tinggi halaman yang
+   dihitung dari lebar kanvas yang sesungguhnya. Ditambah kelonggaran
+   beberapa piksel, blok bertanda `blok-utuh` dijamin berpindah utuh ke
+   halaman berikutnya — bukan "hampir selalu", tetapi selalu.
+   --------------------------------------------------------------------- */
+
+let _halamanPdf = null;   // { skala, rasio } — diisi sebelum render
+
+function rapikanHalamanKlon(doc) {
+  const o = _halamanPdf;
+  if (!o || !o.rasio || !o.skala) return;
+
+  const akar = doc.querySelector('.laporan');
+  if (!akar) return;
+  const kotakAkar = akar.getBoundingClientRect();
+  if (!kotakAkar.width) return;
+
+  // Tinggi satu halaman dalam piksel CSS, dihitung persis seperti
+  // pemotong gambar html2pdf: floor(lebar kanvas × rasio) ÷ skala.
+  const lebarKanvas = Math.ceil(kotakAkar.width * o.skala);
+  const tinggiHal = Math.floor(lebarKanvas * o.rasio) / o.skala;
+  if (!(tinggiHal > 80)) return;
+
+  const AMAN = 9;    // kelonggaran pembulatan, tak terlihat mata
+  const IKUT = 112;  // ruang minimum yang harus tersisa di bawah sebuah judul
+
+  const ganjalSebelum = (el, tinggi) => {
+    if (!(tinggi > 0)) return;
+    const g = doc.createElement('div');
+    g.setAttribute('data-ganjal', '');
+    g.style.cssText = `display:block;height:${Math.round(tinggi)}px;`;
+    el.parentNode.insertBefore(g, el);
+  };
+
+  /* Judul bagian tidak boleh tertinggal sendirian di kaki halaman.
+     Kalau ruang tersisa di bawahnya tidak cukup untuk menampung kepala
+     tabel beserta satu barisnya, judul ikut pindah ke halaman berikut —
+     aturan penyusunan huruf yang membedakan dokumen resmi dari cetakan
+     seadanya. */
+  akar.querySelectorAll('h3').forEach((judul) => {
+    if (!judul.previousElementSibling) return;
+    const atasAkar = akar.getBoundingClientRect().top;
+    const atas = judul.getBoundingClientRect().top - atasAkar;
+    const hal = Math.floor(atas / tinggiHal);
+    const sisa = (hal + 1) * tinggiHal - atas;
+    if (sisa >= IKUT) return;
+    ganjalSebelum(judul, sisa + AMAN);
+  });
+
+  akar.querySelectorAll('.blok-utuh').forEach((el) => {
+    const atasAkar = akar.getBoundingClientRect().top;
+    const r = el.getBoundingClientRect();
+    const atas = r.top - atasAkar;
+    const bawah = r.bottom - atasAkar;
+
+    if (r.height + AMAN * 2 > tinggiHal) return;          // memang lebih tinggi dari satu halaman
+    const hal = Math.floor(atas / tinggiHal);
+    if (bawah + AMAN <= (hal + 1) * tinggiHal) return;    // sudah utuh di halamannya
+
+    ganjalSebelum(el, (hal + 1) * tinggiHal - atas + AMAN);
+  });
+}
+
 /** Dipanggil html2canvas atas salinan dokumen, sebelum dilukis. */
 function siapkanKlonPdf(doc) {
   try {
@@ -5537,7 +5848,7 @@ function siapkanKlonPdf(doc) {
       if (!/fonts\.googleapis\.com|font-?awesome/i.test(href)) n.remove();
     });
     const gaya = doc.createElement('style');
-    gaya.textContent = GAYA_AMAN_PDF;
+    gaya.textContent = GAYA_AMAN_PDF + GAYA_LEMBAR_PDF;
     (doc.head || doc.documentElement).appendChild(gaya);
 
     // Buang bagian aplikasi yang tidak ikut dicetak (mempercepat render).
@@ -5555,10 +5866,25 @@ function siapkanKlonPdf(doc) {
 
     // Lapis 2 — jaring pengaman untuk gaya sebaris yang tersisa.
     normalisasiWarnaPdf(doc, doc.querySelector('.laporan') || doc.body);
+
+    // Lapis 3 — pastikan blok penutup tidak terbelah antar halaman.
+    rapikanHalamanKlon(doc);
   } catch (e) {
     console.warn('[PDF] Penyiapan salinan gagal, lanjut apa adanya:', e);
   }
 }
+
+/* ---------------------------------------------------------------------
+   Ukuran kertas A4 dan area cetaknya. Satu sumber angka untuk margin
+   jsPDF, lebar panggung render, dan kaki halaman — supaya perhitungan
+   batas halaman html2pdf tidak pernah lagi meleset.
+   --------------------------------------------------------------------- */
+const MARGIN_MM      = 13;                       // sama dengan @page pada cetak
+const LEBAR_KERTAS_MM = 210;                     // A4 potret
+const TINGGI_KERTAS_MM = 297;
+const LEBAR_CETAK_PX  = Math.floor(
+  (LEBAR_KERTAS_MM - MARGIN_MM * 2) / 25.4 * 96  // 96 dpi, seperti hitungan html2pdf
+);
 
 /**
  * Unduh PDF memakai panggung render terpisah (#pdfStage), bukan #printArea.
@@ -5577,10 +5903,29 @@ async function unduhLaporanPdf(nisn) {
   let pulihkanLatar = () => {};
   loading(true);
   try {
+    pastikanGayaLembarLaporan();
     const dataMentah = await ambilLaporan(nisn);
     const data = await lengkapiLaporan(saringDataLaporanBulanan(dataMentah));
     htmlLaporan = bangunLaporanHTML(data);
     stage.innerHTML = htmlLaporan;
+
+    /* -------------------------------------------------------------
+       INI YANG MEMBUAT KOTAK CATATAN TIDAK LAGI TERPOTONG.
+
+       html2pdf menghitung batas halaman dengan `pageSize.inner.px.height`,
+       tetapi memotong gambar hasil render dengan `canvas.width × rasio`.
+       Kedua angka itu hanya sama bila lebar elemen sumber PERSIS sama
+       dengan lebar area cetak. Selama ini panggung dibuat 210 mm (lebar
+       kertas penuh), padahal area cetaknya 210 − 2×13 mm — selisihnya
+       menggeser batas halaman sekitar 88 px per halaman, sehingga
+       `page-break-inside: avoid` selalu meleset dan blok mana pun bisa
+       terbelah.
+
+       Dengan menyamakan lebar panggung ke lebar area cetak, perhitungan
+       html2pdf menjadi tepat dan blok yang ditandai `blok-utuh` benar-
+       benar berpindah utuh ke halaman berikutnya.
+       ------------------------------------------------------------- */
+    stage.style.width = LEBAR_CETAK_PX + 'px';
     stage.classList.add('on');
     mask.classList.add('on');
 
@@ -5595,20 +5940,50 @@ async function unduhLaporanPdf(nisn) {
     }
 
     const nama = namaBerkasLaporan(data.siswa?.nama_siswa);
+    const kakiSantri = `${data.siswa?.nama_siswa || 'Santri'} · ${data.siswa?.nisn || ''}`.trim();
     pulihkanLatar = amankanLatarDokumen();
 
-    await window.html2pdf().set({
-      margin: [8,8,8,8], filename: nama,
+    const skala = Math.min(2, Math.max(1.5, window.devicePixelRatio || 1.5));
+    _halamanPdf = {
+      skala,
+      rasio: (TINGGI_KERTAS_MM - MARGIN_MM * 2) / (LEBAR_KERTAS_MM - MARGIN_MM * 2)
+    };
+
+    const pekerja = window.html2pdf().set({
+      margin: [MARGIN_MM, MARGIN_MM, MARGIN_MM, MARGIN_MM], filename: nama,
       image: { type:'jpeg', quality:0.98 },
       html2canvas: {
-        scale: Math.min(2, Math.max(1.5, window.devicePixelRatio || 1.5)),
+        scale: skala,
         useCORS:true, backgroundColor:'#ffffff', logging:false,
         scrollX:0, scrollY:0, imageTimeout:15000,
         onclone: siapkanKlonPdf
       },
       jsPDF: { unit:'mm', format:'a4', orientation:'portrait', compress:true },
+      // Baris tabel & judul bagian ditangani mesin bawaan html2pdf;
+      // blok penutup (`.blok-utuh`) ditangani rapikanHalamanKlon() yang
+      // hitungannya tepat sampai piksel terakhir.
       pagebreak: { mode:['css','legacy'], avoid:['tr','h3'] }
-    }).from(root).save();
+    }).from(root).toPdf();
+
+    // Kaki halaman resmi: identitas santri di kiri, nomor halaman di kanan.
+    // Pembaca langsung tahu bila ada lembar yang hilang.
+    await pekerja.get('pdf').then((pdf) => {
+      try {
+        const jml = pdf.internal.getNumberOfPages();
+        const lebar = pdf.internal.pageSize.getWidth();
+        const tinggi = pdf.internal.pageSize.getHeight();
+        for (let i = 1; i <= jml; i++) {
+          pdf.setPage(i);
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(7.5);
+          pdf.setTextColor(150, 160, 172);
+          pdf.text(kakiSantri, MARGIN_MM, tinggi - 6);
+          pdf.text(`Halaman ${i} dari ${jml}`, lebar - MARGIN_MM, tinggi - 6, { align: 'right' });
+        }
+      } catch (e) { console.warn('[PDF] Kaki halaman dilewati:', e.message); }
+    });
+
+    await pekerja.save(nama);
 
     toast('success', `PDF ${data.periodeAktif ? labelPeriode() : 'lengkap'} berhasil diunduh.`);
   } catch (err) {
@@ -5631,6 +6006,7 @@ async function unduhLaporanPdf(nisn) {
   finally {
     pulihkanLatar();
     stage.classList.remove('on'); stage.innerHTML = '';
+    stage.style.removeProperty('width');
     mask.classList.remove('on');
     loading(false);
   }
