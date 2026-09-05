@@ -1227,7 +1227,23 @@
   .laporan table tr { break-inside:avoid; page-break-inside:avoid; }
   .laporan h3 { break-after:avoid; page-break-after:avoid; }
 
+  /* Warna fallback untuk PDF stage (html2pdf tidak mendukung oklch) */
   #pdfStage {
+    --ink:   #1e293b;
+    --navy:  #0B2B45;
+    --navy-2:#123C5E;
+    --sea:   #14618B;
+    --sea-hi:#1B7AAD;
+    --brass: #C9A227;
+    --brass-hi:#E8CC6B;
+    --paper: #F6F9FC;
+    --surface:#FFFFFF;
+    --line:  #E3EAF0;
+    --line-soft:#EEF3F7;
+    --text:  #0E2233;
+    --text-2:#4A6076;
+    --text-3:#8298AC;
+    
     display:none; position:fixed; left:0; top:0; width:210mm; min-height:297mm;
     background:#fff; color:var(--text); z-index:199990; overflow:visible; pointer-events:none;
   }
