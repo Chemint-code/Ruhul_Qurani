@@ -152,7 +152,7 @@
   input, select, textarea { font-family:inherit; font-size:inherit; }
   a { color:var(--sea); text-decoration:none; }
   img { max-width:100%; }
-  ::selection { background: color-mix(in oklab, var(--sea) 22%, transparent); }
+  ::selection { background: rgba(20,97,139,0.22); }
 
   :focus-visible {
     outline:2px solid var(--sea);
@@ -168,11 +168,11 @@
   .ar    { font-family:'Amiri', serif; direction:rtl; unicode-bidi:isolate; }
 
   /* Batang gulir ramping seragam */
-  * { scrollbar-width: thin; scrollbar-color: color-mix(in oklab, var(--text-3) 45%, transparent) transparent; }
+  * { scrollbar-width: thin; scrollbar-color: rgba(130,152,172,0.45) transparent; }
   *::-webkit-scrollbar { width:8px; height:8px; }
   *::-webkit-scrollbar-track { background:transparent; }
   *::-webkit-scrollbar-thumb {
-    background: color-mix(in oklab, var(--text-3) 42%, transparent);
+    background: rgba(130,152,172,0.42);
     border-radius:8px;
   }
   *::-webkit-scrollbar-thumb:hover { background: color-mix(in oklab, var(--text-3) 70%, transparent); }
@@ -1212,23 +1212,9 @@
     .swal2-popup .duo, .swal2-popup .trio { grid-template-columns:1fr !important; }
   }
 
-  /* ======================= CETAK & PDF ======================= */
-  #printArea { display:none; }
-  @media print {
-    body * { visibility:hidden !important; }
-    #printArea, #printArea * { visibility:visible !important; }
-    #printArea { display:block !important; position:absolute; left:0; top:0; width:100%; }
-    @page { size:A4; margin:13mm; }
-    #bar, #scrim, #pdfMask, #pdfStage, .tabbar { display:none !important; }
-    .sidebar, .topbar, .pbar { display:none !important; }
-    .hero, .pgs-hero, .adm-head { background-image:none !important; }
-  }
-  .laporan table thead { display:table-header-group; }
-  .laporan table tr { break-inside:avoid; page-break-inside:avoid; }
-  .laporan h3 { break-after:avoid; page-break-after:avoid; }
-
-  /* Warna fallback untuk PDF stage (html2pdf tidak mendukung oklch) */
+  /* === FALLBACK UNTUK PDF: Override semua color-mix dengan rgba === */
   #pdfStage {
+    /* Warna dasar (hex) */
     --ink:   #1e293b;
     --navy:  #0B2B45;
     --navy-2:#123C5E;
@@ -1244,6 +1230,43 @@
     --text-2:#4A6076;
     --text-3:#8298AC;
     
+    /* Shadows: color-mix → rgba */
+    --sh-1:0 1px 2px rgba(30,41,59,0.07);
+    --shadow:
+      0 1px 2px rgba(30,41,59,0.06),
+      0 10px 22px -18px rgba(30,41,59,0.55);
+    --shadow-lg:
+      0 2px 4px rgba(30,41,59,0.07),
+      0 28px 56px -32px rgba(30,41,59,0.62);
+    --shadow-naik:
+      0 2px 5px rgba(30,41,59,0.08),
+      0 22px 44px -24px rgba(30,41,59,0.58);
+    --ring: 0 0 0 3px rgba(20,97,139,0.16);
+    
+    /* Gradients: ganti color-mix dengan rgba/hex */
+    --g-garis:linear-gradient(90deg, transparent,
+              rgba(201,162,39,0.78) 26%,
+              #E8CC6B 50%,
+              rgba(201,162,39,0.78) 74%, transparent);
+  }
+
+
+  /* ======================= CETAK & PDF ======================= */
+  #printArea { display:none; }
+  @media print {
+    body * { visibility:hidden !important; }
+    #printArea, #printArea * { visibility:visible !important; }
+    #printArea { display:block !important; position:absolute; left:0; top:0; width:100%; }
+    @page { size:A4; margin:13mm; }
+    #bar, #scrim, #pdfMask, #pdfStage, .tabbar { display:none !important; }
+    .sidebar, .topbar, .pbar { display:none !important; }
+    .hero, .pgs-hero, .adm-head { background-image:none !important; }
+  }
+  .laporan table thead { display:table-header-group; }
+  .laporan table tr { break-inside:avoid; page-break-inside:avoid; }
+  .laporan h3 { break-after:avoid; page-break-after:avoid; }
+
+  #pdfStage {
     display:none; position:fixed; left:0; top:0; width:210mm; min-height:297mm;
     background:#fff; color:var(--text); z-index:199990; overflow:visible; pointer-events:none;
   }
