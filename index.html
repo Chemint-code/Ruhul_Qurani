@@ -1588,10 +1588,27 @@
 
   /* ======================= CETAK & PDF ======================= */
   #printArea { display:none; }
+  /* Tera lambang korps pada lembar cetak.
+     Memakai mask --korps yang sudah tertanam, jadi tidak ada aset
+     tambahan. `position:fixed` membuat peramban mengulangnya di setiap
+     halaman cetak; `print-color-adjust:exact` memaksa warnanya ikut
+     tercetak, karena secara bawaan peramban membuang latar berwarna. */
+  .tera-cetak { display:none; }
+
   @media print {
     body * { visibility:hidden !important; }
     #printArea, #printArea * { visibility:visible !important; }
     #printArea { display:block !important; position:absolute; left:0; top:0; width:100%; }
+    #printArea .laporan { position:relative; z-index:1; }
+    .tera-cetak {
+      display:block !important; position:fixed; left:50%; top:50%;
+      width:112mm; aspect-ratio:var(--korps-rasio);
+      transform:translate(-50%, -50%);
+      background-color:#0B2B45; opacity:.055; z-index:0; pointer-events:none;
+      -webkit-mask:var(--korps) center/contain no-repeat;
+              mask:var(--korps) center/contain no-repeat;
+      -webkit-print-color-adjust:exact; print-color-adjust:exact;
+    }
     @page { size:A4; margin:13mm; }
     #bar, #scrim, #pdfMask, #pdfStage, .tabbar { display:none !important; }
     .sidebar, .topbar, .pbar { display:none !important; }
