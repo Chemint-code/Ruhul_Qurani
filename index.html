@@ -261,6 +261,17 @@
     border:1px solid color-mix(in oklab, var(--teal) 18%, transparent);
   }
   .btn-ok:hover:not(:disabled) { background: color-mix(in oklab, var(--teal) 12%, white); }
+  /* Tombol pemberitahuan WhatsApp kepada wali santri.
+     Hijau WhatsApp dipakai apa adanya — pengguna mengenalinya sebelum
+     sempat membaca labelnya, dan itulah gunanya warna merek di sini. */
+  .btn-wa {
+    background:#E7F7F0; color:#0B6B4F;
+    border:1px solid color-mix(in oklab, #128C7E 22%, transparent);
+  }
+  .btn-wa:hover:not(:disabled) { background: color-mix(in oklab, #25D366 16%, white); }
+  /* Kolom Aksi bisa memuat dua tombol; di ponsel keduanya turun ke bawah
+     tanpa memaksa tabel melebar. */
+  .aksi-bina { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
   .btn-block { width:100%; padding:12px; }
   .btn-sm { padding:6px 11px; font-size:12px; border-radius:var(--r-sm); min-height:32px; }
   .btn-link { color:var(--sea); font-size:12.5px; font-weight:600; padding:0; background:none; }
@@ -1192,6 +1203,14 @@
   .tag-sea { background: color-mix(in oklab, var(--sea) 10%, white); color:var(--sea); }
   .tag-violet { background:var(--violet-bg); color:var(--violet); }
   .tag-emas { background: color-mix(in oklab, var(--brass) 18%, white); color:#7A5F05; }
+  /* Penanda yang meminta dibuka, bukan sekadar dibaca — karena itu ia
+     satu-satunya tag yang berperilaku seperti tombol. */
+  .tag-tinjau {
+    margin-top:5px; cursor:pointer; border:1px dashed color-mix(in oklab, var(--amber) 45%, transparent);
+    background:var(--amber-bg); color:var(--amber);
+    transition:background var(--cepat), border-style var(--cepat);
+  }
+  .tag-tinjau:hover { background: color-mix(in oklab, var(--amber) 15%, white); border-style:solid; }
 
   /* ======================= STATISTIK ======================= */
   .stats { display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin-bottom:20px; }
@@ -1231,6 +1250,14 @@
   .grid-2 { display:grid; grid-template-columns:2fr 1fr; gap:16px; margin-bottom:16px; }
   .grid-half { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
   .grid-3 { display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; margin-bottom:16px; }
+  /* Bawaan CSS Grid memberi setiap item `min-width:auto`: sebuah kolom
+     TIDAK BOLEH menyusut di bawah lebar min-content isinya. Satu tabel
+     lebar di dalam kolom karena itu melebarkan seluruh kisi melewati
+     wadahnya, dan halaman jadi bisa digeser mendatar — di ponsel itulah
+     yang membuat bilah tab bawah ikut bergeser (terukur: 397 px pada
+     layar 390 px). Nol di sini mengembalikan hak kolom untuk menyusut;
+     `.tbl` yang sudah `overflow-x:auto` menggulir sendiri isinya. */
+  .grid-2 > *, .grid-half > *, .grid-3 > * { min-width:0; }
   @container papan (max-width: 980px) {
     .grid-2, .grid-half, .grid-3 { grid-template-columns:1fr; }
   }
@@ -1469,6 +1496,83 @@
   @keyframes pdfspin { to { transform:rotate(360deg); } }
 }
 @layer modul {
+
+  /* ============================================================
+     SAPAAN & AMANAH HARI INI
+     Panel pertama yang dilihat pendidik setiap kali masuk. Gelap
+     seperti kop surat resmi, tapi isinya personal — nama, hari, lalu
+     pekerjaan yang masih menunggu. Yang membuat orang kembali membuka
+     aplikasi bukan grafiknya, melainkan tahu persis apa yang tertunda.
+     ============================================================ */
+  .sapa {
+    position:relative; overflow:hidden; margin-bottom:20px;
+    border-radius:var(--r-lg); padding:22px var(--pad);
+    background:var(--g-navy); color:#EAF2F8;
+    box-shadow:var(--shadow-naik);
+    display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap;
+  }
+  .sapa::before {
+    content:''; position:absolute; inset:0; background-image:var(--girih);
+    opacity:.9; pointer-events:none;
+  }
+  /* Semburat kuningan di sudut kanan atas — sumber cahaya tunggal,
+     sehingga panelnya terbaca sebagai permukaan, bukan blok warna. */
+  .sapa::after {
+    content:''; position:absolute; top:-58%; right:-12%; width:52%; aspect-ratio:1;
+    background:radial-gradient(circle, color-mix(in oklab, var(--brass) 26%, transparent), transparent 68%);
+    pointer-events:none;
+  }
+  .sapa > * { position:relative; z-index:1; }
+  .sapa-teks { min-width:min(100%, 280px); flex:1 1 300px; }
+  .sapa .eyebrow .lat { color: color-mix(in oklab, #EAF2F8 62%, transparent); }
+  .sapa h2 {
+    margin:6px 0 0; font-family:'Instrument Serif', Georgia, serif; font-weight:400;
+    font-size:clamp(21px, 2.4vw, 27px); letter-spacing:-.015em; line-height:1.25; color:#fff;
+  }
+  .sapa p { margin:5px 0 0; font-size:12.5px; color: color-mix(in oklab, #EAF2F8 66%, transparent); }
+
+  .sapa-amanah { display:flex; flex-direction:column; gap:8px; flex:0 1 auto; min-width:min(100%, 262px); }
+  .amanah {
+    display:flex; align-items:center; gap:11px; text-align:left; width:100%;
+    padding:9px 12px; border-radius:var(--r); color:#EAF2F8;
+    background: color-mix(in oklab, white 8%, transparent);
+    border:1px solid color-mix(in oklab, white 14%, transparent);
+    transition:background var(--cepat), border-color var(--cepat), transform var(--cepat);
+  }
+  .amanah:hover {
+    background: color-mix(in oklab, white 15%, transparent);
+    border-color: color-mix(in oklab, var(--brass) 55%, transparent);
+    transform:translateX(3px);
+  }
+  .amanah:active { transform:translateX(1px) scale(.985); }
+  .amanah .ikon {
+    flex:0 0 30px; height:30px; border-radius:9px; display:grid; place-items:center;
+    background: color-mix(in oklab, var(--brass) 22%, transparent); color:#F2E5B8; font-size:12.5px;
+  }
+  .amanah .teks { flex:1; font-size:12.5px; line-height:1.45; }
+  .amanah .teks b {
+    display:inline-block; margin-right:6px; font-size:15px; color:#fff;
+    font-family:'IBM Plex Mono', monospace; font-weight:600;
+  }
+  .amanah .go { font-size:11px; opacity:.5; transition:opacity var(--cepat); }
+  .amanah:hover .go { opacity:1; }
+
+  .sapa-lega {
+    display:flex; align-items:center; gap:9px; margin:0; padding:11px 14px;
+    border-radius:var(--r); font-size:12.5px;
+    background: color-mix(in oklab, var(--teal) 24%, transparent);
+    border:1px solid color-mix(in oklab, var(--teal) 42%, transparent);
+    color:#D6F0EA !important;
+  }
+  .sapa-lega i { color:#8FE3D2; }
+
+  @media (max-width: 760px) {
+    .sapa { padding:18px 16px; gap:15px; }
+    .sapa-amanah { width:100%; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .amanah, .amanah:hover, .amanah:active { transition:none; transform:none; }
+  }
 
   /* ============================================================
      PEMILIH UNIT OPERASIONAL
@@ -2462,6 +2566,12 @@
   .prs-who { flex:1; min-width:0; }
   .prs-who b { display:block; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .prs-who span { display:block; font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--text-3); margin-top:1px; }
+  .prs-bar {
+    display:block; height:3px; margin-top:6px; border-radius:2px; max-width:220px;
+    background: color-mix(in oklab, var(--text-3) 14%, white); overflow:hidden;
+  }
+  .prs-bar i { display:block; height:100%; border-radius:2px; background:var(--g-brass); }
+  .prs-row:nth-child(1) .prs-bar i { background:linear-gradient(90deg,#C9A227,#F0D98A); }
   .prs-poin { text-align:right; flex:none; }
   .prs-poin b { display:block; font-family:'IBM Plex Mono', monospace; font-size:17px; font-weight:700; color:#8A6D0B; line-height:1; }
   .prs-poin small { display:block; font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--text-3); margin-top:3px; }
@@ -2510,6 +2620,53 @@
     font-size:11.5px; font-weight:600; color:color-mix(in oklab, white 86%, transparent);
   }
   @media (max-width:640px) { .thf-hero { padding:20px; } .thf-hero .ar { font-size:19px; } }
+
+  /* ---- Papan peringkat hafalan ----------------------------------
+     Dinaikkan ke awal halaman: yang pertama dilihat santri dan musyrif
+     bukan lagi formulir, melainkan siapa yang sedang di depan. Sepuluh
+     nama dibagi dua kolom di layar lebar supaya seluruhnya terbaca
+     tanpa menggulir — daftar yang harus digulir berhenti memotivasi. */
+  .thf-juara { margin-bottom:16px; }
+  .thf-juara .card-head h3 { display:flex; align-items:center; gap:9px; }
+  .thf-juara .card-head h3 i { color:var(--brass); }
+  /* Barisnya <button> agar bisa dibuka lewat papan tik, bukan <div>
+     yang hanya menyerupai tombol. */
+  .thf-board .prs-row { width:100%; text-align:left; cursor:pointer; }
+  .thf-board .prs-row:focus-visible { outline:2px solid var(--sea); outline-offset:-2px; }
+  .thf-board .prs-who b { text-align:left; }
+  @media (min-width:900px) {
+    .thf-board { display:grid; grid-auto-flow:column; grid-template-rows:repeat(5, auto); }
+    /* Peringkat 6–10 menempati kolom kanan; garis tipis memisahkannya. */
+    .thf-board .prs-row:nth-child(n+6) {
+      border-left:1px solid var(--line-soft); padding-left:calc(var(--pad) + 3px);
+    }
+    .thf-board .prs-row:nth-child(5) { border-bottom:none; }
+  }
+
+  /* ---- Kartu yang bisa dilipat ----------------------------------
+     Riwayat setoran adalah rujukan, bukan beranda: dibungkus <details>
+     supaya halaman terbuka dengan capaian, bukan dengan tabel panjang.
+     Memakai elemen bawaan, jadi tetap bisa dibuka lewat papan tik dan
+     ikut tercari oleh Ctrl+F peramban saat terbuka. */
+  .lipat > summary {
+    cursor:pointer; list-style:none; user-select:none;
+    transition:background var(--cepat);
+  }
+  .lipat > summary::-webkit-details-marker { display:none; }
+  .lipat > summary:hover { background: color-mix(in oklab, var(--sea) 4%, white); }
+  .lipat > summary:focus-visible { outline:2px solid var(--sea); outline-offset:-2px; }
+  .lipat:not([open]) > summary { border-bottom:none; }
+  .lipat-tanda {
+    display:inline-flex; align-items:center; gap:8px; flex:none;
+    font-size:11.5px; font-weight:700; letter-spacing:.04em; color:var(--text-2);
+    padding:6px 11px; border-radius:20px; border:1px solid var(--line); background:var(--surface);
+  }
+  .lipat-tanda i { font-size:10px; transition:transform var(--sedang); }
+  .lipat[open] .lipat-tanda i { transform:rotate(180deg); }
+  .lipat .lipat-tanda .teks::before { content:'Lihat'; }
+  .lipat[open] .lipat-tanda .teks::before { content:'Tutup'; }
+  .lipat > summary:hover .lipat-tanda { border-color: color-mix(in oklab, var(--sea) 26%, var(--line)); color:var(--text); }
+  @media (prefers-reduced-motion: reduce) { .lipat-tanda i { transition:none; } }
 
   .thf-form { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:13px; padding:18px var(--pad) 4px; }
   .thf-form .field { margin:0; }
