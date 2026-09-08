@@ -325,6 +325,65 @@ const JUDUL = {
 const RUMAH_ROLE = { Pimpinan:'pimpinan', Klinik:'perizinan', 'Guru BK':'bk' };
 const rumah = () => RUMAH_ROLE[role()] || 'dashboard';
 
+/* =====================================================================
+ * KORPS MUSYRIF ASRAMA PUTRA — lambang kebanggaan unit
+ * =====================================================================
+ * Lambang ini BUKAN logo dayah. Logo dayah tetap menempati slot
+ * identitas (#loginLogo, #pbarLogoImg) dan tetap menjadi kop laporan
+ * yang diterima wali santri. Yang di bawah ini identitas UNIT, jadi ia
+ * hanya muncul bagi akun yang memang bertugas di asrama putra —
+ * justru pembatasan itulah yang membuatnya terbaca sebagai lencana.
+ *
+ * Gambarnya sendiri tidak disimpan di sini: ia tertanam di index.html
+ * sebagai mask CSS (--korps), sehingga satu aset melayani warna putih
+ * di atas navy maupun navy di atas kertas, dan tetap tampil luring.
+ * Satu-satunya salinan raster ada di KORPS_CAP, khusus lembar cetak —
+ * html2canvas tidak merender mask CSS.
+ * =================================================================== */
+
+/** Cap lambang untuk lembar cetak (PNG navy, latar transparan). */
+const KORPS_CAP = 'data:image/png;base64,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';
+
+/** Akun yang dipaksa masuk korps bila aturan di bawah belum memadai. */
+const KORPS_PAKSA = [];
+
+/**
+ * Apakah pemilik profil ini anggota korps musyrif asrama putra?
+ *
+ * Tabel `profiles` belum punya kolom korps, jadi penandanya dibaca
+ * berlapis. Begitu kolom `korps` (atau `asrama`) ditambahkan, lapis
+ * pertama langsung mengambil alih tanpa menyentuh kode lain — dan
+ * itulah cara yang benar untuk memisahkan asrama putra dari putri.
+ */
+function korpsMusyrifPutra(profil) {
+  const p = profil || APP.profil;
+  if (!p) return false;
+  if (KORPS_PAKSA.includes(p.id) || KORPS_PAKSA.includes(p.username)) return true;
+  if (p.korps)  return /musyrif/i.test(p.korps)  && !/putri|banat/i.test(p.korps);
+  if (p.asrama) return /putra|banin/i.test(p.asrama) && !/putri|banat/i.test(p.asrama);
+  // Penanda yang tersedia hari ini: akun yang cakupannya dikunci pada
+  // unit Pengasuhan adalah pembina asrama, bukan guru madrasah.
+  return String(p.unit_akses || '').trim() === 'Pengasuhan';
+}
+
+/**
+ * Satu saklar untuk seluruh antarmuka. Semua tampilan lambang di CSS
+ * dikunci di balik `body.korps`, jadi tidak ada elemen yang perlu
+ * disembunyikan satu per satu — dan tidak ada tempat yang terlewat.
+ */
+function terapkanKorps(aktif) {
+  document.body.classList.toggle('ada-korps', !!aktif);
+  // Diingat pada perangkat ini supaya layar login pun sudah menyambut
+  // dengan lencananya sebelum nama diketik. Hanya penanda tampilan;
+  // tidak ada data pribadi yang disimpan.
+  try { localStorage.setItem('rq_korps', aktif ? '1' : '0'); } catch (e) {}
+}
+
+/* Pulihkan penanda sedini mungkin — sebelum layar login digambar. */
+try {
+  if (localStorage.getItem('rq_korps') === '1') document.body.classList.add('ada-korps');
+} catch (e) {}
+
 // ---------------------------------------------------------------------
 // 3. LAPISAN DATA (cache ringan + pagination PostgREST)
 // ---------------------------------------------------------------------
@@ -1444,6 +1503,7 @@ async function masukAplikasi() {
   }
 
   APP.profil = profil;
+  terapkanKorps(korpsMusyrifPutra(profil));
 
   $('loginScreen').classList.add('hidden');
   $('appShell').classList.remove('hidden');
@@ -1562,6 +1622,8 @@ async function navigateTo(view) {
   }
   APP.view = view;
   APP.onKlik = null;
+  // Dipakai CSS untuk cap air korps pada halaman kosong modul Pengasuhan.
+  $('viewRoot').dataset.view = view;
 
   const j = JUDUL[view] || { lat:view, ar:'', teks:view };
   $('pageTitle').textContent = j.teks;
@@ -5665,7 +5727,10 @@ function blokPenutupCetak(pj, dicetak) {
                 padding:11px 14px 13px;">
       <p style="margin:0 0 9px;font-size:10px;font-weight:bold;letter-spacing:.7px;
                 text-transform:uppercase;color:#334155;">
-        Catatan &amp; Rekomendasi Musyrif Asrama</p>
+        ${korpsMusyrifPutra()
+          ? `<img src="${KORPS_CAP}" alt="" style="height:13px;width:auto;
+               vertical-align:-2px;margin-right:8px;">` : ''
+        }Catatan &amp; Rekomendasi Musyrif Asrama</p>
       ${garis(5)}
     </div>
 
