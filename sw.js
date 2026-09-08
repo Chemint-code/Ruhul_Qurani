@@ -12,7 +12,7 @@
        penyimpanan sementara saat luring ditangani antrean di app.js.
    ===================================================================== */
 
-const VERSI       = 'rq-v2.2.1';
+const VERSI       = 'rq-v2.7.0';
 const CACHE_INTI  = `${VERSI}-inti`;
 const CACHE_ASET  = `${VERSI}-aset`;
 
@@ -20,12 +20,7 @@ const INTI = [
   './',
   './index.html',
   './app.js',
-  './manifest.webmanifest',
-  // Ikon aplikasi. Wajib tersimpan sejak pemasangan: saat luring, Android
-  // membaca ikon dari manifest untuk splash screen dan layar terkini.
-  './icon-192.png',
-  './icon-512.png',
-  './icon-512-maskable.png'
+  './manifest.webmanifest'
 ];
 
 const CDN_DIIZINKAN = [
@@ -103,16 +98,8 @@ self.addEventListener('fetch', (e) => {
         if (res && res.ok) c.put(req, res.clone());
         return res;
       } catch (err) {
-        const simpanan = await c.match(req);
+        const simpanan = await c.match(req) || await c.match('./index.html');
         if (simpanan) return simpanan;
-        // Cadangan ke kerangka aplikasi hanya untuk permintaan navigasi.
-        // Tanpa penjagaan ini, sebuah .png yang gagal diambil akan dijawab
-        // dengan isi index.html — peramban menerima HTML sebagai gambar,
-        // dan kegagalannya tampak sebagai ikon rusak tanpa pesan apa pun.
-        if (req.mode === 'navigate') {
-          const kerangka = await c.match('./index.html');
-          if (kerangka) return kerangka;
-        }
         return new Response(
           '<h1 style="font-family:system-ui;padding:40px">Sedang luring</h1>' +
           '<p style="font-family:system-ui;padding:0 40px">Halaman ini belum tersimpan di perangkat. ' +
