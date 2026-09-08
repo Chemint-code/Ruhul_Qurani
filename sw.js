@@ -12,7 +12,7 @@
        penyimpanan sementara saat luring ditangani antrean di app.js.
    ===================================================================== */
 
-const VERSI       = 'rq-v2.8.0';
+const VERSI       = 'rq-v2.8.1';
 const CACHE_INTI  = `${VERSI}-inti`;
 const CACHE_ASET  = `${VERSI}-aset`;
 
