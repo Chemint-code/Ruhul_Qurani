@@ -4821,6 +4821,7 @@ function gambarPengguna() {
           <span class="pgu-user"><i class="fa-solid fa-at"></i> ${esc(u.username)}</span>
           ${(u.kelas_binaan||[]).length ? `<span><i class="fa-solid fa-chalkboard"></i> ${esc((u.kelas_binaan||[]).join(', '))}</span>` : ''}
           <span><i class="fa-solid fa-layer-group"></i> ${esc(u.unit_akses||'Semua')}${u.jenjang_akses && u.jenjang_akses!=='Semua' ? ' · '+esc(u.jenjang_akses) : ''}</span>
+          ${u.korps ? `<span><i class="fa-solid fa-shield-halved"></i> ${esc(u.korps)}</span>` : ''}
         </div>
       </div>
       <div class="pgu-acts">
@@ -4856,6 +4857,13 @@ async function modalPengguna(u) {
         <p class="hint">Guru, Guru BK, dan Walas wajib memiliki kelas binaan.</p></div>
       <div class="field"><label class="label">Kelas Binaan (pisahkan koma)</label>
         <input id="uKelas" class="input" value="${esc((u.kelas_binaan||[]).join(', '))}" placeholder="X-A, X-B"></div>
+      <div class="field"><label class="label">Korps</label>
+        <select id="uKorps" class="input">${
+          ['', 'Musyrif Asrama Putra', 'Musyrifah Asrama Putri']
+            .map(x => `<option value="${esc(x)}" ${x === (u.korps || '') ? 'selected' : ''}>${
+              x || '— Tidak tergabung —'}</option>`).join('')}</select>
+        <p class="hint">Menentukan lambang korps yang tampil pada bilah profil,
+           layar masuk, dan lembar cetak. Tidak memengaruhi hak akses.</p></div>
       <div class="trio">
         <div class="field"><label class="label">Unit Akses</label>
           <select id="uUnit" class="input">${['Semua','Pengasuhan','Madrasah']
@@ -4897,6 +4905,7 @@ async function modalPengguna(u) {
       const { error } = await db.from('profiles').update({
         nama: $('uNama').value.trim(), role: peran, kelas_binaan: kelas,
         unit_akses: $('uUnit').value, jenjang_akses: $('uJenjang').value,
+        korps: $('uKorps').value || null,
         aktif: $('uAktif').value === 'true'
       }).eq('id', u.id);
       if (error) { Swal.showValidationMessage(error.message); return false; }
