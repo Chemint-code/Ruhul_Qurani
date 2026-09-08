@@ -214,6 +214,11 @@ const HAK = {
 
   // --- Pembinaan & Master ------------------------------------------
   'bina.ubah'       : ['Admin','Guru','Pimpinan'],
+  // Memberi tahu wali santri lewat WhatsApp. Sengaja lebih luas daripada
+  // 'bina.ubah': wali kelas dan Guru BK adalah pihak yang paling sering
+  // berhubungan dengan orang tua, walaupun tidak berwenang mengubah
+  // status pembinaan.
+  'wali.kabar'      : ['Admin','Guru','Walas','Guru BK','Pimpinan'],
   'master.lihat'    : ['Admin','Guru','Walas','Guru BK','Guru Piket'],
   'master.kelola'   : ['Admin'],
 
@@ -261,6 +266,7 @@ const bolehCetak     = () => bisa('cetak');
 const bolehPdf       = () => bisa('pdf');
 const bolehMaster    = () => bisa('master.lihat');
 const bolehPembinaan = () => bisa('bina.ubah');
+const bolehKabarWali = () => bisa('wali.kabar') && !hanyaBaca();
 const perluFilterKelas = () => bisa('lingkup.kelas');
 
 /** Pengajuan izin: dipakai bersama oleh Perizinan & Pengasuhan. */
@@ -1766,6 +1772,81 @@ function unduhCsv(nama, baris) {
 // ---------------------------------------------------------------------
 // 10. DASHBOARD
 // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+// 11b. SAPAAN & AMANAH HARI INI
+//
+//      Halaman depan sebelumnya langsung membuka dengan pemilih unit —
+//      sebuah pertanyaan ("Anda mau mengerjakan apa?") yang dilontarkan
+//      kepada orang yang baru saja masuk. Panel ini mendahuluinya dengan
+//      hal yang lebih manusiawi: menyapa dengan nama, menyebut hari, lalu
+//      menunjukkan apa yang masih menunggu — bukan grafik, bukan angka
+//      total, melainkan pekerjaan yang bisa langsung diselesaikan.
+//
+//      Dua keputusan yang membentuknya:
+//
+//      (1) Yang ditampilkan hanya yang MASIH TERTUNDA. Menampilkan "0 izin
+//          menunggu" mengubah kabar baik menjadi baris tabel. Bila tidak
+//          ada apa pun yang tertunda, seluruh deretan diganti satu kalimat
+//          — dan justru kalimat itulah imbalan membuka aplikasi.
+//      (2) Setiap butir bisa diklik langsung ke halamannya. Pengingat yang
+//          tidak menyediakan jalan penyelesaiannya hanya menambah beban.
+// ---------------------------------------------------------------------
+
+/** Sapaan menurut jam setempat. */
+function salamWaktu(jam) {
+  if (jam < 4)  return 'Selamat malam';
+  if (jam < 11) return 'Selamat pagi';
+  if (jam < 15) return 'Selamat siang';
+  if (jam < 18) return 'Selamat sore';
+  return 'Selamat malam';
+}
+
+/** Tanggal hijriah; dikembalikan kosong bila peramban tidak menyediakannya. */
+function tanggalHijriah(d = new Date()) {
+  try {
+    // Sebagian peramban sudah membubuhkan "H" sendiri, sebagian tidak —
+    // dilepas dulu supaya tidak pernah tercetak "1448 H H".
+    const teks = new Intl.DateTimeFormat('id-TN-u-ca-islamic-umalqura',
+      { day:'numeric', month:'long', year:'numeric' }).format(d);
+    return String(teks).replace(/\s*H\.?$/i, '').trim();
+  } catch { return ''; }
+}
+
+function panelSapaan(amanah) {
+  const kini  = new Date();
+  // Gelar akademik dilepas dan nama dipotong tiga kata: sapaan yang
+  // menyebut "Nyak Al Azwansyah, S.Sos." terdengar seperti surat tugas,
+  // bukan seperti orang yang sedang disapa.
+  const nama  = String(APP.profil?.nama || '').split(',')[0].trim();
+  const depan = nama.split(/\s+/).slice(0, 3).join(' ') || 'Ustaz';
+  const hari  = kini.toLocaleDateString('id-ID',
+    { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+  const hijri = tanggalHijriah(kini);
+
+  const butir = (amanah || []).filter(a => a.jumlah > 0);
+  const isi = butir.length
+    ? `<div class="sapa-amanah">${butir.map(a => `
+        <button class="amanah" data-nav="${esc(a.view)}">
+          <span class="ikon"><i class="fa-solid ${a.ikon}"></i></span>
+          <span class="teks"><b>${angka(a.jumlah)}</b>${esc(a.label)}</span>
+          <i class="fa-solid fa-arrow-right go"></i>
+        </button>`).join('')}</div>`
+    : `<p class="sapa-lega"><i class="fa-solid fa-circle-check"></i>
+         Tidak ada yang tertunda hari ini. Semoga tetap begitu esok.</p>`;
+
+  return `<div class="sapa">
+    <div class="sapa-teks">
+      <div class="eyebrow"><span class="ar">السلام عليكم</span><span class="rule"></span>
+        <span class="lat">${esc(hari)}${hijri ? ' · ' + esc(hijri) + ' H' : ''}</span></div>
+      <h2>${esc(salamWaktu(kini.getHours()))}, ${esc(depan)}.</h2>
+      <p>${butir.length
+        ? 'Berikut amanah yang masih menunggu penyelesaian Anda.'
+        : 'Seluruh catatan sudah tertangani.'}</p>
+    </div>
+    ${isi}
+  </div>`;
+}
+
 function kartuUnit() {
   if (role() === 'Pimpinan') return '';
   const daftar = [
@@ -1865,7 +1946,23 @@ async function viewDashboard() {
   for (let i = 13; i >= 0; i--) { const k = kunciTgl(tambahHari(new Date(), -i)); hari14.push(k); petaIzinHari[k] = new Set(); }
   izinSemua.forEach(z => { const k = kunciTgl(z.tanggal_mulai); if (petaIzinHari[k]) petaIzinHari[k].add(String(z.nisn)); });
 
+  // Amanah yang belum selesai — sengaja TANPA penyaringan periode: tugas
+  // yang belum dikerjakan tidak berhenti menjadi tugas pada tanggal 1.
+  let perluWali = 0;
+  if (bolehKabarWali()) {
+    try {
+      const { penuh } = await bahanBinaPenuh();
+      perluWali = filterBinaan(penuh, 'kelas')
+        .filter(r => perluKabarWali(r) && String(r.status_pembinaan) !== 'Selesai').length;
+    } catch (e) { console.warn('amanah wali tidak terbaca:', e.message); }
+  }
+
   $('viewRoot').innerHTML = `
+    ${panelSapaan([
+      { jumlah: izinPending, label: 'izin menunggu keputusan', ikon: 'fa-clock', view: 'perizinan' },
+      { jumlah: binaProses,  label: 'pembinaan belum diselesaikan', ikon: 'fa-hands-holding-child', view: 'pembinaan' },
+      { jumlah: perluWali,   label: 'wali santri perlu dikabari', ikon: 'fa-comment-dots', view: 'pembinaan' }
+    ])}
     ${kartuUnit()}
 
     <div class="stats">
@@ -1915,6 +2012,8 @@ async function viewDashboard() {
     </div>`;
 
   onKlik(async (e) => {
+    const n = e.target.closest('[data-nav]');
+    if (n) return navigateTo(n.dataset.nav);
     const c = e.target.closest('[data-ctx]');
     if (c) {
       const [u, j] = c.dataset.ctx.split('|');
@@ -2818,6 +2917,99 @@ async function muatTabelPlg() {
   tandaiTabelBisaGeser();
 }
 
+// ---------------------------------------------------------------------
+// 13b. PENJAGA CATATAN GANDA
+//
+//      Pada data yang ada sekarang terdapat 35 pasang pelanggaran dengan
+//      santri, kode, dan tanggal yang persis sama pada 32 santri berbeda —
+//      pola input ganda, bukan dua kejadian terpisah. Setiap pasang itu
+//      menaikkan nomor tahap satu langkah lebih cepat, dan tahap adalah
+//      dasar seluruh instrumen pembinaan sampai ke surat peringatan.
+//
+//      Yang dipasang di sini SENGAJA bukan penolakan, melainkan satu
+//      pertanyaan. Dua kejadian pada hari yang sama memang mungkin, dan
+//      musyrif di lapangan yang tahu — bukan aplikasi.
+//
+//      BATASNYA JUJUR: pemeriksaan ini berjalan di browser, di atas cache
+//      `detail_data` yang sudah dimuat. Bila dua musyrif mencatat hal yang
+//      sama dari dua perangkat dalam hitungan detik, keduanya tetap lolos.
+//      Pengaman yang benar-benar rapat menuntut unique index di database —
+//      perubahan skema yang sengaja tidak diambil.
+// ---------------------------------------------------------------------
+
+/** Catatan aktif dengan santri + kode + tanggal yang sama, bila ada. */
+async function cariDuplikatPelanggaran(nisn, kode, tanggal) {
+  const rows = await amanKosong(muatDetail, 'pelanggaran');
+  const kTgl = kunciTgl(tanggal);
+  if (!kTgl) return null;
+  return (rows || []).find(r =>
+    aktifDetail(r) &&
+    String(r.nisn || '').trim() === String(nisn).trim() &&
+    String(r.kode_pelanggaran || '').trim() === String(kode).trim() &&
+    kunciTgl(r.tanggal) === kTgl) || null;
+}
+
+/** true bila musyrif memilih tetap mencatat. */
+async function konfirmasiDuplikatPelanggaran(dup, labelKode) {
+  const konf = await Swal.fire({
+    icon: 'warning',
+    title: 'Sudah tercatat hari ini',
+    html: `<div style="text-align:left;font-size:13.5px">
+      <p style="margin:0 0 8px">Pelanggaran
+        <b>${esc(labelKode || dup.nama_pelanggaran || '-')}</b>
+        untuk santri ini sudah tercatat pada tanggal yang sama
+        (${esc(tgl(dup.tanggal))}${dup.penindak ? ' · oleh ' + esc(dup.penindak) : ''}).</p>
+      <p style="margin:0;color:var(--text-3);font-size:12.5px">
+        Satu catatan tambahan menaikkan nomor tahap pembinaan santri ini
+        satu langkah. Lanjutkan hanya bila ini memang kejadian kedua.</p>
+    </div>`,
+    showCancelButton: true,
+    confirmButtonText: 'Tetap catat — kejadian terpisah',
+    cancelButtonText: 'Batalkan',
+    confirmButtonColor: '#9F1239'
+  });
+  return konf.isConfirmed;
+}
+
+/**
+ * Penyaring untuk input massal. Bertanya SEKALI untuk seluruh angkatan
+ * catatan, bukan sekali per santri — empat puluh dialog berturut-turut
+ * hanya melatih orang menekan "lanjut" tanpa membaca.
+ * Mengembalikan daftar panggilan yang jadi dijalankan.
+ */
+async function saringDuplikatMassal(panggilan) {
+  const rows = await amanKosong(muatDetail, 'pelanggaran');
+  const kunci = new Set((rows || []).filter(aktifDetail).map(r =>
+    `${String(r.nisn || '').trim()}|${String(r.kode_pelanggaran || '').trim()}|${kunciTgl(r.tanggal)}`));
+
+  const duplikat = [], bersih = [];
+  (panggilan || []).forEach(p => {
+    const k = `${String(p.params?.p_nisn || '').trim()}|`
+            + `${String(p.params?.p_kode || '').trim()}|${kunciTgl(p.params?.p_tanggal)}`;
+    (kunci.has(k) ? duplikat : bersih).push(p);
+  });
+  if (!duplikat.length) return panggilan;
+
+  const konf = await Swal.fire({
+    icon: 'warning', width: 620,
+    title: `${duplikat.length} santri sudah tercatat hari ini`,
+    html: `<div style="text-align:left;font-size:13px">
+      <p>Pelanggaran yang sama pada tanggal yang sama sudah tersimpan untuk:</p>
+      <ul style="max-height:170px;overflow:auto;margin:6px 0 0 16px">${duplikat
+        .map(x => `<li>${esc(x.nama_siswa || x.params?.p_nisn)}${x.kelas ? ' (' + esc(x.kelas) + ')' : ''}</li>`)
+        .join('')}</ul>
+      <p style="margin:10px 0 0;color:#64748b;font-size:12.5px">
+        Melewati yang duplikat menjaga nomor tahap pembinaan tetap benar.
+        ${bersih.length} santri lainnya tetap dicatat.</p></div>`,
+    showCancelButton: true,
+    confirmButtonText: `Lewati yang duplikat (${bersih.length} dicatat)`,
+    cancelButtonText: 'Catat semuanya',
+    confirmButtonColor: '#0F766E',
+    cancelButtonColor: '#9F1239'
+  });
+  return konf.isConfirmed ? bersih : panggilan;
+}
+
 async function modalCatatPelanggaran(prefill) {
   if (APP.ctx.unit === 'Semua') {
     const r = await Swal.fire({ icon:'info', title:'Pilih unit terlebih dahulu',
@@ -2877,6 +3069,17 @@ async function modalCatatPelanggaran(prefill) {
         p_catatan: $('fCatatan').value.trim(),
         p_force: !!p.force
       };
+
+      // `p.force` menandai penimpaan IZIN, bukan penimpaan duplikat —
+      // dua urusan berbeda, jadi bendera duplikat berdiri sendiri.
+      if (!p.dupOk) {
+        const dup = await cariDuplikatPelanggaran(nisn, kode, payload.p_tanggal);
+        if (dup && !(await konfirmasiDuplikatPelanggaran(dup, fKode.value))) {
+          Swal.showValidationMessage('Dibatalkan — catatan hari ini sudah ada.');
+          return false;
+        }
+      }
+
       const { data, error } = await db.rpc('catat_pelanggaran', payload);
       if (error) { Swal.showValidationMessage(error.message); return false; }
       return { hasil: data, payload, labelSantri: fNisn.value, labelKode: fKode.value };
@@ -2902,7 +3105,8 @@ async function modalCatatPelanggaran(prefill) {
     if (konf.isConfirmed) {
       return modalCatatPelanggaran({
         labelSantri, labelKode, nisn: payload.p_nisn, kode: payload.p_kode,
-        tanggal: payload.p_tanggal, catatan: payload.p_catatan, force: true
+        tanggal: payload.p_tanggal, catatan: payload.p_catatan,
+        force: true, dupOk: true   // duplikat sudah ditanyakan pada percobaan pertama
       });
     }
     return;
@@ -3465,27 +3669,77 @@ function kategoriBina(r, peta) {
 }
 
 /**
- * Penomoran resmi: urutkan SELURUH pelanggaran aktif per (santri + kategori)
- * dari yang terlama, lalu beri nomor 1, 2, 3, …
- * Hasilnya: Map(id_log -> { n, kategori, nisn }).
- * Pelanggaran yang diarsipkan tidak ikut dihitung, sehingga nomor tahap
- * selalu mencerminkan jumlah catatan yang benar-benar berlaku.
+ * Jendela waktu penghitungan tahap, dalam bulan.
+ *
+ * Pelanggaran yang lebih tua dari jendela tidak lagi menambah nomor tahap,
+ * tetapi tetap tersimpan utuh dan tetap tampil di riwayat serta laporan —
+ * hanya berhenti membebani tahap aktif. Santri yang sudah setengah tahun
+ * tidak mengulang tidak pantas terus memikul angka dari periode yang jauh
+ * berlalu; itulah beda pembinaan dari pencatatan.
+ *
+ * Angka ini adalah kebijakan dayah, bukan keputusan teknis. Ganti ke 12
+ * bila hitungannya ingin mengikuti tahun ajaran.
+ */
+const JENDELA_TAHAP_BULAN = 6;
+
+/**
+ * Kunci tanggal N bulan sebelum `kunci`, dengan pengaman akhir bulan:
+ * 31 Agustus dikurangi 6 bulan jatuh pada 28/29 Februari, bukan melompat
+ * ke 3 Maret sebagaimana perilaku bawaan `Date.setMonth`.
+ */
+function mundurBulan(kunci, bulan) {
+  const d = tglDari(kunci); if (!d) return '';
+  const x = new Date(d.getFullYear(), d.getMonth() - bulan, 1);
+  const akhir = new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate();
+  x.setDate(Math.min(d.getDate(), akhir));
+  return kunciTgl(x);
+}
+
+/**
+ * Penomoran resmi: urutkan pelanggaran aktif per (santri + kategori) dari
+ * yang terlama, lalu beri nomor menurut JENDELA BERJALAN masing-masing
+ * catatan — yaitu berapa banyak pelanggaran kategori itu yang terjadi
+ * dalam JENDELA_TAHAP_BULAN bulan sebelum catatan tersebut, termasuk
+ * dirinya sendiri.
+ *
+ * PENTING — jendelanya berlabuh pada tanggal TIAP catatan, bukan pada hari
+ * ini. Jendela yang berlabuh pada hari ini akan membuat nomor tahap setiap
+ * baris lama bergeser sendiri setiap hari, sehingga laporan yang dicetak
+ * bulan lalu tidak lagi cocok dengan layar hari ini — dan surat peringatan
+ * yang sudah diterima wali santri kehilangan dasar angkanya. Dengan
+ * jendela berlabuh, nomor sebuah catatan ditetapkan sekali dan tidak
+ * pernah berubah lagi.
+ *
+ * Setiap id_log tetap mendapat entri (nomor seumur catatan ikut dibawa
+ * sebagai `nSeumur`), sehingga nomorkanBina() tidak pernah kehilangan
+ * rujukan dan baris pembinaan lama tidak jatuh ke jalur perkiraan.
+ *
+ * Hasilnya: Map(id_log -> { n, nSeumur, kategori, nisn }).
  */
 async function petaTahapPelanggaran() {
   const rows = (await amanKosong(muatDetail, 'pelanggaran')).filter(aktifDetail);
-  const urut = rows.slice().sort((a, b) => {
-    const t = String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal)));
-    if (t) return t;
-    return String(a.id_log || '').localeCompare(String(b.id_log || ''));
-  });
-  const hitung = {}, peta = new Map();
-  urut.forEach(r => {
+
+  const grup = new Map();
+  rows.forEach(r => {
     const nisn = String(r.nisn || '').trim();
-    const kat = String(r.kategori || '').trim();
-    const id = String(r.id_log || '').trim();
-    if (!nisn || !kat || !id) return;
+    const kat  = String(r.kategori || '').trim();
+    const id   = String(r.id_log || '').trim();
+    const k    = kunciTgl(r.tanggal);
+    if (!nisn || !kat || !id || !k) return;
     const kunci = `${nisn}|${kat}`;
-    peta.set(id, { n: (hitung[kunci] = (hitung[kunci] || 0) + 1), kategori: kat, nisn });
+    if (!grup.has(kunci)) grup.set(kunci, []);
+    grup.get(kunci).push({ id, k, nisn, kat });
+  });
+
+  const peta = new Map();
+  grup.forEach(daftar => {
+    daftar.sort((a, b) => a.k.localeCompare(b.k) || a.id.localeCompare(b.id));
+    let kepala = 0;                                  // batas bawah jendela
+    daftar.forEach((r, i) => {
+      const batas = mundurBulan(r.k, JENDELA_TAHAP_BULAN);
+      while (kepala < i && daftar[kepala].k < batas) kepala++;
+      peta.set(r.id, { n: i - kepala + 1, nSeumur: i + 1, kategori: r.kat, nisn: r.nisn });
+    });
   });
   return peta;
 }
@@ -3521,6 +3775,7 @@ function nomorkanBina(rows, petaTahap) {
     if (ref) {
       if (ref.kategori) r.kategori_bina = ref.kategori;   // kategori ikut sumber resmi
       r.tahap_hitung = ref.n;
+      r.tahap_seumur = ref.nSeumur;                       // pembanding untuk tinjauan
       r.tahap_perkiraan = false;
       const kunci = `${r.nisn}|${r.kategori_bina}`;
       maks[kunci] = Math.max(maks[kunci] || 0, ref.n);
@@ -3559,6 +3814,101 @@ function bentukMenurutAturan(r, instrumen) {
   return { bentuk_final: bentukAturan(info, n) || bentukBina(r), overflow: false, batas };
 }
 
+// ---------- 16b. Penanda "perlu ditinjau" ----------------------------
+//
+//     Diperiksa langsung ke Supabase: baris log_pembinaan bermode
+//     'Otomatis' dibuat oleh TRIGGER Postgres `trg_pembinaan_otomatis`
+//     (AFTER INSERT pada log_pelanggaran), bukan oleh app.js. Trigger itu
+//     menghitung `pengulangan_ke` dengan count(*) atas SELURUH pelanggaran
+//     aktif santri pada kategori yang sama — tanpa jendela waktu, tanpa
+//     penyaringan catatan ganda, dan pada urutan MASUK, bukan urutan
+//     TANGGAL. Karena itu ia menyimpang dari hitungan browser pada 248 dari
+//     759 baris yang ada sekarang.
+//
+//     Konsekuensinya jujur: app.js tidak bisa mencegat proses itu — sudah
+//     selesai di database sebelum browser tahu. Yang bisa dilakukan adalah
+//     menandai, bukan menghapus atau menimpa diam-diam. Keputusan akhir
+//     tetap di tangan musyrif lewat `ubah_status_pembinaan` yang sudah ada.
+//
+//     Penandanya sengaja disempitkan pada bentuk pembinaan terberat. Dari
+//     759 baris, hanya 5 yang berbentuk pembotakan / surat peringatan /
+//     dikembalikan kepada orang tua, dan hanya 2 di antaranya menyimpang.
+//     Dua penanda yang benar-benar dibaca jauh lebih berguna daripada 248
+//     penanda yang dilewati orang.
+
+/**
+ * Bentuk pembinaan yang tidak boleh tercatat tanpa dilihat manusia.
+ * Daftar ini kebijakan dayah — silakan ditambah atau dikurangi.
+ */
+const KATA_KUNCI_AMBANG_BERAT = [
+  'pembotakan', 'dikembalikan kepada orang tua',
+  'sp 1', 'sp 2', 'sp 3', 'sp1', 'sp2', 'sp3', 'surat peringatan'
+];
+
+const ambangBerat = (teks) => {
+  const t = kunciBentuk(teks);
+  return !!t && KATA_KUNCI_AMBANG_BERAT.some(k => t.includes(k));
+};
+
+/**
+ * Baris perlu ditinjau bila bentuknya termasuk ambang berat DAN nomor
+ * tahap versi trigger berbeda dari hitungan browser — pertanda tahap
+ * terberat mungkin terpicu lebih cepat daripada yang semestinya.
+ */
+function perluDitinjau(r) {
+  if (String(r?.mode_pembinaan) !== 'Otomatis') return false;
+  if (!ambangBerat(bentukBina(r)) && !ambangBerat(r?.bentuk_final)) return false;
+  const mentah = Number(r.pengulangan_ke) || 0;
+  const hitung = Number(r.tahap_hitung) || 0;
+  return mentah > 0 && hitung > 0 && mentah !== hitung;
+}
+
+/** Jendela peninjauan: memperlihatkan selisihnya, lalu menyerahkan keputusan. */
+async function tinjauAmbangBerat(idPembinaan) {
+  const { penuh } = await bahanBinaPenuh();
+  const r = penuh.find(x => String(x.id_pembinaan) === String(idPembinaan));
+  if (!r) return toast('error', 'Data pembinaan tidak ditemukan.');
+
+  const kategori = r.kategori_bina || '-';
+  const riwayat = (await amanKosong(muatDetail, 'pelanggaran'))
+    .filter(aktifDetail)
+    .filter(p => String(p.nisn) === String(r.nisn) &&
+                 String(p.kategori || '').trim() === kategori)
+    .sort((a, b) => String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal))));
+
+  const batas = riwayat.length
+    ? mundurBulan(kunciTgl(r.tanggal_pembinaan) || hariIni(), JENDELA_TAHAP_BULAN) : '';
+  const luar = riwayat.filter(p => kunciTgl(p.tanggal) < batas).length;
+
+  await Swal.fire({
+    icon: 'warning', width: 660, title: 'Perlu ditinjau',
+    html: `<div style="text-align:left;font-size:13.5px">
+      <p style="margin:0 0 9px"><b>${esc(r.nama_siswa)}</b> — tercatat otomatis sebagai
+        <b>${esc(bentukBina(r))}</b>.</p>
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin:0 0 10px">
+        <tr><td style="padding:5px 0">Nomor tahap dari trigger database</td>
+            <td style="padding:5px 0;text-align:right"><b>ke-${esc(r.pengulangan_ke)}</b></td></tr>
+        <tr><td style="padding:5px 0">Nomor tahap hasil hitung ulang (${JENDELA_TAHAP_BULAN} bulan berjalan)</td>
+            <td style="padding:5px 0;text-align:right"><b>ke-${esc(r.tahap_hitung)}</b></td></tr>
+        <tr><td style="padding:5px 0;border-top:1px solid #e2e8f0">Catatan kategori ${esc(kategori)} seluruhnya</td>
+            <td style="padding:5px 0;text-align:right;border-top:1px solid #e2e8f0">
+              <b>${riwayat.length}</b>${luar ? ` <span style="color:#94a3b8">(${luar} di luar jendela)</span>` : ''}</td></tr>
+      </table>
+      <p style="margin:0 0 5px;color:var(--text-3);font-size:12.5px">
+        Selisih ini berarti sebagian dasar tahap berasal dari luar periode berjalan,
+        atau ada catatan ganda. Riwayat kategori ${esc(kategori)}:</p>
+      <ul style="max-height:170px;overflow:auto;padding-left:18px;margin:4px 0 10px;font-size:12.5px">
+        ${riwayat.map(p => `<li>${esc(tgl(p.tanggal))} — ${esc(p.nama_pelanggaran || '-')}</li>`).join('')
+          || '<li>Tidak ada rincian tersedia</li>'}
+      </ul>
+      <p style="margin:0;color:var(--text-3);font-size:12.5px">
+        Bila tahap ini dinilai belum layak, arsipkan catatan pelanggaran yang ganda
+        di menu Pelanggaran, atau ubah status pembinaannya di baris ini.</p>
+    </div>`,
+    confirmButtonText: 'Sudah diperiksa', confirmButtonColor: '#14618B'
+  });
+}
+
 /** Urutan tampil: kategori (Ringan→Sedang→Berat), lalu tahap terbesar dahulu. */
 function urutkanBina(rows) {
   return (rows || []).slice().sort((a, b) => {
@@ -3594,7 +3944,8 @@ async function viewPembinaan() {
       <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
       <div id="pgBina"></div>`,
       `<button class="btn btn-ghost btn-sm" id="pbRefresh"><i class="fa-solid fa-rotate"></i>Muat Ulang</button>`,
-      'Tahap dihitung dari jumlah pelanggaran per kategori; bentuk mengikuti Master Pembinaan.')}`;
+      `Tahap dihitung dari pelanggaran ${JENDELA_TAHAP_BULAN} bulan terakhir per kategori; `
+      + `bentuk mengikuti Master Pembinaan.`)}`;
 
   ['pbKategori','pbStatus','pbMode'].forEach(id => $(id).addEventListener('change', e => {
     stBina[{pbKategori:'kategori', pbStatus:'status', pbMode:'mode'}[id]] = e.target.value;
@@ -3614,6 +3965,8 @@ async function viewPembinaan() {
       $('tbBina').scrollIntoView({ block:'start', behavior:'smooth' });
       return;
     }
+    const t = e.target.closest('[data-tinjau]');
+    if (t) return tinjauAmbangBerat(t.dataset.tinjau);
     const b = e.target.closest('[data-pbn]');
     if (!b) return;
     const [id, status] = b.dataset.pbn.split('|');
@@ -3623,7 +3976,17 @@ async function viewPembinaan() {
   await gambarBina();
 }
 
-async function bahanBina() {
+/**
+ * Riwayat pembinaan PENUH — sudah bernomor tahap dan berbentuk final,
+ * tetapi BELUM disaring periode maupun kelas binaan.
+ *
+ * Dipisahkan dari bahanBina() karena pesan WhatsApp kepada wali santri
+ * (modul 27b) harus memakai seluruh riwayat: pemberitahuan tahap ke-8
+ * tidak boleh berubah isinya hanya karena layar sedang menyaring bulan
+ * berjalan. Peta instrumen ikut dikembalikan supaya tangga pembinaan
+ * berikutnya bisa disusun tanpa memuat ulang master_pembinaan.
+ */
+async function bahanBinaPenuh() {
   const [aturan, mentah, petaTahap] = await Promise.all([
     muatMasterPembinaan(),
     muatPembinaan(),
@@ -3645,6 +4008,11 @@ async function bahanBina() {
   nomorkanBina(penuh, petaTahap);
   penuh.forEach(r => Object.assign(r, bentukMenurutAturan(r, instrumen)));
 
+  return { penuh, instrumen };
+}
+
+async function bahanBina() {
+  const { penuh } = await bahanBinaPenuh();
   // 3. Baru disaring periode & kelas binaan, lalu diurutkan untuk tampilan.
   return urutkanBina(filterBinaan(saringPeriode(penuh, 'tanggal_pembinaan'), 'kelas'));
 }
@@ -3697,15 +4065,23 @@ async function gambarBina() {
            ${r.tahap_perkiraan ? `<div class="secondary" style="font-size:10px;margin-top:4px">perkiraan</div>` : ''}`
         : '<span class="tag tag-off">—</span>'}</td>
       <td><div class="primary" ${r.overflow ? 'style="color:var(--maroon)"' : ''}>${esc(r.bentuk_final)}</div>
+        ${perluDitinjau(r) ? `<button class="tag tag-tinjau" data-tinjau="${esc(r.id_pembinaan)}"
+            title="Nomor tahap dari database berbeda dengan hitungan periode berjalan">
+            <i class="fa-solid fa-magnifying-glass"></i>Perlu ditinjau</button>` : ''}
         ${r.overflow ? `<div class="secondary">Batas modul kategori ini: ${r.batas}</div>` : ''}
         ${tampilCatatan ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:5px">${esc(catatan)}</div>` : ''}</td>
       <td style="font-size:12.5px;color:var(--text-2);max-width:240px">${esc(r.deskripsi_pelanggaran||'-')}</td>
       <td><span class="tag ${String(r.mode_pembinaan)==='Otomatis'?'tag-sea':'tag-off'}">${esc(r.mode_pembinaan||'Manual')}</span></td>
       <td><span class="tag ${selesai?'tag-ok':'tag-wait'}">${esc(r.status_pembinaan||'Dalam Proses')}</span></td>
-      <td class="right">${editable
+      <td class="right"><div class="aksi-bina">${
+        bolehKabarWali() && perluKabarWali(r)
+        ? `<button class="btn btn-wa btn-sm" data-wa-wali="${esc(r.id_pembinaan)}"
+             title="Beri tahu wali santri melalui WhatsApp">
+            <i class="fa-brands fa-whatsapp"></i>Kabari Wali</button>`
+        : ''}${editable
         ? `<button class="btn ${selesai?'btn-ghost':'btn-ok'} btn-sm" data-pbn="${esc(r.id_pembinaan)}|${selesai?'Dalam Proses':'Selesai'}">
             <i class="fa-solid ${selesai?'fa-arrow-rotate-left':'fa-circle-check'}"></i>${selesai?'Buka Lagi':'Selesaikan'}</button>`
-        : '<span class="tag tag-off">Hanya baca</span>'}</td>
+        : '<span class="tag tag-off">Hanya baca</span>'}</div></td>
     </tr>`;
   }).join('') || barisKosong(9, 'Belum ada instruksi pembinaan.', 'Pembinaan otomatis terbentuk setelah pelanggaran dicatat.');
 
@@ -6716,6 +7092,11 @@ function mdGambarPanel() {
 
 /** Simpan pelanggaran lewat RPC catat_pelanggaran + alur konfirmasi izin. */
 async function mdSimpanPelanggaran(payload, btn, label) {
+  // Penjagaan duplikat didahulukan: bertanya setelah tersimpan sudah
+  // terlambat, karena trigger pembinaan berjalan di detik yang sama.
+  const dup = await cariDuplikatPelanggaran(payload.p_nisn, payload.p_kode, payload.p_tanggal);
+  if (dup && !(await konfirmasiDuplikatPelanggaran(dup, payload.p_kode))) return null;
+
   const asli = mulaiSimpan(btn, label);
   try {
     let { data, error } = await db.rpc('catat_pelanggaran', payload);
@@ -8592,7 +8973,11 @@ function aiValidasiBulk(p) {
 async function aiJalankanBulk(hasil) {
   if (!bolehTulis()) return toast('error', `Role ${role()} tidak berwenang mencatat pelanggaran.`);
 
-  const total = hasil.panggilan.length;
+  // Satu pertanyaan untuk seluruh angkatan, sebelum baris pertama dikirim.
+  const panggilan = await saringDuplikatMassal(hasil.panggilan);
+  if (!panggilan.length) return toast('info', 'Tidak ada catatan baru untuk disimpan.');
+
+  const total = panggilan.length;
   const laporan = { berhasil: [], konflik: [], gagal: [] };
 
   Swal.fire({
@@ -8603,7 +8988,7 @@ async function aiJalankanBulk(hasil) {
   sync('saving', 'Menyimpan input massal…');
 
   for (let i = 0; i < total; i++) {
-    const p = hasil.panggilan[i];
+    const p = panggilan[i];
     try {
       const { data, error } = await db.rpc('catat_pelanggaran', p.params);
       if (error) laporan.gagal.push({ ...p, pesan: error.message });
@@ -9982,6 +10367,205 @@ document.addEventListener('click', async (e) => {
 });
 
 // ---------------------------------------------------------------------
+// 27b. NOTIFIKASI WHATSAPP — PEMBERITAHUAN KEPADA WALI SANTRI
+//
+//      Tidak setiap tahap pembinaan pantas dikabarkan kepada rumah.
+//      Yang dikabarkan hanyalah tahap yang menurut Master Pembinaan
+//      memang MELIBATKAN orang tua — surat peringatan dan pemberitahuan
+//      resmi — plus seluruh tahap kategori Berat, yang sejak tahap
+//      pertama sudah berbunyi "Pemberitahuan Orang Tua".
+//
+//      Isi pesan menjawab tiga pertanyaan yang selalu ditanyakan wali
+//      santri, berurutan: apa saja yang sudah terjadi (riwayat kategori
+//      tersebut saja), apa yang dijalankan sekarang, dan apa yang akan
+//      terjadi bila terulang lagi. Pertanyaan ketiga itulah yang
+//      membuat pesan ini berfungsi sebagai pembinaan, bukan sekadar
+//      laporan — orang tua tahu persis apa yang bisa dicegah.
+//
+//      Jalurnya wa.me, bukan webhook grup: ini percakapan pribadi
+//      dengan satu keluarga, dan isinya tidak boleh masuk grup musyrif.
+// ---------------------------------------------------------------------
+
+/**
+ * Tahap yang memicu tombol "Kabari Wali", per kategori.
+ *   Ringan  ke-11  Pemberitahuan Orang tua dan Tanda tangan seluruh musyrif
+ *   Ringan  ke-13  Surat Peringatan I dan Kosekuensi Bila Melanggar Lagi
+ *   Sedang  ke-8   Surat Peringatan I dan Kosekuensi Bila Melanggar Lagi
+ *   Sedang  ke-12  Pemberitahuan Orang tua dan Tanda tangan seluruh musyrif
+ *   Berat   semua  seluruh tahapnya melibatkan orang tua
+ *
+ * Daftar nomor, bukan pencocokan teks: nama bentuk pembinaan di Master
+ * bisa diperbaiki ejaannya kapan saja, sedangkan nomor tahap adalah
+ * tulang punggung instrumen dan tidak berubah. Bila tangga instrumen
+ * diubah, cukup angka di sinilah yang perlu ikut disesuaikan.
+ */
+const WA_TAHAP_WALI = { Ringan: [11, 13], Sedang: [8, 12], Berat: 'semua' };
+
+/** Apakah satu baris pembinaan termasuk yang perlu dikabarkan ke rumah? */
+function perluKabarWali(r) {
+  const aturan = WA_TAHAP_WALI[String(r?.kategori_bina || '').trim()];
+  if (!aturan) return false;
+  const n = tahapBina(r);
+  if (!n) return false;
+  // Baris yang sudah melewati batas modul tetap dikabarkan bila kategorinya
+  // Berat — justru di titik itulah rumah paling perlu tahu.
+  if (aturan === 'semua') return true;
+  return aturan.includes(n);
+}
+
+/** Nomor WhatsApp Indonesia yang siap dipakai pada tautan wa.me. */
+function waNomorWali(s) {
+  const angka = String(s?.no_hp_orang_tua || '').replace(/\D/g, '');
+  if (angka.length < 8) return '';
+  if (angka.startsWith('62')) return angka;
+  if (angka.startsWith('0'))  return '62' + angka.slice(1);
+  if (angka.startsWith('8'))  return '62' + angka;
+  return angka;
+}
+
+/** Tangga pembinaan yang MASIH tersisa di atas tahap ke-n, terurut naik. */
+function waTanggaLanjutan(instrumen, kategori, n) {
+  const info = instrumen ? instrumen.get(String(kategori || '').trim()) : null;
+  if (!info) return [];
+  const sisa = [];
+  info.bentuk.forEach((v, k) => { if (k > n) sisa.push({ ke: k, bentuk: v }); });
+  return sisa.sort((a, b) => a.ke - b.ke);
+}
+
+/**
+ * Susun pesan pemberitahuan. Riwayat sengaja dibatasi pada SATU kategori:
+ * wali santri yang menerima surat peringatan kategori Sedang tidak perlu
+ * dibebani daftar keterlambatan ringan — dan tahap ke-8 memang dihitung
+ * dari kategori itu saja, jadi daftar campuran justru menyesatkan.
+ */
+async function waPesanWali(r, instrumen) {
+  const peta = await petaSiswa();
+  const s = peta[String(r.nisn)] || {};
+  const nama     = r.nama_siswa || s.nama_siswa || '-';
+  const kategori = String(r.kategori_bina || '-').trim();
+  const n        = tahapBina(r) || 0;
+  const batas    = r.batas || null;
+
+  const rows = (await amanKosong(muatDetail, 'pelanggaran'))
+    .filter(aktifDetail)
+    .filter(p => String(p.nisn) === String(r.nisn) &&
+                 String(p.kategori || '').trim() === kategori)
+    .sort((a, b) => String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal))));
+
+  const MAKS = 15;
+  const dipotong = Math.max(0, rows.length - MAKS);
+  const daftar = rows.slice(dipotong).map((p, i) => {
+    const bidang = String(p.bidang || '').trim();
+    const poin = Number(p.bobot_pelanggaran) || 0;
+    return `${dipotong + i + 1}. ${tgl(p.tanggal)} · `
+         + `${String(p.nama_pelanggaran || p.kode_pelanggaran || '-').trim()}`
+         + `${bidang ? ' (' + bidang + ')' : ''} · ${poin} poin`;
+  });
+  if (dipotong) daftar.unshift(`(${dipotong} catatan terdahulu tidak ditampilkan)`);
+
+  const lanjut = r.overflow ? [] : waTanggaLanjutan(instrumen, kategori, n);
+  const bagianLanjut = r.overflow
+    ? ['Seluruh tahapan instrumen pembinaan kategori ini telah dijalani.',
+       'Penanganan berikutnya ditetapkan melalui musyawarah pimpinan dayah',
+       'bersama Bapak/Ibu wali santri.']
+    : (lanjut.length
+        ? lanjut.map(x => `Ke-${x.ke}: ${x.bentuk}`)
+        : ['Tidak ada tahap lanjutan yang terdaftar pada instrumen kategori ini.']);
+
+  const pengirim = `${APP.profil?.nama || '-'} (${role() || '-'})`;
+
+  const baris = [
+    '*PEMBERITAHUAN PEMBINAAN SANTRI*',
+    'Dayah Ruhul Qurani',
+    '',
+    'Assalamualaikum warahmatullahi wabarakatuh.',
+    `Kepada Bapak/Ibu wali dari ananda *${nama}*, kami sampaikan perkembangan pembinaan berikut.`,
+    '',
+    `Nama     : ${nama}`,
+    `NISN     : ${r.nisn || '-'}`,
+    `Kelas    : ${s.kelas || r.kelas || '-'}${s.jenjang ? ' (' + s.jenjang + ')' : ''}`,
+    `Asrama   : ${s.asrama || '-'}`,
+    `Kategori : ${kategori}`,
+    `Tahap    : ke-${n}${batas ? ' dari ' + batas : ''}`,
+    '',
+    `*RIWAYAT PELANGGARAN KATEGORI ${kategori.toUpperCase()} — ${rows.length} CATATAN*`,
+    ...(daftar.length ? daftar : ['(belum ada catatan yang tersimpan)']),
+    '',
+    '*PEMBINAAN YANG BERLAKU SAAT INI*',
+    r.bentuk_final || bentukBina(r),
+    '',
+    '*BILA PELANGGARAN KATEGORI INI TERULANG*',
+    ...bagianLanjut,
+    '',
+    // Penutupnya menyesuaikan keadaan: mengajak mencegah tahap berikutnya
+    // hanya masuk akal selama masih ada tahap yang bisa dicegah.
+    ...(r.overflow || !lanjut.length
+      ? ['Kami mohon kesediaan Bapak/Ibu hadir mendampingi ananda',
+         'dalam penanganan selanjutnya.']
+      : ['Kami mohon kesediaan Bapak/Ibu mendampingi dan mengingatkan ananda,',
+         'agar tahapan berikutnya tidak perlu dijalankan.']),
+    '',
+    `Pengirim : ${pengirim}`,
+    `_Dikirim melalui Sistem Informasi Pengembangan Santri pada ${new Date().toLocaleString('id-ID')}._`
+  ];
+  return { pesan: baris.join('\n'), nomor: waNomorWali(s), nama };
+}
+
+/** Pratinjau dulu, baru buka WhatsApp — pesan ini tidak boleh salah kirim. */
+async function waKabariWali(idPembinaan, btn) {
+  // Penyusunan pesan memuat ulang riwayat penuh; tombol dikunci selama itu.
+  // Penguncian dilepas SEBELUM dialog pratinjau terbuka, supaya penanda
+  // sinkronisasi tidak terlihat "berjalan" selama musyrif membaca.
+  const asli = btn ? mulaiSimpan(btn, 'Menyusun…') : null;
+  let pesan, nomor, nama;
+  try {
+    const { penuh, instrumen } = await bahanBinaPenuh();
+    const r = penuh.find(x => String(x.id_pembinaan) === String(idPembinaan));
+    if (!r) { if (btn) selesaiSimpan(btn, asli, false, 'Data tidak ditemukan');
+              return toast('error', 'Data pembinaan tidak ditemukan.'); }
+    ({ pesan, nomor, nama } = await waPesanWali(r, instrumen));
+    if (btn) selesaiSimpan(btn, asli, true, 'Pesan siap');
+  } catch (err) {
+    if (btn) selesaiSimpan(btn, asli, false);
+    throw err;
+  }
+
+  const konf = await Swal.fire({
+    width: 640,
+    title: 'Kabari wali santri?',
+    html: `<div style="text-align:left">
+      <p style="margin:0 0 10px;font-size:13px;color:#475569">
+        ${nomor
+          ? `Pesan dikirim ke <b>+${esc(nomor)}</b> (wali ananda ${esc(nama)}).`
+          : `Nomor wali ananda ${esc(nama)} belum terisi di data santri —
+             WhatsApp akan membuka daftar kontak agar Anda memilih tujuannya sendiri.`}
+      </p>
+      <textarea readonly style="width:100%;height:280px;font-family:ui-monospace,Menlo,Consolas,monospace;
+        font-size:11.5px;line-height:1.55;padding:11px;border:1px solid #cbd5e1;border-radius:9px;
+        background:#f8fafc;color:#0f172a;resize:vertical">${esc(pesan)}</textarea>
+      <p style="margin:9px 0 0;font-size:11.5px;color:#64748b">
+        Isi pesan masih dapat Anda sunting di WhatsApp sebelum menekan kirim.</p>
+    </div>`,
+    showCancelButton: true,
+    confirmButtonText: 'Buka WhatsApp',
+    cancelButtonText: 'Batal',
+    confirmButtonColor: '#128C7E'
+  });
+  if (!konf.isConfirmed) return;
+
+  window.open(`https://wa.me/${nomor}?text=${encodeURIComponent(pesan)}`, '_blank', 'noopener');
+  if (!nomor) toast('info', 'Nomor wali belum terisi — pilih kontak di WhatsApp.');
+}
+
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-wa-wali]'); if (!b) return;
+  e.preventDefault();
+  if (!bolehKabarWali()) return toast('error', 'Akun Anda tidak berwenang mengabari wali santri.');
+  try { await waKabariWali(b.dataset.waWali, b); }
+  catch (err) { fireError(err); }
+});
+
+// ---------------------------------------------------------------------
 // 28. DASHBOARD GURU BK & PESAN TINDAK LANJUT
 //
 //     Guru BK memakai SELURUH isi Dashboard Pimpinan — kartu statistik,
@@ -11173,6 +11757,16 @@ async function viewTahfiz() {
 
     <div class="stats" id="thfStat"></div>
 
+    <section class="card thf-juara">
+      <div class="card-head">
+        <div><h3><i class="fa-solid fa-ranking-star"></i>Peringkat Hafalan</h3>
+          <p class="sub">Sepuluh penyetor terbanyak pada ${esc(labelPeriode())} —
+             dihitung dari halaman yang terkumpul.</p></div>
+        <span class="tag tag-emas"><i class="fa-solid fa-book-quran"></i>1 juz ≈ ${HALAMAN_PER_JUZ} halaman</span>
+      </div>
+      <div class="prs-board thf-board" id="thfBoard"></div>
+    </section>
+
     <div class="grid-2">
       <div>
         ${bolehSetor ? `
@@ -11239,13 +11833,12 @@ async function viewTahfiz() {
           </div>
         </section>` : ''}
 
-        <section class="card">
-          <div class="card-head">
+        <details class="card lipat" id="thfRiwayat">
+          <summary class="card-head">
             <div><h3>Riwayat Setoran</h3><p class="sub" id="thfSub">Memuat…</p></div>
-            <div class="actions">
-              <button class="btn btn-ghost btn-sm" id="thfCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>
-            </div>
-          </div>
+            <span class="lipat-tanda"><span class="teks"></span>
+              <i class="fa-solid fa-chevron-down"></i></span>
+          </summary>
           <div class="filters">
             <input id="thfCari" class="input grow" placeholder="Cari nama, NISN, atau surah…">
             <select id="thfFJenis" class="input">
@@ -11254,6 +11847,7 @@ async function viewTahfiz() {
             </select>
             <span class="sep"></span>
             <button class="btn btn-ghost btn-sm" id="thfReset"><i class="fa-solid fa-rotate-left"></i>Reset</button>
+            <button class="btn btn-ghost btn-sm" id="thfCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>
           </div>
           <div class="tbl"><table>
             <thead><tr><th>Tanggal</th><th>Santri</th><th>Bacaan</th>
@@ -11262,7 +11856,7 @@ async function viewTahfiz() {
           </table></div>
           <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
           <div id="thfPager"></div>
-        </section>
+        </details>
       </div>
 
       <div>
@@ -11277,12 +11871,6 @@ async function viewTahfiz() {
             </div>
           </div>
           <div id="thfTargetBox"></div>
-        </section>
-
-        <section class="card">
-          <div class="card-head"><div><h3>Peringkat Hafalan</h3>
-            <p class="sub">Halaman terkumpul pada periode aktif.</p></div></div>
-          <div class="prs-board" id="thfBoard"></div>
         </section>
 
         <section class="card">
@@ -11320,6 +11908,13 @@ async function viewTahfiz() {
     thfGambarPanel();
   });
   $('thfCsv').addEventListener('click', thfEksporCsv);
+
+  // Petunjuk "geser ke samping" diukur dari lebar nyata tabel. Selama
+  // panel terlipat lebarnya nol, jadi pengukurannya diulang tiap kali
+  // panel dibuka — kalau tidak, petunjuknya tidak pernah muncul.
+  $('thfRiwayat').addEventListener('toggle', () => {
+    if ($('thfRiwayat').open) tandaiTabelBisaGeser();
+  });
 
   onKlik(async (e) => {
     const d = e.target.closest('[data-detail]');
@@ -11446,13 +12041,24 @@ async function thfGambarPanel() {
       kelas: r.kelas || peta[n]?.kelas || '-', hal:0, jml:0 });
     const o = board.get(n); o.hal += Number(r.capaian_halaman) || 0; o.jml++;
   });
-  const top = [...board.values()].sort((a, b) => b.hal - a.hal).slice(0, 10);
-  $('thfBoard').innerHTML = top.map((t, i) => `
-    <div class="prs-row">
-      <div class="prs-medal">${i + 1}</div>
-      <div class="prs-who"><b>${esc(t.nama)}</b><span>${esc(t.nisn)} · ${esc(t.kelas)}</span></div>
-      <div class="prs-poin"><b>${Math.round(t.hal * 10) / 10}</b><small>${juzDari(t.hal)} juz</small></div>
-    </div>`).join('') || kosong('Belum ada peringkat.', 'Setoran akan muncul di sini.', 'fa-ranking-star');
+  const top = [...board.values()].sort((a, b) => b.hal - a.hal || b.jml - a.jml).slice(0, 10);
+  const puncak = top.length ? top[0].hal : 0;
+  $('thfBoard').innerHTML = top.map((t, i) => {
+    // Bilah kemajuan relatif terhadap peringkat pertama. Angka saja sulit
+    // dirasakan; panjang bilah membuat jarak ke puncak terlihat sekali
+    // pandang — dan jarak yang terlihat itulah yang mengundang dikejar.
+    const persen = puncak > 0 ? Math.max(4, Math.round(t.hal / puncak * 100)) : 0;
+    return `
+    <button type="button" class="prs-row" data-detail="${esc(t.nisn)}"
+            title="Buka detail ${esc(t.nama)}">
+      <span class="prs-medal">${i + 1}</span>
+      <span class="prs-who"><b>${esc(t.nama)}</b>
+        <span>${esc(t.kelas)} · ${angka(t.jml)} setoran</span>
+        <span class="prs-bar"><i style="width:${persen}%"></i></span></span>
+      <span class="prs-poin"><b>${Math.round(t.hal * 10) / 10}</b><small>${juzDari(t.hal)} juz</small></span>
+    </button>`;
+  }).join('') || kosong('Belum ada peringkat.',
+      'Papan ini terisi begitu setoran pertama dicatat.', 'fa-ranking-star');
 
   // ---------- ritme mingguan ----------
   const pekan = {};
