@@ -978,14 +978,21 @@
   body.ada-korps .pbar-korps   { display:grid; }
   body.ada-korps .pbar-sekat   { display:block; }
 
+  /* Kepingnya PUTIH, bukan kaca gelap seperti tile logo dayah di
+     sebelahnya. Lambang korps dipakai dalam warna aslinya — biru tua di
+     atas navy praktis tidak terbaca. Keping terang membuat warnanya
+     hidup, dan bersama cincin kuningan ia terbaca sebagai pin enamel
+     pada seragam, bukan sebagai ikon antarmuka. */
   .pbar-korps {
     position:relative; width:46px; height:46px; border-radius:15px;
-    place-items:center; flex-shrink:0;
-    background: color-mix(in oklab, white 8%, transparent);
-    backdrop-filter:blur(8px);
+    place-items:center; flex-shrink:0; overflow:hidden;
+    background:#FFFFFF;
+    box-shadow:0 6px 16px -10px rgba(0,0,0,.85);
     transition:transform var(--cepat);
   }
-  .pbar-korps .korps { width:30px; color:#fff; }
+  .pbar-korps img {
+    width:34px; height:auto; display:block; position:relative; z-index:1;
+  }
 
   /* Cincin kuningan. Sengaja BUKAN kotak biru kedua: aksen kuningan
      sudah menjadi penanda kehormatan di seluruh sistem ini, jadi
@@ -3770,7 +3777,7 @@
           <div class="pbar-korps" id="pbarKorps" role="img"
                aria-label="Korps Musyrif Asrama Putra"
                title="Musyrif Asrama Putra · Dayah Ruhul Qurani">
-            <span class="korps"></span>
+            <img id="pbarKorpsImg" alt="">
           </div>
           <span class="pbar-sekat" aria-hidden="true"></span>
           <div class="pbar-logo" title="Logo dayah">
