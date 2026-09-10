@@ -11626,8 +11626,12 @@ function waNomorWali(s) {
 }
 
 /** Tangga pembinaan yang MASIH tersisa di atas tahap ke-n, terurut naik. */
-function waTanggaLanjutan(instrumen, kategori, n) {
-  const info = instrumen ? instrumen.get(String(kategori || '').trim()) : null;
+function waTanggaLanjutan(instrumen, kategori, n, unit) {
+  // v2.11.1: sejak v2.10 `instrumen` berbentuk { putra: Map, putri: Map }
+  // (petaInstrumenUnit), bukan Map tunggal. Tangga diambil dari unit
+  // santri yang dikabarkan — sama seperti bentukMenurutAturan().
+  const ins = instrumenUntuk(instrumen, unit);
+  const info = ins ? ins.get(String(kategori || '').trim()) : null;
   if (!info) return [];
   const sisa = [];
   info.bentuk.forEach((v, k) => { if (k > n) sisa.push({ ke: k, bentuk: v }); });
@@ -11665,7 +11669,7 @@ async function waPesanWali(r, instrumen) {
   });
   if (dipotong) daftar.unshift(`(${dipotong} catatan terdahulu tidak ditampilkan)`);
 
-  const lanjut = r.overflow ? [] : waTanggaLanjutan(instrumen, kategori, n);
+  const lanjut = r.overflow ? [] : waTanggaLanjutan(instrumen, kategori, n, unitBaris(r));
   const bagianLanjut = r.overflow
     ? ['Seluruh tahapan instrumen pembinaan kategori ini telah dijalani.',
        'Penanganan berikutnya ditetapkan melalui musyawarah pimpinan dayah',
