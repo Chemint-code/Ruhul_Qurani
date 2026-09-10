@@ -1140,6 +1140,22 @@
   .ctx-badge i { font-size:11px; }
   @media (max-width:720px) { .ctx-badge span { display:none; } }
 
+  /* Pemilih unit asrama putra/putri — v2.10.
+     Berdiri sendiri, BUKAN di dalam .ctx-badge, supaya Pimpinan yang
+     lencana unit operasionalnya disembunyikan tetap bisa berpindah
+     antar asrama. */
+  .unit-box {
+    display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:20px;
+    background: color-mix(in oklab, var(--brass) 8%, white);
+    border:1px solid color-mix(in oklab, var(--brass) 26%, white);
+    color: var(--brass); font-size:11.5px; font-weight:700; white-space:nowrap;
+  }
+  .unit-box > i { font-size:11px; }
+  .unit-box select.per-in { color:inherit; font-weight:700; }
+  .unit-box .unit-tetap { letter-spacing:.01em; }
+  @media (max-width:720px) { .unit-box > i { display:none; } }
+  @media (max-width:420px) { .unit-box { padding:3px 7px; font-size:11px; } }
+
   .sync {
     display:none; align-items:center; gap:6px; padding:4px 10px; border-radius:20px;
     border:1px solid var(--line); background:var(--paper); color:var(--text-2);
@@ -2449,6 +2465,57 @@
   .dft-chips .chip { padding:5px 13px; font-size:12px; }
   .dft-note { margin-left:auto; font-size:11.5px; color:var(--text-3); font-weight:600; }
   .dft-note i { color:var(--sea); margin-right:5px; }
+  /* ---- Unggah CSV data unit putri — v2.10 ------------------------- */
+  .brk-unggah {
+    display:block; text-align:left; cursor:default;
+    border:1px dashed color-mix(in oklab, var(--sea) 34%, white);
+  }
+  .brk-unggah:hover { transform:none; }
+  .unggah-list { display:grid; gap:8px; margin-top:12px; }
+  .unggah-item {
+    display:flex; align-items:center; gap:10px; padding:9px 11px;
+    border:1px solid var(--line); border-radius:var(--r); background:var(--paper);
+  }
+  .unggah-item .ui-ico {
+    flex:none; width:30px; height:30px; border-radius:9px; display:grid; place-items:center;
+    background:color-mix(in oklab, var(--sea) 10%, white); color:var(--sea); font-size:13px;
+  }
+  .unggah-item .ui-teks { flex:1 1 auto; min-width:0; }
+  .unggah-item .ui-teks b { display:block; font-size:12.5px; }
+  .unggah-item .ui-teks small { color:var(--text-3); font-size:11px; }
+  .unggah-item .ui-teks code {
+    background:color-mix(in oklab, var(--sea) 8%, white); padding:0 4px; border-radius:4px;
+  }
+  .unggah-item .ui-aksi { flex:none; display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  @media (max-width:640px) {
+    .unggah-item { flex-wrap:wrap; }
+    .unggah-item .ui-aksi { width:100%; justify-content:stretch; }
+    .unggah-item .ui-aksi .btn { flex:1 1 0; justify-content:center; }
+  }
+
+  /* Pratinjau: baris bermasalah harus terbaca sekali lihat, termasuk
+     bagi pengguna yang sulit membedakan warna — karena itu ada garis
+     kiri tebal, bukan hanya latar merah. */
+  .baris-rusak > td {
+    background:color-mix(in oklab, var(--maroon) 7%, white) !important;
+  }
+  .baris-rusak > td:first-child {
+    box-shadow:inset 3px 0 0 var(--maroon);
+  }
+  .masalah-teks {
+    margin-top:4px; font-size:11px; line-height:1.45;
+    color:color-mix(in oklab, var(--maroon) 82%, black);
+  }
+  .pra-ring { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .pra-peringatan {
+    display:flex; gap:8px; align-items:flex-start; padding:9px 11px; border-radius:var(--r);
+    font-size:12px; line-height:1.5;
+    background:color-mix(in oklab, var(--maroon) 8%, white);
+    border:1px solid color-mix(in oklab, var(--maroon) 24%, white);
+    color:color-mix(in oklab, var(--maroon) 80%, black);
+  }
+  .pra-peringatan > i { margin-top:1px; flex:none; }
+
   .dft-wrap { max-height:56vh; overflow:auto; border:1px solid var(--line); border-radius:var(--r); }
   .dft-tbl { width:100%; border-collapse:separate; border-spacing:0; min-width:700px; }
   @media (max-width:760px) {
@@ -3774,6 +3841,12 @@
           <button type="button" class="pbar-btn" id="pbarBtnStudio" title="Ganti foto profil">
             <i class="fa-solid fa-images"></i><span>Identitas</span>
           </button>
+          <!-- Jalan keluar terakhir bila satu perangkat tersangkut pada
+               versi lama meski berkas di server sudah diperbarui — v2.10. -->
+          <button type="button" class="pbar-btn" id="btnSegarkan"
+                  title="Bersihkan singgahan dan muat versi terbaru">
+            <i class="fa-solid fa-rotate"></i><span>Segarkan</span>
+          </button>
           <div class="pbar-korps" id="pbarKorps" role="img"
                aria-label="Korps Musyrif Asrama Putra"
                title="Musyrif Asrama Putra · Dayah Ruhul Qurani">
@@ -3802,6 +3875,11 @@
         <span class="ctx-badge" id="ctxBadge" title="Unit operasional aktif">
           <i class="fa-solid fa-layer-group"></i><span id="ctxLabel">Semua Unit</span>
         </span>
+
+        <!-- Unit asrama (putra/putri) — v2.10. Isinya digambar oleh
+             gambarPilihUnit(): pemilih untuk akun dua unit, lencana mati
+             untuk akun yang terkunci pada satu asrama. -->
+        <span class="unit-box hidden" id="unitBox" title="Unit asrama"></span>
 
         <span class="periode" id="periodeBox" title="Periode laporan">
           <i class="fa-regular fa-calendar-days"></i>

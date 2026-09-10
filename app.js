@@ -49,7 +49,9 @@ const APP = {
   charts: {},
   channel: null,
   onKlik: null,
-  ctx: { unit: 'Semua', jenjang: 'Semua' },
+  // `gender` (v2.10): 'Semua' | 'putra' | 'putri'. Hanya berlaku untuk
+  // akun yang tidak terkunci pada satu unit — lihat unitGuru().
+  ctx: { unit: 'Semua', jenjang: 'Semua', gender: 'Semua' },
   // Foto milik user yang sedang login (diisi setupProfilUserLogin)
   fotoSaya: null,
   // Identitas visual dayah: { identitas_logo, identitas_latar } — dipakai
@@ -277,6 +279,172 @@ function filterBinaan(rows, field = 'kelas') {
   if (!perluFilterKelas()) return rows;
   const kb = APP.profil?.kelas_binaan || [];
   return rows.filter(r => kb.includes(r[field]));
+}
+
+/* =====================================================================
+ * 3b. UNIT ASRAMA — PUTRA / PUTRI   (v2.10)
+ * =====================================================================
+ * Satu atap, satu database. Yang dipisahkan hanya KATALOG aturan
+ * (master_pelanggaran & master_pembinaan) dan tampilan data santri,
+ * bukan tabelnya.
+ *
+ * Penanda unit dibaca berlapis, dari yang paling tegas ke yang paling
+ * bisa disimpulkan:
+ *   1. kolom `unit_gender` (ada sejak migration v2.10);
+ *   2. kolom `unit_gender` pada baris `siswa` yang tertanam lewat relasi;
+ *   3. turunan dari NAMA KELAS, menurut ketetapan dayah.
+ *
+ * Lapis ketiga penting: ia membuat seluruh modul berjalan benar tanpa
+ * mengubah view `detail_data` — baris pelanggaran sudah membawa `kelas`,
+ * jadi unitnya bisa disimpulkan tanpa satu pun perubahan di database.
+ *
+ * Baris yang unitnya TIDAK bisa ditentukan sengaja TIDAK disembunyikan.
+ * Menyembunyikan data karena ragu lebih berbahaya daripada menampilkan
+ * data yang unitnya belum jelas.
+ * ===================================================================== */
+const UNIT_PUTRA = 'putra';
+const UNIT_PUTRI = 'putri';
+
+/**
+ * Ketetapan dayah tentang penamaan kelas:
+ *   MTs (VII, VIII, IX) -> putri memakai sufiks A, B, C
+ *   MA  (X, XI, XII)    -> putri memakai sufiks A, B
+ * Selebihnya putra. Perhatikan bahwa sufiks "C" berarti PUTRI di MTs
+ * tetapi PUTRA di MA — jadi aturannya memang bergantung tingkat, dan
+ * tidak boleh disederhanakan menjadi satu daftar huruf.
+ */
+const SUFIKS_PUTRI = { MTs: ['A','B','C'], MA: ['A','B'] };
+const TINGKAT_MTS = ['VII','VIII','IX'];
+const TINGKAT_MA  = ['X','XI','XII'];
+
+/** Pecah 'VIII-E' / 'x - c' menjadi { tingkat:'VIII', sufiks:'E' }. */
+function pecahKelas(kelas) {
+  const m = String(kelas ?? '').trim().toUpperCase().match(/^([IVX]+)\s*-\s*([A-Z])\b/);
+  return m ? { tingkat: m[1], sufiks: m[2] } : null;
+}
+
+/** Unit asrama menurut nama kelas. null bila pola kelas tidak dikenali. */
+function unitDariKelas(kelas) {
+  const p = pecahKelas(kelas);
+  if (!p) return null;
+  if (TINGKAT_MTS.includes(p.tingkat)) {
+    return SUFIKS_PUTRI.MTs.includes(p.sufiks) ? UNIT_PUTRI : UNIT_PUTRA;
+  }
+  if (TINGKAT_MA.includes(p.tingkat)) {
+    return SUFIKS_PUTRI.MA.includes(p.sufiks) ? UNIT_PUTRI : UNIT_PUTRA;
+  }
+  return null;
+}
+
+/** Normalisasi nilai kolom unit_gender. null bila kosong/tak dikenal. */
+function normalUnit(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  if (s === UNIT_PUTRI) return UNIT_PUTRI;
+  if (s === UNIT_PUTRA) return UNIT_PUTRA;
+  return null;
+}
+
+/**
+ * Unit satu baris MASTER (pelanggaran / pembinaan).
+ * Baris tanpa kolom unit_gender dianggap PUTRA — itulah keadaan seluruh
+ * 310 + 35 baris yang sudah ada, dan juga keadaan aplikasi bila
+ * migration belum dijalankan. Dengan begitu jalur putra tidak pernah
+ * kehilangan satu baris pun.
+ */
+function unitMaster(r) {
+  return normalUnit(r?.unit_gender) || UNIT_PUTRA;
+}
+
+/**
+ * Unit satu baris yang membawa identitas santri (siswa, detail_data,
+ * log_pembinaan, prestasi, tahfiz, …). null bila tidak bisa ditentukan.
+ */
+function unitBaris(r) {
+  if (!r) return null;
+  return normalUnit(r.unit_gender)
+      || normalUnit(r.siswa?.unit_gender)
+      || unitDariKelas(r.kelas)
+      || unitDariKelas(r.siswa?.kelas);
+}
+
+/** Unit yang tersirat dari nama korps. null bila tidak menyebut unit. */
+function unitDariKorps(korps) {
+  const k = String(korps ?? '');
+  if (/putri|banat/i.test(k)) return UNIT_PUTRI;
+  if (/putra|banin/i.test(k)) return UNIT_PUTRA;
+  return null;
+}
+
+/**
+ * Role yang memang bertugas melihat kedua unit. Keduanya tidak pernah
+ * dikunci otomatis; pemisahannya mereka atur sendiri lewat pemilih unit
+ * pada bilah konteks. Tanpa pengecualian ini, dua akun Admin yang
+ * korps-nya 'Musyrif Asrama Putra' akan terkunci ke putra dan tidak bisa
+ * mengunggah data putri sama sekali.
+ */
+const ROLE_DUA_UNIT = ['Admin','Pimpinan'];
+
+/**
+ * Unit asrama yang diampu akun yang sedang masuk.
+ *   'putra' | 'putri' -> terkunci pada satu unit
+ *   null              -> tidak terkunci (melihat kedua unit)
+ *
+ * Sumber utama adalah UNIT KELAS BINAAN, bukan korps: kelas binaan
+ * adalah fakta penugasan yang sudah dipakai filterBinaan() dan sudah
+ * terisi pada 17 dari 21 akun, sedangkan `korps` menurut keterangannya
+ * sendiri "tidak memengaruhi hak akses". Korps hanya dipakai sebagai
+ * cadangan untuk akun tanpa kelas binaan — dan itulah cara mengunci
+ * akun Osis, yang strukturnya memang terpisah antara putra dan putri.
+ */
+function unitGuru(profil) {
+  const p = profil || APP.profil;
+  if (!p) return null;
+  if (ROLE_DUA_UNIT.includes(p.role)) return null;
+
+  const unitKelas = [...new Set((p.kelas_binaan || []).map(unitDariKelas).filter(Boolean))];
+  if (unitKelas.length === 1) return unitKelas[0];
+  if (unitKelas.length > 1)  return null;      // membina kelas di kedua unit
+
+  return unitDariKorps(p.korps);               // cadangan: Osis & sejenisnya
+}
+
+/**
+ * Unit yang sedang berlaku untuk penyaringan.
+ * Akun terkunci selalu memakai unitnya sendiri — pemilih konteks tidak
+ * bisa menembusnya. Akun dua unit memakai pilihan pada bilah konteks.
+ */
+function unitAktif() {
+  return unitGuru() || normalUnit(APP.ctx.gender);
+}
+
+/** Apakah akun ini perlu melihat pemilih unit di bilah konteks? */
+function bolehPilihUnit() { return !unitGuru(); }
+
+/** Saring baris MASTER menurut unit aktif. Tanpa unit aktif, lewat utuh. */
+function lingkupUnitMaster(rows) {
+  const u = unitAktif();
+  if (!u) return rows || [];
+  return (rows || []).filter(r => unitMaster(r) === u);
+}
+
+/**
+ * Saring baris bersantri menurut unit aktif. Baris yang unitnya tidak
+ * bisa ditentukan tetap ditampilkan (lihat catatan di kepala bagian).
+ */
+function lingkupUnitSantri(rows) {
+  const u = unitAktif();
+  if (!u) return rows || [];
+  return (rows || []).filter(r => { const x = unitBaris(r); return !x || x === u; });
+}
+
+/**
+ * Pembungkus filterBinaan() yang juga menyaring unit asrama.
+ * filterBinaan() sendiri TIDAK diubah satu karakter pun: jalur putra
+ * yang sudah berjalan tetap memakai logika kelas binaan yang sama, dan
+ * penyaringan unit hanya ditambahkan sebagai lapis di atasnya.
+ */
+function filterBinaanUnit(rows, field = 'kelas') {
+  return lingkupUnitSantri(filterBinaan(rows, field));
 }
 
 const MENU_ROLE = {
@@ -593,18 +761,34 @@ const aktifSantri = (s) => !['nonaktif','inactive','archived']
 // ---------------------------------------------------------------------
 // 4. KONTEKS OPERASIONAL (Pengasuhan / Madrasah MTs / MA)
 // ---------------------------------------------------------------------
-function normalKonteks(unit, jenjang) {
+function normalKonteks(unit, jenjang, gender) {
   let u = ['Semua','Pengasuhan','Madrasah'].includes(unit) ? unit : 'Semua';
   let j = ['Semua','MTs','MA'].includes(jenjang) ? jenjang : 'Semua';
   if (u !== 'Madrasah') j = 'Semua';
-  return { unit: u, jenjang: j };
+  // v2.10 — unit asrama. Argumen ketiga sengaja opsional supaya seluruh
+  // pemanggil lama (yang hanya mengirim unit & jenjang) tetap sah dan
+  // tidak kehilangan pilihan unit yang sedang aktif.
+  let g = gender === undefined ? (APP.ctx?.gender ?? 'Semua') : gender;
+  g = normalUnit(g) || 'Semua';
+  if (unitGuru()) g = 'Semua';       // akun terkunci: pilihan tidak berlaku
+  return { unit: u, jenjang: j, gender: g };
+}
+
+/** Label unit asrama untuk bilah konteks. '' bila tidak perlu ditampilkan. */
+function labelUnitAsrama() {
+  const kunci = unitGuru();
+  if (kunci) return kunci === UNIT_PUTRI ? 'Putri' : 'Putra';
+  const g = normalUnit(APP.ctx.gender);
+  return g ? (g === UNIT_PUTRI ? 'Putri' : 'Putra') : '';
 }
 
 function labelKonteks() {
   const { unit, jenjang } = APP.ctx;
-  if (unit === 'Pengasuhan') return 'Pengasuhan';
-  if (unit === 'Madrasah') return jenjang === 'Semua' ? 'Madrasah' : `Madrasah ${jenjang}`;
-  return 'Semua Unit';
+  const asrama = labelUnitAsrama();
+  const imbuh = asrama ? ` · ${asrama}` : '';
+  if (unit === 'Pengasuhan') return 'Pengasuhan' + imbuh;
+  if (unit === 'Madrasah') return (jenjang === 'Semua' ? 'Madrasah' : `Madrasah ${jenjang}`) + imbuh;
+  return (asrama ? 'Semua Unit' : 'Semua Unit') + imbuh;
 }
 
 /** Akun dengan unit_akses/jenjang_akses terbatas tidak boleh pindah unit lain. */
@@ -616,8 +800,8 @@ function bolehKonteks(unit, jenjang) {
   return true;
 }
 
-function setKonteks(unit, jenjang, pindah) {
-  const ctx = normalKonteks(unit, jenjang);
+function setKonteks(unit, jenjang, pindah, gender) {
+  const ctx = normalKonteks(unit, jenjang, gender);
   if (!bolehKonteks(ctx.unit, ctx.jenjang)) {
     return toast('error', `Akun Anda tidak memiliki akses ke ${ctx.unit === 'Madrasah' ? labelKonteks() : ctx.unit}.`);
   }
@@ -630,13 +814,15 @@ function setKonteks(unit, jenjang, pindah) {
 function pulihkanKonteks() {
   try {
     const raw = sessionStorage.getItem('rq_ctx');
-    if (raw) { const p = JSON.parse(raw); APP.ctx = normalKonteks(p.unit, p.jenjang); }
-  } catch (e) { APP.ctx = { unit:'Semua', jenjang:'Semua' }; }
+    if (raw) { const p = JSON.parse(raw); APP.ctx = normalKonteks(p.unit, p.jenjang, p.gender); }
+  } catch (e) { APP.ctx = { unit:'Semua', jenjang:'Semua', gender:'Semua' }; }
   const ua = APP.profil?.unit_akses || 'Semua';
   if (APP.ctx.unit === 'Semua' && ua !== 'Semua') {
-    APP.ctx = normalKonteks(ua, APP.profil?.jenjang_akses || 'Semua');
+    APP.ctx = normalKonteks(ua, APP.profil?.jenjang_akses || 'Semua', APP.ctx.gender);
   }
-  if (!bolehKonteks(APP.ctx.unit, APP.ctx.jenjang)) APP.ctx = { unit:'Semua', jenjang:'Semua' };
+  if (!bolehKonteks(APP.ctx.unit, APP.ctx.jenjang)) {
+    APP.ctx = { unit:'Semua', jenjang:'Semua', gender: APP.ctx.gender || 'Semua' };
+  }
   gambarBadgeKonteks();
 }
 
@@ -644,6 +830,41 @@ function gambarBadgeKonteks() {
   const el = $('ctxLabel'); if (el) el.textContent = labelKonteks();
   const badge = $('ctxBadge');
   if (badge) badge.title = 'Unit operasional aktif: ' + labelKonteks();
+  gambarPilihUnit();
+}
+
+/**
+ * Pemilih unit asrama pada bilah konteks (v2.10).
+ *
+ * Hanya muncul untuk akun yang TIDAK terkunci — Admin, Pimpinan, dan
+ * akun tanpa penanda unit. Akun yang terkunci melihat lencana mati
+ * berisi unitnya, bukan pemilih, supaya tidak ada kesan bahwa unit lain
+ * bisa dibuka lewat antarmuka.
+ */
+function gambarPilihUnit() {
+  const box = $('unitBox'); if (!box) return;
+  const kunci = unitGuru();
+
+  if (kunci) {
+    box.classList.remove('hidden');
+    box.innerHTML = `<i class="fa-solid fa-house-chimney-user"></i>
+      <span class="unit-tetap" title="Akun Anda terkunci pada unit ini">Asrama ${
+        kunci === UNIT_PUTRI ? 'Putri' : 'Putra'}</span>`;
+    return;
+  }
+
+  box.classList.remove('hidden');
+  const g = normalUnit(APP.ctx.gender) || 'Semua';
+  box.innerHTML = `<i class="fa-solid fa-house-chimney-user"></i>
+    <select id="unitPilih" class="per-in" title="Unit asrama yang sedang ditampilkan">
+      <option value="Semua" ${g === 'Semua' ? 'selected' : ''}>Dua Unit</option>
+      <option value="putra" ${g === UNIT_PUTRA ? 'selected' : ''}>Asrama Putra</option>
+      <option value="putri" ${g === UNIT_PUTRI ? 'selected' : ''}>Asrama Putri</option>
+    </select>`;
+
+  $('unitPilih')?.addEventListener('change', (e) => {
+    setKonteks(APP.ctx.unit, APP.ctx.jenjang, null, e.target.value);
+  });
 }
 
 /** Terapkan konteks + kelas binaan + periode pada baris detail_data. */
@@ -656,7 +877,7 @@ function lingkupDetail(rows, pakaiPeriode = true) {
     if (jenjang !== 'Semua') out = out.filter(r => String(r.jenjang || '').trim() === jenjang);
   }
   if (pakaiPeriode) out = saringPeriode(out, 'tanggal');
-  return filterBinaan(out, 'kelas');
+  return filterBinaanUnit(out, 'kelas');
 }
 
 /** Master pelanggaran yang relevan dengan konteks aktif. */
@@ -667,7 +888,9 @@ function lingkupMaster(rows) {
   if (unit === 'Madrasah' && jenjang !== 'Semua') {
     out = out.filter(m => { const j = String(m.jenjang || 'Semua').trim(); return !j || j === 'Semua' || j === jenjang; });
   }
-  return out;
+  // v2.10: katalog pelanggaran putri berbeda istilah dari putra, jadi
+  // lingkup unit ikut menentukan baris mana yang boleh muncul.
+  return lingkupUnitMaster(out);
 }
 
 // ---------------------------------------------------------------------
@@ -1447,7 +1670,7 @@ async function cariSantriRingkas(s) {
     .select('nisn,nama_siswa,kelas,jenjang')
     .or(`nama_siswa.ilike.%${bersih}%,nisn.ilike.%${bersih}%`)
     .limit(15);
-  return filterBinaan(data || [], 'kelas');
+  return filterBinaanUnit(data || [], 'kelas');
 }
 
 function saranSantri(input, onPilih) {
@@ -2024,13 +2247,13 @@ async function viewDashboard() {
     amanKosong(muatPembinaan, 'pembinaan')
   ]);
 
-  const siswa   = filterBinaan(siswaAll.filter(aktifSantri), 'kelas');
+  const siswa   = filterBinaanUnit(siswaAll.filter(aktifSantri), 'kelas');
   const detail  = lingkupDetail(detailAll);          // ikut periode → untuk KPI
   const detailTr = lingkupDetail(detailAll, false);  // lintas periode → untuk grafik
   const nisnBoleh = new Set(siswa.map(s => String(s.nisn)));
   const izinSemua = perluFilterKelas() ? izinAll.filter(z => nisnBoleh.has(String(z.nisn))) : izinAll;
   const izin = saringPeriodeIzin(izinSemua);
-  const pembinaan = filterBinaan(
+  const pembinaan = filterBinaanUnit(
     saringPeriode(pembinaanAll.filter(aktifPembinaan), 'tanggal_pembinaan')
       .map(p => ({ ...p, kelas: p.siswa?.kelas || '' })), 'kelas');
 
@@ -2080,7 +2303,7 @@ async function viewDashboard() {
   if (bolehKabarWali()) {
     try {
       const { penuh } = await bahanBinaPenuh();
-      perluWali = filterBinaan(penuh, 'kelas')
+      perluWali = filterBinaanUnit(penuh, 'kelas')
         .filter(r => perluKabarWali(r) && String(r.status_pembinaan) !== 'Selesai').length;
     } catch (e) { console.warn('amanah wali tidak terbaca:', e.message); }
   }
@@ -2654,7 +2877,7 @@ async function viewSiswa() {
 }
 
 function saringSiswa(all) {
-  let rows = filterBinaan(all.filter(aktifSantri), 'kelas');
+  let rows = filterBinaanUnit(all.filter(aktifSantri), 'kelas');
   if (stSiswa.kelas)   rows = rows.filter(s => s.kelas === stSiswa.kelas);
   if (stSiswa.jenjang) rows = rows.filter(s => (s.jenjang || angkatanJenjang(s.kelas)) === stSiswa.jenjang);
   if (stSiswa.cari) {
@@ -3284,7 +3507,7 @@ const stRekap = { kategori:'Semua', kelas:'', cari:'', page:1, size:30 };
 function lingkupRekap(rows, pakaiPeriode = true) {
   let out = (rows || []).filter(aktifDetail);
   if (pakaiPeriode) out = saringPeriode(out, 'tanggal');
-  return filterBinaan(out, 'kelas');
+  return filterBinaanUnit(out, 'kelas');
 }
 
 /**
@@ -3514,7 +3737,7 @@ async function viewPerizinan() {
 async function gambarIzin() {
   const semua = await muatIzin();
   const nisnBoleh = perluFilterKelas()
-    ? new Set(filterBinaan(await muatSiswa(), 'kelas').map(s => String(s.nisn))) : null;
+    ? new Set(filterBinaanUnit(await muatSiswa(), 'kelas').map(s => String(s.nisn))) : null;
 
   let rows = semua.filter(p => stIzin.filter === 'Semua' || p.status_persetujuan === stIzin.filter);
   if (nisnBoleh) rows = rows.filter(p => nisnBoleh.has(String(p.nisn)));
@@ -3933,7 +4156,10 @@ function nomorkanBina(rows, petaTahap) {
  *   3. tidak ada aturan -> pakai apa yang tercatat di log
  */
 function bentukMenurutAturan(r, instrumen) {
-  const info = instrumen ? instrumen.get(r.kategori_bina) : null;
+  // v2.10: tangga yang dipakai mengikuti unit asrama santri, bukan unit
+  // yang kebetulan sedang ditampilkan di layar.
+  const ins = instrumenUntuk(instrumen, unitBaris(r));
+  const info = ins ? ins.get(r.kategori_bina) : null;
   const n = r.tahap_hitung || 0;
   const batas = info && info.max > 0 ? info.max : null;
   if (batas && n > batas) {
@@ -4120,7 +4346,7 @@ async function bahanBinaPenuh() {
     muatPembinaan(),
     petaTahapPelanggaran()
   ]);
-  const instrumen = petaInstrumen(aturan);             // lihat 20a
+  const instrumen = petaInstrumenUnit(aturan);         // lihat 20a — terpisah per unit
   const petaKat = petaKatAturan(aturan);
 
   // 1. Riwayat PENUH (belum disaring periode) — dasar penomoran tahap.
@@ -4142,7 +4368,7 @@ async function bahanBinaPenuh() {
 async function bahanBina() {
   const { penuh } = await bahanBinaPenuh();
   // 3. Baru disaring periode & kelas binaan, lalu diurutkan untuk tampilan.
-  return urutkanBina(filterBinaan(saringPeriode(penuh, 'tanggal_pembinaan'), 'kelas'));
+  return urutkanBina(filterBinaanUnit(saringPeriode(penuh, 'tanggal_pembinaan'), 'kelas'));
 }
 
 async function gambarBina() {
@@ -4364,6 +4590,634 @@ async function gambarRb() {
 const stMaster = { cari:'', kategori:'Semua' };
 const stMsBidang = { cari:'', status:'Semua' };
 
+
+// =====================================================================
+// 19c. UNGGAH CSV — PENGISIAN DATA UNIT PUTRI   (v2.10)
+//
+//     LETAK DI ANTARMUKA
+//     Kartu unggah diletakkan di halaman "Master & Bidang", bukan di
+//     "Pengguna" maupun "Studio Identitas". Alasannya lugas: dua dari
+//     tiga jenis berkas yang diunggah — master pelanggaran dan master
+//     pembinaan — memang ISI halaman itu, dan yang ketiga (data santri)
+//     adalah data referensi sejenis. Halaman itu sudah menamai dirinya
+//     "brankas referensi" dan sudah memuat tombol Tambah untuk ketiga
+//     master, jadi unggah massal berdiri persis di sebelah padanan
+//     manualnya. "Pengguna" mengurus akun, bukan data santri; "Studio
+//     Identitas" mengurus berkas gambar.
+//
+//     TANPA PUSTAKA LUAR
+//     Pengurai CSV ditulis sendiri, mengikuti preseden QR generator
+//     v2.4. Selain menghindari ketergantungan CDN, ada alasan teknis:
+//     ekspor aplikasi ini (unduhCsv) memakai pemisah TITIK KOMA, dan
+//     sebagian besar pengurai siap pakai berasumsi koma. Pengurai di
+//     bawah mendeteksi pemisah sendiri sehingga berkas hasil ekspor
+//     aplikasi ini bisa langsung diimpor kembali.
+//
+//     WAJIB PRATINJAU
+//     Tidak ada jalur yang mengirim data ke Supabase tanpa melewati
+//     tabel pratinjau dan satu penekanan tombol konfirmasi. Baris yang
+//     bermasalah ditandai beserta alasannya, dan selama masih ada baris
+//     bermasalah tombol kirim tidak aktif.
+// =====================================================================
+
+/* ---------- 19c-1. Pengurai CSV --------------------------------------
+ *
+ * Menangani: tanda kutip ganda, kutip di dalam kutip (""), baris baru di
+ * dalam sel, CRLF/CR/LF campur, dan BOM UTF-8 di awal berkas.
+ */
+
+/** Buang BOM dan seragamkan akhir baris. */
+function bersihkanTeksCsv(teks) {
+  return String(teks || '').replace(/^﻿/, '').replace(/\r\n?/g, '\n');
+}
+
+/**
+ * Tebak pemisah kolom dari baris kepala, dengan menghitung kemunculan di
+ * LUAR tanda kutip saja. Titik koma didahulukan karena itu yang dipakai
+ * ekspor aplikasi ini.
+ */
+function deteksiPemisah(teks) {
+  const baris = bersihkanTeksCsv(teks).split('\n').find(b => b.trim() !== '') || '';
+  const hitung = (p) => {
+    let n = 0, dalam = false;
+    for (let i = 0; i < baris.length; i++) {
+      const c = baris[i];
+      if (c === '"') { dalam = !dalam; continue; }
+      if (!dalam && c === p) n++;
+    }
+    return n;
+  };
+  const kandidat = [[';', hitung(';')], [',', hitung(',')], ['\t', hitung('\t')]];
+  kandidat.sort((a, b) => b[1] - a[1]);
+  return kandidat[0][1] > 0 ? kandidat[0][0] : ';';
+}
+
+/** Urai teks CSV menjadi larik-larik sel mentah. */
+function uraiBarisCsv(teks, pemisah) {
+  const isi = bersihkanTeksCsv(teks);
+  const hasil = [];
+  let baris = [], sel = '', dalam = false;
+
+  for (let i = 0; i < isi.length; i++) {
+    const c = isi[i];
+    if (dalam) {
+      if (c === '"') {
+        if (isi[i + 1] === '"') { sel += '"'; i++; }
+        else dalam = false;
+      } else sel += c;
+      continue;
+    }
+    if (c === '"') { dalam = true; continue; }
+    if (c === pemisah) { baris.push(sel); sel = ''; continue; }
+    if (c === '\n') { baris.push(sel); hasil.push(baris); baris = []; sel = ''; continue; }
+    sel += c;
+  }
+  baris.push(sel);
+  hasil.push(baris);
+
+  // Buang baris yang seluruh selnya kosong (umumnya baris terakhir).
+  return hasil.filter(b => b.some(x => String(x).trim() !== ''));
+}
+
+/** Samakan nama kolom: huruf kecil, spasi/strip -> garis bawah. */
+const kunciKolom = (s) => String(s ?? '').trim().toLowerCase()
+  .replace(/^﻿/, '').replace(/[\s\-.]+/g, '_').replace(/[^a-z0-9_]/g, '');
+
+/**
+ * Urai berkas menjadi { kolom, baris, pemisah }.
+ * `baris` berisi objek berkunci nama kolom yang sudah diseragamkan,
+ * beserta `__baris` (nomor baris di berkas, terhitung baris kepala).
+ */
+function uraiCsv(teks) {
+  const pemisah = deteksiPemisah(teks);
+  const mentah = uraiBarisCsv(teks, pemisah);
+  if (!mentah.length) return { kolom: [], baris: [], pemisah };
+
+  const kolom = mentah[0].map(kunciKolom);
+  const baris = mentah.slice(1).map((sel, i) => {
+    const o = { __baris: i + 2 };            // +2: baris 1 adalah kepala
+    kolom.forEach((k, j) => { if (k) o[k] = String(sel[j] ?? '').trim(); });
+    return o;
+  });
+  return { kolom, baris, pemisah };
+}
+
+/* ---------- 19c-2. Skema per jenis berkas ---------------------------- */
+
+const KATEGORI_PLG = ['Ringan', 'Sedang', 'Berat', 'Khusus'];
+const KATEGORI_BINA = ['Ringan', 'Sedang', 'Berat'];
+
+/** Rapikan NISN: buang selain angka. Sepadan dengan norm_nisn() di database. */
+const rapiNisn = (v) => String(v ?? '').replace(/\D/g, '');
+
+/** Benarkah teks ini tanggal yyyy-mm-dd / dd-mm-yyyy / dd/mm/yyyy yang sah? */
+function tanggalSah(v) {
+  const s = String(v ?? '').trim();
+  if (!s) return null;
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return cekTanggal(+m[1], +m[2], +m[3]);
+  m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (m) return cekTanggal(+m[3], +m[2], +m[1]);
+  return null;
+}
+function cekTanggal(y, b, t) {
+  const d = new Date(Date.UTC(y, b - 1, t));
+  if (d.getUTCFullYear() !== y || d.getUTCMonth() !== b - 1 || d.getUTCDate() !== t) return null;
+  return `${y}-${String(b).padStart(2, '0')}-${String(t).padStart(2, '0')}`;
+}
+
+/**
+ * Tiga skema berkas. Setiap kolom menyebut: wajib atau tidak, nilai
+ * bawaan, dan pemeriksa nilainya.
+ *
+ * Catatan jujur soal pemeriksaan tanggal: ketiga tabel tujuan TIDAK
+ * memiliki satu pun kolom tanggal yang diisi Admin — `created_at` diisi
+ * database sendiri. Pemeriksa `tanggalSah()` tetap disediakan dan sudah
+ * terpasang di kerangka ini supaya skema berkas berikutnya yang memang
+ * memuat tanggal bisa memakainya tanpa menulis ulang apa pun, tetapi
+ * pada ketiga skema di bawah ia memang belum terpakai.
+ */
+const SKEMA_CSV = {
+  santri: {
+    label: 'Data Santri Putri',
+    tabel: 'siswa',
+    kunci: 'nisn',
+    ikon: 'fa-user-graduate',
+    kolom: [
+      { k:'nisn',            judul:'NISN',            wajib:true },
+      { k:'nama_siswa',      judul:'Nama Santri',     wajib:true },
+      { k:'kelas',           judul:'Kelas',           wajib:true },
+      { k:'jenjang',         judul:'Jenjang',         wajib:false, bawaan:'' },
+      { k:'jenis_kelamin',   judul:'Jenis Kelamin',   wajib:false, bawaan:'P' },
+      { k:'no_hp_orang_tua', judul:'No. HP Orang Tua',wajib:false, bawaan:'' },
+      { k:'email_orang_tua', judul:'Email Orang Tua', wajib:false, bawaan:'' },
+      { k:'asrama',          judul:'Asrama',          wajib:false, bawaan:'' },
+      { k:'status_santri',   judul:'Status Santri',   wajib:false, bawaan:'Aktif' }
+    ]
+  },
+  pelanggaran: {
+    label: 'Master Pelanggaran Putri',
+    tabel: 'master_pelanggaran',
+    kunci: 'kode_pelanggaran',
+    ikon: 'fa-scale-balanced',
+    kolom: [
+      { k:'kode_pelanggaran', judul:'Kode',       wajib:true },
+      { k:'nama_pelanggaran', judul:'Nama Pelanggaran', wajib:true },
+      { k:'kategori',         judul:'Kategori',   wajib:true },
+      { k:'bobot_poin',       judul:'Bobot Poin', wajib:true },
+      { k:'bidang',           judul:'Bidang',     wajib:true },
+      { k:'sumber',           judul:'Sumber',     wajib:false, bawaan:'Pengasuhan' },
+      { k:'jenjang',          judul:'Jenjang',    wajib:false, bawaan:'Semua' }
+    ]
+  },
+  pembinaan: {
+    label: 'Master Pembinaan Putri',
+    tabel: 'master_pembinaan',
+    kunci: null,
+    ikon: 'fa-hands-praying',
+    kolom: [
+      { k:'kategori',         judul:'Kategori',        wajib:true },
+      { k:'pengulangan_ke',   judul:'Tahap Ke-',       wajib:true },
+      { k:'bentuk_pembinaan', judul:'Bentuk Pembinaan',wajib:true },
+      { k:'keterangan',       judul:'Keterangan',      wajib:false, bawaan:'' },
+      { k:'aktif',            judul:'Aktif',           wajib:false, bawaan:'Ya' }
+    ]
+  }
+};
+
+/* ---------- 19c-3. Pemeriksaan isi ----------------------------------- */
+
+/**
+ * Periksa seluruh baris satu berkas.
+ * Mengembalikan larik { data, masalah[], __baris } — `data` sudah siap
+ * kirim (unit_gender ikut disisipkan), `masalah` kosong berarti lolos.
+ *
+ * `adaDb` adalah Set kunci yang SUDAH ada di database, supaya bentrok
+ * kunci utama ketahuan sebelum Supabase menolaknya dengan pesan teknis.
+ */
+function periksaCsv(jenis, baris, adaDb) {
+  const skema = SKEMA_CSV[jenis];
+  const terlihat = new Map();      // kunci -> nomor baris pertama
+  const pasangan = new Map();      // khusus pembinaan: kategori|tahap
+
+  return (baris || []).map(r => {
+    const masalah = [];
+    const data = { unit_gender: UNIT_PUTRI };
+
+    // 1. Kolom wajib & nilai bawaan
+    skema.kolom.forEach(kol => {
+      let v = String(r[kol.k] ?? '').trim();
+      if (!v && kol.wajib) { masalah.push(`Kolom wajib "${kol.judul}" kosong`); return; }
+      if (!v) v = kol.bawaan ?? '';
+      data[kol.k] = v;
+    });
+
+    // 2. Pemeriksaan khusus per jenis
+    if (jenis === 'santri') {
+      const nisn = rapiNisn(data.nisn);
+      if (data.nisn && !nisn) masalah.push('NISN tidak memuat satu pun angka');
+      else if (nisn && nisn.length < 4) masalah.push(`NISN "${data.nisn}" terlalu pendek`);
+      data.nisn = nisn;
+
+      const unitKelas = unitDariKelas(data.kelas);
+      if (data.kelas && !unitKelas) {
+        masalah.push(`Kelas "${data.kelas}" tidak mengikuti pola TINGKAT-HURUF, mis. VII-A`);
+      } else if (unitKelas === UNIT_PUTRA) {
+        masalah.push(`Kelas "${data.kelas}" adalah kelas PUTRA menurut ketetapan dayah `
+          + '(VII–IX putri = A/B/C, X–XII putri = A/B)');
+      }
+
+      const p = pecahKelas(data.kelas);
+      const jenjangKelas = p ? (TINGKAT_MTS.includes(p.tingkat) ? 'MTs'
+                             : TINGKAT_MA.includes(p.tingkat) ? 'MA' : '') : '';
+      if (!data.jenjang) data.jenjang = jenjangKelas;
+      else if (!['MTs','MA'].includes(data.jenjang)) {
+        masalah.push(`Jenjang "${data.jenjang}" tidak dikenal (isi MTs atau MA, atau kosongkan)`);
+      } else if (jenjangKelas && data.jenjang !== jenjangKelas) {
+        masalah.push(`Jenjang "${data.jenjang}" tidak cocok dengan kelas "${data.kelas}" (seharusnya ${jenjangKelas})`);
+      }
+
+      if (data.email_orang_tua && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(data.email_orang_tua)) {
+        masalah.push(`Email "${data.email_orang_tua}" tidak berbentuk alamat surel`);
+      }
+      if (data.no_hp_orang_tua && !/^[0-9+()\-\s]{6,}$/.test(data.no_hp_orang_tua)) {
+        masalah.push(`No. HP "${data.no_hp_orang_tua}" memuat karakter yang tidak lazim`);
+      }
+      if (!data.jenis_kelamin) data.jenis_kelamin = 'P';
+      if (!data.status_santri) data.status_santri = 'Aktif';
+      // Kolom kosong dikirim sebagai null, bukan string kosong.
+      ['no_hp_orang_tua','email_orang_tua','asrama','jenjang'].forEach(k => {
+        if (!data[k]) data[k] = null;
+      });
+    }
+
+    if (jenis === 'pelanggaran') {
+      if (data.kategori && !KATEGORI_PLG.includes(data.kategori)) {
+        masalah.push(`Kategori "${data.kategori}" tidak dikenal (pilih ${KATEGORI_PLG.join(' / ')})`);
+      }
+      const poin = Number(String(data.bobot_poin).replace(',', '.'));
+      if (data.bobot_poin !== '' && (!Number.isFinite(poin) || poin < 0 || !Number.isInteger(poin))) {
+        masalah.push(`Bobot poin "${data.bobot_poin}" harus bilangan bulat tidak negatif`);
+      } else data.bobot_poin = poin || 0;
+
+      if (data.sumber && !['Pengasuhan','Madrasah'].includes(data.sumber)) {
+        masalah.push(`Sumber "${data.sumber}" tidak dikenal (Pengasuhan atau Madrasah)`);
+      }
+      if (data.jenjang && !['Semua','MTs','MA'].includes(data.jenjang)) {
+        masalah.push(`Jenjang "${data.jenjang}" tidak dikenal (Semua / MTs / MA)`);
+      }
+    }
+
+    if (jenis === 'pembinaan') {
+      if (data.kategori && !KATEGORI_BINA.includes(data.kategori)) {
+        masalah.push(`Kategori "${data.kategori}" tidak dikenal (pilih ${KATEGORI_BINA.join(' / ')})`);
+      }
+      const ke = Number(data.pengulangan_ke);
+      if (!Number.isInteger(ke) || ke < 1) {
+        masalah.push(`Tahap ke- "${data.pengulangan_ke}" harus bilangan bulat mulai dari 1`);
+      } else data.pengulangan_ke = ke;
+
+      const ya = /^(ya|y|true|1|aktif)$/i.test(String(data.aktif ?? 'Ya'));
+      data.aktif = ya;
+
+      // Penjaga yang sama dengan indeks unik di database, tetapi
+      // dilaporkan dalam bahasa manusia sebelum berkas dikirim.
+      if (!masalah.length && data.aktif) {
+        const kunci = `${data.kategori}|${data.pengulangan_ke}`;
+        if (pasangan.has(kunci)) {
+          masalah.push(`Tahap "${data.kategori} ke-${data.pengulangan_ke}" sudah ada pada baris ${pasangan.get(kunci)}`);
+        } else pasangan.set(kunci, r.__baris);
+        if (adaDb && adaDb.has(kunci)) {
+          masalah.push(`Tahap "${data.kategori} ke-${data.pengulangan_ke}" sudah terdaftar di database untuk unit putri`);
+        }
+      }
+      if (!data.keterangan) data.keterangan = '';
+    }
+
+    // 3. Bentrok kunci utama — di dalam berkas dan terhadap database
+    if (skema.kunci) {
+      const nilai = String(data[skema.kunci] ?? '');
+      if (nilai) {
+        if (terlihat.has(nilai)) {
+          masalah.push(`${skema.kunci === 'nisn' ? 'NISN' : 'Kode'} "${nilai}" ganda — sudah dipakai baris ${terlihat.get(nilai)}`);
+        } else terlihat.set(nilai, r.__baris);
+        if (adaDb && adaDb.has(nilai)) {
+          masalah.push(`${skema.kunci === 'nisn' ? 'NISN' : 'Kode'} "${nilai}" sudah ada di database`);
+        }
+      }
+    }
+
+    return { __baris: r.__baris, data, masalah };
+  });
+}
+
+/** Kunci yang sudah dipakai di database, untuk mendeteksi bentrok. */
+async function kunciTerpakai(jenis) {
+  if (jenis === 'santri') {
+    return new Set((await muatSiswa()).map(s => String(s.nisn)));
+  }
+  if (jenis === 'pelanggaran') {
+    return new Set((await muatMaster()).map(m => String(m.kode_pelanggaran)));
+  }
+  // pembinaan: yang bentrok adalah pasangan (kategori, tahap) pada unit putri
+  return new Set((await muatMasterPembinaan())
+    .filter(a => unitMaster(a) === UNIT_PUTRI && a.aktif !== false)
+    .map(a => `${String(a.kategori || '').trim()}|${Number(a.pengulangan_ke) || 0}`));
+}
+
+/* ---------- 19c-4. Templat berkas ------------------------------------ */
+
+/**
+ * Contoh isi templat. Sengaja memakai kelas dan kode yang benar-benar
+ * sah menurut ketetapan dayah, supaya berkas templat yang diunduh lalu
+ * langsung diunggah kembali LOLOS pemeriksaan tanpa satu pun suntingan.
+ */
+const CONTOH_CSV = {
+  santri: [
+    ['0071234501','Aisyah Nur Rahmah','VII-A','MTs','P','081234567890','wali.aisyah@contoh.id','Asrama Putri 1','Aktif'],
+    ['0071234502','Khadijah Az-Zahra','VIII-B','MTs','P','081234567891','','Asrama Putri 1','Aktif'],
+    ['0061234503','Fatimah Salsabila','X-A','MA','P','081234567892','wali.fatimah@contoh.id','Asrama Putri 2','Aktif']
+  ],
+  pelanggaran: [
+    ['PI-001','Terlambat mengikuti halaqah pagi','Ringan','5','Musyrifah','Pengasuhan','Semua'],
+    ['PI-002','Tidak mengenakan khimar sesuai ketentuan asrama','Ringan','5','Musyrifah','Pengasuhan','Semua'],
+    ['PI-003','Keluar area asrama putri tanpa izin musyrifah','Sedang','10','Musyrifah','Pengasuhan','Semua'],
+    ['PI-004','Membawa alat komunikasi ke dalam kamar','Berat','25','Musyrifah','Pengasuhan','Semua']
+  ],
+  pembinaan: [
+    ['Ringan','1','Nasihat lisan oleh musyrifah kamar','Tahap pertama, dicatat di buku kamar','Ya'],
+    ['Ringan','3','Istighfar dan hafalan tambahan','Diawasi musyrifah harian','Ya'],
+    ['Sedang','1','Pemanggilan dan pembinaan oleh musyrifah asrama','Disertai surat pernyataan','Ya'],
+    ['Berat','1','Pemanggilan wali santri oleh pimpinan asrama putri','Dihadiri musyrifah dan wali','Ya']
+  ]
+};
+
+/** Unduh templat CSV satu jenis, lengkap dengan baris contoh. */
+function unduhTemplatCsv(jenis) {
+  const skema = SKEMA_CSV[jenis];
+  unduhCsv(`templat-${jenis}-putri.csv`,
+    [skema.kolom.map(k => k.k), ...(CONTOH_CSV[jenis] || [])]);
+}
+
+/* ---------- 19c-5. Antarmuka: kartu, pratinjau, pengiriman ----------- */
+
+/** Kartu unggah pada halaman Master & Bidang. Hanya untuk Admin. */
+function kartuUnggahCsv() {
+  return `<div class="brankas brk-unggah" id="brkUnggah">
+    <div class="brk-top">
+      <span class="brk-ico"><i class="fa-solid fa-file-arrow-up"></i></span>
+      <div class="eyebrow">
+        <span class="ar">رفع البيانات</span><span class="rule"></span>
+        <span class="lat">Unit Putri</span>
+      </div>
+    </div>
+    <b class="brk-nm">Unggah Berkas CSV</b>
+    <p class="brk-sub">Pengisian massal data asrama putri. Setiap berkas
+       ditinjau lebih dahulu sebelum masuk database.</p>
+    <div class="unggah-list">
+      ${Object.entries(SKEMA_CSV).map(([jenis, s]) => `
+        <div class="unggah-item">
+          <span class="ui-ico"><i class="fa-solid ${s.ikon}"></i></span>
+          <div class="ui-teks">
+            <b>${esc(s.label)}</b>
+            <small>Tabel <code>${esc(s.tabel)}</code> · ${s.kolom.filter(k => k.wajib).length} kolom wajib</small>
+          </div>
+          <div class="ui-aksi">
+            <button type="button" class="btn btn-ghost btn-sm" data-templat="${jenis}"
+              title="Unduh templat beserta contoh isian"><i class="fa-solid fa-download"></i>Templat</button>
+            <button type="button" class="btn btn-onnavy btn-sm" data-unggah="${jenis}">
+              <i class="fa-solid fa-file-csv"></i>Pilih Berkas</button>
+          </div>
+        </div>`).join('')}
+    </div>
+    <p class="hint" style="margin:10px 2px 0">
+      Kolom <b>unit_gender</b> tidak perlu ada di berkas — sistem mengisinya
+      <b>putri</b> secara otomatis pada saat pengiriman.</p>
+    <input type="file" id="csvInput" accept=".csv,text/csv,text/plain" class="hidden">
+  </div>`;
+}
+
+/** Status modul unggah selama satu sesi pemilihan berkas. */
+const stUnggah = { jenis: null };
+
+/** Pasang seluruh penangan pada kartu unggah. */
+function pasangUnggahCsv() {
+  const kartu = $('brkUnggah'); if (!kartu) return;
+  const input = $('csvInput');
+
+  kartu.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-templat]');
+    if (t) return unduhTemplatCsv(t.dataset.templat);
+    const u = e.target.closest('[data-unggah]');
+    if (u) { stUnggah.jenis = u.dataset.unggah; input.value = ''; input.click(); }
+  });
+
+  input.addEventListener('change', async () => {
+    const berkas = input.files?.[0]; input.value = '';
+    if (!berkas || !stUnggah.jenis) return;
+    try {
+      const teks = await bacaBerkasTeks(berkas);
+      await pratinjauCsv(stUnggah.jenis, berkas.name, teks);
+    } catch (err) {
+      toast('error', err.message || 'Berkas gagal dibaca.');
+    }
+  });
+}
+
+/** Baca berkas sebagai teks UTF-8. */
+function bacaBerkasTeks(berkas) {
+  return new Promise((selesai, gagal) => {
+    if (berkas.size > 5 * 1024 * 1024) return gagal(new Error('Berkas melebihi 5 MB.'));
+    const fr = new FileReader();
+    fr.onerror = () => gagal(new Error('Berkas tidak dapat dibaca.'));
+    fr.onload = () => selesai(String(fr.result || ''));
+    fr.readAsText(berkas, 'UTF-8');
+  });
+}
+
+/**
+ * Tahap pratinjau — WAJIB dilewati sebelum data menyentuh database.
+ * Tombol kirim baru hidup bila tidak ada satu pun baris bermasalah,
+ * supaya tidak pernah ada pengiriman sebagian yang diam-diam.
+ */
+async function pratinjauCsv(jenis, namaBerkas, teks) {
+  const skema = SKEMA_CSV[jenis];
+  const { kolom, baris, pemisah } = uraiCsv(teks);
+
+  if (!baris.length) {
+    return Swal.fire({ icon:'warning', title:'Berkas kosong',
+      text:'Tidak ada baris data yang terbaca setelah baris kepala.' });
+  }
+
+  const kurang = skema.kolom.filter(k => k.wajib && !kolom.includes(k.k));
+  if (kurang.length) {
+    return Swal.fire({ icon:'error', width:640, title:'Kolom wajib tidak ditemukan',
+      html:`<p style="text-align:left">Baris kepala berkas <b>${esc(namaBerkas)}</b>
+              tidak memuat kolom berikut:</p>
+            <ul style="text-align:left">${kurang.map(k =>
+              `<li><code>${esc(k.k)}</code> (${esc(k.judul)})</li>`).join('')}</ul>
+            <p style="text-align:left">Kolom terbaca:
+              <code>${esc(kolom.filter(Boolean).join(', ')) || '—'}</code>.
+              Unduh templat untuk susunan kolom yang benar.</p>` });
+  }
+
+  const adaDb = await kunciTerpakai(jenis);
+  const hasil = periksaCsv(jenis, baris, adaDb);
+  const rusak = hasil.filter(h => h.masalah.length);
+  const bersih = hasil.filter(h => !h.masalah.length);
+  const tampil = skema.kolom.slice(0, 5);
+
+  // Baris bermasalah diangkat ke atas: pada berkas 400 baris, tiga baris
+  // rusak di tengah tabel praktis tak terlihat kalau urutannya dibiarkan.
+  const urut = [...rusak, ...bersih];
+
+  const tabel = `
+    <div class="dft-wrap">
+      <table class="dft-tbl"><thead><tr>
+        <th style="width:58px">Baris</th>
+        ${tampil.map(k => `<th>${esc(k.judul)}</th>`).join('')}
+        <th>Status</th>
+      </tr></thead><tbody>
+      ${urut.map(h => `<tr class="${h.masalah.length ? 'baris-rusak' : ''}">
+        <td class="secondary center">${h.__baris}</td>
+        ${tampil.map(k => `<td>${esc(h.data[k.k] ?? '')}</td>`).join('')}
+        <td>${h.masalah.length
+          ? `<span class="tag tag-berat">Bermasalah</span>
+             <div class="masalah-teks">${h.masalah.map(esc).join('<br>')}</div>`
+          : '<span class="tag tag-ok">Siap</span>'}</td>
+      </tr>`).join('')}
+      </tbody></table>
+    </div>`;
+
+  const res = await Swal.fire({
+    title: `Pratinjau — ${skema.label}`,
+    width: 1040,
+    showCancelButton: true,
+    cancelButtonText: 'Batal',
+    confirmButtonText: `Kirim ${angka(bersih.length)} baris ke database`,
+    confirmButtonColor: '#14618B',
+    showLoaderOnConfirm: true,
+    allowOutsideClick: () => !Swal.isLoading(),
+    html: `
+      <div class="stack" style="text-align:left">
+        <div class="pra-ring">
+          <span class="tag tag-sea"><i class="fa-solid fa-file-csv"></i> ${esc(namaBerkas)}</span>
+          <span class="tag tag-off">Pemisah: ${pemisah === '\t' ? 'Tab' : esc(pemisah)}</span>
+          <span class="tag tag-ok">${angka(bersih.length)} siap</span>
+          ${rusak.length ? `<span class="tag tag-berat">${angka(rusak.length)} bermasalah</span>` : ''}
+          <span class="tag tag-violet">unit_gender = putri</span>
+        </div>
+        ${rusak.length ? `<div class="pra-peringatan">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          Selama masih ada baris bermasalah, tidak ada satu baris pun yang dikirim.
+          Perbaiki berkas lalu unggah ulang.</div>` : ''}
+        ${tabel}
+      </div>`,
+    didOpen: () => {
+      const ok = Swal.getConfirmButton();
+      if (!ok) return;
+      if (rusak.length || !bersih.length) {
+        ok.disabled = true;
+        ok.textContent = rusak.length ? 'Perbaiki berkas terlebih dahulu' : 'Tidak ada baris untuk dikirim';
+      }
+    },
+    preConfirm: async () => {
+      try {
+        const n = await kirimCsv(jenis, bersih.map(h => h.data));
+        return n;
+      } catch (err) {
+        Swal.showValidationMessage(err.message || 'Pengiriman gagal.');
+        return false;
+      }
+    }
+  });
+
+  if (res.isConfirmed && res.value) {
+    toast('success', `${angka(res.value)} baris ${skema.label} tersimpan`);
+    sync('done', 'Unggahan tersimpan');
+  }
+}
+
+/**
+ * Kirim baris yang sudah bersih ke Supabase.
+ *
+ * PILIHAN JALUR: client Supabase langsung, BUKAN RPC batch.
+ *   1. Tidak ada satu pun RPC batch di database ini, jadi jalur RPC
+ *      berarti membuat fungsi SECURITY DEFINER baru — menambah kode yang
+ *      berjalan dengan hak penuh dan melewati RLS, padahal tidak ada
+ *      yang perlu dilewati.
+ *   2. RLS yang ada sudah tepat: `p_siswa_insert` (WITH CHECK is_admin())
+ *      dan `p_mp_write` / `p_mpb_write` (ALL, is_admin()) sudah
+ *      mengizinkan Admin menyisipkan baris ke ketiga tabel. Jalur biasa
+ *      cukup, dan penolakan datang dari RLS — bukan dari pemeriksaan
+ *      yang kita tulis sendiri.
+ *   3. Trigger `rekam_audit` tetap mencatat setiap baris beserta
+ *      pelakunya, persis seperti input manual. Jejak audit tidak hilang.
+ *
+ * KEUTUHAN: seluruh baris dikirim dalam SATU pernyataan INSERT selama
+ * jumlahnya wajar, sehingga PostgREST membungkusnya dalam satu
+ * transaksi — gagal berarti tidak ada satu baris pun yang masuk. Untuk
+ * berkas sangat besar, pengiriman dipecah dan bila satu potongan gagal,
+ * jumlah baris yang TERLANJUR masuk dilaporkan apa adanya.
+ */
+const CSV_MAKS_SEKALI = 500;
+
+async function kirimCsv(jenis, rows) {
+  const skema = SKEMA_CSV[jenis];
+  if (!rows.length) throw new Error('Tidak ada baris untuk dikirim.');
+
+  sync('save', 'Mengirim berkas…');
+
+  if (rows.length <= CSV_MAKS_SEKALI) {
+    const { error } = await db.from(skema.tabel).insert(rows);
+    if (error) throw new Error(pesanKirim(error));
+    segarkanSetelahUnggah(jenis);
+    return rows.length;
+  }
+
+  let masuk = 0;
+  for (let i = 0; i < rows.length; i += CSV_MAKS_SEKALI) {
+    const potong = rows.slice(i, i + CSV_MAKS_SEKALI);
+    const { error } = await db.from(skema.tabel).insert(potong);
+    if (error) {
+      segarkanSetelahUnggah(jenis);
+      throw new Error(`${pesanKirim(error)} — ${angka(masuk)} baris sudah masuk sebelum kegagalan `
+        + `(baris berkas 2–${masuk + 1}). Hapus baris yang sudah masuk dari berkas sebelum mengulang.`);
+    }
+    masuk += potong.length;
+  }
+  segarkanSetelahUnggah(jenis);
+  return masuk;
+}
+
+/** Terjemahkan galat Postgres menjadi kalimat yang bisa ditindaklanjuti. */
+function pesanKirim(error) {
+  const m = String(error?.message || 'Galat tidak dikenal');
+  if (/duplicate key|already exists/i.test(m)) {
+    return 'Ditolak database: ada kunci yang sudah terpakai. '
+      + 'Kemungkinan data sudah diunggah sebelumnya.';
+  }
+  if (/violates row-level security|permission denied/i.test(m)) {
+    return 'Ditolak database: hanya Admin yang boleh mengisi tabel ini.';
+  }
+  if (/violates check constraint/i.test(m)) {
+    return `Ditolak database: nilai kolom di luar yang diizinkan (${m}).`;
+  }
+  if (/column .* does not exist/i.test(m)) {
+    return 'Ditolak database: kolom unit_gender belum ada. '
+      + 'Jalankan migration v2.10 terlebih dahulu.';
+  }
+  return `Ditolak database: ${m}`;
+}
+
+/** Bersihkan singgahan agar data baru langsung terlihat. */
+function segarkanSetelahUnggah(jenis) {
+  if (jenis === 'santri') cacheHapus('siswa', 'petaSiswa', 'kelas', 'detail');
+  if (jenis === 'pelanggaran') cacheHapus('master');
+  if (jenis === 'pembinaan') cacheHapus('aturanBina');
+}
+
+
 async function viewMaster() {
   if (!bolehMaster()) { $('viewRoot').innerHTML = kosong('Akses dibatasi.',
     `Role ${role()} tidak memiliki akses ke Master Pelanggaran.`, 'fa-lock'); return; }
@@ -4379,6 +5233,7 @@ async function viewMaster() {
       <div id="brkMaster">${kartuBrankasMaster(master)}</div>
       <div id="brkBidang">${kartuBrankasBidang(bidang)}</div>
       <div id="brkPrestasi">${kartuBrankasPrestasi(prestasi)}</div>
+      ${isAdmin() ? `<div id="brkUnggahWrap">${kartuUnggahCsv()}</div>` : ''}
     </div>
     ${isAdmin() ? kartuIdentitasDayah(identitas) : ''}`;
 
@@ -4391,7 +5246,7 @@ async function viewMaster() {
     if (e.target.closest('#brkPrestasi .brankas')) return bukaDaftarPrestasi();
   });
 
-  if (isAdmin()) pasangIdentitasDayah();
+  if (isAdmin()) { pasangIdentitasDayah(); pasangUnggahCsv(); }
 }
 
 /* =====================================================================
@@ -4679,7 +5534,9 @@ async function gambarMaster() {
     <td><div class="primary">${esc(m.nama_pelanggaran)}</div></td>
     <td><span class="tag ${tagKategori(m.kategori)}">${esc(m.kategori)}</span></td>
     <td class="num center">${m.bobot_poin}</td>
-    <td>${esc(m.sumber||'-')}</td>
+    <td>${esc(m.sumber||'-')}<br>
+      <span class="tag ${unitMaster(m) === UNIT_PUTRI ? 'tag-violet' : 'tag-off'}">${
+        unitMaster(m) === UNIT_PUTRI ? 'Putri' : 'Putra'}</span></td>
     <td><span class="tag tag-sea">${esc(m.bidang||'Belum Dipetakan')}</span></td>
     <td>${esc(m.jenjang||'Semua')}</td>
     <td class="right">${isAdmin()
@@ -4746,6 +5603,14 @@ async function modalMaster(existing) {
           <select id="mJenjang" class="input">${['Semua','MTs','MA']
             .map(k => `<option ${k===(m.jenjang||(APP.ctx.jenjang!=='Semua'?APP.ctx.jenjang:'Semua'))?'selected':''}>${k}</option>`).join('')}</select></div>
       </div>
+      <div class="field"><label class="label">Unit Asrama</label>
+        <select id="mUnit" class="input">${
+          [[UNIT_PUTRA,'Asrama Putra'],[UNIT_PUTRI,'Asrama Putri']]
+            .map(([v,t]) => `<option value="${v}" ${
+              v === (normalUnit(m.unit_gender) || unitAktif() || UNIT_PUTRA) ? 'selected' : ''
+            }>${t}</option>`).join('')}</select>
+        <p class="hint">Katalog putra dan putri berdiri sendiri. Kode pelanggaran
+           tidak boleh sama antar unit karena kode adalah kunci utama tabel.</p></div>
       <div class="field"><label class="label">Bidang</label>
         <input id="mBidang" class="input" autocomplete="off" value="${esc(m.bidang||'')}"
                placeholder="Ketik: ubu, bahasa, atribut…">
@@ -4760,15 +5625,29 @@ async function modalMaster(existing) {
         bobot_poin: Number($('mBobot').value) || 0,
         sumber: $('mSumber').value,
         bidang: $('mBidang').value.trim(),
-        jenjang: $('mJenjang').value
+        jenjang: $('mJenjang').value,
+        unit_gender: $('mUnit').value
       };
       if (!payload.kode_pelanggaran || !payload.nama_pelanggaran) {
         Swal.showValidationMessage('Kode dan nama pelanggaran wajib diisi.'); return false;
       }
       if (!payload.bidang) { Swal.showValidationMessage('Bidang wajib dipilih.'); return false; }
-      const { error } = ubah
-        ? await db.from('master_pelanggaran').update(payload).eq('kode_pelanggaran', payload.kode_pelanggaran)
-        : await db.from('master_pelanggaran').insert(payload);
+      // v2.10 — urutan pemasangan tidak boleh menjadi jebakan. Bila
+      // berkas ini sudah dipasang tetapi migration belum dijalankan,
+      // kolom unit_gender belum ada dan database akan menolak seluruh
+      // penyimpanan. Daripada menggagalkan pekerjaan Admin, kirim ulang
+      // tanpa kolom itu dan beri tahu apa yang belum lengkap.
+      const simpan = async (isi) => ubah
+        ? db.from('master_pelanggaran').update(isi).eq('kode_pelanggaran', isi.kode_pelanggaran)
+        : db.from('master_pelanggaran').insert(isi);
+
+      let { error } = await simpan(payload);
+      if (error && /unit_gender/.test(error.message || '')
+                && /does not exist|schema cache/i.test(error.message || '')) {
+        const { unit_gender, ...tanpaUnit } = payload;
+        ({ error } = await simpan(tanpaUnit));
+        if (!error) toast('info', 'Tersimpan tanpa penanda unit — migration v2.10 belum dijalankan.');
+      }
       if (error) { Swal.showValidationMessage(error.message); return false; }
       return true;
     }
@@ -4924,12 +5803,23 @@ async function modalPengguna(u) {
       <div class="field"><label class="label">Kelas Binaan (pisahkan koma)</label>
         <input id="uKelas" class="input" value="${esc((u.kelas_binaan||[]).join(', '))}" placeholder="X-A, X-B"></div>
       <div class="field"><label class="label">Korps</label>
-        <select id="uKorps" class="input">${
-          ['', 'Musyrif Asrama Putra', 'Musyrifah Asrama Putri']
-            .map(x => `<option value="${esc(x)}" ${x === (u.korps || '') ? 'selected' : ''}>${
-              x || '— Tidak tergabung —'}</option>`).join('')}</select>
-        <p class="hint">Menentukan lambang korps yang tampil pada bilah profil,
-           layar masuk, dan lembar cetak. Tidak memengaruhi hak akses.</p></div>
+        <select id="uKorps" class="input">${(() => {
+          // Daftar baku + nilai yang sedang tersimpan bila belum terdaftar.
+          // Tanpa penambahan itu, akun ber-korps 'Musyrif Asrama Putri'
+          // (ejaan lama yang sudah ada di database) akan terhapus diam-diam
+          // begitu Admin menekan Simpan tanpa menyentuh kolom ini.
+          const baku = ['', 'Musyrif Asrama Putra', 'Musyrifah Asrama Putri',
+                        'Osis Putra', 'Osis Putri'];
+          const kini = u.korps || '';
+          const opsi = baku.includes(kini) ? baku : [...baku, kini];
+          return opsi.map(x => `<option value="${esc(x)}" ${x === kini ? 'selected' : ''}>${
+            x || '— Tidak tergabung —'}</option>`).join('');
+        })()}</select>
+        <p class="hint">Menentukan lambang korps pada bilah profil, layar masuk,
+           dan lembar cetak. Untuk akun <b>tanpa kelas binaan</b> — misalnya Osis —
+           nilai ini juga mengunci unit asrama yang boleh dilihat, karena Osis putra
+           dan Osis putri punya struktur sendiri. Akun yang sudah punya kelas binaan
+           selalu mengikuti unit kelasnya, bukan korps.</p></div>
       <div class="trio">
         <div class="field"><label class="label">Unit Akses</label>
           <select id="uUnit" class="input">${['Semua','Pengasuhan','Madrasah']
@@ -5047,6 +5937,38 @@ function petaInstrumen(rows) {
   return peta;
 }
 
+/**
+ * Peta instrumen TERPISAH per unit asrama (v2.10).
+ *
+ * Sengaja tidak menyaring `aturan` lebih dulu lalu memanggil
+ * petaInstrumen() sekali. Alasannya: Admin dan Pimpinan melihat kedua
+ * unit sekaligus, dan bila kedua tangga digabung dalam satu Map,
+ * `bentuk` yang berkunci `pengulangan_ke` akan saling menimpa — tahap
+ * ke-3 putri menghapus tahap ke-3 putra tanpa jejak. Dua peta terpisah
+ * membuat setiap baris pembinaan dinilai dengan tangga unitnya sendiri,
+ * berapa pun unit yang sedang ditampilkan.
+ *
+ * petaInstrumen() sendiri tidak diubah sama sekali.
+ */
+function petaInstrumenUnit(rows) {
+  const out = { __perUnit: true };
+  out[UNIT_PUTRA] = petaInstrumen((rows || []).filter(r => unitMaster(r) === UNIT_PUTRA));
+  out[UNIT_PUTRI] = petaInstrumen((rows || []).filter(r => unitMaster(r) === UNIT_PUTRI));
+  return out;
+}
+
+/**
+ * Ambil peta instrumen yang berlaku untuk satu unit.
+ * Menerima juga bentuk LAMA (Map kategori langsung) supaya pemanggil
+ * yang belum diperbarui — atau data tersimpan dari versi sebelumnya —
+ * tidak pecah.
+ */
+function instrumenUntuk(ins, unit) {
+  if (!ins) return null;
+  if (ins.__perUnit) return ins[unit === UNIT_PUTRI ? UNIT_PUTRI : UNIT_PUTRA] || new Map();
+  return ins;
+}
+
 /** Aturan yang berlaku untuk pengulangan ke-n: tangga tertinggi yang <= n. */
 function bentukAturan(info, n) {
   if (!info) return null;
@@ -5119,7 +6041,10 @@ function riwayatCetak(tampil, penuh, pembinaan, instrumen) {
   return urut(tampil).map(p => {
     const kategori = String(p.kategori || '-').trim();
     const n = p.__n || 0;
-    const info = instrumen ? instrumen.get(kategori) : null;
+    // v2.10: baris pelanggaran membawa `kelas`, jadi unitnya bisa
+    // ditentukan tanpa mengubah view detail_data.
+    const ins = instrumenUntuk(instrumen, unitBaris(p));
+    const info = ins ? ins.get(kategori) : null;
     const batas = info && info.max > 0 ? info.max : null;
     const overflow = isNum(batas) && n > batas;
     return { ...p, kategori, urutanKategori: n, batas, overflow,
@@ -5936,7 +6861,7 @@ async function lengkapiLaporan(data) {
     ambilPenanggungJawab(),
     dataUriGambar(ASET.korps)
   ]);
-  return { ...data, instrumen: petaInstrumen(aturan), agregasi, penanggungJawab, logoKorps };
+  return { ...data, instrumen: petaInstrumenUnit(aturan), agregasi, penanggungJawab, logoKorps };
 }
 
 // ---------- 20f. Template lembar cetak --------------------------------
@@ -7158,7 +8083,7 @@ const stMd = { panel:'atribut', santriAtr:null, santriPlg:null, masterPlg:null }
 /** Santri pada jenjang madrasah yang sedang aktif (ikut kelas binaan). */
 async function siswaMadrasah() {
   const j = APP.ctx.jenjang;
-  const rows = filterBinaan((await muatSiswa()).filter(aktifSantri), 'kelas');
+  const rows = filterBinaanUnit((await muatSiswa()).filter(aktifSantri), 'kelas');
   if (!['MTs','MA'].includes(j)) return rows;
   return rows.filter(s => (s.jenjang || angkatanJenjang(s.kelas)) === j);
 }
@@ -8183,7 +9108,9 @@ const PGS_FITUR = [
 function pgsSetelKonteks() {
   if (APP.ctx.unit === 'Pengasuhan') return true;
   if (!bolehKonteks('Pengasuhan', 'Semua')) return false;
-  APP.ctx = { unit: 'Pengasuhan', jenjang: 'Semua' };
+  // v2.10: pilihan unit asrama dipertahankan — modul ini hanya memaksa
+  // unit OPERASIONAL (Pengasuhan), bukan unit asrama.
+  APP.ctx = normalKonteks('Pengasuhan', 'Semua', APP.ctx.gender);
   try { sessionStorage.setItem('rq_ctx', JSON.stringify(APP.ctx)); } catch (e) {}
   gambarBadgeKonteks();
   return true;
@@ -8191,7 +9118,7 @@ function pgsSetelKonteks() {
 
 /** Santri aktif pada cakupan pengguna. */
 async function pgsSantri() {
-  return filterBinaan((await muatSiswa()).filter(aktifSantri), 'kelas');
+  return filterBinaanUnit((await muatSiswa()).filter(aktifSantri), 'kelas');
 }
 
 /** Perizinan pada cakupan pengguna. */
@@ -11504,11 +12431,108 @@ $('btnPasang')?.addEventListener('click', async () => {
   $('btnPasang')?.classList.remove('on');
 });
 
+/* ---------------------------------------------------------------------
+ * PEMBARUAN APLIKASI  (v2.10)
+ *
+ * Sebelumnya pendaftaran service worker berhenti sampai "aktif". Akibatnya
+ * tab yang dibiarkan terbuka seharian — kebiasaan yang wajar di meja
+ * musyrif — tetap menjalankan app.js lama meski berkas di server sudah
+ * diganti. Tiga penambahan di bawah menutup celah itu:
+ *
+ *   1. Pemeriksaan berkala: setiap kali tab kembali dilihat, dan sekali
+ *      tiap 30 menit. Tanpa ini, peramban baru memeriksa sw.js saat ada
+ *      navigasi baru — yang mungkin tidak pernah terjadi.
+ *   2. Deteksi 'updatefound': versi baru selesai dipasang sementara
+ *      halaman ini masih memakai yang lama.
+ *   3. Pesan dari service worker yang baru aktif.
+ *
+ * Yang sengaja TIDAK dilakukan: memuat ulang halaman secara otomatis.
+ * Musyrif bisa sedang mengetik catatan pembinaan, dan memuat ulang tanpa
+ * permisi berarti membuang pekerjaannya. Pembaruan ditawarkan, bukan
+ * dipaksakan.
+ * ------------------------------------------------------------------- */
+let versiBaruDitawarkan = false;
+
+function tawarkanMuatUlang() {
+  if (versiBaruDitawarkan) return;
+  versiBaruDitawarkan = true;
+  Swal.fire({
+    toast: true, position: 'bottom-end', icon: 'info',
+    title: 'Versi baru tersedia',
+    text: 'Muat ulang untuk memakai pembaruan terbaru.',
+    showConfirmButton: true, confirmButtonText: 'Muat Ulang',
+    showCancelButton: true,  cancelButtonText: 'Nanti',
+    confirmButtonColor: '#14618B',
+    timer: undefined, timerProgressBar: false, allowOutsideClick: false
+  }).then(r => {
+    if (r.isConfirmed) {
+      navigator.serviceWorker?.controller?.postMessage({ tipe: 'lewati-tunggu' });
+      location.reload();
+    } else {
+      // Ditolak sekali bukan berarti selamanya; tawarkan lagi nanti.
+      setTimeout(() => { versiBaruDitawarkan = false; }, 30 * 60 * 1000);
+    }
+  });
+}
+
+$('btnSegarkan')?.addEventListener('click', async () => {
+  const r = await Swal.fire({
+    icon: 'question', title: 'Segarkan aplikasi?',
+    html: 'Singgahan di perangkat ini dibersihkan lalu halaman dimuat ulang '
+        + 'dengan versi terbaru.<br><br><b>Data santri tidak terpengaruh</b> — '
+        + 'seluruhnya tersimpan di server, bukan di perangkat.',
+    showCancelButton: true, confirmButtonText: 'Ya, segarkan',
+    cancelButtonText: 'Batal', confirmButtonColor: '#14618B'
+  });
+  if (r.isConfirmed) {
+    toast('info', 'Membersihkan singgahan…');
+    paksaSegarkanAplikasi();
+  }
+});
+
+/** Jalan keluar terakhir bila satu perangkat tersangkut di versi lama. */
+async function paksaSegarkanAplikasi() {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (!reg) { location.reload(); return; }
+    navigator.serviceWorker.controller?.postMessage({ tipe: 'bersihkan-singgahan' });
+    await reg.update().catch(() => {});
+    setTimeout(() => location.reload(), 900);
+  } catch (e) { location.reload(); }
+}
+
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js')
-      .then(() => console.info('[PWA] service worker aktif'))
-      .catch(e => console.warn('[PWA] service worker gagal:', e.message));
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('sw.js');
+      console.info('[PWA] service worker aktif');
+
+      const periksa = () => reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) periksa(); });
+      window.addEventListener('online', periksa);
+      setInterval(periksa, 30 * 60 * 1000);
+
+      reg.addEventListener('updatefound', () => {
+        const baru = reg.installing;
+        if (!baru) return;
+        baru.addEventListener('statechange', () => {
+          // `controller` yang sudah ada berarti ini benar-benar PEMBARUAN,
+          // bukan pemasangan pertama kali.
+          if (baru.state === 'installed' && navigator.serviceWorker.controller) {
+            tawarkanMuatUlang();
+          }
+        });
+      });
+    } catch (e) {
+      console.warn('[PWA] service worker gagal:', e.message);
+    }
+  });
+
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    const p = e.data;
+    if (p?.tipe === 'versi-baru') tawarkanMuatUlang();
+    if (p?.tipe === 'versi') console.info('[PWA] versi singgahan:', p.versi);
+    if (p?.tipe === 'singgahan-bersih') console.info('[PWA] singgahan dibersihkan:', p.versi);
   });
 }
 
@@ -11533,7 +12557,7 @@ function lingkupPrestasi(rows, pakaiPeriode = true) {
     out = out.filter(r => String(r.sumber || '').trim() === 'Madrasah');
     if (jenjang !== 'Semua') out = out.filter(r => String(r.jenjang || '').trim() === jenjang);
   }
-  out = filterBinaan(out, 'kelas');
+  out = filterBinaanUnit(out, 'kelas');
   return pakaiPeriode ? saringPeriode(out, 'tanggal') : out;
 }
 
@@ -11962,7 +12986,7 @@ function prsEksporCsv() {
 const stThf = { page:1, size:15, cari:'', jenis:'', nisn:'', namaPilih:'' };
 
 function lingkupTahfiz(rows, pakaiPeriode = true) {
-  let out = filterBinaan((rows || []).filter(aktifTahfiz), 'kelas');
+  let out = filterBinaanUnit((rows || []).filter(aktifTahfiz), 'kelas');
   const { unit, jenjang } = APP.ctx;
   if (unit === 'Madrasah' && jenjang !== 'Semua') {
     out = out.filter(r => String(r.jenjang || '').trim() === jenjang);
