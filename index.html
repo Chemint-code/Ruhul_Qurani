@@ -3647,6 +3647,107 @@
   #pdfMask { background: rgba(246,249,252,.94); }
 }
 
+
+  /* ============ 38. PETA SEBARAN & INDEKS PERINGATAN PEMBINAAN ======== */
+  /* Animasi dibatasi pada transform & opacity saja — lihat catatan v2.1
+     tentang keluhan "web terasa berat". */
+
+  .sb-judul { margin:26px 0 14px; }
+
+  /* `.card + .card { margin-top:16px }` juga cocok pada kartu bersebelahan
+     di dalam grid, sehingga kartu kolom kedua turun 16px dan kedua kartu
+     jadi tidak sejajar. Di dalam grid, jarak antarkartu sudah diatur gap. */
+  :is(.grid-2, .grid-half, .grid-3) > .card + .card { margin-top:0; }
+
+
+  .sb-kaki {
+    margin:0; padding:12px var(--pad) 16px;
+    font-size:12px; line-height:1.65; color:var(--text-3);
+    border-top:1px solid var(--line-soft);
+  }
+  .sb-kaki b { color:var(--text-2); font-weight:600; }
+
+  /* ---- matriks sebaran ---- */
+  table.sebar thead th { text-align:center; }
+  table.sebar thead th:first-child { text-align:left; }
+  table.sebar tbody td { vertical-align:middle; padding:10px 12px; }
+  .sb-nm { min-width:150px; }
+  .sb-nm b { display:block; font-size:13px; }
+  .sb-nm small { color:var(--text-3); font-size:11.5px; }
+  .sb-sel { text-align:center; min-width:88px; }
+  .sb-sel b { font-family:'IBM Plex Mono', monospace; font-size:13px; font-weight:600; }
+  .sb-tren { text-align:center; min-width:118px; white-space:nowrap; }
+
+  /* ---- lencana tren ---- */
+  .tren-baik, .tren-buruk, .tren-x {
+    display:inline-flex; align-items:center; gap:5px;
+    padding:4px 9px; border-radius:20px;
+    font-family:'IBM Plex Mono', monospace; font-size:11px; font-weight:600;
+    white-space:nowrap;
+  }
+  .tren-baik { background:var(--teal-bg); color:var(--teal); }
+  .tren-buruk { background:var(--maroon-bg); color:var(--maroon); }
+  .tren-x { background:var(--paper); color:var(--text-3); }
+
+  /* ---- tampilan data yang belum terisi ---- */
+  .ajak {
+    padding:34px 22px 30px; text-align:center;
+    display:flex; flex-direction:column; align-items:center; gap:7px;
+  }
+  .ajak > i { font-size:24px; color:var(--brass); margin-bottom:4px; }
+  .ajak p { margin:0; font-weight:600; font-size:13.5px; color:var(--text-2); }
+  .ajak small { color:var(--text-3); font-size:12.5px; line-height:1.65; max-width:44ch; }
+  .ajak .ajak-aksi { color:var(--sea); font-weight:600; }
+  .ajak-angka { display:flex; gap:10px; margin:10px 0 2px; flex-wrap:wrap; justify-content:center; }
+  .ajak-angka span {
+    display:flex; flex-direction:column; align-items:center; gap:1px;
+    padding:8px 16px; border-radius:10px; background:var(--paper);
+    font-size:11px; color:var(--text-3);
+  }
+  .ajak-angka b { font-family:'IBM Plex Mono', monospace; font-size:17px; color:var(--text-1); }
+  .ajak .btn { margin-top:10px; }
+
+  /* ---- Indeks Peringatan Pembinaan ---- */
+  .ipp-ket {
+    display:flex; gap:14px; flex-wrap:wrap;
+    padding:12px var(--pad) 0; font-size:11.5px; color:var(--text-3);
+  }
+  .ipp-ket span { display:inline-flex; align-items:center; gap:6px; }
+  .ipp-dot { width:9px; height:9px; border-radius:3px; display:inline-block; }
+  .ipp-dot.merah  { background:#9F1239; }
+  .ipp-dot.hijau  { background:#0F766E; }
+  .ipp-dot.kuning { background:#B45309; }
+  .ipp-dot.biru   { background:#14618B; }
+
+  .ipp { padding:10px var(--pad) 4px; }
+  .ipp-baris {
+    display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1.4fr) auto;
+    align-items:center; gap:14px;
+    padding:12px 0; border-bottom:1px solid var(--line-soft);
+    cursor:pointer; transition:transform .16s ease, opacity .16s ease;
+  }
+  .ipp-baris:last-child { border-bottom:none; }
+  .ipp-baris:hover, .ipp-baris:focus-visible { transform:translateX(3px); outline:none; }
+  .ipp-baris:focus-visible .ipp-nm b { text-decoration:underline; }
+  .ipp-nm { min-width:0; }
+  .ipp-nm b { display:block; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ipp-nm small { color:var(--text-3); font-size:11.5px; line-height:1.5; display:block; }
+
+  .ipp-unsur { display:grid; grid-template-columns:repeat(4, 1fr); gap:9px; min-width:0; }
+  .ipp-u { display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .ipp-u b { font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-3); font-weight:600; }
+  .ipp-bar { display:block; height:7px; border-radius:5px; background:var(--paper); overflow:hidden; }
+  .ipp-bar i { display:block; height:100%; border-radius:5px; }
+  .ipp-bar.merah  i { background:#9F1239; }
+  .ipp-bar.hijau  i { background:#0F766E; }
+  .ipp-bar.kuning i { background:#B45309; }
+  .ipp-bar.biru   i { background:#14618B; }
+
+  @media (max-width:720px) {
+    .ipp-baris { grid-template-columns:1fr auto; gap:9px 12px; }
+    .ipp-unsur { grid-column:1 / -1; }
+    .ipp-nm small { white-space:normal; }
+  }
 </style>
 </head>
 <body>

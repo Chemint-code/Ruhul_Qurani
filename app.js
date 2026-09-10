@@ -2360,11 +2360,15 @@ async function viewDashboard() {
           <div class="mini s"><span>Total Izin</span><b>${angka(izin.length)}</b></div>
         </div>
         ${chartBox('chIzin')}`, '', 'Santri unik yang mulai izin, 14 hari terakhir.')}
-    </div>`;
+    </div>
+
+    <div id="blokSebaran"></div>`;
 
   onKlik(async (e) => {
     const n = e.target.closest('[data-nav]');
     if (n) return navigateTo(n.dataset.nav);
+    const dt = e.target.closest('[data-detail]');
+    if (dt) return bukaDetailSantri(dt.dataset.detail);
     const c = e.target.closest('[data-ctx]');
     if (c) {
       const [u, j] = c.dataset.ctx.split('|');
@@ -2427,6 +2431,23 @@ async function viewDashboard() {
       plugins:{legend:{display:false}},
       scales:{ x:{grid:{display:false}}, y:{beginAtZero:true, ticks:{precision:0}} } }
   });
+
+  // ---- Peta perkembangan (modul 38) ----------------------------------
+  // Digambar setelah grafik utama supaya halaman sudah terasa hidup
+  // sebelum agregasi tambahan selesai; kegagalannya tidak boleh
+  // menjatuhkan dashboard yang sudah tampil.
+  try {
+    const sebaran = await blokSebaran({
+      siswa, detail: detailTr, izin: izinSemua, pembinaan, ipp: true, batasIpp: 6 });
+    const kotak = $('blokSebaran');
+    if (kotak) { kotak.innerHTML = sebaran.html; sebaran.gambar(); }
+  } catch (e) {
+    console.warn('Peta perkembangan tidak dapat ditampilkan:', e.message);
+    const kotak = $('blokSebaran');
+    if (kotak) kotak.innerHTML = kosong('Peta perkembangan belum dapat dimuat.',
+      'Data pendukungnya sedang tidak terbaca. Muat ulang halaman untuk mencoba lagi.',
+      'fa-triangle-exclamation');
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -2755,12 +2776,16 @@ async function viewPimpinan(opsi = {}) {
       ${kartu('Kondisi Pembinaan', chartBox('pBina'))}
     </div>
 
+    <div id="blokSebaran"></div>
+
     <div class="brankas-grid">
       <div id="brkPrio">${kartuBrankasPrioritas()}</div>
       <div id="brkJenis">${kartuBrankasJenis()}</div>
     </div>`;
 
   onKlik((e) => {
+    const nav = e.target.closest('[data-nav]');
+    if (nav) return navigateTo(nav.dataset.nav);
     if (e.target.closest('#konsultanBox .brankas')) return bukaKesimpulanKonsultan();
     if (e.target.closest('#brkPrio .brankas'))      return bukaSantriPrioritas();
     if (e.target.closest('#brkJenis .brankas'))     return bukaJenisTerbanyak();
@@ -2808,6 +2833,20 @@ async function viewPimpinan(opsi = {}) {
         backgroundColor:['#0F766E','#B45309'], borderWidth:0 }]},
     options:{ responsive:true, maintainAspectRatio:false, cutout:'66%',
       plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:9}}} }});
+
+  try {
+    const sebaran = await blokSebaran({
+      siswa, detail: detailAktif, izin: izinAll, pembinaan: pbnAktif,
+      ipp: true, batasIpp: modeBk ? 15 : 10 });
+    const kotak = $('blokSebaran');
+    if (kotak) { kotak.innerHTML = sebaran.html; sebaran.gambar(); }
+  } catch (e) {
+    console.warn('Peta perkembangan tidak dapat ditampilkan:', e.message);
+    const kotak = $('blokSebaran');
+    if (kotak) kotak.innerHTML = kosong('Peta perkembangan belum dapat dimuat.',
+      'Data pendukungnya sedang tidak terbaca. Muat ulang halaman untuk mencoba lagi.',
+      'fa-triangle-exclamation');
+  }
 
   await gambarKonsultan();
 
@@ -14219,6 +14258,651 @@ function hidupkanLayarLogin() {
       tombol.style.setProperty('--tarikY', '0px');
     }
   });
+}
+
+// =====================================================================
+// 38. PETA SEBARAN & INDEKS PERINGATAN PEMBINAAN  (v2.11)
+//
+//     Modul ini melebarkan ketiga dashboard — Ringkasan, Pimpinan, dan
+//     Guru BK — dari "berapa banyak pelanggaran" menjadi "bagaimana
+//     sebaran perkembangan santri". Empat panel ditambahkan, seluruhnya
+//     dihitung di peramban dari tabel yang sudah ada. Tidak ada layar
+//     input baru, tidak ada tabel baru, tidak ada pustaka statistik.
+//
+//     Dasar rancangannya (lihat berkas riset di folder Riset-Teori):
+//
+//     (1) Empat unsur Indeks Peringatan Pembinaan diturunkan dari empat
+//         ikatan sosial Hirschi: Beban (luaran yang dipantau), Ikatan
+//         (commitment & involvement), Keterputusan (involvement terbalik),
+//         dan Respons (attachment yang dilembagakan).
+//
+//     (2) Keempatnya SENGAJA TIDAK DIJUMLAHKAN. Satu angka tunggal
+//         menyembunyikan sebab, dan itu persis kelemahan skor net yang
+//         sudah ada. Yang ditampilkan empat batang berdampingan, supaya
+//         pertanyaan yang muncul bukan "berapa skornya" melainkan
+//         "ikatan mana yang mengendur".
+//
+//     (3) TREN LINEAR HANYA DIHITUNG PADA TINGKAT KELOMPOK. Pada tingkat
+//         santri, jumlah titik waktu per anak belum memadai untuk menaksir
+//         arah perubahan; label "membaik/memburuk" per santri karena itu
+//         ditahan, dan yang ditampilkan adalah status pada jendela
+//         berjalan. Menuntun keputusan pembinaan atas anak yang nyata
+//         dengan label yang dibangkitkan dari kebisingan tidak dapat
+//         dipertanggungjawabkan.
+//
+//     (4) Kriteria "Ikatan nol" menangkap santri yang menarik diri —
+//         tidak melanggar apa pun, tetapi juga tidak menyetor hafalan dan
+//         tidak pernah tercatat berprestasi. Kriteria ini TIDUR selama
+//         pengisian log_prestasi dan log_tahfiz belum merata, karena bila
+//         diaktifkan pada data yang kosong ia akan menandai hampir seluruh
+//         santri sekaligus — peringatan yang menandai semua orang tidak
+//         memperingatkan siapa pun.
+// =====================================================================
+
+/** Jendela pengamatan IPP, dalam hari. */
+const IPP_JENDELA = 60;
+
+/** Ambang keaktifan pencatatan positif: minimal 20% santri punya satu catatan. */
+const IPP_AMBANG_IKATAN = 0.20;
+
+/** Seluruh target pembinaan (goal_santri) — untuk agregasi dashboard. */
+async function muatGoalSemua() {
+  const c = cacheGet('goalSemua'); if (c) return c;
+  return cacheSet('goalSemua', await amanKosong(
+    () => ambilSemua('goal_santri', '*', { order:'periode', asc:false }), 'target pembinaan'));
+}
+
+/**
+ * Kemiringan garis regresi linear sederhana atas deret nilai berurutan.
+ * Dikembalikan null bila titik waktunya kurang dari tiga — dua titik
+ * selalu membentuk garis sempurna dan tidak mengandung informasi tren.
+ */
+function trenLinear(nilai) {
+  const n = (nilai || []).length;
+  if (n < 3) return null;
+  const rerataX = (n - 1) / 2;
+  const rerataY = nilai.reduce((a, b) => a + b, 0) / n;
+  let atas = 0, bawah = 0;
+  for (let i = 0; i < n; i++) {
+    atas  += (i - rerataX) * (nilai[i] - rerataY);
+    bawah += (i - rerataX) ** 2;
+  }
+  return bawah ? Math.round((atas / bawah) * 100) / 100 : 0;
+}
+
+/** Lencana arah tren kelompok. Naik = memburuk untuk pelanggaran. */
+function lencanaTren(kemiringan, { naikBuruk = true } = {}) {
+  if (kemiringan === null) {
+    return `<span class="tren-x" title="Butuh minimal tiga bulan data">
+      <i class="fa-solid fa-minus"></i>belum cukup</span>`;
+  }
+  const diam = Math.abs(kemiringan) < 0.5;
+  if (diam) return `<span class="tren-x"><i class="fa-solid fa-equals"></i>stabil</span>`;
+  const naik = kemiringan > 0;
+  const buruk = naikBuruk ? naik : !naik;
+  return `<span class="tren-${buruk ? 'buruk' : 'baik'}">
+    <i class="fa-solid fa-arrow-trend-${naik ? 'up' : 'down'}"></i>
+    ${naik ? '+' : ''}${kemiringan}/bln</span>`;
+}
+
+/** Daftar 'yyyy-MM' mundur n bulan, terurut lama → baru. */
+function bulanTerakhir(n) {
+  const out = [], kini = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(kini.getFullYear(), kini.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
+
+/**
+ * Hitung empat unsur Indeks Peringatan Pembinaan per santri pada jendela
+ * berjalan. Tidak ada penjumlahan menjadi skor tunggal — itu disengaja.
+ */
+function hitungIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, hari = IPP_JENDELA }) {
+  const akhir = new Date(); akhir.setHours(23, 59, 59, 999);
+  const mulai = tambahHari(akhir, -(hari - 1)); mulai.setHours(0, 0, 0, 0);
+  const dalam = (v) => { const d = tglDari(kunciTgl(v)); return !!d && d >= mulai && d <= akhir; };
+
+  const peta = {};
+  const ent = (nisn, s) => {
+    const n = String(nisn || ''); if (!n) return null;
+    if (!peta[n]) {
+      const sw = s || {};
+      peta[n] = { nisn: n, nama: sw.nama_siswa || '(tidak ditemukan)', kelas: sw.kelas || '-',
+        beban: 0, kasus: 0, ikatan: 0, prestasi: 0, tahfiz: 0, putus: 0,
+        binaTotal: 0, binaSelesai: 0 };
+    }
+    return peta[n];
+  };
+  (siswa || []).forEach(s => ent(s.nisn, s));
+
+  (detail || []).forEach(r => {
+    if (!dalam(r.tanggal)) return;
+    const it = ent(r.nisn); if (!it) return;
+    it.beban += Number(r.bobot_pelanggaran) || 0;
+    it.kasus++;
+  });
+  (prestasi || []).forEach(r => {
+    if (!dalam(r.tanggal)) return;
+    const it = ent(r.nisn); if (!it) return;
+    it.prestasi++; it.ikatan++;
+  });
+  (tahfiz || []).forEach(r => {
+    if (!dalam(r.tanggal)) return;
+    const it = ent(r.nisn); if (!it) return;
+    it.tahfiz++; it.ikatan++;
+  });
+  (izin || []).forEach(r => {
+    if (!dalam(r.tanggal_mulai)) return;
+    const it = ent(r.nisn); if (!it) return;
+    it.putus++;
+  });
+  (pembinaan || []).forEach(r => {
+    if (!dalam(r.tanggal_pembinaan)) return;
+    const it = ent(r.nisn); if (!it) return;
+    it.binaTotal++;
+    if (String(r.status_pembinaan) === 'Selesai') it.binaSelesai++;
+  });
+
+  const daftar = Object.values(peta);
+  const punyaIkatan = daftar.filter(x => x.ikatan > 0).length;
+  // Kriteria "Ikatan nol" hanya diaktifkan bila pencatatan positif sudah
+  // cukup merata. Lihat catatan (4) di kepala modul.
+  const ikatanAktif = daftar.length
+    ? (punyaIkatan / daftar.length) >= IPP_AMBANG_IKATAN : false;
+
+  daftar.forEach(it => {
+    it.respons = it.binaTotal ? Math.round(it.binaSelesai / it.binaTotal * 100) : null;
+    const macet = it.binaTotal >= 2 && it.respons !== null && it.respons < 50;
+    if (it.beban >= 50 || macet) it.tingkat = 3;
+    else if (it.beban > 0 || it.putus >= 2 || (ikatanAktif && it.ikatan === 0)) it.tingkat = 2;
+    else it.tingkat = 1;
+
+    const sebab = [];
+    if (it.beban >= 50) sebab.push(`beban ${it.beban} poin`);
+    else if (it.beban > 0) sebab.push(`${it.kasus} catatan · ${it.beban} poin`);
+    if (macet) sebab.push(`${it.binaTotal - it.binaSelesai} pembinaan belum tuntas`);
+    if (it.putus >= 2) sebab.push(`${it.putus} kali izin keluar`);
+    if (ikatanAktif && it.ikatan === 0) sebab.push('tidak ada catatan positif');
+    it.sebab = sebab.join(' · ') || 'Tidak ada indikasi';
+  });
+
+  const maks = {
+    beban:  Math.max(1, ...daftar.map(x => x.beban)),
+    ikatan: Math.max(1, ...daftar.map(x => x.ikatan)),
+    putus:  Math.max(1, ...daftar.map(x => x.putus))
+  };
+
+  const urut = { 3:3, 2:2, 1:1 };
+  daftar.sort((a, b) => (urut[b.tingkat] - urut[a.tingkat]) || (b.beban - a.beban) || (a.ikatan - b.ikatan));
+
+  return {
+    daftar, maks, ikatanAktif, punyaIkatan, mulai, akhir, hari,
+    tier3: daftar.filter(x => x.tingkat === 3).length,
+    tier2: daftar.filter(x => x.tingkat === 2).length,
+    tier1: daftar.filter(x => x.tingkat === 1).length
+  };
+}
+
+/**
+ * Tampilan untuk data yang belum terisi. Bukan sekadar "belum ada data":
+ * menyebut angkanya, menerangkan akibatnya, dan menyediakan jalan mengisi.
+ * Panel yang menerangkan sebab kekosongannya lebih berguna daripada panel
+ * yang menyembunyikan diri.
+ */
+function kartuBelumTerisi({ judul, jumlah, dariSantri, ikon, akibat, ajakan, view }) {
+  // Tombol hanya dipasang bila peran yang sedang masuk memang memiliki
+  // menunya. Memakai HAK saja tidak cukup: Pimpinan boleh MELIHAT prestasi
+  // tetapi menu Profil Santri tidak dibuka untuknya, sehingga navigateTo()
+  // hanya akan melempar pesan galat — tombol yang menolak dirinya sendiri
+  // lebih buruk daripada tidak ada tombol.
+  const bolehBuka = !!view && (MENU_ROLE[view] || []).includes(role());
+  return `<div class="ajak">
+    <i class="fa-solid ${ikon || 'fa-seedling'}"></i>
+    <p>${esc(judul)}</p>
+    <small>${esc(akibat)}</small>
+    <div class="ajak-angka">
+      <span><b>${angka(jumlah)}</b>catatan tersimpan</span>
+      <span><b>${angka(dariSantri)}</b>santri aktif</span>
+    </div>
+    <small class="ajak-aksi">${esc(ajakan)}</small>
+    ${bolehBuka ? `<button class="btn btn-ghost btn-sm" data-nav="${esc(view)}">
+      <i class="fa-solid fa-pen-to-square"></i>Buka halaman pencatatan</button>` : ''}
+  </div>`;
+}
+
+/* ---------------------------------------------------------------------
+   Panel 1 — Prestasi & Tahfiz
+   --------------------------------------------------------------------- */
+
+function panelPositif({ siswa, prestasi, tahfiz, bulanKunci }) {
+  const jmlSantri = siswa.length || 1;
+
+  const prsBulan = Object.fromEntries(bulanKunci.map(b => [b, 0]));
+  const thfBulan = Object.fromEntries(bulanKunci.map(b => [b, 0]));
+  const perKat = { Emas:0, Perak:0, Perunggu:0 };
+  let poinPrestasi = 0, halaman = 0;
+  const santriPrestasi = new Set(), santriTahfiz = new Set();
+
+  prestasi.forEach(r => {
+    const b = bulanDari(kunciTgl(r.tanggal));
+    if (b in prsBulan) prsBulan[b]++;
+    if (r.kategori in perKat) perKat[r.kategori]++;
+    poinPrestasi += Number(r.poin) || 0;
+    if (r.nisn) santriPrestasi.add(String(r.nisn));
+  });
+  tahfiz.forEach(r => {
+    const b = bulanDari(kunciTgl(r.tanggal));
+    if (b in thfBulan) thfBulan[b]++;
+    halaman += Number(r.capaian_halaman) || 0;
+    if (r.nisn) santriTahfiz.add(String(r.nisn));
+  });
+
+  const trenPrs = trenLinear(bulanKunci.map(b => prsBulan[b]));
+  const trenThf = trenLinear(bulanKunci.map(b => thfBulan[b]));
+  const jangkauan = (n) => Math.round(n / jmlSantri * 1000) / 10;
+
+  // Ambang tampilan kosong. Di bawah jangkauan ini, grafik bulanan
+  // menggambarkan segelintir santri tetapi terbaca seolah menggambarkan
+  // seluruh dayah — menyebutkan angka jangkauannya secara terbuka lebih
+  // jujur daripada melukis grafik yang nyaris rata di dasar sumbu.
+  const AMBANG_JANGKAUAN = 0.15;
+  const prsTipis = santriPrestasi.size / jmlSantri < AMBANG_JANGKAUAN;
+  const thfTipis = santriTahfiz.size / jmlSantri < AMBANG_JANGKAUAN;
+
+  const isiPrestasi = prsTipis
+    ? kartuBelumTerisi({
+        judul: 'Catatan apresiasi belum terkumpul',
+        jumlah: prestasi.length, dariSantri: siswa.length, ikon: 'fa-award',
+        akibat: 'Selama tabel ini kosong, skor net santri sama saja dengan poin pelanggaran — sisi positifnya tidak pernah ikut dihitung.',
+        ajakan: 'Satu catatan apresiasi per pekan per rayon sudah cukup untuk membuat panel ini bermakna.',
+        view: 'prestasi' })
+    : `<div class="minis" style="padding-bottom:14px">
+        <div class="mini t"><span>Catatan</span><b>${angka(prestasi.length)}</b></div>
+        <div class="mini s"><span>Santri</span><b>${angka(santriPrestasi.size)}</b></div>
+        <div class="mini a"><span>Poin</span><b>${angka(poinPrestasi)}</b></div>
+        <div class="mini m"><span>Jangkauan</span><b>${jangkauan(santriPrestasi.size)}%</b></div>
+      </div>${chartBox('sbPrestasi')}`;
+
+  const isiTahfiz = thfTipis
+    ? kartuBelumTerisi({
+        judul: 'Setoran hafalan belum terkumpul',
+        jumlah: tahfiz.length, dariSantri: siswa.length, ikon: 'fa-book-quran',
+        akibat: 'Konsistensi ibadah adalah satu-satunya ikatan positif yang bisa diukur dari catatan. Tanpanya, sistem hanya melihat pelanggaran.',
+        ajakan: 'Setoran yang dicatat rutin membuat santri yang menarik diri terlihat sebelum ia melanggar.',
+        view: 'tahfiz' })
+    : `<div class="minis" style="padding-bottom:14px">
+        <div class="mini t"><span>Setoran</span><b>${angka(tahfiz.length)}</b></div>
+        <div class="mini s"><span>Santri</span><b>${angka(santriTahfiz.size)}</b></div>
+        <div class="mini a"><span>Halaman</span><b>${angka(Math.round(halaman))}</b></div>
+        <div class="mini m"><span>Jangkauan</span><b>${jangkauan(santriTahfiz.size)}%</b></div>
+      </div>${chartBox('sbTahfiz')}`;
+
+  const html = `<div class="grid-half">
+    ${kartu('Apresiasi & Prestasi', isiPrestasi,
+      prsTipis ? '' : lencanaTren(trenPrs, { naikBuruk:false }),
+      `${bulanKunci.length} bulan terakhir · Emas ${perKat.Emas} · Perak ${perKat.Perak} · Perunggu ${perKat.Perunggu}`)}
+    ${kartu('Setoran Tahfiz', isiTahfiz,
+      thfTipis ? '' : lencanaTren(trenThf, { naikBuruk:false }),
+      `${bulanKunci.length} bulan terakhir · konsistensi ibadah`)}
+  </div>`;
+
+  return { html, prsTipis, thfTipis, prsBulan, thfBulan, perKat };
+}
+
+function gambarPositif({ bulanKunci, prsBulan, thfBulan, prsTipis, thfTipis }) {
+  const label = bulanKunci.map(b => {
+    const [th, bl] = b.split('-');
+    return new Date(Number(th), Number(bl) - 1, 1)
+      .toLocaleDateString('id-ID', { month:'short', year:'2-digit' });
+  });
+  if (!prsTipis) buatChart('sbPrestasi', 'sbPrestasi', {
+    type:'bar',
+    data:{ labels: label, datasets:[{ label:'Catatan apresiasi',
+      data: bulanKunci.map(b => prsBulan[b]), backgroundColor:'#C9A227', borderRadius:6 }]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{ x:{grid:{display:false}}, y:{beginAtZero:true, ticks:{precision:0}} } }
+  });
+  if (!thfTipis) buatChart('sbTahfiz', 'sbTahfiz', {
+    type:'line',
+    data:{ labels: label, datasets:[{ label:'Setoran',
+      data: bulanKunci.map(b => thfBulan[b]), borderColor:'#0F766E',
+      backgroundColor:'rgba(15,118,110,.14)', tension:.35, fill:true,
+      borderWidth:2.5, pointRadius:3 }]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{ x:{grid:{display:false}}, y:{beginAtZero:true, ticks:{precision:0}} } }
+  });
+}
+
+/* ---------------------------------------------------------------------
+   Panel 2 — Peta sebaran perkembangan
+   --------------------------------------------------------------------- */
+
+/**
+ * Matriks sebaran per angkatan. Setiap sel dinormalkan per 100 santri
+ * supaya angkatan berukuran berbeda dapat dibandingkan — jumlah mentah
+ * selalu memihak angkatan yang lebih besar.
+ */
+function panelSebaran({ siswa, detail, prestasi, tahfiz, izin, pembinaan, bulanKunci }) {
+  const urutAng = ['VII','VIII','IX','X','XI','XII'];
+  const baris = {};
+  urutAng.forEach(a => baris[a] = { angkatan:a, santri:0, plg:0, poin:0, berat:0,
+    prs:0, thf:0, izin:0, binaTotal:0, binaSelesai:0,
+    perBulan: Object.fromEntries(bulanKunci.map(b => [b, 0])) });
+
+  const petaKelas = {};
+  siswa.forEach(s => {
+    const a = angkatanDariKelas(s.kelas);
+    if (baris[a]) { baris[a].santri++; petaKelas[String(s.nisn)] = a; }
+  });
+
+  const keAng = (r) => baris[angkatanDariKelas(r.kelas) || petaKelas[String(r.nisn)] || ''] || null;
+
+  detail.forEach(r => {
+    const it = keAng(r); if (!it) return;
+    it.plg++; it.poin += Number(r.bobot_pelanggaran) || 0;
+    if (r.kategori === 'Berat') it.berat++;
+    const b = bulanDari(kunciTgl(r.tanggal)); if (b in it.perBulan) it.perBulan[b]++;
+  });
+  prestasi.forEach(r => { const it = keAng(r); if (it) it.prs++; });
+  tahfiz.forEach(r  => { const it = keAng(r); if (it) it.thf++; });
+  izin.forEach(r    => { const it = keAng(r); if (it) it.izin++; });
+  pembinaan.forEach(r => {
+    const it = keAng(r); if (!it) return;
+    it.binaTotal++; if (String(r.status_pembinaan) === 'Selesai') it.binaSelesai++;
+  });
+
+  const isi = urutAng.map(a => baris[a]).filter(r => r.santri > 0);
+  const per100 = (n, s) => s ? Math.round(n / s * 1000) / 10 : 0;
+  isi.forEach(r => {
+    r.plg100 = per100(r.plg, r.santri);
+    r.prs100 = per100(r.prs, r.santri);
+    r.thf100 = per100(r.thf, r.santri);
+    r.izin100 = per100(r.izin, r.santri);
+    r.tuntas = r.binaTotal ? Math.round(r.binaSelesai / r.binaTotal * 100) : null;
+    r.tren = trenLinear(bulanKunci.map(b => r.perBulan[b]));
+  });
+
+  const maks = {
+    plg: Math.max(1, ...isi.map(r => r.plg100)),
+    prs: Math.max(1, ...isi.map(r => r.prs100)),
+    thf: Math.max(1, ...isi.map(r => r.thf100)),
+    izin: Math.max(1, ...isi.map(r => r.izin100))
+  };
+  // Warna sel: makin pekat makin tinggi. Merah untuk yang tidak diinginkan,
+  // hijau untuk yang diinginkan — arah bacaannya harus langsung terasa.
+  const sel = (nilai, puncak, warna) => {
+    const p = puncak ? Math.min(1, nilai / puncak) : 0;
+    const rgb = warna === 'merah' ? '159,18,57' : warna === 'hijau' ? '15,118,110'
+      : warna === 'kuning' ? '180,83,9' : '20,97,139';
+    return `<td class="sb-sel" style="background:rgba(${rgb},${(p * 0.32).toFixed(3)})">
+      <b>${nilai}</b></td>`;
+  };
+
+  const tubuh = isi.map(r => `<tr>
+    <td class="sb-nm"><b>Angkatan ${esc(r.angkatan)}</b><small>${angka(r.santri)} santri</small></td>
+    ${sel(r.plg100, maks.plg, 'merah')}
+    ${sel(r.prs100, maks.prs, 'hijau')}
+    ${sel(r.thf100, maks.thf, 'hijau')}
+    ${sel(r.izin100, maks.izin, 'kuning')}
+    <td class="sb-sel">${r.tuntas === null
+      ? '<span style="color:var(--text-3)">—</span>'
+      : `<b>${r.tuntas}%</b>`}</td>
+    <td class="sb-tren">${lencanaTren(r.tren)}</td>
+  </tr>`).join('') || barisKosong(7, 'Belum ada santri terdata.', 'Isi data santri terlebih dahulu.');
+
+  const html = kartu('Peta Sebaran Perkembangan per Angkatan',
+    `<div class="tbl"><table class="sebar">
+      <thead><tr>
+        <th>Angkatan</th>
+        <th>Pelanggaran</th><th>Apresiasi</th><th>Setoran</th>
+        <th>Izin keluar</th><th>Pembinaan tuntas</th><th>Tren pelanggaran</th>
+      </tr></thead><tbody>${tubuh}</tbody></table></div>
+    <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
+    <p class="sb-kaki">Empat kolom pertama dihitung <b>per 100 santri</b> agar angkatan
+      berukuran berbeda dapat dibandingkan. Kolom tren adalah kemiringan garis regresi
+      linear atas jumlah pelanggaran bulanan — dihitung hanya pada tingkat kelompok,
+      tempat jumlah catatannya memadai.</p>`,
+    '', `${bulanKunci.length} bulan terakhir`);
+
+  return { html, isi };
+}
+
+/* ---------------------------------------------------------------------
+   Panel 3 — Target pembinaan
+   --------------------------------------------------------------------- */
+
+function panelTarget({ siswa, goals, targetTahfiz, tahfiz }) {
+  const periode = (typeof batasPeriode === 'function' && batasPeriode()?.bulan) || bulanIni();
+  const kini = (goals || []).filter(g => String(g.periode) === periode);
+
+  // Setiap target digolongkan SEKALI. Urutan pemeriksaannya mengikuti
+  // kelasGoal() pada modul 35: "Tercapai Sebagian" mengandung kata
+  // "tercapai" sekaligus "sebagian", sehingga penyaringan terpisah akan
+  // menghitungnya dua kali dan membuat sisa "berjalan" menjadi negatif.
+  const golonganGoal = (g) => {
+    const t = String(g.status || '').toLowerCase();
+    if (t.includes('sebagian')) return 'sebagian';
+    if (t.includes('belum') || t.includes('batal')) return 'meleset';
+    if (t.includes('tercapai')) return 'tercapai';
+    return 'berjalan';
+  };
+  const hitungGoal = { tercapai:0, sebagian:0, meleset:0, berjalan:0 };
+  kini.forEach(g => hitungGoal[golonganGoal(g)]++);
+  const { tercapai, sebagian, meleset, berjalan } = hitungGoal;
+  const bersasar = new Set(kini.map(g => String(g.nisn))).size;
+  const tanpaTarget = Math.max(0, siswa.length - bersasar);
+
+  // Target hafalan: bandingkan capaian halaman periode berjalan dengan
+  // target yang ditetapkan untuk periode yang sama.
+  const targetPeriode = (targetTahfiz || []).filter(t => String(t.periode) === periode);
+  const capai = {};
+  (tahfiz || []).forEach(r => {
+    if (bulanDari(kunciTgl(r.tanggal)) !== periode) return;
+    const n = String(r.nisn || ''); if (!n) return;
+    capai[n] = (capai[n] || 0) + (Number(r.capaian_halaman) || 0);
+  });
+  let thfCapai = 0, thfKurang = 0;
+  targetPeriode.forEach(t => {
+    const target = Number(t.target_halaman) || 0;
+    if (!target) return;
+    if ((capai[String(t.nisn)] || 0) >= target) thfCapai++; else thfKurang++;
+  });
+
+  const adaGoal = kini.length > 0;
+  const adaTarget = targetPeriode.length > 0;
+
+  const isiGoal = adaGoal
+    ? `<div class="minis" style="padding-bottom:14px">
+        <div class="mini t"><span>Tercapai</span><b>${angka(tercapai)}</b></div>
+        <div class="mini a"><span>Sebagian</span><b>${angka(sebagian)}</b></div>
+        <div class="mini m"><span>Belum</span><b>${angka(meleset)}</b></div>
+        <div class="mini s"><span>Berjalan</span><b>${angka(berjalan)}</b></div>
+      </div>
+      ${chartBox('sbGoal')}
+      <p class="sb-kaki"><b>${angka(bersasar)}</b> santri sudah punya target pada periode ini;
+        <b>${angka(tanpaTarget)}</b> belum. Target yang tidak ditetapkan tidak dapat dievaluasi,
+        dan pembinaan tanpa sasaran sulit dinilai tuntas.</p>`
+    : kartuBelumTerisi({
+        judul: 'Belum ada target pembinaan pada periode ini',
+        jumlah: (goals || []).length, dariSantri: siswa.length, ikon: 'fa-bullseye',
+        akibat: 'Pembinaan tanpa sasaran yang tertulis hanya dapat dinilai dari selesai atau tidaknya instruksi, bukan dari berubahnya perilaku.',
+        ajakan: 'Target ditetapkan dari halaman Profil Santri, satu sasaran per santri per periode sudah memadai.',
+        view: 'siswa' });
+
+  const isiTahfiz = adaTarget
+    ? `<div class="minis" style="padding-bottom:14px">
+        <div class="mini t"><span>Memenuhi</span><b>${angka(thfCapai)}</b></div>
+        <div class="mini m"><span>Belum</span><b>${angka(thfKurang)}</b></div>
+        <div class="mini s"><span>Ditetapkan</span><b>${angka(targetPeriode.length)}</b></div>
+        <div class="mini a"><span>Ketercapaian</span><b>${targetPeriode.length
+          ? Math.round(thfCapai / targetPeriode.length * 100) : 0}%</b></div>
+      </div>${chartBox('sbTargetThf')}`
+    : kartuBelumTerisi({
+        judul: 'Target hafalan belum ditetapkan',
+        jumlah: (targetTahfiz || []).length, dariSantri: siswa.length, ikon: 'fa-book-bookmark',
+        akibat: 'Tanpa target, setoran hanya terbaca sebagai kegiatan — bukan sebagai kemajuan terhadap sasaran.',
+        ajakan: 'Target halaman per periode ditetapkan dari halaman Tahfiz.',
+        view: 'tahfiz' });
+
+  const html = `<div class="grid-half">
+    ${kartu('Target Pembinaan', isiGoal, `<span class="tag tag-sea">${esc(periode)}</span>`,
+      'Sasaran tertulis per santri dan hasil evaluasinya')}
+    ${kartu('Target Hafalan', isiTahfiz, `<span class="tag tag-sea">${esc(periode)}</span>`,
+      'Capaian halaman dibandingkan target periode berjalan')}
+  </div>`;
+
+  return { html, adaGoal, adaTarget, tercapai, sebagian, meleset, berjalan, thfCapai, thfKurang };
+}
+
+function gambarTarget(d) {
+  if (d.adaGoal) buatChart('sbGoal', 'sbGoal', {
+    type:'doughnut',
+    data:{ labels:['Tercapai','Sebagian','Belum','Berjalan'],
+      datasets:[{ data:[d.tercapai, d.sebagian, d.meleset, d.berjalan],
+        backgroundColor:['#0F766E','#B45309','#9F1239','#14618B'], borderWidth:0 }]},
+    options:{ responsive:true, maintainAspectRatio:false, cutout:'66%',
+      plugins:{legend:{position:'bottom', labels:{usePointStyle:true, boxWidth:9}}} }
+  });
+  if (d.adaTarget) buatChart('sbTargetThf', 'sbTargetThf', {
+    type:'doughnut',
+    data:{ labels:['Memenuhi target','Belum memenuhi'],
+      datasets:[{ data:[d.thfCapai, d.thfKurang],
+        backgroundColor:['#0F766E','#B45309'], borderWidth:0 }]},
+    options:{ responsive:true, maintainAspectRatio:false, cutout:'66%',
+      plugins:{legend:{position:'bottom', labels:{usePointStyle:true, boxWidth:9}}} }
+  });
+}
+
+/* ---------------------------------------------------------------------
+   Panel 4 — Indeks Peringatan Pembinaan
+   --------------------------------------------------------------------- */
+
+function panelIpp(ipp, { batas = 10 } = {}) {
+  const perhatian = ipp.daftar.filter(x => x.tingkat >= 2).slice(0, batas);
+
+  const batang = (nilai, puncak, warna, judul) => {
+    const p = puncak ? Math.min(100, Math.round(nilai / puncak * 100)) : 0;
+    return `<span class="ipp-u" title="${esc(judul)}">
+      <span class="ipp-bar ${warna}"><i style="width:${p}%"></i></span>
+      <b>${nilai}</b></span>`;
+  };
+
+  const baris = perhatian.map(x => `
+    <div class="ipp-baris t${x.tingkat}" data-detail="${esc(x.nisn)}" role="button" tabindex="0">
+      <div class="ipp-nm">
+        <b>${esc(x.nama)}</b>
+        <small>${esc(x.kelas)} · ${esc(x.sebab)}</small>
+      </div>
+      <div class="ipp-unsur">
+        ${batang(x.beban,  ipp.maks.beban,  'merah',  'Beban — poin pelanggaran')}
+        ${batang(x.ikatan, ipp.maks.ikatan, 'hijau',  'Ikatan — apresiasi & setoran')}
+        ${batang(x.putus,  ipp.maks.putus,  'kuning', 'Keterputusan — izin keluar')}
+        <span class="ipp-u" title="Respons — pembinaan yang tuntas">
+          <span class="ipp-bar biru"><i style="width:${x.respons === null ? 0 : x.respons}%"></i></span>
+          <b>${x.respons === null ? '—' : x.respons + '%'}</b></span>
+      </div>
+      <span class="tag ${x.tingkat === 3 ? 'tag-berat' : 'tag-sedang'}">Tier ${x.tingkat}</span>
+    </div>`).join('') || kosong('Tidak ada santri pada tier 2 atau 3.',
+      'Seluruh santri berada pada dukungan umum sepanjang jendela ini.', 'fa-circle-check');
+
+  const catatanIkatan = ipp.ikatanAktif
+    ? `Kriteria <b>Ikatan nol</b> aktif — santri tanpa satu pun catatan positif ikut ditandai.`
+    : `Kriteria <b>Ikatan nol</b> sedang nonaktif: baru ${angka(ipp.punyaIkatan)} dari
+       ${angka(ipp.daftar.length)} santri yang memiliki catatan apresiasi atau setoran.
+       Kriteria ini menyala sendiri setelah pencatatan positif mencapai
+       ${Math.round(IPP_AMBANG_IKATAN * 100)}% santri.`;
+
+  return kartu('Indeks Peringatan Pembinaan',
+    `<div class="ipp-ket">
+      <span><i class="ipp-dot merah"></i>Beban</span>
+      <span><i class="ipp-dot hijau"></i>Ikatan</span>
+      <span><i class="ipp-dot kuning"></i>Keterputusan</span>
+      <span><i class="ipp-dot biru"></i>Respons</span>
+    </div>
+    <div class="ipp">${baris}</div>
+    <p class="sb-kaki">Keempat unsur <b>sengaja tidak dijumlahkan</b> menjadi satu skor:
+      satu angka tunggal menyembunyikan sebab, sedangkan empat batang berdampingan
+      menunjukkan ikatan mana yang mengendur. Yang ditampilkan adalah <b>status</b> pada
+      jendela ${ipp.hari} hari berjalan, bukan arah perubahan — jumlah titik waktu per
+      santri belum memadai untuk menaksir tren perorangan. ${catatanIkatan}</p>`,
+    `<span class="tag tag-berat">Tier 3: ${angka(ipp.tier3)}</span>
+     <span class="tag tag-sedang">Tier 2: ${angka(ipp.tier2)}</span>
+     <span class="tag tag-ok">Tier 1: ${angka(ipp.tier1)}</span>`,
+    `${ipp.hari} hari terakhir · ${tgl(kunciTgl(ipp.mulai))} – ${tgl(kunciTgl(ipp.akhir))}`);
+}
+
+/* ---------------------------------------------------------------------
+   Perakitan — dipanggil dari viewDashboard dan viewPimpinan
+   --------------------------------------------------------------------- */
+
+/**
+ * Muat data tambahan lalu susun seluruh panel perluasan.
+ * Mengembalikan { html, gambar } — html disisipkan ke DOM, lalu gambar()
+ * dipanggil setelahnya untuk melukis grafiknya.
+ */
+async function blokSebaran({ siswa, detail, izin, pembinaan, ipp = true, batasIpp = 10 }) {
+  const [prestasiAll, tahfizAll, goals, targetThf] = await Promise.all([
+    amanKosong(muatPrestasi, 'prestasi'),
+    amanKosong(muatTahfiz, 'tahfiz'),
+    amanKosong(muatGoalSemua, 'target pembinaan'),
+    amanKosong(muatTargetTahfiz, 'target tahfiz')
+  ]);
+
+  const nisnBoleh = new Set(siswa.map(s => String(s.nisn)));
+  const saring = (rows) => rows.filter(r => nisnBoleh.has(String(r.nisn)));
+
+  const bulanKunci = bulanTerakhir(6);
+  // Seluruh panel di blok ini berlabel "6 bulan terakhir", jadi datanya
+  // dipotong SEKALI di sini. Tanpa pemotongan ini, kolom per-100 santri
+  // menjumlahkan seluruh riwayat sementara judulnya menjanjikan enam
+  // bulan — angka yang tidak sesuai labelnya lebih berbahaya daripada
+  // angka yang tidak ada.
+  const jendela = new Set(bulanKunci);
+  const dalamJendela = (rows, kolom) =>
+    rows.filter(r => jendela.has(bulanDari(kunciTgl(r[kolom]))));
+
+  const prestasi  = dalamJendela(saring(prestasiAll.filter(aktifPrestasi)), 'tanggal');
+  const tahfiz    = dalamJendela(saring(tahfizAll.filter(aktifTahfiz)), 'tanggal');
+  const detail6   = dalamJendela(detail, 'tanggal');
+  const izin6     = dalamJendela(izin, 'tanggal_mulai');
+  const bina6     = dalamJendela(pembinaan, 'tanggal_pembinaan');
+
+  const pos = panelPositif({ siswa, prestasi, tahfiz, bulanKunci });
+  const seb = panelSebaran({ siswa, detail: detail6, prestasi, tahfiz,
+    izin: izin6, pembinaan: bina6, bulanKunci });
+  const tgt = panelTarget({ siswa, goals: saring(goals), targetTahfiz: saring(targetThf), tahfiz });
+
+  let ippHtml = '';
+  if (ipp) {
+    // Jendela IPP (60 hari) berada di dalam enam bulan, jadi pemotongan
+    // di atas tidak menghilangkan satu pun baris yang IPP butuhkan.
+    const hasil = hitungIpp({ siswa, detail: detail6, prestasi, tahfiz,
+      izin: izin6, pembinaan: bina6 });
+    ippHtml = panelIpp(hasil, { batas: batasIpp });
+  }
+
+  const html = `
+    <div class="eyebrow sb-judul"><span class="ar">خريطة التطور</span><span class="rule"></span>
+      <span class="lat">Peta Perkembangan Santri</span></div>
+    ${pos.html}
+    ${seb.html}
+    ${tgt.html}
+    ${ippHtml}`;
+
+  return {
+    html,
+    gambar: () => {
+      gambarPositif({ bulanKunci, prsBulan: pos.prsBulan, thfBulan: pos.thfBulan,
+        prsTipis: pos.prsTipis, thfTipis: pos.thfTipis });
+      gambarTarget(tgt);
+      // Matriks sebaran lebih lebar daripada layar ponsel; helper ini
+      // mengubahnya menjadi kartu berlabel di layar sempit dan menyalakan
+      // petunjuk geser di layar lebar bila memang masih meluap.
+      tandaiTabelBisaGeser();
+    }
+  };
 }
 
 // ---------------------------------------------------------------------
