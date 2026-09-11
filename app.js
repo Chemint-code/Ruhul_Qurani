@@ -14,6 +14,9 @@
    - v2.12: Laporan pembinaan Ustadz GEN-Z → pengesahan guru kelas
      binaan (modul 28e); pengesah dikunci di database lewat
      boleh_sahkan_pembinaan()
+   - v2.14: Indeks Peringatan Pembinaan memuat unsur kelima, Kehadiran
+     kelas (data_presensi), dan Peta Sebaran memuat kolom kehadiran &
+     alpa per angkatan (modul 38, catatan (5))
 
    Semua agregasi dihitung DI BROWSER dari tabel yang sudah ada.
    Tidak ada perubahan skema maupun RPC baru di backend.
@@ -9027,6 +9030,7 @@ async function prKirim(minggu, rows, libur, btn, label) {
     }), 'simpan presensi');
     selesaiSimpan(btn, asli, true, 'Presensi tersimpan');
     stPr.kotor = false;
+    cacheHapus('presensiJendela');   // unsur Kehadiran IPP ikut segar
     return data || {};
   } catch (err) {
     selesaiSimpan(btn, asli, false, 'Gagal menyimpan');
@@ -15465,7 +15469,7 @@ function hidupkanLayarLogin() {
 //         (commitment & involvement), Keterputusan (involvement terbalik),
 //         dan Respons (attachment yang dilembagakan).
 //
-//     (2) Keempatnya SENGAJA TIDAK DIJUMLAHKAN. Satu angka tunggal
+//     (2) Seluruh unsurnya SENGAJA TIDAK DIJUMLAHKAN. Satu angka tunggal
 //         menyembunyikan sebab, dan itu persis kelemahan skor net yang
 //         sudah ada. Yang ditampilkan empat batang berdampingan, supaya
 //         pertanyaan yang muncul bukan "berapa skornya" melainkan
@@ -15486,10 +15490,151 @@ function hidupkanLayarLogin() {
 //         diaktifkan pada data yang kosong ia akan menandai hampir seluruh
 //         santri sekaligus — peringatan yang menandai semua orang tidak
 //         memperingatkan siapa pun.
+//
+//     (5) v2.14 — UNSUR KELIMA: KEHADIRAN KELAS. Indeks peringatan dini
+//         yang dirujuk modul ini (Henry, Knight & Thornberry, 2011)
+//         disusun dari catatan resmi sekolah: capaian, KEHADIRAN, dan
+//         perilaku. Sampai v2.13 IPP hanya memuat perilaku, sehingga
+//         klaim "mengikuti indeks disengagement" belum utuh. Kehadiran
+//         madrasah adalah wujud paling langsung dari involvement Hirschi
+//         dan dari keterlibatan perilaku (behavioral engagement).
+//         Aturan bacanya:
+//         · Alpa (tanpa keterangan) dibaca sebagai sinyal keterputusan;
+//           S dan IP hanya ikut dalam ukuran "tidak hadir kronis" (≥10%
+//           jam pelajaran, apa pun alasannya); IK — dispensasi kegiatan
+//           resmi — dihitung sebagai keterlibatan, bukan ketidakhadiran.
+//         · Penyebutnya hanya pekan yang ditandai SELESAI oleh penginput.
+//           Ketiadaan catatan pada pekan yang belum diinput TIDAK PERNAH
+//           dibaca sebagai hadir (tabayyun: data yang belum ada tidak
+//           ditetapkan sebagai fakta). Santri tanpa pekan teramati
+//           bertanda "—" dan tidak ditandai dari unsur ini.
+//         · Ambang persentase baru berlaku setelah ≥ 2 pekan teramati,
+//           agar satu pekan sakit tidak langsung terbaca "kronis".
 // =====================================================================
 
 /** Jendela pengamatan IPP, dalam hari. */
 const IPP_JENDELA = 60;
+
+/** Kehadiran (v2.14): minimal JP teramati sebelum ambang persentase berlaku (2 pekan). */
+const KH_MIN_AMATI = 2 * 48;
+/** Tidak hadir kronis: ≥ 10% jam pelajaran teramati, apa pun alasannya (S · IP · A). */
+const KH_AMBANG_KRONIS = 0.10;
+/** Alpa yang cukup untuk tier 2: setara satu hari penuh (8 JP). */
+const KH_AMBANG_ALPA_JP = 8;
+/** Alpa kronis → tier 3: ≥ 10% jam pelajaran teramati tanpa keterangan. */
+const KH_AMBANG_ALPA_KRONIS = 0.10;
+
+/**
+ * JP efektif satu "minggu ke-k" dalam lembar wali kelas. Minggu ke-k
+ * dipetakan ke tanggal 7(k−1)+1 … min(7k, akhir bulan) — sama dengan
+ * cara modul presensi memilih minggu bawaan — dan 6 dari 7 hari
+ * kalender dianggap hari belajar. Minggu ke-5 bulan 31 hari karena itu
+ * bernilai ±21 JP, bukan 48.
+ */
+function jpSegmenMinggu(tahun, bulan, minggu) {
+  const akhirBln = new Date(tahun, bulan, 0).getDate();
+  const awal = 7 * (minggu - 1) + 1;
+  const hari = Math.max(0, Math.min(7 * minggu, akhirBln) - awal + 1);
+  return hari * 6 / 7 * 8;
+}
+
+/** Tanggal tengah minggu ke-k — dipakai untuk menguji masuk tidaknya ke jendela. */
+function tglTengahMinggu(tahun, bulan, minggu) {
+  const akhirBln = new Date(tahun, bulan, 0).getDate();
+  return new Date(tahun, bulan - 1, Math.min(7 * (minggu - 1) + 4, akhirBln));
+}
+
+/**
+ * Presensi kelas untuk enam bulan dasbor: baris data_presensi dan penanda
+ * pekan (presensi_minggu). Kegagalan tidak menjatuhkan dasbor — unsur
+ * Kehadiran cukup menjadi "tidak teramati".
+ */
+async function muatPresensiJendela(bulanKunci) {
+  const c = cacheGet('presensiJendela');
+  if (c && c.dari === bulanKunci[0]) return c;
+  const th0 = Number(String(bulanKunci[0]).slice(0, 4));
+  const bolehBulan = new Set(bulanKunci);
+  const kunciBln = (r) => `${r.tahun}-${String(r.bulan).padStart(2, '0')}`;
+  const ambil = async (tabel, select) => {
+    const hasil = [];
+    for (let from = 0; from < 40000; from += 1000) {
+      const { data, error } = await db.from(tabel).select(select)
+        .gte('tahun', th0).range(from, from + 999);
+      if (error) throw error;
+      hasil.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+    return hasil.filter(r => bolehBulan.has(kunciBln(r)));
+  };
+  const [rows, pekan] = await Promise.all([
+    amanKosong(() => ambil('data_presensi', 'nisn,kelas,tahun,bulan,minggu,jenis,jp'), 'presensi'),
+    amanKosong(() => ambil('presensi_minggu', 'kelas,tahun,bulan,minggu,status'), 'penanda pekan')
+  ]);
+  return cacheSet('presensiJendela', { dari: bulanKunci[0], rows, pekan });
+}
+
+/**
+ * Kehadiran per santri pada rentang [mulai, akhir].
+ *
+ * Penyebut (jpAmati) = jumlah JP efektif dari pekan kelas santri yang
+ * berstatus 'selesai' dan jatuh di dalam rentang. Pekan 'libur' dan pekan
+ * yang belum ditandai tidak dihitung — di kedua sisi pecahan. Hasilnya
+ * peta NISN → ringkasan, hanya untuk santri yang memiliki pekan teramati.
+ */
+function hitungKehadiran({ siswa, presensi, mulai, akhir }) {
+  const { rows = [], pekan = [] } = presensi || {};
+  const dalam = (r) => {
+    const d = tglTengahMinggu(Number(r.tahun), Number(r.bulan), Number(r.minggu));
+    return d >= mulai && d <= akhir;
+  };
+  const kunciPekan = (r) => `${r.tahun}-${r.bulan}-${r.minggu}`;
+
+  // Pekan teramati per kelas: kunci → JP efektif.
+  const amatiKelas = {};
+  pekan.forEach(p => {
+    if (String(p.status) !== 'selesai' || !dalam(p)) return;
+    const k = String(p.kelas || '');
+    (amatiKelas[k] = amatiKelas[k] || {})[kunciPekan(p)] =
+      jpSegmenMinggu(Number(p.tahun), Number(p.bulan), Number(p.minggu));
+  });
+
+  // Kelas yang pernah ditempati santri pada rentang ini (pindah kelas di
+  // tengah periode tetap terhitung pada kelas saat pencatatan).
+  const kelasSantri = {};
+  (siswa || []).forEach(s => { kelasSantri[String(s.nisn)] = new Set([String(s.kelas || '')]); });
+
+  const absen = {};
+  rows.forEach(r => {
+    if (!dalam(r)) return;
+    const n = String(r.nisn || ''); if (!n || !kelasSantri[n]) return;
+    const kPekan = kunciPekan(r), kelas = String(r.kelas || '');
+    if (!amatiKelas[kelas]?.[kPekan]) return;       // pekan belum selesai: diabaikan
+    kelasSantri[n].add(kelas);
+    const a = absen[n] = absen[n] || { S:0, IK:0, IP:0, A:0 };
+    if (r.jenis in a) a[r.jenis] += Number(r.jp) || 0;
+  });
+
+  const hasil = {};
+  Object.entries(kelasSantri).forEach(([n, set]) => {
+    let jpAmati = 0;
+    const sudah = new Set();
+    set.forEach(k => Object.entries(amatiKelas[k] || {}).forEach(([kp, jp]) => {
+      if (sudah.has(kp)) return; sudah.add(kp); jpAmati += jp;
+    }));
+    if (!jpAmati) return;                            // tidak teramati
+    const a = absen[n] || { S:0, IK:0, IP:0, A:0 };
+    const tidakHadir = Math.min(jpAmati, a.S + a.IP + a.A);
+    hasil[n] = {
+      jpAmati: Math.round(jpAmati), pekan: sudah.size,
+      alpa: a.A, sakit: a.S, izinPulang: a.IP, izinKegiatan: a.IK, tidakHadir,
+      hadirPct:   Math.round((1 - tidakHadir / jpAmati) * 1000) / 10,
+      alpaRasio:  Math.min(1, a.A / jpAmati),
+      absenRasio: tidakHadir / jpAmati,
+      cukup: jpAmati >= KH_MIN_AMATI
+    };
+  });
+  return hasil;
+}
 
 /** Ambang keaktifan pencatatan positif: minimal 20% santri punya satu catatan. */
 const IPP_AMBANG_IKATAN = 0.20;
@@ -15548,7 +15693,7 @@ function bulanTerakhir(n) {
  * Hitung empat unsur Indeks Peringatan Pembinaan per santri pada jendela
  * berjalan. Tidak ada penjumlahan menjadi skor tunggal — itu disengaja.
  */
-function hitungIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, hari = IPP_JENDELA }) {
+function hitungIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presensi, hari = IPP_JENDELA }) {
   const akhir = new Date(); akhir.setHours(23, 59, 59, 999);
   const mulai = tambahHari(akhir, -(hari - 1)); mulai.setHours(0, 0, 0, 0);
   const dalam = (v) => { const d = tglDari(kunciTgl(v)); return !!d && d >= mulai && d <= akhir; };
@@ -15560,7 +15705,7 @@ function hitungIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, hari = IP
       const sw = s || {};
       peta[n] = { nisn: n, nama: sw.nama_siswa || '(tidak ditemukan)', kelas: sw.kelas || '-',
         beban: 0, kasus: 0, ikatan: 0, prestasi: 0, tahfiz: 0, putus: 0,
-        binaTotal: 0, binaSelesai: 0 };
+        binaTotal: 0, binaSelesai: 0, kh: null };
     }
     return peta[n];
   };
@@ -15594,8 +15739,13 @@ function hitungIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, hari = IP
     if (String(r.status_pembinaan) === 'Selesai') it.binaSelesai++;
   });
 
+  // Unsur kelima — kehadiran kelas (catatan (5) di kepala modul).
+  const kh = hitungKehadiran({ siswa, presensi, mulai, akhir });
+  Object.entries(kh).forEach(([n, v]) => { if (peta[n]) peta[n].kh = v; });
+
   const daftar = Object.values(peta);
   const punyaIkatan = daftar.filter(x => x.ikatan > 0).length;
+  const teramati = daftar.filter(x => x.kh).length;
   // Kriteria "Ikatan nol" hanya diaktifkan bila pencatatan positif sudah
   // cukup merata. Lihat catatan (4) di kepala modul.
   const ikatanAktif = daftar.length
@@ -15604,14 +15754,22 @@ function hitungIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, hari = IP
   daftar.forEach(it => {
     it.respons = it.binaTotal ? Math.round(it.binaSelesai / it.binaTotal * 100) : null;
     const macet = it.binaTotal >= 2 && it.respons !== null && it.respons < 50;
-    if (it.beban >= 50 || macet) it.tingkat = 3;
-    else if (it.beban > 0 || it.putus >= 2 || (ikatanAktif && it.ikatan === 0)) it.tingkat = 2;
+    const k = it.kh;
+    const alpaKronis = !!k && k.cukup && k.alpaRasio >= KH_AMBANG_ALPA_KRONIS;
+    const alpaHari   = !!k && k.alpa >= KH_AMBANG_ALPA_JP;
+    const absenKronis = !!k && k.cukup && k.absenRasio >= KH_AMBANG_KRONIS;
+    it.alpa = k ? k.alpa : 0;
+    if (it.beban >= 50 || macet || alpaKronis) it.tingkat = 3;
+    else if (it.beban > 0 || it.putus >= 2 || alpaHari || absenKronis
+             || (ikatanAktif && it.ikatan === 0)) it.tingkat = 2;
     else it.tingkat = 1;
 
     const sebab = [];
     if (it.beban >= 50) sebab.push(`beban ${it.beban} poin`);
     else if (it.beban > 0) sebab.push(`${it.kasus} catatan · ${it.beban} poin`);
     if (macet) sebab.push(`${it.binaTotal - it.binaSelesai} pembinaan belum tuntas`);
+    if (alpaHari || alpaKronis) sebab.push(`alpa ${k.alpa} JP (${Math.round(k.alpaRasio * 100)}% jam teramati)`);
+    if (absenKronis) sebab.push(`tidak hadir ${Math.round(k.absenRasio * 100)}% jam pelajaran`);
     if (it.putus >= 2) sebab.push(`${it.putus} kali izin keluar`);
     if (ikatanAktif && it.ikatan === 0) sebab.push('tidak ada catatan positif');
     it.sebab = sebab.join(' · ') || 'Tidak ada indikasi';
@@ -15624,10 +15782,11 @@ function hitungIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, hari = IP
   };
 
   const urut = { 3:3, 2:2, 1:1 };
-  daftar.sort((a, b) => (urut[b.tingkat] - urut[a.tingkat]) || (b.beban - a.beban) || (a.ikatan - b.ikatan));
+  daftar.sort((a, b) => (urut[b.tingkat] - urut[a.tingkat]) || (b.beban - a.beban)
+    || (b.alpa - a.alpa) || (a.ikatan - b.ikatan));
 
   return {
-    daftar, maks, ikatanAktif, punyaIkatan, mulai, akhir, hari,
+    daftar, maks, ikatanAktif, punyaIkatan, teramati, mulai, akhir, hari,
     tier3: daftar.filter(x => x.tingkat === 3).length,
     tier2: daftar.filter(x => x.tingkat === 2).length,
     tier1: daftar.filter(x => x.tingkat === 1).length
@@ -15773,11 +15932,12 @@ function gambarPositif({ bulanKunci, prsBulan, thfBulan, prsTipis, thfTipis }) {
  * supaya angkatan berukuran berbeda dapat dibandingkan — jumlah mentah
  * selalu memihak angkatan yang lebih besar.
  */
-function panelSebaran({ siswa, detail, prestasi, tahfiz, izin, pembinaan, bulanKunci }) {
+function panelSebaran({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presensi, bulanKunci }) {
   const urutAng = ['VII','VIII','IX','X','XI','XII'];
   const baris = {};
   urutAng.forEach(a => baris[a] = { angkatan:a, santri:0, plg:0, poin:0, berat:0,
     prs:0, thf:0, izin:0, binaTotal:0, binaSelesai:0,
+    khSantri:0, khAmati:0, khTidak:0, khAlpa:0,
     perBulan: Object.fromEntries(bulanKunci.map(b => [b, 0])) });
 
   const petaKelas = {};
@@ -15802,6 +15962,18 @@ function panelSebaran({ siswa, detail, prestasi, tahfiz, izin, pembinaan, bulanK
     it.binaTotal++; if (String(r.status_pembinaan) === 'Selesai') it.binaSelesai++;
   });
 
+  // Kehadiran kelas per angkatan: dijumlahkan hanya atas santri yang
+  // memiliki pekan teramati, sehingga angkatan yang presensinya belum
+  // diinput tampil "—", bukan 100%.
+  const [thA, blA] = bulanKunci[0].split('-').map(Number);
+  const khMulai = new Date(thA, blA - 1, 1);
+  const khAkhir = new Date(); khAkhir.setHours(23, 59, 59, 999);
+  const kh = hitungKehadiran({ siswa, presensi, mulai: khMulai, akhir: khAkhir });
+  Object.entries(kh).forEach(([n, v]) => {
+    const it = baris[petaKelas[n] || '']; if (!it) return;
+    it.khSantri++; it.khAmati += v.jpAmati; it.khTidak += v.tidakHadir; it.khAlpa += v.alpa;
+  });
+
   const isi = urutAng.map(a => baris[a]).filter(r => r.santri > 0);
   const per100 = (n, s) => s ? Math.round(n / s * 1000) / 10 : 0;
   isi.forEach(r => {
@@ -15810,6 +15982,10 @@ function panelSebaran({ siswa, detail, prestasi, tahfiz, izin, pembinaan, bulanK
     r.thf100 = per100(r.thf, r.santri);
     r.izin100 = per100(r.izin, r.santri);
     r.tuntas = r.binaTotal ? Math.round(r.binaSelesai / r.binaTotal * 100) : null;
+    r.hadir = r.khAmati ? Math.round((1 - r.khTidak / r.khAmati) * 1000) / 10 : null;
+    // Alpa per santri teramati, dalam JP — pembandingnya santri yang
+    // benar-benar diamati, bukan seluruh angkatan.
+    r.alpaPer = r.khSantri ? Math.round(r.khAlpa / r.khSantri * 10) / 10 : null;
     r.tren = trenLinear(bulanKunci.map(b => r.perBulan[b]));
   });
 
@@ -15817,7 +15993,8 @@ function panelSebaran({ siswa, detail, prestasi, tahfiz, izin, pembinaan, bulanK
     plg: Math.max(1, ...isi.map(r => r.plg100)),
     prs: Math.max(1, ...isi.map(r => r.prs100)),
     thf: Math.max(1, ...isi.map(r => r.thf100)),
-    izin: Math.max(1, ...isi.map(r => r.izin100))
+    izin: Math.max(1, ...isi.map(r => r.izin100)),
+    alpa: Math.max(1, ...isi.map(r => r.alpaPer || 0))
   };
   // Warna sel: makin pekat makin tinggi. Merah untuk yang tidak diinginkan,
   // hijau untuk yang diinginkan — arah bacaannya harus langsung terasa.
@@ -15838,21 +16015,30 @@ function panelSebaran({ siswa, detail, prestasi, tahfiz, izin, pembinaan, bulanK
     <td class="sb-sel">${r.tuntas === null
       ? '<span style="color:var(--text-3)">—</span>'
       : `<b>${r.tuntas}%</b>`}</td>
+    <td class="sb-sel" title="${r.khSantri ? `${r.khSantri} santri teramati · ${angka(Math.round(r.khAmati))} JP` : 'Belum ada pekan presensi yang ditandai selesai'}">${r.hadir === null
+      ? '<span style="color:var(--text-3)">—</span>'
+      : `<b>${r.hadir}%</b><small class="sb-n">${angka(r.khSantri)} santri</small>`}</td>
+    ${r.alpaPer === null
+      ? '<td class="sb-sel"><span style="color:var(--text-3)">—</span></td>'
+      : sel(r.alpaPer, maks.alpa, 'merah')}
     <td class="sb-tren">${lencanaTren(r.tren)}</td>
-  </tr>`).join('') || barisKosong(7, 'Belum ada santri terdata.', 'Isi data santri terlebih dahulu.');
+  </tr>`).join('') || barisKosong(9, 'Belum ada santri terdata.', 'Isi data santri terlebih dahulu.');
 
   const html = kartu('Peta Sebaran Perkembangan per Angkatan',
     `<div class="tbl"><table class="sebar">
       <thead><tr>
         <th>Angkatan</th>
         <th>Pelanggaran</th><th>Apresiasi</th><th>Setoran</th>
-        <th>Izin keluar</th><th>Pembinaan tuntas</th><th>Tren pelanggaran</th>
+        <th>Izin keluar</th><th>Pembinaan tuntas</th>
+        <th>Kehadiran kelas</th><th>Alpa (JP/santri)</th><th>Tren pelanggaran</th>
       </tr></thead><tbody>${tubuh}</tbody></table></div>
     <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
     <p class="sb-kaki">Empat kolom pertama dihitung <b>per 100 santri</b> agar angkatan
       berukuran berbeda dapat dibandingkan. Kolom tren adalah kemiringan garis regresi
       linear atas jumlah pelanggaran bulanan — dihitung hanya pada tingkat kelompok,
-      tempat jumlah catatannya memadai.</p>`,
+      tempat jumlah catatannya memadai. Kolom <b>kehadiran</b> dan <b>alpa</b> dihitung atas
+      santri yang pekan presensinya sudah ditandai selesai (izin kegiatan dihitung hadir);
+      angkatan tanpa pekan teramati bertanda —.</p>`,
     '', `${bulanKunci.length} bulan terakhir`);
 
   return { html, isi };
@@ -15978,6 +16164,18 @@ function panelIpp(ipp, { batas = 10 } = {}) {
       <b>${nilai}</b></span>`;
   };
 
+  // Unsur Kehadiran: batang = persentase hadir dari jam teramati; angka
+  // alpa ditampilkan terpisah karena alpa — bukan sakit — yang dibaca
+  // sebagai sinyal keterputusan.
+  const unsurHadir = (k) => {
+    if (!k) return `<span class="ipp-u" title="Kehadiran — belum ada pekan presensi yang ditandai selesai">
+      <span class="ipp-bar ungu"><i style="width:0%"></i></span><b>—</b></span>`;
+    const judul = `Kehadiran — ${k.hadirPct}% dari ${k.jpAmati} JP teramati (${k.pekan} pekan); alpa ${k.alpa} JP`;
+    return `<span class="ipp-u" title="${esc(judul)}">
+      <span class="ipp-bar ungu"><i style="width:${Math.max(0, Math.min(100, k.hadirPct))}%"></i></span>
+      <b>${Math.round(k.hadirPct)}%${k.alpa ? `<em class="ipp-a"> · A${k.alpa}</em>` : ''}</b></span>`;
+  };
+
   const baris = perhatian.map(x => `
     <div class="ipp-baris t${x.tingkat}" data-detail="${esc(x.nisn)}" role="button" tabindex="0">
       <div class="ipp-nm">
@@ -15991,6 +16189,7 @@ function panelIpp(ipp, { batas = 10 } = {}) {
         <span class="ipp-u" title="Respons — pembinaan yang tuntas">
           <span class="ipp-bar biru"><i style="width:${x.respons === null ? 0 : x.respons}%"></i></span>
           <b>${x.respons === null ? '—' : x.respons + '%'}</b></span>
+        ${unsurHadir(x.kh)}
       </div>
       <span class="tag ${x.tingkat === 3 ? 'tag-berat' : 'tag-sedang'}">Tier ${x.tingkat}</span>
     </div>`).join('') || kosong('Tidak ada santri pada tier 2 atau 3.',
@@ -16003,19 +16202,31 @@ function panelIpp(ipp, { batas = 10 } = {}) {
        Kriteria ini menyala sendiri setelah pencatatan positif mencapai
        ${Math.round(IPP_AMBANG_IKATAN * 100)}% santri.`;
 
+  const catatanHadir = ipp.teramati
+    ? `Unsur <b>Kehadiran</b> terbaca untuk ${angka(ipp.teramati)} dari ${angka(ipp.daftar.length)}
+       santri — hanya pekan presensi yang sudah ditandai selesai yang dihitung; santri lain
+       bertanda —. Yang dibaca sebagai sinyal adalah <b>alpa</b> (≥ ${KH_AMBANG_ALPA_JP} JP → tier 2,
+       ≥ ${Math.round(KH_AMBANG_ALPA_KRONIS * 100)}% jam → tier 3) dan ketidakhadiran kronis
+       ≥ ${Math.round(KH_AMBANG_KRONIS * 100)}% jam pelajaran apa pun alasannya; izin kegiatan (IK)
+       tidak dihitung sebagai ketidakhadiran.`
+    : `Unsur <b>Kehadiran</b> belum terbaca: belum ada pekan presensi kelas yang ditandai selesai
+       pada jendela ini. Ketiadaan catatan presensi tidak dibaca sebagai hadir.`;
+
   return kartu('Indeks Peringatan Pembinaan',
     `<div class="ipp-ket">
       <span><i class="ipp-dot merah"></i>Beban</span>
       <span><i class="ipp-dot hijau"></i>Ikatan</span>
       <span><i class="ipp-dot kuning"></i>Keterputusan</span>
       <span><i class="ipp-dot biru"></i>Respons</span>
+      <span><i class="ipp-dot ungu"></i>Kehadiran</span>
     </div>
     <div class="ipp">${baris}</div>
-    <p class="sb-kaki">Keempat unsur <b>sengaja tidak dijumlahkan</b> menjadi satu skor:
-      satu angka tunggal menyembunyikan sebab, sedangkan empat batang berdampingan
+    <p class="sb-kaki">Kelima unsur <b>sengaja tidak dijumlahkan</b> menjadi satu skor:
+      satu angka tunggal menyembunyikan sebab, sedangkan lima batang berdampingan
       menunjukkan ikatan mana yang mengendur. Yang ditampilkan adalah <b>status</b> pada
       jendela ${ipp.hari} hari berjalan, bukan arah perubahan — jumlah titik waktu per
-      santri belum memadai untuk menaksir tren perorangan. ${catatanIkatan}</p>`,
+      santri belum memadai untuk menaksir tren perorangan. ${catatanIkatan}
+      ${catatanHadir}</p>`,
     `<span class="tag tag-berat">Tier 3: ${angka(ipp.tier3)}</span>
      <span class="tag tag-sedang">Tier 2: ${angka(ipp.tier2)}</span>
      <span class="tag tag-ok">Tier 1: ${angka(ipp.tier1)}</span>`,
@@ -16032,17 +16243,18 @@ function panelIpp(ipp, { batas = 10 } = {}) {
  * dipanggil setelahnya untuk melukis grafiknya.
  */
 async function blokSebaran({ siswa, detail, izin, pembinaan, ipp = true, batasIpp = 10 }) {
-  const [prestasiAll, tahfizAll, goals, targetThf] = await Promise.all([
+  const bulanKunci = bulanTerakhir(6);
+  const [prestasiAll, tahfizAll, goals, targetThf, presensiAll] = await Promise.all([
     amanKosong(muatPrestasi, 'prestasi'),
     amanKosong(muatTahfiz, 'tahfiz'),
     amanKosong(muatGoalSemua, 'target pembinaan'),
-    amanKosong(muatTargetTahfiz, 'target tahfiz')
+    amanKosong(muatTargetTahfiz, 'target tahfiz'),
+    muatPresensiJendela(bulanKunci).catch(() => ({ rows: [], pekan: [] }))
   ]);
 
   const nisnBoleh = new Set(siswa.map(s => String(s.nisn)));
   const saring = (rows) => rows.filter(r => nisnBoleh.has(String(r.nisn)));
 
-  const bulanKunci = bulanTerakhir(6);
   // Seluruh panel di blok ini berlabel "6 bulan terakhir", jadi datanya
   // dipotong SEKALI di sini. Tanpa pemotongan ini, kolom per-100 santri
   // menjumlahkan seluruh riwayat sementara judulnya menjanjikan enam
@@ -16057,10 +16269,13 @@ async function blokSebaran({ siswa, detail, izin, pembinaan, ipp = true, batasIp
   const detail6   = dalamJendela(detail, 'tanggal');
   const izin6     = dalamJendela(izin, 'tanggal_mulai');
   const bina6     = dalamJendela(pembinaan, 'tanggal_pembinaan');
+  // Presensi sudah terpotong enam bulan saat dimuat; di sini hanya
+  // disaring pada santri yang boleh dilihat peran ini.
+  const presensiRaw = { rows: saring(presensiAll.rows || []), pekan: presensiAll.pekan || [] };
 
   const pos = panelPositif({ siswa, prestasi, tahfiz, bulanKunci });
   const seb = panelSebaran({ siswa, detail: detail6, prestasi, tahfiz,
-    izin: izin6, pembinaan: bina6, bulanKunci });
+    izin: izin6, pembinaan: bina6, presensi: presensiRaw, bulanKunci });
   const tgt = panelTarget({ siswa, goals: saring(goals), targetTahfiz: saring(targetThf), tahfiz });
 
   let ippHtml = '';
@@ -16068,7 +16283,7 @@ async function blokSebaran({ siswa, detail, izin, pembinaan, ipp = true, batasIp
     // Jendela IPP (60 hari) berada di dalam enam bulan, jadi pemotongan
     // di atas tidak menghilangkan satu pun baris yang IPP butuhkan.
     const hasil = hitungIpp({ siswa, detail: detail6, prestasi, tahfiz,
-      izin: izin6, pembinaan: bina6 });
+      izin: izin6, pembinaan: bina6, presensi: presensiRaw });
     ippHtml = panelIpp(hasil, { batas: batasIpp });
   }
 

@@ -1798,6 +1798,12 @@
   }
   .mod-card:hover { transform:translateY(-3px); border-color: color-mix(in oklab, var(--sea) 24%, var(--line)); box-shadow:var(--shadow-lg); }
   .mod-card:disabled { opacity:.5; cursor:not-allowed; transform:none; }
+  /* v2.15 — kartu presensi terkunci untuk peran tanpa hak presensi */
+  .mod-card.terkunci, .mod-card.terkunci:hover {
+    opacity:.72; cursor:not-allowed; transform:none; box-shadow:none;
+    border-style:dashed; background:var(--paper);
+  }
+  .mod-card.terkunci .go { color:var(--text-3); }
   .mod-card .ico { width:42px; height:42px; border-radius:13px; display:grid; place-items:center; font-size:15px; margin-bottom:14px; }
   .mod-card .k { font-size:9.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--text-3); }
   .mod-card b { display:block; font-size:15px; margin-top:3px; }
@@ -3721,6 +3727,7 @@
   .ipp-dot.hijau  { background:#0F766E; }
   .ipp-dot.kuning { background:#B45309; }
   .ipp-dot.biru   { background:#14618B; }
+  .ipp-dot.ungu   { background:#5B21B6; }
 
   .ipp { padding:10px var(--pad) 4px; }
   .ipp-baris {
@@ -3736,7 +3743,8 @@
   .ipp-nm b { display:block; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .ipp-nm small { color:var(--text-3); font-size:11.5px; line-height:1.5; display:block; }
 
-  .ipp-unsur { display:grid; grid-template-columns:repeat(4, 1fr); gap:9px; min-width:0; }
+  .ipp-unsur { display:grid; grid-template-columns:repeat(5, 1fr); gap:9px; min-width:0; }
+  .ipp.tanpa-hadir .ipp-unsur { grid-template-columns:repeat(4, 1fr); }
   .ipp-u { display:flex; flex-direction:column; gap:4px; min-width:0; }
   .ipp-u b { font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-3); font-weight:600; }
   .ipp-bar { display:block; height:7px; border-radius:5px; background:var(--paper); overflow:hidden; }
@@ -3745,10 +3753,15 @@
   .ipp-bar.hijau  i { background:#0F766E; }
   .ipp-bar.kuning i { background:#B45309; }
   .ipp-bar.biru   i { background:#14618B; }
+  .ipp-bar.ungu   i { background:#5B21B6; }
+  .ipp-u b { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ipp-a { font-style:normal; color:#5B21B6; }
+  table.sebar .sb-n { display:block; font-size:10.5px; color:var(--text-3); font-weight:500; }
 
   @media (max-width:720px) {
     .ipp-baris { grid-template-columns:1fr auto; gap:9px 12px; }
-    .ipp-unsur { grid-column:1 / -1; }
+    .ipp-unsur { grid-column:1 / -1; gap:7px; }
+    .ipp-a { display:none; }   /* alpa tetap terbaca di baris sebab */
     .ipp-nm small { white-space:normal; }
   }
 
