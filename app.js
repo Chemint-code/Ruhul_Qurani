@@ -11,6 +11,9 @@
    - Laporan terpadu: cetak + unduh PDF (html2pdf) — MENGIKUTI PERIODE AKTIF
    - RBAC klien: Admin/Guru/Walas/Guru BK/Guru Piket/Ustadz GEN-Z/Osis/Pimpinan
    - Indikator sinkronisasi saat proses input
+   - v2.12: Laporan pembinaan Ustadz GEN-Z → pengesahan guru kelas
+     binaan (modul 28e); pengesah dikunci di database lewat
+     boleh_sahkan_pembinaan()
 
    Semua agregasi dihitung DI BROWSER dari tabel yang sudah ada.
    Tidak ada perubahan skema maupun RPC baru di backend.
@@ -215,7 +218,14 @@ const HAK = {
   'presensi.isi'    : ['Admin','Guru','Walas'],
 
   // --- Pembinaan & Master ------------------------------------------
-  'bina.ubah'       : ['Admin','Guru','Pimpinan'],
+  // v2.12 — Legalitas pembinaan ada pada guru kelas binaan (dan Admin).
+  // Pimpinan dikeluarkan karena database memang tidak pernah
+  // mengizinkannya (tombolnya tampil tetapi selalu "Akses ditolak").
+  // Batas sesungguhnya: fungsi boleh_sahkan_pembinaan() di Supabase.
+  'bina.ubah'       : ['Admin','Guru'],
+  // Ustadz GEN-Z = perpanjangan tangan musyrif asrama: melaksanakan dan
+  // MELAPORKAN pembinaan kepada guru kelas binaan, tidak mengesahkan.
+  'bina.lapor'      : ['Ustadz GEN-Z'],
   // Memberi tahu wali santri lewat WhatsApp. Sengaja lebih luas daripada
   // 'bina.ubah': wali kelas dan Guru BK adalah pihak yang paling sering
   // berhubungan dengan orang tua, walaupun tidak berwenang mengubah
@@ -269,6 +279,7 @@ const bolehPdf       = () => bisa('pdf');
 const bolehMaster    = () => bisa('master.lihat');
 const bolehPembinaan = () => bisa('bina.ubah');
 const bolehKabarWali = () => bisa('wali.kabar') && !hanyaBaca();
+const bolehLaporBina = () => bisa('bina.lapor') && !hanyaBaca();
 const perluFilterKelas = () => bisa('lingkup.kelas');
 
 /** Pengajuan izin: dipakai bersama oleh Perizinan & Pengasuhan. */
@@ -1979,7 +1990,12 @@ function tandaiTabelBisaGeser() {
  */
 function siapkanTabelKartu(akar) {
   (akar || document).querySelectorAll('.tbl table').forEach(tabel => {
-    if (tabel.dataset.kartuSiap === '1') return;
+    // Tabel yang tbody-nya dirender ulang (filter, halaman berikut,
+    // realtime) tetap memakai elemen <table> yang sama. Penanda siap
+    // saja tidak cukup: baris baru belum berlabel sehingga di mode kartu
+    // ponsel judul kolomnya hilang. Periksa sel yang belum berlabel.
+    if (tabel.dataset.kartuSiap === '1'
+        && !tabel.querySelector(':scope > tbody > tr > td:not([data-l]):not([data-penuh])')) return;
 
     const kepala = tabel.tHead && tabel.tHead.rows[tabel.tHead.rows.length - 1];
     if (!kepala) return;
@@ -2308,10 +2324,29 @@ async function viewDashboard() {
     } catch (e) { console.warn('amanah wali tidak terbaca:', e.message); }
   }
 
+  // v2.12 — laporan pembinaan: GEN-Z diingatkan yang belum dilaporkan,
+  // guru diingatkan laporan yang menunggu pengesahannya.
+  let binaBelumLapor = 0, binaMenungguSah = 0;
+  if (bolehLaporBina() || bolehPembinaan()) {
+    try {
+      const lap = await petaLaporanBina();
+      const terbuka = filterBinaanUnit(dedupBina(pembinaanAll.filter(aktifPembinaan)
+        .map(p => ({ ...p, kelas: p.siswa?.kelas || '' }))), 'kelas')
+        .filter(p => p.status_pembinaan !== 'Selesai');
+      binaMenungguSah = bolehPembinaan()
+        ? terbuka.filter(p => (lap.get(String(p.id_pembinaan))?.penerima_id || []).includes(idSaya())
+                              || (isAdmin() && lap.has(String(p.id_pembinaan)))).length : 0;
+      binaBelumLapor = bolehLaporBina() ? terbuka.filter(p => !lap.has(String(p.id_pembinaan))).length : 0;
+    } catch (e) { console.warn('amanah laporan pembinaan tidak terbaca:', e.message); }
+  }
+
   $('viewRoot').innerHTML = `
     ${panelSapaan([
       { jumlah: izinPending, label: 'izin menunggu keputusan', ikon: 'fa-clock', view: 'perizinan' },
-      { jumlah: binaProses,  label: 'pembinaan belum diselesaikan', ikon: 'fa-hands-holding-child', view: 'pembinaan' },
+      { jumlah: binaMenungguSah, label: 'laporan pembinaan menunggu pengesahan Anda', ikon: 'fa-file-signature', view: 'pesan' },
+      bolehLaporBina()
+        ? { jumlah: binaBelumLapor, label: 'pembinaan belum dilaporkan ke guru', ikon: 'fa-paper-plane', view: 'pembinaan' }
+        : { jumlah: binaProses,  label: 'pembinaan belum diselesaikan', ikon: 'fa-hands-holding-child', view: 'pembinaan' },
       { jumlah: perluWali,   label: 'wali santri perlu dikabari', ikon: 'fa-comment-dots', view: 'pembinaan' }
     ])}
     ${kartuUnit()}
@@ -4017,7 +4052,7 @@ async function modalPerpanjangIzin(idIzin) {
 //     pembinaan melalui id_log_pelanggaran. Bentuk pembinaan diambil dari
 //     master_pembinaan berdasarkan nomor hasil hitungan itu.
 // ---------------------------------------------------------------------
-const stBina = { cari:'', kategori:'', status:'', mode:'', page:1, size:30 };
+const stBina = { cari:'', kategori:'', status:'', mode:'', page:1, size:30, pilih: new Set() };
 
 /** Nomor tahap yang dipakai UI: hasil hitung ulang, bukan angka database. */
 function tahapBina(r) {
@@ -4315,24 +4350,37 @@ function urutkanBina(rows) {
 }
 
 async function viewPembinaan() {
+  const lapor = bolehLaporBina();
+  const nKol  = lapor ? 10 : 9;
   $('viewRoot').innerHTML = `
     <div class="stats" id="binaKpi"></div>
+    ${lapor ? `<div class="alur-bina rise">
+      <div class="alur-langkah on"><span>1</span><div><b>Laksanakan</b><small>Pembinaan di asrama oleh Ustadz GEN-Z</small></div></div>
+      <i class="fa-solid fa-chevron-right alur-panah"></i>
+      <div class="alur-langkah on"><span>2</span><div><b>Laporkan</b><small>Terkirim ke guru kelas binaan santri</small></div></div>
+      <i class="fa-solid fa-chevron-right alur-panah"></i>
+      <div class="alur-langkah"><span>3</span><div><b>Disahkan</b><small>Guru menekan “Sahkan Selesai” — legalitas pada guru</small></div></div>
+    </div>` : ''}
     ${kartu('Instruksi Pembinaan', `
       <div class="filters">
         <input id="pbCari" class="input grow" placeholder="Cari santri, instrumen, atau pemicu…" value="${esc(stBina.cari)}">
         <select id="pbKategori" class="input"><option value="">Semua Kategori</option>
           ${['Ringan','Sedang','Berat'].map(k => `<option ${k===stBina.kategori?'selected':''}>${k}</option>`).join('')}</select>
         <select id="pbStatus" class="input"><option value="">Semua Status</option>
-          ${['Dalam Proses','Selesai'].map(k => `<option ${k===stBina.status?'selected':''}>${k}</option>`).join('')}</select>
+          ${['Dalam Proses','Menunggu Pengesahan','Selesai'].map(k => `<option ${k===stBina.status?'selected':''}>${k}</option>`).join('')}</select>
         <select id="pbMode" class="input"><option value="">Semua Mode</option>
           ${['Otomatis','Manual'].map(k => `<option ${k===stBina.mode?'selected':''}>${k}</option>`).join('')}</select>
         <span class="sep"></span>
+        ${lapor ? `<button class="btn btn-lapor btn-sm hidden" id="pbLaporMassal">
+          <i class="fa-solid fa-paper-plane"></i><span>Laporkan terpilih (<b id="pbPilihN">0</b>)</span></button>` : ''}
         <span class="tag tag-off" id="pbCount">0 data</span>
       </div>
-      <div class="tbl"><table>
-        <thead><tr><th>Tanggal</th><th>Santri</th><th>Kategori</th><th class="center">Tahap</th>
+      <div class="tbl"><table class="tbl-bina">
+        <thead><tr>${lapor ? `<th class="center pilih-kol"><input type="checkbox" id="pbPilihSemua"
+            class="cek" aria-label="Pilih semua pembinaan yang bisa dilaporkan di halaman ini"></th>` : ''}
+          <th>Tanggal</th><th>Santri</th><th>Kategori</th><th class="center">Tahap</th>
           <th>Bentuk Pembinaan</th><th>Pemicu</th><th>Mode</th><th>Status</th><th class="right">Aksi</th></tr></thead>
-        <tbody id="tbBina"><tr><td colspan="9" style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</td></tr></tbody>
+        <tbody id="tbBina"><tr><td colspan="${nKol}" style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</td></tr></tbody>
       </table></div>
       <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
       <div id="pgBina"></div>`,
@@ -4347,8 +4395,27 @@ async function viewPembinaan() {
   $('pbCari').addEventListener('input', debounce(e => {
     stBina.cari = e.target.value.trim(); stBina.page = 1; gambarBina(); }, 220));
   $('pbRefresh').addEventListener('click', async () => {
-    cacheHapus('pembinaan','aturanBina','detail');
+    cacheHapus('pembinaan','aturanBina','detail','laporan_bina');
     await gambarBina(); toast('success','Data dimuat ulang'); });
+
+  // Centang laporan massal — status pilihan disimpan di stBina.pilih
+  // supaya tidak hilang ketika tabel dirender ulang oleh realtime.
+  if (lapor) {
+    $('tbBina').addEventListener('change', (e) => {
+      const c = e.target.closest('[data-pilih]'); if (!c) return;
+      c.checked ? stBina.pilih.add(c.dataset.pilih) : stBina.pilih.delete(c.dataset.pilih);
+      c.closest('tr')?.classList.toggle('dipilih', c.checked);
+      segarkanPilihanBina();
+    });
+    $('pbPilihSemua').addEventListener('change', (e) => {
+      document.querySelectorAll('#tbBina [data-pilih]').forEach(c => {
+        c.checked = e.target.checked;
+        c.checked ? stBina.pilih.add(c.dataset.pilih) : stBina.pilih.delete(c.dataset.pilih);
+        c.closest('tr')?.classList.toggle('dipilih', c.checked);
+      });
+      segarkanPilihanBina();
+    });
+  }
 
   onKlik(async (e) => {
     const p = e.target.closest('[data-pg]');
@@ -4360,6 +4427,11 @@ async function viewPembinaan() {
     }
     const t = e.target.closest('[data-tinjau]');
     if (t) return tinjauAmbangBerat(t.dataset.tinjau);
+    const l = e.target.closest('[data-lapor]');
+    if (l) return modalLaporBina([l.dataset.lapor]);
+    if (e.target.closest('#pbLaporMassal')) return modalLaporBina([...stBina.pilih]);
+    const u = e.target.closest('[data-bina-utas]');
+    if (u) { stPesan.aktif = u.dataset.binaUtas; return navigateTo('pesan'); }
     const b = e.target.closest('[data-pbn]');
     if (!b) return;
     const [id, status] = b.dataset.pbn.split('|');
@@ -4411,25 +4483,37 @@ async function bahanBina() {
 }
 
 async function gambarBina() {
-  const semua = await bahanBina();
+  const [semua, lap] = await Promise.all([bahanBina(), petaLaporanBina()]);
+  const lapor = bolehLaporBina();
+  const nKol  = lapor ? 10 : 9;
+  const laporanDari = (r) => lap.get(String(r.id_pembinaan)) || null;
+  const menungguSah = (r) => String(r.status_pembinaan) !== 'Selesai' && !!laporanDari(r);
 
   const total = semua.length;
   const proses = semua.filter(r => r.status_pembinaan !== 'Selesai').length;
+  const menunggu = semua.filter(menungguSah).length;
   const otomatis = semua.filter(r => String(r.mode_pembinaan) === 'Otomatis').length;
+  const belumLapor = lapor ? semua.filter(r => r.status_pembinaan !== 'Selesai' && !laporanDari(r)).length : 0;
   $('binaKpi').innerHTML =
     stat('Total Instruksi', angka(total), 'fa-solid fa-list', 'background:#EFF3F6;color:var(--text-2)', 'var(--text-3)', labelPeriode()) +
-    stat('Dalam Proses', angka(proses), 'fa-solid fa-hourglass-half', 'background:var(--amber-bg);color:var(--amber)', 'var(--amber)') +
-    stat('Selesai', angka(total - proses), 'fa-solid fa-circle-check', 'background:var(--teal-bg);color:var(--teal)', 'var(--teal)') +
-    stat('Dibuat Otomatis', angka(otomatis), 'fa-solid fa-robot', 'background:#E7F1F7;color:var(--sea)', 'var(--sea)');
+    stat('Dalam Proses', angka(proses), 'fa-solid fa-hourglass-half', 'background:var(--amber-bg);color:var(--amber)', 'var(--amber)',
+      lapor ? `${angka(belumLapor)} belum dilaporkan` : '') +
+    stat('Menunggu Pengesahan', angka(menunggu), 'fa-solid fa-file-signature', 'background:#E7F1F7;color:var(--sea)', 'var(--sea)',
+      bolehPembinaan() ? 'Laporan Ustadz GEN-Z untuk Anda' : 'Di tangan guru kelas binaan') +
+    stat('Selesai', angka(total - proses), 'fa-solid fa-circle-check', 'background:var(--teal-bg);color:var(--teal)', 'var(--teal)',
+      `${angka(otomatis)} dibuat otomatis`);
 
   const k = stBina.cari.toLowerCase();
   const rows = semua.filter(r => {
     if (stBina.kategori && r.kategori_bina !== stBina.kategori) return false;
-    if (stBina.status && String(r.status_pembinaan || 'Dalam Proses') !== stBina.status) return false;
+    if (stBina.status === 'Menunggu Pengesahan') { if (!menungguSah(r)) return false; }
+    else if (stBina.status && String(r.status_pembinaan || 'Dalam Proses') !== stBina.status) return false;
     if (stBina.mode && String(r.mode_pembinaan || 'Manual') !== stBina.mode) return false;
     if (!k) return true;
-    return [r.nisn, r.nama_siswa, r.kelas, r.kategori_bina, r.bentuk_final, bentukBina(r),
-            r.deskripsi_pelanggaran, r.catatan_pembinaan, r.id_aturan, r.mode_pembinaan]
+    const L = laporanDari(r);
+    return [r.id_pembinaan, r.nisn, r.nama_siswa, r.kelas, r.kategori_bina, r.bentuk_final, bentukBina(r),
+            r.deskripsi_pelanggaran, r.catatan_pembinaan, r.id_aturan, r.mode_pembinaan, r.pembina,
+            L?.pelapor, ...(L?.penerima || [])]
       .some(v => String(v||'').toLowerCase().includes(k));
   });
 
@@ -4438,18 +4522,46 @@ async function gambarBina() {
   const from = (stBina.page - 1) * stBina.size;
   const hal = rows.slice(from, from + stBina.size);
 
+  // Pilihan yang sudah tidak sah (baris dilaporkan/diselesaikan orang lain) dibuang.
+  if (lapor) [...stBina.pilih].forEach(id => {
+    const r = semua.find(x => String(x.id_pembinaan) === id);
+    if (!r || r.status_pembinaan === 'Selesai' || laporanDari(r)) stBina.pilih.delete(id);
+  });
+
   $('pbCount').textContent = `${angka(rows.length)} dari ${angka(semua.length)} data`;
   $('queryTime').textContent = `pembinaan · ${angka(rows.length)} baris`;
 
   const editable = bolehPembinaan() && !hanyaBaca();
   $('tbBina').innerHTML = hal.map(r => {
+    const id = String(r.id_pembinaan || '');
     const selesai = String(r.status_pembinaan) === 'Selesai';
+    const L = laporanDari(r);
+    const tunggu = L && !selesai;
+    const bisaDipilih = lapor && !selesai && !L;
+    const dipilih = bisaDipilih && stBina.pilih.has(id);
     const tahap = tahapBina(r);
     const catatan = String(r.catatan_pembinaan || '').trim();
     const tampilCatatan = catatan && !/^Pembinaan otomatis kategori /i.test(catatan);
-    return `<tr>
+
+    const aksi = [];
+    if (bolehKabarWali() && perluKabarWali(r)) aksi.push(`<button class="btn btn-wa btn-sm" data-wa-wali="${esc(id)}"
+         title="Beri tahu wali santri melalui WhatsApp"><i class="fa-brands fa-whatsapp"></i>Kabari Wali</button>`);
+    if (lapor && bisaDipilih) aksi.push(`<button class="btn btn-lapor btn-sm" data-lapor="${esc(id)}"
+         title="Kirim laporan pelaksanaan ke guru kelas binaan"><i class="fa-solid fa-paper-plane"></i>Laporkan ke Guru</button>`);
+    if (L && (lapor || editable)) aksi.push(`<button class="btn btn-ghost btn-sm" data-bina-utas="${esc(L.utas[0])}"
+         title="Buka percakapan laporan"><i class="fa-solid fa-comments"></i>Utas</button>`);
+    if (editable) aksi.push(`<button class="btn ${selesai ? 'btn-ghost' : tunggu ? 'btn-sah' : 'btn-ok'} btn-sm"
+         data-pbn="${esc(id)}|${selesai ? 'Dalam Proses' : 'Selesai'}">
+         <i class="fa-solid ${selesai ? 'fa-arrow-rotate-left' : tunggu ? 'fa-file-signature' : 'fa-circle-check'}"></i>${
+           selesai ? 'Buka Lagi' : tunggu ? 'Sahkan Selesai' : 'Selesaikan'}</button>`);
+    if (!aksi.length) aksi.push('<span class="tag tag-off">Hanya baca</span>');
+
+    return `<tr class="${tunggu ? 'menunggu' : ''}${dipilih ? ' dipilih' : ''}">
+      ${lapor ? `<td class="center pilih-kol">${bisaDipilih
+        ? `<input type="checkbox" class="cek" data-pilih="${esc(id)}" ${dipilih ? 'checked' : ''}
+             aria-label="Pilih pembinaan ${esc(r.nama_siswa)}">` : ''}</td>` : ''}
       <td class="nowrap"><div class="secondary" style="margin:0">${tgl(r.tanggal_pembinaan)}</div>
-        <div class="secondary" style="font-size:10px">${esc(r.id_pembinaan||'')}</div></td>
+        <div class="secondary" style="font-size:10px">${esc(id)}</div></td>
       <td><div class="primary">${esc(r.nama_siswa)}</div>
           <div class="secondary">${esc(r.nisn)} · ${esc(r.kelas)}</div></td>
       <td><span class="tag ${tagKategori(r.kategori_bina)}">${esc(r.kategori_bina||'-')}</span></td>
@@ -4458,47 +4570,53 @@ async function gambarBina() {
            ${r.tahap_perkiraan ? `<div class="secondary" style="font-size:10px;margin-top:4px">perkiraan</div>` : ''}`
         : '<span class="tag tag-off">—</span>'}</td>
       <td><div class="primary" ${r.overflow ? 'style="color:var(--maroon)"' : ''}>${esc(r.bentuk_final)}</div>
-        ${perluDitinjau(r) ? `<button class="tag tag-tinjau" data-tinjau="${esc(r.id_pembinaan)}"
+        ${perluDitinjau(r) ? `<button class="tag tag-tinjau" data-tinjau="${esc(id)}"
             title="Nomor tahap dari database berbeda dengan hitungan periode berjalan">
             <i class="fa-solid fa-magnifying-glass"></i>Perlu ditinjau</button>` : ''}
         ${r.overflow ? `<div class="secondary">Batas modul kategori ini: ${r.batas}</div>` : ''}
         ${tampilCatatan ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:5px">${esc(catatan)}</div>` : ''}</td>
       <td style="font-size:12.5px;color:var(--text-2);max-width:240px">${esc(r.deskripsi_pelanggaran||'-')}</td>
       <td><span class="tag ${String(r.mode_pembinaan)==='Otomatis'?'tag-sea':'tag-off'}">${esc(r.mode_pembinaan||'Manual')}</span></td>
-      <td><span class="tag ${selesai?'tag-ok':'tag-wait'}">${esc(r.status_pembinaan||'Dalam Proses')}</span></td>
-      <td class="right"><div class="aksi-bina">${
-        bolehKabarWali() && perluKabarWali(r)
-        ? `<button class="btn btn-wa btn-sm" data-wa-wali="${esc(r.id_pembinaan)}"
-             title="Beri tahu wali santri melalui WhatsApp">
-            <i class="fa-brands fa-whatsapp"></i>Kabari Wali</button>`
-        : ''}${editable
-        ? `<button class="btn ${selesai?'btn-ghost':'btn-ok'} btn-sm" data-pbn="${esc(r.id_pembinaan)}|${selesai?'Dalam Proses':'Selesai'}">
-            <i class="fa-solid ${selesai?'fa-arrow-rotate-left':'fa-circle-check'}"></i>${selesai?'Buka Lagi':'Selesaikan'}</button>`
-        : '<span class="tag tag-off">Hanya baca</span>'}</div></td>
+      <td style="min-width:150px">
+        <span class="tag ${selesai ? 'tag-ok' : tunggu ? 'tag-sah' : 'tag-wait'}">${
+          selesai ? 'Selesai' : tunggu ? 'Menunggu Pengesahan' : esc(r.status_pembinaan || 'Dalam Proses')}</span>
+        ${L ? `<div class="jejak-sah"><i class="fa-solid fa-user-shield"></i>Dilaksanakan ${esc(L.pelapor)}${
+            L.tglLaksana ? ' · ' + esc(tgl(L.tglLaksana)) : ''}</div>` : ''}
+        ${tunggu ? `<div class="jejak-sah"><i class="fa-solid fa-hourglass-half"></i>Menunggu ${esc(L.penerima.join(', ') || 'guru')}</div>` : ''}
+        ${selesai && r.pembina ? `<div class="jejak-sah ok"><i class="fa-solid fa-signature"></i>Disahkan ${esc(r.pembina)}${
+            r.diselesaikan_pada ? ' · ' + esc(tgl(r.diselesaikan_pada)) : ''}</div>` : ''}</td>
+      <td class="right"><div class="aksi-bina">${aksi.join('')}</div></td>
     </tr>`;
-  }).join('') || barisKosong(9, 'Belum ada instruksi pembinaan.', 'Pembinaan otomatis terbentuk setelah pelanggaran dicatat.');
+  }).join('') || barisKosong(nKol, 'Belum ada instruksi pembinaan.', 'Pembinaan otomatis terbentuk setelah pelanggaran dicatat.');
 
   $('pgBina').innerHTML = rows.length ? pager('bina', stBina.page, rows.length, stBina.size) : '';
+  if (lapor) segarkanPilihanBina();
   tandaiTabelBisaGeser();
 }
 
 async function ubahStatusPembinaan(id, status, btn) {
   const selesai = status === 'Selesai';
+  const L = (await petaLaporanBina()).get(String(id));
   const konf = await Swal.fire({
     icon: selesai ? 'question' : 'warning',
-    title: selesai ? 'Tandai pembinaan selesai?' : 'Buka kembali pembinaan?',
-    text: `Status akan menjadi "${status}".`,
-    showCancelButton:true, confirmButtonText: selesai ? 'Ya, selesai' : 'Ya, buka lagi',
+    title: selesai ? (L ? 'Sahkan pembinaan ini?' : 'Tandai pembinaan selesai?') : 'Buka kembali pembinaan?',
+    html: selesai && L
+      ? `Pembinaan dilaksanakan oleh <b>${esc(L.pelapor)}</b>${L.tglLaksana ? ' pada ' + esc(tgl(L.tglLaksana)) : ''}.
+         <br>Dengan mengesahkan, status menjadi <b>Selesai</b> atas nama Anda dan pelapor menerima konfirmasi otomatis.`
+      : `Status akan menjadi "${esc(status)}".`,
+    showCancelButton:true, confirmButtonText: selesai ? (L ? 'Ya, sahkan' : 'Ya, selesai') : 'Ya, buka lagi',
     cancelButtonText:'Batal', confirmButtonColor: selesai ? '#0F766E' : '#B45309' });
   if (!konf.isConfirmed) return;
 
   const asli = mulaiSimpan(btn, 'Menyimpan…');
   try {
     await q(db.rpc('ubah_status_pembinaan', { p_id:id, p_status:status }), 'pembinaan');
-    cacheHapus('pembinaan');
+    cacheHapus('pembinaan', 'laporan_bina', 'pesan_bk');
     selesaiSimpan(btn, asli, true, 'Status diperbarui');
-    toast('success', 'Status pembinaan: ' + status);
-    await gambarBina();
+    toast('success', selesai && L ? 'Pembinaan disahkan selesai' : 'Status pembinaan: ' + status);
+    refreshBadgePesan();
+    if (APP.view === 'pembinaan') await gambarBina();
+    else if (APP.view === 'pesan') await muatViewPesan();
   } catch (err) { selesaiSimpan(btn, asli, false); fireError(err); }
 }
 
@@ -8027,16 +8145,18 @@ const segarkan = debounce(async (tabel) => {
     if (APP.view === 'perizinan') gambarIzin();
     if (['dashboard','pimpinan','bk','pengasuhan'].includes(APP.view)) navigateTo(APP.view);
   } else if (tabel === 'pesan_bk') {
+    cacheHapus('laporan_bina');
     refreshBadgePesan();
     if (APP.view === 'pesan') muatViewPesan();
     else if (APP.view === 'bk') gambarPanelPesanBk();
+    else if (APP.view === 'pembinaan') gambarBina();
   } else if (tabel === 'log_pelanggaran' || tabel === 'detail_data') {
     cacheHapus('detail','siswa');
     if (APP.view === 'pelanggaran') muatTabelPlg();
     else if (APP.view === 'rekap') gambarRekap();
     else if (['dashboard','pimpinan','bk','pengasuhan'].includes(APP.view)) navigateTo(APP.view);
   } else if (tabel === 'log_pembinaan') {
-    cacheHapus('pembinaan');
+    cacheHapus('pembinaan', 'laporan_bina');
     if (APP.view === 'pembinaan') gambarBina();
     else if (APP.view === 'rekapbina') gambarRb();
   } else if (tabel === 'log_prestasi') {
@@ -11866,12 +11986,14 @@ function kelompokUtas(rows) {
   rows.forEach(r => {
     const k = r.utas || kunciUtas(r.nisn, r.pengirim_id, r.penerima_id);
     if (!peta[k]) peta[k] = { utas:k, nisn:r.nisn, nama_santri:r.nama_santri,
-      kelas:r.kelas, tier:r.tier, pesan:[], belum:0, selesai:false };
+      kelas:r.kelas, tier:r.tier, pesan:[], belum:0, selesai:false,
+      jenis: r.jenis || 'bk', id_pembinaan: r.id_pembinaan || null };
     const u = peta[k];
     u.pesan.push(r);
     if (r.penerima_id === uid && !r.dibaca_pada) u.belum++;
     if (r.status === 'Selesai') u.selesai = true;
     if (r.nama_santri && !u.nama_santri) u.nama_santri = r.nama_santri;
+    if (r.jenis === 'pembinaan') { u.jenis = 'pembinaan'; u.id_pembinaan = u.id_pembinaan || r.id_pembinaan; }
   });
   return Object.values(peta).map(u => {
     const akhir = u.pesan[u.pesan.length - 1];
@@ -11881,6 +12003,9 @@ function kelompokUtas(rows) {
     u.lawan    = akhir.pengirim_id === uid
       ? { id:akhir.penerima_id, nama:akhir.penerima_nama, role:akhir.penerima_role }
       : { id:akhir.pengirim_id, nama:akhir.pengirim_nama, role:akhir.pengirim_role };
+    // Utas laporan pembinaan bisa dibuka lagi bila guru membatalkan
+    // pengesahan — statusnya mengikuti baris terbaru, bukan "pernah selesai".
+    if (u.jenis === 'pembinaan') u.selesai = akhir.status === 'Selesai';
     u.status   = u.selesai ? 'Selesai' : (u.belum ? 'Baru' : 'Berjalan');
     return u;
   }).sort((a, b) => String(b.waktu).localeCompare(String(a.waktu)));
@@ -11893,8 +12018,15 @@ async function sisipkanPesan(rows) {
 }
 
 async function tandaiDibaca(utas) {
+  // Baris yang sudah "Selesai" (utas BK yang diantar, laporan pembinaan
+  // yang disahkan) hanya dicap waktu bacanya — statusnya tidak boleh
+  // turun kembali menjadi "Dibaca", atau utas tampak terbuka lagi.
+  const kini = new Date().toISOString();
   await db.from(PESAN_TABEL)
-    .update({ dibaca_pada: new Date().toISOString(), status: 'Dibaca' })
+    .update({ dibaca_pada: kini, status: 'Dibaca' })
+    .eq('utas', utas).eq('penerima_id', idSaya()).is('dibaca_pada', null).neq('status', 'Selesai');
+  await db.from(PESAN_TABEL)
+    .update({ dibaca_pada: kini })
     .eq('utas', utas).eq('penerima_id', idSaya()).is('dibaca_pada', null);
 }
 
@@ -12103,9 +12235,9 @@ async function modalPesanBk(nisn) {
 async function viewPesan() {
   $('viewRoot').innerHTML = kartu('Pesan Tindak Lanjut', `
     <div class="card-note"><i class="fa-solid fa-circle-info"></i>
-      Percakapan antara <b>Guru BK</b> dan guru pembina kelas mengenai santri yang
-      membutuhkan perhatian khusus. Tandai <b>“Sudah diantar ke BK”</b> bila ananda
-      sudah dikirim menemui Guru BK.</div>
+      Dua jenis percakapan: <b>pesan Guru BK</b> tentang santri yang membutuhkan perhatian
+      khusus (tandai <b>“Sudah diantar ke BK”</b>), dan <b>laporan pembinaan Ustadz GEN-Z</b>
+      yang menunggu <b>pengesahan guru kelas binaan</b>.</div>
     <div class="msg">
       <aside class="msg-side">
         <div class="msg-bar">
@@ -12113,9 +12245,10 @@ async function viewPesan() {
                  value="${esc(stPesan.cari)}">
         </div>
         <div class="msg-chips" id="msgChips">
-          ${['Semua','Belum dibaca','Berjalan','Selesai'].map(f =>
+          ${['Semua','Belum dibaca','Pengesahan','Berjalan','Selesai'].map(f =>
             `<button class="chip${stPesan.filter === f ? ' on' : ''}" data-f="${f}">${f}</button>`).join('')}
         </div>
+        <div id="msgMassal"></div>
         <div class="msg-list" id="msgList"></div>
       </aside>
       <section class="msg-panel" id="msgPanel"></section>
@@ -12143,6 +12276,10 @@ async function viewPesan() {
     if (d) return bukaDetailSantri(d.dataset.detail);
     if (e.target.closest('#msgKirim'))  return kirimBalasan();
     if (e.target.closest('#msgSelesai')) return selesaikanUtas();
+    if (e.target.closest('#msgSahkan')) return sahkanUtas();
+    if (e.target.closest('#msgSahkanSemua')) return sahkanSemuaUtas();
+    const kb = e.target.closest('[data-ke-bina]');
+    if (kb) { stBina.cari = kb.dataset.keBina; stBina.status = ''; stBina.page = 1; return navigateTo('pembinaan'); }
   });
 
   await muatViewPesan();
@@ -12173,11 +12310,12 @@ async function muatViewPesan() {
 function saringUtas() {
   let rows = stPesan.utas;
   if (stPesan.filter === 'Belum dibaca') rows = rows.filter(u => u.belum > 0);
+  if (stPesan.filter === 'Pengesahan')   rows = rows.filter(u => u.jenis === 'pembinaan' && !u.selesai);
   if (stPesan.filter === 'Berjalan')     rows = rows.filter(u => !u.selesai);
   if (stPesan.filter === 'Selesai')      rows = rows.filter(u => u.selesai);
   const k = stPesan.cari.toLowerCase();
   if (k) rows = rows.filter(u =>
-    [u.nama_santri, u.nisn, u.kelas, u.lawan?.nama, u.terakhir?.isi]
+    [u.nama_santri, u.nisn, u.kelas, u.lawan?.nama, u.terakhir?.isi, u.id_pembinaan]
       .some(v => String(v || '').toLowerCase().includes(k)));
   return rows;
 }
@@ -12185,10 +12323,19 @@ function saringUtas() {
 function gambarDaftarUtas() {
   const list = $('msgList'); if (!list) return;
   const rows = saringUtas();
+  const massal = $('msgMassal');
+  if (massal) {
+    const n = utasMenungguSaya().length;
+    massal.innerHTML = n ? `<button class="btn btn-sah btn-sm msg-massal" id="msgSahkanSemua">
+      <i class="fa-solid fa-file-signature"></i>Sahkan semua laporan (${angka(n)})</button>` : '';
+  }
   list.innerHTML = rows.map(u => `
-    <button class="msg-item${u.utas === stPesan.aktif ? ' on' : ''}${u.belum ? ' baru' : ''}"
+    <button class="msg-item${u.utas === stPesan.aktif ? ' on' : ''}${u.belum ? ' baru' : ''}${
+      u.jenis === 'pembinaan' ? ' bina' : ''}"
             data-utas="${esc(u.utas)}">
-      <span class="msg-av">${esc(getInitialsFromName(u.nama_santri || u.lawan?.nama || '?'))}</span>
+      <span class="msg-av">${u.jenis === 'pembinaan'
+        ? '<i class="fa-solid fa-hands-holding-child"></i>'
+        : esc(getInitialsFromName(u.nama_santri || u.lawan?.nama || '?'))}</span>
       <span class="msg-body">
         <span class="msg-top">
           <b>${esc(u.nama_santri || '(tanpa santri)')}</b>
@@ -12199,7 +12346,11 @@ function gambarDaftarUtas() {
             u.kelas ? ' · ' + esc(u.kelas) : ''}</span>
         <span class="msg-prev">${esc(String(u.terakhir?.isi || '').replace(/\s+/g, ' ').slice(0, 76))}…</span>
         <span class="msg-tags">
-          ${u.selesai ? '<span class="tag tag-ok">Sudah diantar</span>'
+          ${u.jenis === 'pembinaan'
+            ? (u.selesai ? '<span class="tag tag-ok">Disahkan</span>'
+               : '<span class="tag tag-sah">Menunggu pengesahan</span>')
+              + (u.belum ? ` <span class="tag tag-wait">${u.belum} baru</span>` : '')
+            : u.selesai ? '<span class="tag tag-ok">Sudah diantar</span>'
             : u.belum ? `<span class="tag tag-wait">${u.belum} baru</span>`
             : '<span class="tag tag-sea">Berjalan</span>'}
           ${u.tier ? `<span class="tag tag-off">${esc(u.tier)}</span>` : ''}
@@ -12217,7 +12368,9 @@ function gambarUtasKosong() {
     <p>Pilih satu percakapan di sebelah kiri.</p>
     <small>${bisa('pesan.mulai')
       ? 'Percakapan baru dimulai dari Dashboard Guru BK → panel Pesan Tindak Lanjut.'
-      : 'Pesan dari Guru BK akan muncul di sini.'}</small></div>`;
+      : bolehLaporBina()
+      ? 'Laporan pembinaan dikirim dari menu Log Pembinaan → tombol “Laporkan ke Guru”.'
+      : 'Pesan Guru BK dan laporan pembinaan Ustadz GEN-Z akan muncul di sini.'}</small></div>`;
 }
 
 async function bukaUtas(k) {
@@ -12226,7 +12379,10 @@ async function bukaUtas(k) {
   gambarUtas();
   const u = stPesan.utas.find(x => x.utas === k);
   if (u?.belum) {
-    try { await tandaiDibaca(k); refreshBadgePesan(); } catch (e) { console.warn('[pesan]', e); }
+    try {
+      await tandaiDibaca(k); refreshBadgePesan();
+      u.belum = 0; gambarDaftarUtas();       // tanda "baru" langsung padam
+    } catch (e) { console.warn('[pesan]', e); }
   }
 }
 
@@ -12241,14 +12397,23 @@ function gambarUtas() {
       <div>
         <b>${esc(u.nama_santri || '(tanpa santri)')}</b>
         <span>${u.nisn ? esc(u.nisn) + ' · ' : ''}${esc(u.kelas || '-')}${
-          u.tier ? ' · Tier ' + esc(u.tier) : ''}</span>
+          u.tier ? (u.jenis === 'pembinaan' ? ' · ' : ' · Tier ') + esc(u.tier) : ''}${
+          u.jenis === 'pembinaan' ? ' · <i class="fa-solid fa-hands-holding-child"></i> Laporan pembinaan' : ''}</span>
       </div>
       <div class="msg-acts">
         ${u.nisn ? `<button class="btn btn-ghost btn-sm" data-detail="${esc(u.nisn)}">
           <i class="fa-solid fa-eye"></i>Profil santri</button>` : ''}
-        <button class="btn ${u.selesai ? 'btn-ghost' : 'btn-ok'} btn-sm" id="msgSelesai"
+        ${u.jenis === 'pembinaan' ? `
+          <button class="btn btn-ghost btn-sm" data-ke-bina="${esc(u.id_pembinaan || '')}">
+            <i class="fa-solid fa-list-check"></i>Lihat di Log</button>
+          ${u.selesai
+            ? `<button class="btn btn-ghost btn-sm" disabled><i class="fa-solid fa-signature"></i>Disahkan</button>`
+            : bolehPembinaan()
+            ? `<button class="btn btn-sah btn-sm" id="msgSahkan"><i class="fa-solid fa-file-signature"></i>Sahkan Selesai</button>`
+            : `<span class="tag tag-sah"><i class="fa-solid fa-hourglass-half"></i>Menunggu pengesahan guru</span>`}`
+        : `<button class="btn ${u.selesai ? 'btn-ghost' : 'btn-ok'} btn-sm" id="msgSelesai"
                 ${u.selesai ? 'disabled' : ''}>
-          <i class="fa-solid fa-circle-check"></i>${u.selesai ? 'Sudah diantar' : 'Tandai sudah diantar ke BK'}</button>
+          <i class="fa-solid fa-circle-check"></i>${u.selesai ? 'Sudah diantar' : 'Tandai sudah diantar ke BK'}</button>`}
       </div>
     </header>
     <div class="msg-thread" id="msgThread">
@@ -12280,9 +12445,12 @@ async function kirimBalasan() {
     const p = APP.profil;
     await sisipkanPesan([{
       utas: u.utas, nisn: u.nisn, nama_santri: u.nama_santri, kelas: u.kelas, tier: u.tier,
+      jenis: u.jenis || 'bk', id_pembinaan: u.jenis === 'pembinaan' ? u.id_pembinaan : null,
+      // Balasan pada utas yang sudah disahkan ikut berstatus Selesai agar
+      // utas tidak tampak "terbuka" lagi hanya karena ucapan terima kasih.
       pengirim_id: p.id, pengirim_nama: p.nama, pengirim_role: p.role,
       penerima_id: u.lawan.id, penerima_nama: u.lawan.nama, penerima_role: u.lawan.role,
-      isi, status: 'Terkirim'
+      isi, status: u.jenis === 'pembinaan' && u.selesai ? 'Selesai' : 'Terkirim'
     }]);
     box.value = '';
     selesaiSimpan(btn, asli, true, 'Balasan terkirim');
@@ -12320,6 +12488,293 @@ document.addEventListener('click', (e) => {
   }
 });
 
+
+
+
+// ---------- 28e. LAPORAN PEMBINAAN USTADZ GEN-Z → PENGESAHAN GURU (v2.12)
+//
+//     Ustadz GEN-Z adalah perpanjangan tangan musyrif asrama: ia
+//     MELAKSANAKAN pembinaan dan MELAPORKANNYA. Legalitas pembinaan —
+//     status "Selesai" — tetap berada pada guru yang kelas binaannya
+//     memuat kelas santri (serta Admin).
+//
+//     Alurnya memakai tabel pesan_bk yang sama dengan pesan Guru BK,
+//     dibedakan kolom `jenis = 'pembinaan'` dan `id_pembinaan`.
+//     Satu pembinaan = satu utas per guru penerima, dengan kunci
+//         bina:<id_pembinaan>|<id peserta terkecil>|<id peserta terbesar>
+//     sehingga guru mengesahkan tiap pembinaan secara terpisah.
+//
+//     Pengesahan tidak ditulis app.js ke pesan_bk. Guru cukup memanggil
+//     ubah_status_pembinaan(); trigger trg_pbn_tutup_laporan di database
+//     yang menutup utas dan mengirim konfirmasi kepada pelapor. Dengan
+//     begitu, jalur mana pun yang menyelesaikan pembinaan (halaman Log,
+//     halaman Pesan, atau Admin) meninggalkan jejak yang sama.
+//
+//     Batas keamanan yang sesungguhnya ada di database —
+//     boleh_sahkan_pembinaan(): Admin, atau Guru yang kelas binaannya
+//     memuat kelas santri. Lihat migrasi 20260911_v2_12_…sql.
+// ---------------------------------------------------------------------
+const ROLE_PENGESAH = ['Guru'];
+
+function kunciUtasBina(idPembinaan, a, b) {
+  return `bina:${String(idPembinaan)}|` + [String(a), String(b)].sort().join('|');
+}
+
+/** Guru yang sah mengesahkan: role Guru + kelas binaan memuat kelas santri. */
+function guruPengesah(list, kelas) {
+  const k = String(kelas || '').trim(); if (!k) return [];
+  return (list || []).filter(g => ROLE_PENGESAH.includes(g.role) && g.id !== idSaya()
+    && (g.kelas_binaan || []).includes(k));
+}
+
+/**
+ * Peta laporan pembinaan: Map(id_pembinaan -> { utas[], pelapor,
+ * penerima[], tglLaksana, dikirim }). RLS membatasi baris pada utas
+ * milik pengguna sendiri; Admin & Pimpinan melihat seluruhnya.
+ */
+async function petaLaporanBina() {
+  if (!bisa('pesan.lihat')) return new Map();
+  const c = cacheGet('laporan_bina'); if (c) return c;
+  let data = [];
+  try {
+    const res = await db.from(PESAN_TABEL)
+      .select('utas,id_pembinaan,pengirim_id,pengirim_nama,penerima_id,penerima_nama,dilaksanakan_pada,status,created_at')
+      .eq('jenis', 'pembinaan').not('id_pembinaan', 'is', null)
+      .order('created_at', { ascending: true }).limit(5000);
+    if (res.error) throw res.error;
+    data = res.data || [];
+  } catch (e) {
+    console.warn('[laporan pembinaan]', e?.message || e);
+    return new Map();          // jangan dicache: coba lagi pada render berikutnya
+  }
+  // Pesan PERTAMA tiap utas adalah laporan aslinya; sisanya balasan.
+  const pertama = new Map();
+  data.forEach(r => { if (!pertama.has(r.utas)) pertama.set(r.utas, r); });
+  const peta = new Map();
+  pertama.forEach(r => {
+    const id = String(r.id_pembinaan);
+    if (!peta.has(id)) peta.set(id, { utas: [], pelapor: r.pengirim_nama || '-',
+      pelapor_id: r.pengirim_id, penerima: [], penerima_id: [],
+      tglLaksana: r.dilaksanakan_pada, dikirim: r.created_at });
+    const L = peta.get(id);
+    // Utas milik pengguna sendiri didahulukan agar tombol "Utas" membuka miliknya.
+    (r.penerima_id === idSaya() || r.pengirim_id === idSaya()) ? L.utas.unshift(r.utas) : L.utas.push(r.utas);
+    if (!L.penerima.includes(r.penerima_nama)) { L.penerima.push(r.penerima_nama); L.penerima_id.push(r.penerima_id); }
+  });
+  return cacheSet('laporan_bina', peta);
+}
+
+/** Tombol "Laporkan terpilih" mengikuti jumlah centang. */
+function segarkanPilihanBina() {
+  const n = stBina.pilih.size;
+  const b = $('pbLaporMassal'); if (b) b.classList.toggle('hidden', !n);
+  const s = $('pbPilihN'); if (s) s.textContent = angka(n);
+  const all = $('pbPilihSemua');
+  if (all) {
+    const cek = [...document.querySelectorAll('#tbBina [data-pilih]')];
+    const on = cek.filter(c => c.checked).length;
+    all.checked = !!cek.length && on === cek.length;
+    all.indeterminate = on > 0 && on < cek.length;
+    all.disabled = !cek.length;
+  }
+}
+
+function templateLaporBina(r, { tanggal, catatan }) {
+  const saya  = APP.profil?.nama || 'Ustadz GEN-Z';
+  const tahap = tahapBina(r);
+  return `Assalamu'alaikum warahmatullahi wabarakatuh.
+
+Laporan pelaksanaan pembinaan untuk Ustadz/Ustadzah selaku guru kelas binaan ${r.kelas || '-'}.
+
+Santri: ${r.nama_siswa} (NISN ${r.nisn}) · ${r.kelas || '-'}
+Kategori: ${r.kategori_bina || '-'}${tahap ? ` · tahap ke-${tahap}` : ''}
+Bentuk pembinaan: ${r.bentuk_final || bentukBina(r)}
+Pemicu: ${r.deskripsi_pelanggaran || '-'}
+Dilaksanakan: ${tgl(tanggal)} oleh ${saya}
+Catatan pelaksanaan: ${catatan}
+
+Pembinaan di atas telah dilaksanakan di asrama. Mohon ditinjau, lalu tekan "Sahkan Selesai" agar tercatat resmi atas nama Ustadz/Ustadzah.
+
+Jazakumullahu khairan.
+— ${saya} (Ustadz GEN-Z)`;
+}
+
+/** Jendela laporan — satu baris (penerima bisa diganti) atau banyak baris sekaligus. */
+async function modalLaporBina(ids) {
+  ids = [...new Set((ids || []).map(String))].filter(Boolean);
+  if (!ids.length) return toast('info', 'Pilih minimal satu pembinaan.');
+  if (!bolehLaporBina()) return toast('error', 'Role Anda tidak melaporkan pembinaan.');
+
+  let penuh, lap, guru;
+  try {
+    [{ penuh }, lap, guru] = await Promise.all([bahanBinaPenuh(), petaLaporanBina(), muatGuruAktif()]);
+  } catch (err) { return fireError(err); }
+
+  const admin = guru.filter(g => g.role === 'Admin' && g.id !== idSaya());
+  const siap = [], lewat = [];
+  ids.forEach(id => {
+    const r = penuh.find(x => String(x.id_pembinaan) === id);
+    if (!r) return lewat.push({ nama: id, sebab: 'tidak ditemukan' });
+    if (String(r.status_pembinaan) === 'Selesai') return lewat.push({ nama: r.nama_siswa, sebab: 'sudah selesai' });
+    if (lap.has(id)) return lewat.push({ nama: r.nama_siswa, sebab: 'sudah dilaporkan' });
+    const pengesah = guruPengesah(guru, r.kelas);
+    siap.push({ r, pengesah, cadangan: !pengesah.length });
+  });
+  if (!siap.length) return toast('info', 'Tidak ada yang bisa dilaporkan: ' +
+    lewat.map(x => `${x.nama} (${x.sebab})`).join(', '));
+  if (siap.some(s => s.cadangan) && !admin.length)
+    return toast('error', 'Sebagian kelas belum punya guru kelas binaan, dan tidak ada Admin aktif sebagai cadangan.');
+
+  const tunggal = siap.length === 1 ? siap[0] : null;
+  const opsi = (arr, label) => arr.length ? `<optgroup label="${esc(label)}">${arr.map(g =>
+    `<option value="${esc(g.id)}">${esc(g.nama)} — ${esc(g.role)}${
+      (g.kelas_binaan || []).length ? ' · ' + esc(g.kelas_binaan.join(', ')) : ''}</option>`).join('')}</optgroup>` : '';
+  const chipGuru = (s) => s.cadangan
+    ? `<span class="tag tag-wait" title="Kelas ${esc(s.r.kelas)} belum punya guru kelas binaan">Admin (cadangan)</span>`
+    : s.pengesah.map(g => `<span class="tag tag-off">${esc(g.nama)}</span>`).join(' ');
+
+  const ringkas = tunggal ? `
+      <div class="pgs-pick on">
+        <div class="ico"><i class="fa-solid fa-hands-holding-child"></i></div>
+        <div><small>Pembinaan</small><b>${esc(tunggal.r.nama_siswa)}</b>
+          <div class="secondary">${esc(tunggal.r.nisn)} · ${esc(tunggal.r.kelas || '-')} ·
+            ${esc(tunggal.r.kategori_bina || '-')}${tahapBina(tunggal.r) ? ' ke-' + tahapBina(tunggal.r) : ''}</div>
+          <div class="secondary" style="color:var(--text-1);margin-top:3px">${esc(tunggal.r.bentuk_final || bentukBina(tunggal.r))}</div></div>
+      </div>
+      <div class="field"><label class="label">Guru Pengesah</label>
+        <select id="lbGuru" class="input">
+          ${opsi(tunggal.pengesah, `Guru kelas binaan ${tunggal.r.kelas || '-'}`)}
+          ${opsi(admin, 'Admin')}
+        </select>
+        <p class="hint">${tunggal.pengesah.length
+          ? `Terisi otomatis dengan guru kelas binaan ${esc(tunggal.r.kelas || '-')}.`
+          : `Kelas ${esc(tunggal.r.kelas || '-')} belum punya guru kelas binaan; laporan diarahkan ke Admin.`}</p>
+      </div>
+      ${tunggal.pengesah.length > 1 ? `<label class="ctx-note" style="cursor:pointer">
+        <input type="checkbox" id="lbSemua" checked style="accent-color:var(--sea)">
+        Kirim ke semua guru kelas binaan ${esc(tunggal.r.kelas)} (${tunggal.pengesah.length} guru) — cukup satu yang mengesahkan
+      </label>` : ''}`
+    : `<div class="lb-daftar">
+        <div class="lb-kepala"><b>${angka(siap.length)} pembinaan</b> akan dilaporkan — penerima dipilih otomatis
+          dari guru kelas binaan tiap santri.</div>
+        ${siap.map(s => `<div class="lb-baris">
+          <div><b>${esc(s.r.nama_siswa)}</b><small>${esc(s.r.kelas || '-')} · ${esc(s.r.kategori_bina || '-')}${
+            tahapBina(s.r) ? ' ke-' + tahapBina(s.r) : ''} · ${esc(s.r.bentuk_final || bentukBina(s.r))}</small></div>
+          <div class="lb-guru">${chipGuru(s)}</div></div>`).join('')}
+      </div>`;
+
+  const res = await Swal.fire({
+    title: tunggal ? 'Laporkan Pembinaan ke Guru' : 'Laporkan Pembinaan Terpilih',
+    width: 680, showCancelButton: true,
+    confirmButtonText: `<i class="fa-solid fa-paper-plane"></i> Kirim laporan`, cancelButtonText: 'Batal',
+    confirmButtonColor: '#14618B', showLoaderOnConfirm: true,
+    allowOutsideClick: () => !Swal.isLoading(),
+    html: `<div class="stack" style="text-align:left">
+      ${ringkas}
+      ${lewat.length ? `<div class="ctx-note"><i class="fa-solid fa-circle-info"></i>
+        Dilewati: ${lewat.map(x => `${esc(x.nama)} (${esc(x.sebab)})`).join(', ')}</div>` : ''}
+      <div class="grid-half" style="gap:12px">
+        <div class="field"><label class="label">Tanggal Pelaksanaan</label>
+          <input id="lbTgl" type="date" class="input" value="${hariIni()}" max="${hariIni()}"></div>
+        <div class="field"><label class="label">Pelaksana</label>
+          <input class="input" value="${esc(APP.profil?.nama || '-')} · Ustadz GEN-Z" disabled></div>
+      </div>
+      <div class="field"><label class="label">Catatan Pelaksanaan</label>
+        <textarea id="lbCatatan" class="input" rows="4"
+          placeholder="Contoh: pembinaan dilaksanakan ba'da Isya di mushalla asrama; ananda mengakui kesalahan dan berjanji memperbaiki."></textarea>
+        <p class="hint">Uraikan singkat bagaimana pembinaan dijalankan dan respons ananda — ini bahan guru sebelum mengesahkan.</p>
+      </div>
+    </div>`,
+    didOpen: () => { if (tunggal) $('lbGuru').value = (tunggal.pengesah[0] || admin[0] || {}).id || ''; },
+    preConfirm: async () => {
+      const tanggal = $('lbTgl').value;
+      const catatan = $('lbCatatan').value.trim();
+      if (!tanggal) { Swal.showValidationMessage('Tanggal pelaksanaan belum diisi.'); return false; }
+      if (tanggal > hariIni()) { Swal.showValidationMessage('Tanggal pelaksanaan tidak boleh di masa depan.'); return false; }
+      if (catatan.length < 8) { Swal.showValidationMessage('Catatan pelaksanaan terlalu singkat (minimal 8 karakter).'); return false; }
+
+      const p = APP.profil;
+      const rows = [];
+      siap.forEach(s => {
+        let tujuan;
+        if (tunggal) tujuan = $('lbSemua')?.checked ? s.pengesah.map(g => g.id) : [$('lbGuru').value];
+        else tujuan = s.cadangan ? admin.map(g => g.id) : s.pengesah.map(g => g.id);
+        tujuan = [...new Set(tujuan.filter(Boolean))];
+        const isi = templateLaporBina(s.r, { tanggal, catatan });
+        const tahap = tahapBina(s.r);
+        tujuan.forEach(id => {
+          const g = guru.find(x => x.id === id) || {};
+          rows.push({
+            utas: kunciUtasBina(s.r.id_pembinaan, p.id, id),
+            jenis: 'pembinaan', id_pembinaan: String(s.r.id_pembinaan), dilaksanakan_pada: tanggal,
+            nisn: String(s.r.nisn), nama_santri: s.r.nama_siswa, kelas: s.r.kelas || null,
+            tier: `${s.r.kategori_bina || '-'}${tahap ? ' · ke-' + tahap : ''}`,
+            pengirim_id: p.id, pengirim_nama: p.nama, pengirim_role: p.role,
+            penerima_id: id, penerima_nama: g.nama || '-', penerima_role: g.role || '-',
+            isi, status: 'Terkirim'
+          });
+        });
+      });
+      if (!rows.length) { Swal.showValidationMessage('Penerima belum dipilih.'); return false; }
+      try { await sisipkanPesan(rows); return { laporan: siap.length, pesan: rows.length }; }
+      catch (e) { Swal.showValidationMessage(e.message || 'Gagal mengirim laporan.'); return false; }
+    }
+  });
+
+  if (res.isConfirmed) {
+    siap.forEach(s => stBina.pilih.delete(String(s.r.id_pembinaan)));
+    cacheHapus('laporan_bina', 'pesan_bk');
+    sync('done', 'Laporan terkirim');
+    toast('success', `${angka(res.value.laporan)} laporan terkirim ke guru kelas binaan`);
+    if (APP.view === 'pembinaan') await gambarBina();
+  }
+}
+
+/** Utas laporan yang menunggu pengesahan SAYA (saya penerima laporan aslinya). */
+function utasMenungguSaya() {
+  if (!bolehPembinaan()) return [];
+  return stPesan.utas.filter(u => u.jenis === 'pembinaan' && !u.selesai
+    && u.pesan[0]?.penerima_id === idSaya());
+}
+
+async function sahkanUtas() {
+  const u = stPesan.utas.find(x => x.utas === stPesan.aktif);
+  if (!u || u.jenis !== 'pembinaan' || u.selesai) return;
+  await ubahStatusPembinaan(u.id_pembinaan, 'Selesai', $('msgSahkan'));
+}
+
+async function sahkanSemuaUtas() {
+  const daftar = utasMenungguSaya();
+  if (!daftar.length) return toast('info', 'Tidak ada laporan yang menunggu pengesahan.');
+  const konf = await Swal.fire({
+    icon: 'question', width: 600, title: `Sahkan ${daftar.length} pembinaan?`,
+    html: `<div style="text-align:left;font-size:13px">
+      <p style="margin:0 0 8px">Setiap pembinaan berikut akan berstatus <b>Selesai</b> atas nama Anda,
+        dan pelapor menerima konfirmasi otomatis.</p>
+      <ul style="max-height:220px;overflow:auto;padding-left:18px;margin:0">
+        ${daftar.map(u => `<li><b>${esc(u.nama_santri || '-')}</b> — ${esc(u.kelas || '-')}${
+          u.tier ? ' · ' + esc(u.tier) : ''} <span style="color:var(--text-3)">(${esc(u.pesan[0]?.pengirim_nama || '-')})</span></li>`).join('')}
+      </ul>
+      <p style="margin:10px 0 0;color:var(--text-3);font-size:12px">Sudah membaca setiap laporan? Pengesahan adalah tanggung jawab Anda.</p></div>`,
+    showCancelButton: true, confirmButtonText: 'Ya, sahkan semua', cancelButtonText: 'Batal',
+    confirmButtonColor: '#0F766E'
+  });
+  if (!konf.isConfirmed) return;
+
+  const btn = $('msgSahkanSemua'); const asli = mulaiSimpan(btn, 'Mengesahkan…');
+  let ok = 0; const gagal = [];
+  for (const u of daftar) {
+    try { await q(db.rpc('ubah_status_pembinaan', { p_id: u.id_pembinaan, p_status: 'Selesai' }), 'pembinaan'); ok++; }
+    catch (e) { gagal.push(`${u.nama_santri}: ${e.message || e}`); }
+  }
+  cacheHapus('pembinaan', 'laporan_bina', 'pesan_bk');
+  selesaiSimpan(btn, asli, !gagal.length, gagal.length ? 'Sebagian gagal' : 'Semua disahkan');
+  if (gagal.length) Swal.fire({ icon: 'warning', title: `${ok} disahkan, ${gagal.length} gagal`,
+    html: `<div style="text-align:left;font-size:12.5px">${gagal.map(esc).join('<br>')}</div>` });
+  else toast('success', `${angka(ok)} pembinaan disahkan`);
+  refreshBadgePesan();
+  await muatViewPesan();
+}
 
 
 // =====================================================================

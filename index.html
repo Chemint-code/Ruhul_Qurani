@@ -37,6 +37,9 @@
      · ::details-content + interpolate-size → akordion tanpa JS
      · @starting-style   → animasi masuk tanpa keyframes
      · content-visibility→ daftar panjang tidak dirender bila di luar layar
+     · v2.12 lapisan `paripurna` (akhir berkas): latar aurora, tepi kartu
+       bergradasi (mask-composite), sorot kursor, animation-timeline,
+       tata cair clamp() + container query untuk ponsel/tablet/desktop
    Semua transisi dibatasi pada transform & opacity supaya tidak
    memicu layout/paint ulang — ringan di ponsel kelas menengah.
    ============================================================ */
@@ -3748,6 +3751,671 @@
     .ipp-unsur { grid-column:1 / -1; }
     .ipp-nm small { white-space:normal; }
   }
+
+/* ══════════════════════════════════════════════════════════════════════
+   PENYEMPURNAAN v2.12 — LAPISAN "PARIPURNA"                (September 2026)
+
+   Lapisan terakhir dalam urutan kaskade: seluruh aturan di sini menang
+   atas lapisan sebelumnya tanpa !important (kecuali untuk SweetAlert,
+   yang berkas CSS-nya tidak berlapis).
+
+   Arah visual: identitas korps yang dinaikkan satu tingkat —
+   navy · laut · kuningan tetap menjadi tulang punggung, lalu ditambah:
+
+     · Latar aurora   tiga semburat cahaya (laut, kuningan, teal) yang
+                      diam di belakang halaman. Satu lapisan tetap
+                      (position:fixed) yang dilukis sekali saja; di
+                      desktop ia bergeser sangat pelan memakai transform,
+                      jadi compositor yang bekerja, bukan CPU.
+     · Tepi bercahaya kartu dan statistik diberi garis rambut bergradasi
+                      (mask-composite) — kesan "logam tipis" tanpa gambar.
+     · Sorot kursor   di desktop, cahaya lembut mengikuti kursor di atas
+                      kartu. JS hanya menulis dua angka per bingkai.
+     · Gerak masuk    halaman baru disusun berjenjang; kartu yang masuk
+                      layar saat digulir muncul lewat animation-timeline
+                      (utas compositor, nol event listener).
+     · Tata cair      jarak, huruf judul, dan kisi mengikuti lebar layar
+                      lewat clamp() dan container query — ponsel 360 px,
+                      tablet 820 px, desktop 1440 px+ dirancang tersendiri.
+
+   Anggaran kinerja tetap dijaga seperti v2.1: gerak hanya transform &
+   opacity; kaca buram tetap dicopot di ≤1024 px; semua hiasan mati pada
+   :root.hemat dan prefers-reduced-motion.
+   ══════════════════════════════════════════════════════════════════════ */
+
+@layer paripurna {
+
+  /* ═══════════════ 1 · TOKEN CAIR ═══════════════ */
+  :root {
+    --pad: clamp(14px, .9vw + 8px, 22px);
+    --celah: clamp(12px, .8vw + 6px, 18px);
+    --r: 14px; --r-lg: 20px; --r-xl: 26px;
+
+    --aurora-laut:   color-mix(in oklab, var(--sea) 17%, transparent);
+    --aurora-emas:   color-mix(in oklab, var(--brass) 13%, transparent);
+    --aurora-teal:   color-mix(in oklab, var(--teal) 11%, transparent);
+
+    /* Garis rambut bergradasi untuk tepi kartu. */
+    --tepi: linear-gradient(155deg in oklab,
+              color-mix(in oklab, var(--sea) 26%, var(--line)) 0%,
+              var(--line) 38%,
+              var(--line) 62%,
+              color-mix(in oklab, var(--brass) 36%, var(--line)) 100%);
+    --tepi-naik: linear-gradient(155deg in oklab,
+              color-mix(in oklab, var(--sea) 55%, transparent) 0%,
+              color-mix(in oklab, var(--line) 80%, transparent) 45%,
+              color-mix(in oklab, var(--brass) 70%, transparent) 100%);
+
+    --shadow:
+      0 1px 1px color-mix(in oklab, var(--ink) 4%, transparent),
+      0 2px 6px -2px color-mix(in oklab, var(--ink) 6%, transparent),
+      0 18px 34px -26px color-mix(in oklab, var(--navy) 42%, transparent);
+    --shadow-naik:
+      0 2px 4px color-mix(in oklab, var(--ink) 6%, transparent),
+      0 14px 24px -14px color-mix(in oklab, var(--navy) 26%, transparent),
+      0 34px 60px -34px color-mix(in oklab, var(--sea) 46%, transparent);
+    --ring: 0 0 0 4px color-mix(in oklab, var(--sea) 15%, transparent);
+  }
+
+  /* ═══════════════ 2 · LATAR AURORA ═══════════════ */
+  body { background: var(--paper); }
+  #appShell { position: relative; isolation: isolate; }
+  #appShell::before {
+    content: ''; position: fixed; inset: -12vmax; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(42vmax 34vmax at 86% 6%,  var(--aurora-laut), transparent 70%),
+      radial-gradient(36vmax 30vmax at 8% 34%,  var(--aurora-emas), transparent 72%),
+      radial-gradient(40vmax 36vmax at 62% 96%, var(--aurora-teal), transparent 70%);
+    will-change: transform;
+  }
+  /* Girih tipis di atas aurora — tinta navy 3 %, hanya terasa, tidak terbaca. */
+  #appShell::after {
+    content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background-image: var(--girih); filter: invert(1) brightness(.35); opacity: .38;
+    -webkit-mask-image: linear-gradient(180deg, #000, transparent 65%);
+            mask-image: linear-gradient(180deg, #000, transparent 65%);
+  }
+  @media (min-width: 1025px) and (hover: hover) and (prefers-reduced-motion: no-preference) {
+    #appShell::before { animation: auroraMengalir 38s ease-in-out infinite alternate; }
+  }
+  @keyframes auroraMengalir {
+    0%   { transform: translate3d(0, 0, 0) scale(1); }
+    50%  { transform: translate3d(-3vmax, 2vmax, 0) scale(1.05); }
+    100% { transform: translate3d(2vmax, -1.5vmax, 0) scale(1.02); }
+  }
+  :root.hemat #appShell::before { animation: none; }
+  :root.hemat #appShell::after  { display: none; }
+
+  /* ═══════════════ 3 · AREA KONTEN & BILAH ATAS ═══════════════ */
+  .view { padding: clamp(14px, 1.6vw, 28px) clamp(12px, 1.9vw, 30px) clamp(18px, 2vw, 32px); }
+  .main { min-width: 0; }
+
+  .topbar {
+    padding-inline: clamp(14px, 1.9vw, 30px);
+    background: color-mix(in oklab, var(--surface) 78%, transparent);
+    border-bottom: 1px solid color-mix(in oklab, var(--line) 80%, transparent);
+  }
+  @media (max-width: 1024px) { .topbar { background: color-mix(in oklab, var(--surface) 97%, var(--paper)); } }
+  .topbar h2 {
+    font-size: clamp(19px, 1.2vw + 12px, 25px);
+    background: linear-gradient(100deg in oklab, var(--navy) 0%, var(--sea) 70%, var(--navy-2) 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    padding-bottom: 1px;
+  }
+  #pageTitle { view-transition-name: judul-halaman; }
+
+  /* Pil penanda di bilah atas: satu bahasa bentuk. */
+  .ctx-badge, .unit-box, .periode, .sync, .live, .antre, .luring {
+    border-radius: 999px;
+    box-shadow: inset 0 1px 0 color-mix(in oklab, white 70%, transparent),
+                0 1px 2px color-mix(in oklab, var(--ink) 6%, transparent);
+  }
+
+  /* ═══════════════ 4 · BILAH SISI ═══════════════ */
+  .sidebar {
+    background:
+      radial-gradient(120% 40% at 0% 0%, color-mix(in oklab, var(--sea) 30%, transparent), transparent 70%),
+      radial-gradient(90% 30% at 100% 100%, color-mix(in oklab, var(--brass) 12%, transparent), transparent 70%),
+      var(--ink);
+    border-right: 1px solid color-mix(in oklab, var(--brass) 18%, transparent);
+  }
+  .nav-item { border-radius: 11px; }
+  .nav-item.active {
+    background: linear-gradient(90deg in oklab,
+      color-mix(in oklab, var(--sea-hi) 48%, transparent),
+      color-mix(in oklab, var(--sea) 10%, transparent) 88%);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, white 12%, transparent),
+                0 8px 18px -12px color-mix(in oklab, var(--sea-hi) 90%, transparent);
+  }
+  .nav-item.active::before {
+    height: 22px; width: 3px;
+    background: linear-gradient(180deg, var(--brass-hi), var(--brass));
+    box-shadow: 0 0 12px color-mix(in oklab, var(--brass) 80%, transparent);
+    animation: indikatorMasuk .28s var(--lengkung) both;
+  }
+  @keyframes indikatorMasuk { from { transform: translateY(-50%) scaleY(0); } to { transform: translateY(-50%) scaleY(1); } }
+  .nav-count {
+    background: linear-gradient(140deg, var(--brass-hi), var(--brass));
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--ink) 80%, transparent);
+  }
+
+  /* ═══════════════ 5 · KARTU ═══════════════ */
+  .card, .stat, .unit-wrap {
+    position: relative;
+    border-color: transparent;
+    background-clip: padding-box;
+  }
+  /* Garis rambut bergradasi: satu pseudo-elemen, di-mask menjadi cincin 1 px. */
+  .card::before, .stat::before, .unit-wrap::after {
+    content: ''; position: absolute; inset: -1px; z-index: 3; pointer-events: none;
+    border-radius: inherit; padding: 1px;
+    background: var(--tepi);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+    transition: opacity var(--sedang);
+  }
+  .card { box-shadow: var(--shadow); }
+  .card + .card { margin-top: var(--celah); }
+
+  /* Sorot kursor (desktop). --sx/--sy ditulis skrip kecil di akhir berkas. */
+  @media (hover: hover) and (pointer: fine) {
+    .card::after {
+      content: ''; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+      border-radius: inherit; opacity: 0; transition: opacity .35s ease;
+      background: radial-gradient(520px circle at var(--sx, 50%) var(--sy, 0%),
+                  color-mix(in oklab, var(--sea) 6%, transparent), transparent 55%);
+    }
+    .card.disorot::after { opacity: 1; }
+    .card.disorot::before { background: var(--tepi-naik); }
+  }
+  :root.hemat .card::after { display: none; }
+
+  .card-head {
+    padding: clamp(13px, .6vw + 9px, 17px) var(--pad);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--paper) 55%, var(--surface)), var(--surface));
+    border-bottom-color: color-mix(in oklab, var(--line) 70%, transparent);
+  }
+  .card-head h3 {
+    display: flex; align-items: center; gap: 9px;
+    font-size: clamp(14px, .25vw + 13px, 15.5px); letter-spacing: -.012em;
+  }
+  /* Belah ketupat kuningan kecil — motif girih yang sama dengan logo. */
+  .card-head h3::before {
+    content: ''; flex: 0 0 7px; width: 7px; height: 7px; transform: rotate(45deg);
+    background: linear-gradient(135deg, var(--brass-hi), var(--brass));
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--brass) 16%, transparent);
+    border-radius: 1.5px;
+  }
+  .card-body { padding: clamp(14px, .6vw + 11px, 20px) var(--pad); }
+  .card-note {
+    background: linear-gradient(90deg in oklab, color-mix(in oklab, var(--sea) 9%, var(--surface)),
+                color-mix(in oklab, var(--brass) 5%, var(--surface)));
+    line-height: 1.6;
+  }
+
+  /* ═══════════════ 6 · STATISTIK ═══════════════ */
+  .stats { gap: var(--celah); margin-bottom: clamp(16px, 1.4vw, 24px); }
+  .stat {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "k ico" "v ico" "f f";
+    align-items: start; column-gap: 12px;
+    padding: clamp(14px, .7vw + 10px, 20px);
+    background:
+      radial-gradient(120% 90% at 100% 0%, color-mix(in oklab, var(--accent, var(--sea)) 9%, transparent), transparent 60%),
+      var(--surface);
+    box-shadow: var(--shadow);
+  }
+  .stat::after {                          /* bilah aksen kiri → garis atas bercahaya */
+    left: var(--pad); right: auto; top: 0; bottom: auto; width: 34px; height: 3px;
+    border-radius: 0 0 3px 3px;
+    background: linear-gradient(90deg, var(--accent, var(--sea)), color-mix(in oklab, var(--accent, var(--sea)) 30%, transparent));
+    transition: transform var(--sedang);
+    transform-origin: left;
+  }
+  .stat .ico {
+    grid-area: ico; margin: 0; width: 40px; height: 40px; border-radius: 13px; font-size: 15px;
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, currentColor 16%, transparent);
+    transition: transform var(--sedang);
+  }
+  .stat .k  { grid-area: k; margin: 2px 0 0; line-height: 1.45; }
+  .stat .v  {
+    grid-area: v; margin: 6px 0 0;
+    font-size: clamp(24px, 1.4vw + 16px, 34px);
+    background: linear-gradient(120deg in oklab, var(--text) 25%, var(--accent, var(--sea)));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .f  { grid-area: f; margin: 0; padding-top: 10px; }
+  .stat:hover { transform: translateY(-3px); box-shadow: var(--shadow-naik); }
+  .stat:hover::after { transform: scaleX(2.2); }
+  .stat:hover .ico { transform: rotate(-6deg) scale(1.06); }
+  .stat:hover::before { background: var(--tepi-naik); }
+
+  @container papan (max-width: 460px) {
+    .stat { padding: 13px 13px 12px; column-gap: 8px; }
+    .stat .ico { width: 32px; height: 32px; border-radius: 10px; font-size: 12px; }
+    .stat .k { font-size: 9px; letter-spacing: .1em; }
+    .stat .f { font-size: 10.5px; padding-top: 7px; }
+  }
+
+  /* Mini metrik (panel BK dsb.) */
+  .mini { border-radius: 14px; box-shadow: inset 0 0 0 1px color-mix(in oklab, currentColor 14%, transparent); }
+
+  /* ═══════════════ 7 · TOMBOL ═══════════════ */
+  .btn { border-radius: 12px; letter-spacing: -.003em; }
+  .btn-sm { border-radius: 10px; }
+  .btn-primary {
+    background: linear-gradient(135deg in oklab, var(--sea-hi) 0%, var(--sea) 45%, var(--navy-2) 100%);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, white 26%, transparent),
+                0 1px 2px color-mix(in oklab, var(--ink) 20%, transparent),
+                0 10px 22px -12px color-mix(in oklab, var(--sea) 95%, transparent);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: linear-gradient(135deg in oklab, color-mix(in oklab, var(--sea-hi) 80%, white), var(--sea) 50%, var(--navy) 100%);
+    transform: translateY(-1px);
+  }
+  .btn-ghost {
+    background: linear-gradient(180deg, var(--surface), color-mix(in oklab, var(--paper) 70%, var(--surface)));
+    box-shadow: inset 0 1px 0 white, 0 1px 2px color-mix(in oklab, var(--ink) 5%, transparent);
+  }
+  .btn-ok, .btn-danger, .btn-wa { box-shadow: inset 0 1px 0 color-mix(in oklab, white 60%, transparent); }
+  .btn:focus-visible { outline: none; box-shadow: var(--ring), 0 0 0 1px var(--sea); }
+
+  /* v2.12 — Laporkan ke guru (GEN-Z) & Sahkan (guru) */
+  .btn-lapor {
+    color: #fff;
+    background: linear-gradient(135deg in oklab, #1B7AAD 0%, #14618B 50%, #0F766E 100%);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, white 24%, transparent),
+                0 8px 18px -12px color-mix(in oklab, #14618B 95%, transparent);
+  }
+  .btn-lapor:hover:not(:disabled) { filter: brightness(1.07); transform: translateY(-1px); }
+  .btn-lapor i { transition: transform .25s var(--lengkung); }
+  .btn-lapor:hover i { transform: translate(2px, -2px) rotate(-8deg); }
+  .btn-sah {
+    color: #fff;
+    background: linear-gradient(135deg in oklab, #14958B 0%, #0F766E 55%, #0B4F45 100%);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, white 22%, transparent),
+                0 8px 18px -12px color-mix(in oklab, #0F766E 95%, transparent);
+  }
+  .btn-sah:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
+
+  /* ═══════════════ 8 · MASUKAN ═══════════════ */
+  /* background-color saja: <select> memakai background-image untuk panahnya. */
+  .input {
+    border-radius: 12px;
+    background-color: color-mix(in oklab, var(--paper) 40%, var(--surface));
+    box-shadow: inset 0 1px 2px color-mix(in oklab, var(--ink) 4%, transparent);
+  }
+  .input:focus {
+    background-color: var(--surface);
+    box-shadow: var(--ring), inset 0 1px 2px color-mix(in oklab, var(--ink) 3%, transparent);
+  }
+
+  /* Kotak centang bergaya — dipakai pemilihan laporan massal. */
+  .cek {
+    appearance: none; -webkit-appearance: none; margin: 0; cursor: pointer;
+    width: 20px; height: 20px; border-radius: 7px; flex: none;
+    border: 1.5px solid color-mix(in oklab, var(--sea) 34%, var(--line));
+    background: var(--surface);
+    display: inline-grid; place-content: center; vertical-align: middle;
+    transition: background var(--cepat), border-color var(--cepat), box-shadow var(--cepat), transform .12s var(--lengkung);
+  }
+  .cek::before {
+    content: ''; width: 10px; height: 10px; transform: scale(0);
+    transition: transform .18s var(--lengkung);
+    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+    background: #fff;
+  }
+  .cek:checked, .cek:indeterminate {
+    background: linear-gradient(135deg, var(--sea-hi), var(--teal)); border-color: transparent;
+    box-shadow: 0 4px 10px -4px color-mix(in oklab, var(--sea) 90%, transparent);
+  }
+  .cek:checked::before { transform: scale(1); }
+  .cek:indeterminate::before { transform: scale(1); clip-path: inset(40% 10% 40% 10%); }
+  .cek:hover { border-color: var(--sea); }
+  .cek:active { transform: scale(.9); }
+  .cek:focus-visible { outline: none; box-shadow: var(--ring); }
+  .cek:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* ═══════════════ 9 · TABEL ═══════════════ */
+  thead th {
+    background: linear-gradient(180deg, color-mix(in oklab, var(--paper) 85%, var(--surface)), var(--paper));
+    color: color-mix(in oklab, var(--text-3) 85%, var(--navy));
+  }
+  /* Latar baris HANYA pada <tr> — sel yang diwarnai modul lain
+     (peringkat, peta sebaran) tidak boleh tertimpa saat disorot. */
+  tbody tr:hover { background: color-mix(in oklab, var(--sea) 5%, var(--surface)); }
+  tbody tr:hover > td:first-child { box-shadow: inset 3px 0 0 var(--sea); }
+  .pilih-kol { width: 44px; padding-inline: 14px 4px !important; }
+  td.pilih-kol { padding-top: 13px !important; }
+
+  /* v2.12 — baris pembinaan */
+  tbody tr.menunggu { background: color-mix(in oklab, var(--sea) 5%, var(--surface)); }
+  tbody tr.menunggu > td:first-child { box-shadow: inset 3px 0 0 var(--sea-hi); }
+  tbody tr.dipilih { background: color-mix(in oklab, var(--teal) 8%, var(--surface)); }
+  tbody tr.dipilih > td:first-child { box-shadow: inset 3px 0 0 var(--teal); }
+  .jejak-sah {
+    display: flex; align-items: center; gap: 6px; margin-top: 6px;
+    font-size: 11px; line-height: 1.4; color: var(--text-3);
+  }
+  .jejak-sah i { color: var(--sea); font-size: 10px; width: 12px; text-align: center; flex: none; }
+  .jejak-sah.ok { color: var(--teal); font-weight: 600; }
+  .jejak-sah.ok i { color: var(--teal); }
+
+  .pager .btn { min-width: 0; }
+
+  /* ═══════════════ 10 · TAG ═══════════════ */
+  .tag, .badge {
+    border-radius: 999px; padding: 3px 10px;
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, currentColor 16%, transparent);
+  }
+  .tag-sah {
+    color: var(--sea);
+    background: linear-gradient(90deg in oklab, color-mix(in oklab, var(--sea) 12%, var(--surface)),
+                color-mix(in oklab, var(--teal) 10%, var(--surface)));
+  }
+  .tag-sah::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none;
+    animation: denyut 1.8s ease-in-out infinite;
+  }
+  @keyframes denyut { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }
+  :root.hemat .tag-sah::before { animation: none; }
+
+  /* ═══════════════ 11 · FILTER & CHIP ═══════════════ */
+  .filters { gap: 9px; padding: 13px var(--pad); background: color-mix(in oklab, var(--paper) 35%, var(--surface)); }
+  .chip { border-radius: 999px; }
+  .chip.on {
+    background: linear-gradient(135deg in oklab, var(--navy-2), var(--ink));
+    box-shadow: 0 6px 14px -8px color-mix(in oklab, var(--navy) 90%, transparent);
+  }
+
+  /* ═══════════════ 12 · SAPAAN, UNIT & BRANKAS ═══════════════ */
+  .sapa {
+    border-radius: var(--r-xl);
+    background:
+      radial-gradient(60% 120% at 100% 0%, color-mix(in oklab, var(--brass) 20%, transparent), transparent 62%),
+      radial-gradient(70% 120% at 0% 100%, color-mix(in oklab, var(--sea-hi) 36%, transparent), transparent 65%),
+      var(--g-navy);
+    box-shadow: 0 2px 6px color-mix(in oklab, var(--ink) 18%, transparent),
+                0 30px 60px -34px color-mix(in oklab, var(--navy) 95%, transparent);
+    padding: clamp(18px, 1.4vw + 10px, 28px) clamp(16px, 1.6vw + 8px, 30px);
+  }
+  .sapa h2 { font-size: clamp(22px, 1.6vw + 14px, 32px); }
+  .amanah {
+    border-radius: 14px;
+    box-shadow: inset 0 1px 0 color-mix(in oklab, white 10%, transparent);
+  }
+  .amanah:hover { transform: translateX(3px); }
+
+  .unit-wrap { border-radius: var(--r-xl); box-shadow: var(--shadow); padding: clamp(16px, 1vw + 10px, 24px) var(--pad); }
+  .unit-wrap::before { opacity: .35; }
+  .unit-card {
+    border-radius: 18px;
+    box-shadow: inset 0 1px 0 color-mix(in oklab, white 16%, transparent),
+                0 16px 30px -22px color-mix(in oklab, var(--ink) 95%, transparent);
+  }
+  .unit-card::after {
+    content: ''; position: absolute; right: -30%; top: -60%; width: 80%; aspect-ratio: 1; pointer-events: none;
+    background: radial-gradient(circle, color-mix(in oklab, white 16%, transparent), transparent 65%);
+    transition: transform .5s var(--lengkung);
+  }
+  .unit-card:hover::after { transform: translate3d(-12%, 14%, 0); }
+  .unit-card .go i { transition: transform .25s var(--lengkung); }
+  .unit-card:hover .go i { transform: translateX(4px); }
+
+  /* Ponsel & tablet sempit: tiga kartu unit tidak lagi bertumpuk tinggi,
+     melainkan menjadi baris ringkas — ikon di kiri, teks di kanan. */
+  @container papan (max-width: 800px) {
+    .unit-grid { gap: 9px; }
+    .unit-card {
+      display: grid; grid-template-columns: auto 1fr auto; align-items: center;
+      column-gap: 12px; padding: 12px 14px;
+    }
+    .unit-card .ico { grid-row: 1 / span 3; margin: 0; }
+    .unit-card .ar { display: none; }
+    .unit-card b { grid-column: 2; }
+    .unit-card small { grid-column: 2; margin-top: 1px; }
+    .unit-card .go {
+      grid-column: 3; grid-row: 1 / span 3; margin: 0; font-size: 0; gap: 0;
+      width: 32px; height: 32px; border-radius: 10px; justify-content: center;
+      background: color-mix(in oklab, white 12%, transparent);
+    }
+    .unit-card .go i { font-size: 12px; }
+    .unit-head { margin-bottom: 11px; }
+    .unit-head h3 { font-size: 18px; }
+  }
+
+  .brankas { border-radius: 18px; }
+
+  /* ═══════════════ 13 · v2.12 · ALUR LAPORAN PEMBINAAN ═══════════════ */
+  .alur-bina {
+    display: flex; align-items: stretch; gap: 10px; margin-bottom: var(--celah);
+    padding: 12px; border-radius: var(--r-lg);
+    background:
+      radial-gradient(80% 140% at 0% 0%, color-mix(in oklab, var(--sea) 10%, transparent), transparent 60%),
+      color-mix(in oklab, var(--surface) 92%, transparent);
+    box-shadow: var(--shadow), inset 0 0 0 1px var(--line);
+  }
+  .alur-langkah {
+    flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 11px;
+    padding: 10px 12px; border-radius: 14px;
+    background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-soft);
+  }
+  .alur-langkah > span {
+    flex: 0 0 30px; width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center;
+    font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 13px;
+    color: var(--text-3); background: var(--paper); box-shadow: inset 0 0 0 1px var(--line);
+  }
+  .alur-langkah.on > span {
+    color: #fff; background: linear-gradient(135deg, var(--sea-hi), var(--teal)); box-shadow: none;
+  }
+  .alur-langkah:last-child > span {
+    color: #2A2003; background: linear-gradient(135deg, var(--brass-hi), var(--brass)); box-shadow: none;
+  }
+  .alur-langkah b { display: block; font-size: 13px; line-height: 1.3; }
+  .alur-langkah small { display: block; font-size: 11.5px; color: var(--text-3); line-height: 1.4; margin-top: 1px; }
+  .alur-panah { align-self: center; color: color-mix(in oklab, var(--brass) 70%, var(--text-3)); font-size: 11px; flex: none; }
+  /* Ponsel: tiga langkah tetap sebaris sebagai pil ringkas — alurnya
+     terbaca sekilas tanpa memakan setengah layar. */
+  @container papan (max-width: 720px) {
+    .alur-bina { gap: 4px; padding: 6px; border-radius: 16px; }
+    .alur-langkah { flex-direction: column; gap: 5px; padding: 8px 4px; text-align: center; border-radius: 12px; }
+    .alur-langkah > span { flex-basis: auto; width: 26px; height: 26px; font-size: 12px; border-radius: 9px; }
+    .alur-langkah b { font-size: 12px; }
+    .alur-langkah small { display: none; }
+    .alur-panah { font-size: 9px; }
+  }
+
+  /* Jendela laporan: daftar pembinaan terpilih */
+  .lb-daftar {
+    border-radius: 14px; background: var(--paper);
+    box-shadow: inset 0 0 0 1px var(--line); max-height: 290px; overflow: auto;
+  }
+  .lb-kepala {
+    position: sticky; top: 0; z-index: 1; padding: 10px 13px; font-size: 12.5px; color: var(--text-2);
+    background: linear-gradient(180deg, var(--paper) 70%, color-mix(in oklab, var(--paper) 0%, transparent));
+  }
+  .lb-baris {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 9px 13px; border-top: 1px dashed var(--line);
+  }
+  .lb-baris b { display: block; font-size: 13px; }
+  .lb-baris small { display: block; font-size: 11.5px; color: var(--text-3); line-height: 1.45; }
+  .lb-guru { display: flex; gap: 4px; flex-wrap: wrap; }
+
+  /* Pesan: utas laporan pembinaan */
+  .msg-item.bina .msg-av { background: linear-gradient(135deg, #14958B, #0B4F45); font-size: 14px; }
+  .msg-item.bina.baru .msg-av { background: var(--g-brass); }
+  .msg-massal { margin: 0 16px 10px; width: calc(100% - 32px); }
+  .msg-head span i { color: var(--teal); margin-inline: 2px 3px; }
+
+  /* ═══════════════ 14 · PERCAKAPAN ═══════════════ */
+  .msg-thread {
+    background:
+      radial-gradient(60% 50% at 100% 0%, color-mix(in oklab, var(--sea) 5%, transparent), transparent 70%),
+      var(--paper);
+  }
+  .bub { border-radius: 18px; }
+  .bub.saya {
+    border-bottom-right-radius: 6px;
+    background: linear-gradient(135deg in oklab, color-mix(in oklab, var(--sea) 10%, var(--surface)),
+                color-mix(in oklab, var(--teal) 6%, var(--surface)));
+  }
+  .bub.dia { border-bottom-left-radius: 6px; }
+  @media (prefers-reduced-motion: no-preference) {
+    .bub { animation: bubMasuk .26s var(--lengkung) both; }
+  }
+  @keyframes bubMasuk { from { opacity: 0; transform: translate3d(0, 6px, 0) scale(.985); } }
+
+  /* ═══════════════ 15 · BILAH TAB BAWAH (ponsel/tablet) ═══════════════ */
+  @media (max-width: 1024px) {
+    .tabbar { padding-inline: 8px; gap: 4px; }
+    .tabbar .tab { position: relative; border-radius: 14px; }
+    .tabbar .tab.active {
+      color: var(--sea);
+      background: linear-gradient(180deg, color-mix(in oklab, var(--sea) 12%, var(--surface)),
+                  color-mix(in oklab, var(--sea) 4%, var(--surface)));
+      box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--sea) 16%, transparent);
+    }
+    .tabbar .tab.active::before {
+      content: ''; position: absolute; top: -6px; left: 50%; width: 22px; height: 3px; margin-left: -11px;
+      border-radius: 0 0 3px 3px; background: linear-gradient(90deg, var(--brass), var(--brass-hi));
+      animation: indikatorTab .3s var(--lengkung) both;
+    }
+    .tabbar .tab.active i { transform: translateY(-1px) scale(1.08); }
+  }
+  @keyframes indikatorTab { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+  /* ═══════════════ 16 · GERAK MASUK HALAMAN ═══════════════
+     Setiap navigasi mengganti isi #viewRoot, jadi animasi di bawah
+     berjalan sekali per halaman — tanpa JS. Jenjangnya ≤ 0,2 s. */
+  @media (prefers-reduced-motion: no-preference) {
+    #viewRoot > * { animation: halamanMasuk .38s var(--lengkung) both; }
+    #viewRoot > :nth-child(2) { animation-delay: .04s; }
+    #viewRoot > :nth-child(3) { animation-delay: .08s; }
+    #viewRoot > :nth-child(4) { animation-delay: .12s; }
+    #viewRoot > :nth-child(n+5) { animation-delay: .16s; }
+  }
+  @keyframes halamanMasuk {
+    from { opacity: 0; transform: translate3d(0, 12px, 0) scale(.992); }
+    to   { opacity: 1; transform: none; }
+  }
+  :root.hemat #viewRoot > * { animation-duration: .2s; animation-delay: 0s; }
+
+  /* Kartu jauh di bawah muncul saat digulir (utas compositor). */
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      #viewRoot :is(.grid-2, .grid-half, .grid-3) > .card,
+      #viewRoot > .card ~ .card {
+        animation: munculGulir linear both;
+        animation-timeline: view();
+        animation-range: entry 0% entry 28%;
+      }
+    }
+  }
+  @keyframes munculGulir {
+    from { opacity: .001; transform: translate3d(0, 26px, 0) scale(.985); }
+    to   { opacity: 1; transform: none; }
+  }
+  :root.hemat #viewRoot :is(.grid-2, .grid-half, .grid-3) > .card,
+  :root.hemat #viewRoot > .card ~ .card { animation: none; }
+
+  /* ═══════════════ 17 · SWEETALERT ═══════════════ */
+  .swal2-container.swal2-backdrop-show { background: rgba(6, 24, 38, .46) !important; }
+  .swal2-popup {
+    border-radius: 24px !important;
+    box-shadow: 0 2px 8px rgba(6,24,38,.12), 0 50px 90px -40px rgba(6,24,38,.75) !important;
+  }
+  /* Tanpa overflow:hidden — panel saran (autocomplete) di dalam
+     jendela tidak boleh terpotong. Garisnya disisipkan di antara sudut. */
+  .swal2-popup::before {
+    content: ''; position: absolute; left: 26px; right: 26px; top: 0; height: 2px;
+    background: var(--g-garis); border-radius: 0 0 2px 2px;
+  }
+  .swal2-styled.swal2-confirm {
+    border-radius: 12px !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 10px 20px -12px rgba(20,97,139,.9) !important;
+  }
+
+  /* ═══════════════ 18 · MODE KARTU TABEL DI PONSEL ═══════════════ */
+  @media (max-width: 760px) {
+    .tbl[data-kartu] > table > tbody > tr {
+      border-radius: 18px; border-color: transparent;
+      box-shadow: 0 0 0 1px var(--line), 0 10px 22px -18px color-mix(in oklab, var(--navy) 60%, transparent);
+    }
+    .tbl[data-kartu] > table > tbody > tr > td:first-child { box-shadow: none !important; }
+    .tbl[data-kartu] > table > tbody > tr.menunggu {
+      background: linear-gradient(180deg, color-mix(in oklab, var(--sea) 6%, var(--surface)), var(--surface) 60%);
+    }
+    .tbl[data-kartu] > table > tbody > tr.menunggu::before { background: linear-gradient(180deg, var(--sea-hi), var(--teal)); opacity: 1; }
+    .tbl[data-kartu] > table > tbody > tr.dipilih { box-shadow: 0 0 0 2px var(--teal), 0 12px 24px -18px color-mix(in oklab, var(--teal) 80%, transparent); }
+
+    /* Kolom centang menjadi tombol bulat di pojok kanan atas kartu. */
+    .tbl[data-kartu] > table > tbody > tr > td.pilih-kol {
+      position: absolute; top: 12px; right: 12px; z-index: 2;
+      display: block; width: auto; padding: 0 !important; margin: 0; border: 0;
+    }
+    .tbl[data-kartu] > table > tbody > tr > td.pilih-kol::before { content: none; }
+    .tbl[data-kartu] > table > tbody > tr > td.pilih-kol .cek { width: 24px; height: 24px; border-radius: 8px; }
+    /* Sel sesudah kolom centang mengambil peran judul kartu. */
+    .tbl[data-kartu] > table > tbody > tr > td.pilih-kol + td {
+      grid-template-columns: 1fr; gap: 2px; padding: 0 36px 9px 0; margin-bottom: 3px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .tbl[data-kartu] > table > tbody > tr > td.pilih-kol + td::before { display: block; padding-top: 0; }
+
+    .aksi-bina { justify-content: flex-start; }
+    .aksi-bina .btn { flex: 1 1 auto; min-height: 40px; }
+  }
+
+  /* ═══════════════ 19 · RUANG LAYAR ═══════════════ */
+  /* Tablet potret (761–1024 px): dua kolom yang lega, bukan satu kolom
+     yang memanjang, dan bilah profil lebih ringkas. */
+  @media (min-width: 761px) and (max-width: 1024px) {
+    .pbar-inner { padding: 13px 22px; }
+    .pbar-av { flex-basis: 64px; width: 64px; height: 64px; }
+  }
+  /* Desktop lebar: isi dibatasi agar baris tidak terlalu panjang dibaca,
+     dan diletakkan di tengah ruang yang tersisa. */
+  @media (min-width: 1600px) {
+    .view { max-width: 1560px; margin-inline: auto; }
+    .pbar-inner { max-width: 1560px; margin-inline: auto; }
+  }
+  /* Layar sangat sempit (≤ 360 px): jaga tepi & sentuhan tetap nyaman. */
+  @media (max-width: 360px) {
+    .stats { gap: 9px; }
+    .stat .v { font-size: 22px; }
+    .alur-langkah small { display: none; }
+  }
+
+  /* Kisi kartu bidang: kolom boleh menyusut (minmax 0) supaya dua kartu
+     tetap muat di ponsel 360 px — sebelumnya sisi kanan terpotong. */
+  @media (max-width: 640px) {
+    .bid-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 12px; }
+    .bid-card { min-width: 0; }
+  }
+  @media (max-width: 340px) { .bid-grid { grid-template-columns: 1fr; } }
+
+  /* Eyebrow pada panel gelap: bahasa Arab tidak dipatah menjadi dua baris. */
+  #viewRoot .eyebrow { flex-wrap: wrap; row-gap: 3px; }
+  .eyebrow .ar { white-space: nowrap; }
+
+  /* ═══════════════ 20 · MENGHORMATI SETELAN PENGGUNA ═══════════════ */
+  @media (prefers-reduced-motion: reduce) {
+    #appShell::before, #viewRoot > *, .bub, .nav-item.active::before, .tag-sah::before { animation: none !important; }
+  }
+  @media (forced-colors: active) {
+    .topbar h2, .stat .v { background: none; color: CanvasText; }
+    .card::before, .stat::before, .unit-wrap::after { display: none; }
+  }
+  @media print {
+    #appShell::before, #appShell::after, .card::before, .card::after, .stat::before { display: none !important; }
+  }
+}
+
 </style>
 </head>
 <body>
@@ -4032,5 +4700,31 @@
 </div>
 
 <script src="app.js"></script>
+<script>
+/* v2.12 — Sorot kursor pada kartu (desktop saja).
+   Hanya menulis dua angka (--sx, --sy) sekali per bingkai; seluruh
+   cahaya dan transisinya dikerjakan CSS lapisan `paripurna`. */
+(function () {
+  if (!matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  let el = null, x = 0, y = 0, bingkai = 0;
+  const tulis = () => {
+    bingkai = 0; if (!el) return;
+    const r = el.getBoundingClientRect();
+    el.style.setProperty('--sx', (x - r.left) + 'px');
+    el.style.setProperty('--sy', (y - r.top) + 'px');
+  };
+  document.addEventListener('pointermove', (e) => {
+    if (document.documentElement.classList.contains('hemat')) return;
+    const k = e.target && e.target.closest ? e.target.closest('.card') : null;
+    if (k !== el) { if (el) el.classList.remove('disorot'); el = k; if (el) el.classList.add('disorot'); }
+    x = e.clientX; y = e.clientY;
+    if (el && !bingkai) bingkai = requestAnimationFrame(tulis);
+  }, { passive: true });
+  document.documentElement.addEventListener('pointerleave', () => {
+    if (el) el.classList.remove('disorot'); el = null;
+  });
+})();
+</script>
 </body>
 </html>
