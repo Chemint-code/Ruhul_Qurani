@@ -7163,12 +7163,14 @@ function bangunLaporanHTML(data) {
       <tr><td style="${ID_K}"><b>Status Saat Ini</b></td><td style="${ID_V}">: ${esc(s.status_keberadaan||'Hadir')}</td></tr>
     </table>
 
-    <h3 style="${H3}">1. Presensi Madrasah</h3>
+    <h3 style="${H3}">1. Presensi Madrasah
+      <span style="font-weight:normal;font-size:10px;color:#64748b;">(satuan JP · 1 hari = ${JP_PER_HARI} JP)</span></h3>
     <table style="${TABEL}font-size:11px;">
-      <thead><tr>${['Bulan','Hadir','Izin','Sakit','Alpa'].map(th).join('')}</tr></thead>
-      <tbody>${baris(data.presensi, p =>
-        `<tr>${td(p.bulan)}${td(p.hadir,'text-align:center')}${td(p.izin,'text-align:center')}${td(p.sakit,'text-align:center')}${td(p.alpa,'text-align:center')}</tr>`,
-        'Belum ada data presensi.', 5)}</tbody>
+      <thead><tr>${['Bulan','Sakit','Izin Kegiatan','Izin Pulang','Alpa','Total'].map(th).join('')}</tr></thead>
+      <tbody>${baris(data.presensi, p => {
+        const sel = (jp) => jp ? `${jp} JP (${prHari(jp)} hr)` : '-';
+        return `<tr>${td(p.bulan)}${td(sel(p.S),'text-align:center')}${td(sel(p.IK),'text-align:center')}${td(sel(p.IP),'text-align:center')}${td(sel(p.A),'text-align:center')}${td(sel(p.total),'text-align:center;font-weight:bold')}</tr>`;
+      }, 'Belum ada data presensi.', 6)}</tbody>
     </table>
 
     <h3 style="${H3}">
@@ -7271,24 +7273,17 @@ function bangunLaporanHTML(data) {
 
 // ---------- 20g. Pengambilan data & aksi cetak ------------------------
 
-/** Agregasi data_presensi mingguan → baris bulanan untuk lembar cetak. */
+/** Agregasi data_presensi (JP per minggu per jenis) → baris bulanan untuk lembar cetak. */
 function agregatPresensiCetak(rows) {
-  const namaBulan = ['Januari','Februari','Maret','April','Mei','Juni',
-                     'Juli','Agustus','September','Oktober','November','Desember'];
   const peta = new Map();
   (rows || []).forEach(r => {
-    const b = Number(r.bulan) || 0;
-    const th = Number(r.tahun) || 0;
-    if (!b || !th) return;
+    const b = Number(r.bulan) || 0, th = Number(r.tahun) || 0;
+    if (!b || !th || !['S','IK','IP','A'].includes(r.jenis)) return;
     const kunci = `${th}-${String(b).padStart(2, '0')}`;
-    if (!peta.has(kunci)) {
-      peta.set(kunci, { bulan: `${namaBulan[b - 1] || b} ${th}`, hadir: 0, izin: 0, sakit: 0, alpa: 0 });
-    }
+    if (!peta.has(kunci)) peta.set(kunci, { bulan: `${BULAN_ID[b - 1]} ${th}`, S:0, IK:0, IP:0, A:0, total:0 });
     const o = peta.get(kunci);
-    o.hadir += Number(r.hadir) || 0;
-    o.izin  += Number(r.izin)  || 0;
-    o.sakit += Number(r.sakit) || 0;
-    o.alpa  += Number(r.alpa)  || 0;
+    o[r.jenis] += Number(r.jp) || 0;
+    o.total += Number(r.jp) || 0;
   });
   return [...peta.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([, v]) => v);
 }
@@ -7297,16 +7292,16 @@ async function ambilLaporan(nisn) {
   const { data } = await q(db.rpc('laporan_santri', { p_nisn: nisn }), 'laporan_santri');
   if (!data || !data.siswa) throw new Error('Data laporan santri tidak ditemukan.');
 
-  // RPC lama belum mengembalikan data_presensi — ambil langsung dari tabel bila ada.
-  if (!data.presensi || !data.presensi.length) {
-    try {
-      const { data: rows, error } = await db.from('data_presensi')
-        .select('tahun,bulan,hadir,izin,sakit,alpa,semester')
-        .eq('nisn', String(nisn));
-      if (!error && rows?.length) data.presensi = agregatPresensiCetak(rows);
-    } catch (e) {
-      console.warn('Presensi cetak tidak tersedia:', e?.message || e);
-    }
+  // Presensi selalu dibaca dari data_presensi (format JP S/IK/IP/A, v2.13);
+  // bagian presensi dari RPC lama (log_presensi_madrasah, H/I/S/A) diabaikan.
+  data.presensi = [];
+  try {
+    const { data: rows, error } = await db.from('data_presensi')
+      .select('tahun,bulan,jenis,jp')
+      .eq('nisn', String(nisn));
+    if (!error && rows?.length) data.presensi = agregatPresensiCetak(rows);
+  } catch (e) {
+    console.warn('Presensi cetak tidak tersedia:', e?.message || e);
   }
 
   // Tabel baru (prestasi, tahfiz, target) belum ada di RPC lama —
@@ -8208,32 +8203,8 @@ const BULAN_ID = ['Januari','Februari','Maret','April','Mei','Juni',
                   'Juli','Agustus','September','Oktober','November','Desember'];
 const bulanSemester = (s) => s === 'Genap' ? [1,2,3,4,5,6] : [7,8,9,10,11,12];
 
-const SQL_PRESENSI = `create table public.data_presensi (
-  id         bigserial primary key,
-  nisn       text    not null,
-  nama_siswa text,
-  kelas      text,
-  jenjang    text,
-  semester   text    not null,
-  tahun      int     not null,
-  bulan      int     not null,
-  minggu     int     not null,
-  hadir      int     default 0,
-  izin       int     default 0,
-  sakit      int     default 0,
-  alpa       int     default 0,
-  diperbarui timestamptz default now()
-);
-
-create index data_presensi_periode_idx
-  on public.data_presensi (kelas, semester, tahun, bulan, minggu);
-
-alter table public.data_presensi enable row level security;
-
-create policy "presensi baca"  on public.data_presensi
-  for select to authenticated using (true);
-create policy "presensi tulis" on public.data_presensi
-  for all    to authenticated using (true) with check (true);`;
+// Skema presensi format JP: lihat berkas SQL_PRESENSI_JP.sql (tabel data_presensi + presensi_minggu
+// + RPC simpan_presensi). Modul presensi ada di panel 3 di bawah.
 
 /** Data pendukung tampilan Madrasah untuk render ulang panel. */
 const MDS = { kelas:[], atribut:null, siapPresensi:false, hari:'', rekap:null };
@@ -8379,8 +8350,8 @@ async function viewMadrasah() {
       </button>
       <button class="mod-card ${stMd.panel==='presensi'?'on':''}" data-mdpanel="presensi">
         <div class="ico" style="background:var(--teal-bg);color:var(--teal)"><i class="fa-solid fa-calendar-check"></i></div>
-        <div class="k">Kehadiran</div><b>Rekap Presensi Kelas</b>
-        <p>Input mingguan H/I/S/A dan rekapitulasi bulanan satu semester.</p>
+        <div class="k">Kehadiran · format wali kelas</div><b>Presensi Kelas (JP)</b>
+        <p>Input mingguan S · IK · IP · A, tempel dari Excel sekolah, laporan bulanan C–G, dan akumulasi semester.</p>
         <span class="go">Buka panel <i class="fa-solid fa-arrow-right"></i></span>
       </button>
     </div>
@@ -8639,309 +8610,1068 @@ async function mdSimpanPelanggaranUmum() {
   navigateTo('madrasah');
 }
 
-// ---------- Panel 3: presensi kelas ----------
+// ---------- Panel 3: presensi kelas — FORMAT LAPORAN WALI KELAS (v2.13) ----------
+//
+// Kerangka disamakan dengan "Laporan Bulanan Wali Kelas" MA Ruhul Qurani:
+//   · satuan JP (jam pelajaran), 1 hari = 8 JP
+//   · empat jenis: S (Sakit) · IK (Izin Kegiatan) · IP (Izin Pulang) · A (Alpa)
+//   · per MINGGU KE-1 … KE-5, hanya santri yang tidak masuk yang dicatat
+//   · bagian C (rekap) dan D–G (rincian per jenis per minggu)
+//   · Akumulasi Kehadiran satu semester: total JP → ÷ 8 → dibulatkan
+//
+// Tabel: data_presensi (satu baris = santri · minggu · jenis) dan
+// presensi_minggu (penanda minggu selesai/libur). Penyimpanan lewat RPC
+// simpan_presensi agar satu minggu tertulis atomik dan jejak audit hemat.
+// -------------------------------------------------------------------------------
+const PR_JENIS = [
+  { k:'S',  nama:'Sakit',         judul:'SAKIT',              warna:'var(--amber)',  mini:'a' },
+  { k:'IK', nama:'Izin Kegiatan', judul:'IZIN KEGIATAN (IK)', warna:'var(--sea)',    mini:'s' },
+  { k:'IP', nama:'Izin Pulang',   judul:'IZIN PULANG (IP)',   warna:'var(--violet)', mini:'v' },
+  { k:'A',  nama:'Alpa',          judul:'ALPA',               warna:'var(--maroon)', mini:'m' }
+];
+const PR_KODE = PR_JENIS.map(j => j.k);
+const PR_INFO = Object.fromEntries(PR_JENIS.map(j => [j.k, j]));
+const PR_BAGIAN = { S:'D', IK:'E', IP:'F', A:'G' };
+const PR_URUT_AKUM = ['S','IP','IK','A'];     // urutan kolom sheet "Akumulasi Kehadiran"
+const JP_PER_HARI = 8;
+const JP_MAKS_MINGGU = 48;                     // 6 hari × 8 JP
+
+const prTaAwal = () => { const d = new Date(); return d.getMonth() + 1 >= 7 ? d.getFullYear() : d.getFullYear() - 1; };
+const prTahun  = (ta, bulan) => bulan >= 7 ? ta : ta + 1;
+const prLabelTa = (ta) => `${ta}/${ta + 1}`;
+const prSmt    = (bulan) => bulan >= 7 ? 'Ganjil' : 'Genap';
+const prHari   = (jp) => Math.round((Number(jp) || 0) / JP_PER_HARI * 10) / 10;
+const prBulat  = (jp) => Math.round((Number(jp) || 0) / JP_PER_HARI);
+
+const stPr = {
+  tab: 'input', kelas: '', ta: prTaAwal(),
+  bulan: new Date().getMonth() + 1,
+  minggu: Math.min(5, Math.ceil(new Date().getDate() / 7)),
+  siswa: [], data: [], pm: [], kotor: false,
+  tempel: null, akum: null, rinci: window.innerWidth > 900, walasDb: null
+};
+
+/* Penyimpanan kecil per perangkat (nama TTD, alias nama hasil tempel). */
+function prLokal(kunci, nilai) {
+  try {
+    if (nilai === undefined) return JSON.parse(localStorage.getItem('pr:' + kunci) || 'null');
+    localStorage.setItem('pr:' + kunci, JSON.stringify(nilai));
+  } catch (e) { return null; }
+}
+
+/** "8", "8 JP", "1h", "1 hari" → angka JP bulat (0–60). */
+function prNilaiJp(v) {
+  const s = String(v ?? '').trim().toLowerCase().replace(',', '.');
+  if (!s) return 0;
+  const m = s.match(/^(\d+(?:\.\d+)?)\s*(jp|h|hr|hari)?$/);
+  if (!m) return NaN;
+  let n = Number(m[1]);
+  if (m[2] && m[2] !== 'jp') n *= JP_PER_HARI;
+  return Math.max(0, Math.min(60, Math.round(n)));
+}
+
+function prPeriodeTeks() {
+  return `${BULAN_ID[stPr.bulan - 1]} ${prTahun(stPr.ta, stPr.bulan)}`;
+}
+
 function mdPanelPresensi() {
   if (!bisa('presensi.lihat')) {
-    return kartu('Rekap Presensi Kelas', `
+    return kartu('Presensi Kelas', `
       <div class="card-note"><i class="fa-solid fa-lock"></i>
         Akses terbatas. Fitur presensi hanya untuk
         <b>${esc(HAK['presensi.lihat'].join(', '))}</b>.</div>`,
       '<span class="tag tag-off">Akses ditolak</span>');
   }
-
   if (!MDS.siapPresensi) {
-    return kartu('Rekap Presensi Kelas', `
+    return kartu('Presensi Kelas', `
       <div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
-        Tabel <b>data_presensi</b> belum tersedia di Supabase, jadi input dan rekap
-        presensi belum bisa dijalankan. Modul lain tetap berjalan normal.</div>
-      <div class="card-body">
-        <p style="margin:0 0 11px;font-size:12.5px;color:var(--text-2)">
-          Bila nanti hendak diaktifkan, jalankan skrip berikut di
-          <b>SQL Editor Supabase</b>. Struktur inilah yang dibaca aplikasi —
-          tidak ada perubahan lain di sisi kode.</p>
-        <div class="sql-note">${esc(SQL_PRESENSI)}</div>
-      </div>`,
+        Tabel <b>data_presensi</b> (format JP) belum tersedia di Supabase.
+        Jalankan berkas <b>SQL_PRESENSI_JP.sql</b> di SQL Editor, lalu muat ulang halaman.</div>`,
       '<span class="tag tag-off">Belum aktif</span>');
   }
 
-  const th = new Date().getFullYear();
-  const smt = (new Date().getMonth() + 1) >= 7 ? 'Ganjil' : 'Genap';
-  const opsiKelas = (id) => `<select id="${id}" class="input">
-      <option value="">— Pilih Kelas —</option>
-      ${MDS.kelas.map(k => `<option>${esc(k)}</option>`).join('')}</select>`;
-  const opsiTahun = (id) => `<select id="${id}" class="input">
-      ${[th-1, th, th+1].map(y => `<option ${y===th?'selected':''}>${y}</option>`).join('')}</select>`;
-  const opsiSmt = (id) => `<select id="${id}" class="input">
-      <option ${smt==='Ganjil'?'selected':''}>Ganjil</option>
-      <option ${smt==='Genap'?'selected':''}>Genap</option></select>`;
+  if (!stPr.kelas || !MDS.kelas.includes(stPr.kelas)) {
+    const binaan = (APP.profil?.kelas_binaan || []).find(k => MDS.kelas.includes(k));
+    stPr.kelas = binaan || MDS.kelas[0] || '';
+  }
+  const taPilihan = [stPr.ta - 1, stPr.ta, stPr.ta + 1];
+  const urutBulan = [7,8,9,10,11,12,1,2,3,4,5,6];
+  const tabs = [
+    ['input',   'fa-keyboard',        'Input Mingguan'],
+    ['tempel',  'fa-paste',           'Tempel / Impor Excel'],
+    ['laporan', 'fa-file-lines',      'Laporan Bulanan'],
+    ['akum',    'fa-table-cells',     'Akumulasi Semester']
+  ];
 
   return `
-    ${kartu('Input Presensi Mingguan', `
-      <div class="md-form">
-        <div class="field"><label class="label">Kelas</label>${opsiKelas('prKelas')}</div>
-        <div class="field"><label class="label">Semester</label>${opsiSmt('prSemester')}</div>
-        <div class="field"><label class="label">Tahun</label>${opsiTahun('prTahun')}</div>
-        <div class="field"><label class="label">Bulan</label><select id="prBulan" class="input"></select></div>
-        <div class="field"><label class="label">Minggu Ke</label>
-          <select id="prMinggu" class="input">
-            ${[1,2,3,4,5].map(m => `<option value="${m}">Minggu ke-${m}</option>`).join('')}</select></div>
-        <div class="field"><label class="label">&nbsp;</label>
-          <button class="btn btn-ghost btn-sm" id="prMuat">
-            <i class="fa-solid fa-list-check"></i>Muat Siswa</button></div>
-      </div>
-
-      <div class="minis">
-        <div class="mini t"><span>Hadir</span><b id="prH">0</b></div>
-        <div class="mini s"><span>Izin</span><b id="prI">0</b></div>
-        <div class="mini a"><span>Sakit</span><b id="prS">0</b></div>
-        <div class="mini m"><span>Alpa</span><b id="prA">0</b></div>
-      </div>
-
-      <div class="tbl" style="margin-top:16px"><table>
-        <thead><tr><th>Nama Santri</th><th class="center">Hadir</th><th class="center">Izin</th>
-          <th class="center">Sakit</th><th class="center">Alpa</th></tr></thead>
-        <tbody id="prBody">${barisKosong(5, 'Belum ada daftar santri.',
-          'Pilih kelas dan periode, lalu tekan “Muat Siswa”.')}</tbody>
-      </table></div>
-      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
-
-      <div class="md-bar">
-        <span class="note-min"><i class="fa-solid fa-circle-info"></i>
-          Menyimpan ulang periode yang sama akan memperbarui data lama.</span>
-        ${bisa('presensi.isi')
-          ? `<button class="btn btn-primary btn-sm" id="prSimpan">
-               <i class="fa-solid fa-floppy-disk"></i>Simpan Presensi Minggu Ini</button>`
-          : `<span class="tag tag-off">Hanya baca</span>`}
-      </div>`,
-      `<span class="tag tag-ok" id="prBadge">Periode baru</span>`,
-      'Isi total Hadir, Izin, Sakit, dan Alpa setiap santri pada minggu terpilih.')}
-
-    ${kartu('Rekap Bulanan Satu Semester', `
-      <div class="md-form">
-        <div class="field"><label class="label">Kelas</label>${opsiKelas('rpKelas')}</div>
-        <div class="field"><label class="label">Semester</label>${opsiSmt('rpSemester')}</div>
-        <div class="field"><label class="label">Tahun</label>${opsiTahun('rpTahun')}</div>
-        <div class="field"><label class="label">&nbsp;</label>
-          <button class="btn btn-ghost btn-sm" id="rpTampil">
-            <i class="fa-solid fa-table"></i>Tampilkan Rekap</button></div>
-      </div>
-      <div id="rpSummary"></div>
-      <div class="tbl"><table>
-        <thead id="rpHead"></thead>
-        <tbody id="rpBody">${barisKosong(3, 'Rekap belum ditampilkan.',
-          'Pilih kelas, semester, dan tahun.')}</tbody>
-      </table></div>
-      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>`,
-      `<button class="btn btn-ghost btn-sm" id="rpCsv"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>`,
-      'Setiap kolom bulan berisi ringkasan H/I/S/A dari seluruh minggu yang sudah diinput.')}`;
+  <section class="card pr-shell">
+    <div class="card-head">
+      <div><h3>Presensi Kelas · Format Laporan Wali Kelas</h3>
+        <p class="sub">Satuan JP · <b style="color:var(--amber)">S</b> Sakit ·
+          <b style="color:var(--sea)">IK</b> Izin Kegiatan ·
+          <b style="color:var(--violet)">IP</b> Izin Pulang ·
+          <b style="color:var(--maroon)">A</b> Alpa · 1 hari = ${JP_PER_HARI} JP</p></div>
+      <div class="actions"><span class="tag tag-sea" id="prTaTag">TA ${prLabelTa(stPr.ta)} · ${prSmt(stPr.bulan)}</span></div>
+    </div>
+    <div class="md-form pr-filter">
+      <div class="field"><label class="label">Kelas</label>
+        <select id="prKelas" class="input">${MDS.kelas.map(k =>
+          `<option ${k === stPr.kelas ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></div>
+      <div class="field"><label class="label">Tahun Ajaran</label>
+        <select id="prTa" class="input">${taPilihan.map(t =>
+          `<option value="${t}" ${t === stPr.ta ? 'selected' : ''}>${prLabelTa(t)}</option>`).join('')}</select></div>
+      <div class="field"><label class="label">Bulan</label>
+        <select id="prBulan" class="input">${urutBulan.map(b =>
+          `<option value="${b}" ${b === stPr.bulan ? 'selected' : ''}>${BULAN_ID[b-1]} ${prTahun(stPr.ta, b)}</option>`).join('')}</select></div>
+    </div>
+    <div class="chips pr-tabs" role="tablist">${tabs.map(([k, ik, t]) =>
+      `<button class="chip ${stPr.tab === k ? 'on' : ''}" data-prtab="${k}" role="tab">
+         <i class="fa-solid ${ik}"></i> ${t}</button>`).join('')}</div>
+    <div id="prIsi"><div class="pr-muat"><i class="fa-solid fa-circle-notch fa-spin"></i> Memuat presensi…</div></div>
+  </section>`;
 }
 
 function mdPasangPresensi() {
-  if (!MDS.siapPresensi || !$('prSemester')) return;
+  if (!MDS.siapPresensi || !$('prKelas')) return;
 
-  const isiBulan = () => {
-    const bulan = bulanSemester($('prSemester').value);
-    const kini = new Date().getMonth() + 1;
-    $('prBulan').innerHTML = bulan.map(b =>
-      `<option value="${b}" ${b===kini?'selected':''}>${BULAN_ID[b-1]}</option>`).join('');
+  const ganti = async (fn) => {
+    if (!(await prBolehPindah())) return prSetelFilter();
+    fn(); prSetelFilter(true);
+    await prMuat();
   };
-  isiBulan();
-  $('prSemester').addEventListener('change', isiBulan);
+  $('prKelas').addEventListener('change', e => ganti(() => { stPr.kelas = e.target.value; }));
+  $('prBulan').addEventListener('change', e => ganti(() => { stPr.bulan = Number(e.target.value); }));
+  $('prTa').addEventListener('change', e => ganti(() => { stPr.ta = Number(e.target.value); }));
 
-  $('prMuat').addEventListener('click', mdMuatPresensi);
-  $('prSimpan')?.addEventListener('click', mdSimpanPresensi);
-  $('rpTampil').addEventListener('click', mdTampilkanRekapPresensi);
-  $('rpCsv').addEventListener('click', mdEksporRekapPresensi);
-}
-
-function mdPeriodePresensi() {
-  return {
-    kelas: $('prKelas').value,
-    semester: $('prSemester').value,
-    tahun: Number($('prTahun').value),
-    bulan: Number($('prBulan').value),
-    minggu: Number($('prMinggu').value)
-  };
-}
-
-function mdTotalPresensi() {
-  const jml = { hadir:0, izin:0, sakit:0, alpa:0 };
-  document.querySelectorAll('#prBody tr[data-nisn]').forEach(tr => {
-    ['hadir','izin','sakit','alpa'].forEach(k => {
-      jml[k] += Number(tr.querySelector('.pr-' + k).value) || 0;
-    });
-  });
-  $('prH').textContent = angka(jml.hadir);
-  $('prI').textContent = angka(jml.izin);
-  $('prS').textContent = angka(jml.sakit);
-  $('prA').textContent = angka(jml.alpa);
-}
-
-async function mdMuatPresensi() {
-  const p = mdPeriodePresensi();
-  if (!p.kelas) return toast('error', 'Pilih kelas terlebih dahulu.');
-
-  loading(true);
-  try {
-    const siswa = (await siswaMadrasah()).filter(s => s.kelas === p.kelas);
-    const { data, error } = await q(db.from('data_presensi').select('*')
-      .eq('kelas', p.kelas).eq('semester', p.semester).eq('tahun', p.tahun)
-      .eq('bulan', p.bulan).eq('minggu', p.minggu), 'presensi');
-    if (error) throw error;
-
-    const peta = Object.fromEntries((data || []).map(r => [String(r.nisn), r]));
-    const ada = (data || []).length > 0;
-    $('prBadge').textContent = ada ? 'Data tersimpan · mode perbarui' : 'Periode baru';
-    $('prBadge').className = 'tag ' + (ada ? 'tag-sea' : 'tag-ok');
-
-    $('prBody').innerHTML = siswa.map((s, i) => {
-      const r = peta[String(s.nisn)] || {};
-      return `<tr data-nisn="${esc(s.nisn)}" data-nama="${esc(s.nama_siswa)}">
-        <td><div class="primary">${i+1}. ${esc(s.nama_siswa)}</div>
-            <div class="secondary">${esc(s.nisn)} · ${esc(s.kelas || '-')}</div></td>
-        ${['hadir','izin','sakit','alpa'].map(k =>
-          `<td class="center"><input class="num-in pr-${k}" type="number" min="0"
-             value="${Number(r[k] || 0)}"></td>`).join('')}
-      </tr>`;
-    }).join('') || barisKosong(5, 'Tidak ada santri pada kelas ini.',
-      'Periksa data santri atau cakupan kelas binaan Anda.');
-
-    document.querySelectorAll('#prBody .num-in')
-      .forEach(i => i.addEventListener('input', mdTotalPresensi));
-    mdTotalPresensi();
-    tandaiTabelBisaGeser();
-  } catch (err) { fireError(err); }
-  finally { loading(false); }
-}
-
-async function mdSimpanPresensi() {
-  const p = mdPeriodePresensi();
-  const baris = [...document.querySelectorAll('#prBody tr[data-nisn]')];
-  if (!p.kelas || !baris.length) return toast('error', 'Muat daftar santri terlebih dahulu.');
-
-  const rows = baris.map(tr => ({
-    nisn: tr.dataset.nisn,
-    nama_siswa: tr.dataset.nama,
-    kelas: p.kelas,
-    jenjang: APP.ctx.jenjang,
-    semester: p.semester,
-    tahun: p.tahun,
-    bulan: p.bulan,
-    minggu: p.minggu,
-    hadir: Number(tr.querySelector('.pr-hadir').value) || 0,
-    izin:  Number(tr.querySelector('.pr-izin').value)  || 0,
-    sakit: Number(tr.querySelector('.pr-sakit').value) || 0,
-    alpa:  Number(tr.querySelector('.pr-alpa').value)  || 0
+  document.querySelectorAll('[data-prtab]').forEach(b => b.addEventListener('click', async () => {
+    if (b.dataset.prtab === stPr.tab) return;
+    if (!(await prBolehPindah())) return;
+    stPr.tab = b.dataset.prtab;
+    document.querySelectorAll('[data-prtab]').forEach(x => x.classList.toggle('on', x === b));
+    await prMuat();
   }));
 
-  const btn = $('prSimpan');
-  const asli = mulaiSimpan(btn, 'Menyimpan Presensi…');
+  if (!window.__prJaga) {
+    window.__prJaga = true;
+    window.addEventListener('beforeunload', (e) => {
+      if (stPr.kotor && document.getElementById('prGrid')) { e.preventDefault(); e.returnValue = ''; }
+    });
+  }
+  prMuat();
+}
+
+/** Selaraskan tampilan filter dengan state (dipakai saat pindah dibatalkan). */
+function prSetelFilter(ulangBulan) {
+  if (!$('prKelas')) return;
+  $('prKelas').value = stPr.kelas;
+  $('prTa').value = String(stPr.ta);
+  if (ulangBulan) {
+    [...$('prBulan').options].forEach(o => {
+      const b = Number(o.value); o.textContent = `${BULAN_ID[b-1]} ${prTahun(stPr.ta, b)}`;
+    });
+  }
+  $('prBulan').value = String(stPr.bulan);
+  $('prTaTag').textContent = `TA ${prLabelTa(stPr.ta)} · ${prSmt(stPr.bulan)}`;
+}
+
+async function prBolehPindah() {
+  if (!stPr.kotor || !document.getElementById('prGrid')) { stPr.kotor = false; return true; }
+  const r = await Swal.fire({
+    icon: 'warning', title: 'Perubahan belum disimpan',
+    text: `Isian ${stPr.kelas} minggu ke-${stPr.minggu} belum disimpan. Tinggalkan tanpa menyimpan?`,
+    showCancelButton: true, confirmButtonText: 'Tinggalkan', cancelButtonText: 'Kembali',
+    confirmButtonColor: '#9F1239'
+  });
+  if (r.isConfirmed) stPr.kotor = false;
+  return r.isConfirmed;
+}
+
+/** Muat data sesuai tab aktif, lalu gambar. */
+async function prMuat() {
+  const el = $('prIsi'); if (!el) return;
+  const tahun = prTahun(stPr.ta, stPr.bulan);
   try {
-    // Periode ditulis ulang seluruhnya agar tidak ada baris ganda.
-    const hapus = await db.from('data_presensi').delete()
-      .eq('kelas', p.kelas).eq('semester', p.semester).eq('tahun', p.tahun)
-      .eq('bulan', p.bulan).eq('minggu', p.minggu);
-    if (hapus.error) throw hapus.error;
+    stPr.siswa = (await siswaMadrasah()).filter(s => s.kelas === stPr.kelas)
+      .sort((a, b) => String(a.nama_siswa).localeCompare(String(b.nama_siswa)));
 
-    const { error } = await db.from('data_presensi').insert(rows);
-    if (error) throw error;
-
-    selesaiSimpan(btn, asli, true, 'Presensi tersimpan');
-    toast('success', `Presensi ${p.kelas} · ${BULAN_ID[p.bulan-1]} minggu ke-${p.minggu} tersimpan.`);
-    $('prBadge').textContent = 'Data tersimpan · mode perbarui';
-    $('prBadge').className = 'tag tag-sea';
+    if (stPr.tab === 'akum') {
+      const bulanSmt = bulanSemester(prSmt(stPr.bulan));
+      const { data } = await q(db.from('data_presensi')
+        .select('nisn,nama_siswa,bulan,minggu,jenis,jp')
+        .eq('kelas', stPr.kelas).eq('tahun_ajaran', prLabelTa(stPr.ta))
+        .in('bulan', bulanSmt), 'akumulasi presensi');
+      stPr.akum = data || [];
+    } else {
+      const [d, pm] = await Promise.all([
+        q(db.from('data_presensi').select('*')
+          .eq('kelas', stPr.kelas).eq('tahun', tahun).eq('bulan', stPr.bulan), 'presensi'),
+        q(db.from('presensi_minggu').select('kelas,minggu,status')
+          .eq('tahun', tahun).eq('bulan', stPr.bulan), 'penanda minggu')
+      ]);
+      stPr.data = d.data || [];
+      stPr.pm = pm.data || [];
+    }
   } catch (err) {
-    selesaiSimpan(btn, asli, false, 'Gagal menyimpan');
-    fireError(err);
+    el.innerHTML = `<div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
+      Gagal memuat presensi: ${esc(err.message || err)}</div>`;
+    return;
+  }
+
+  if (stPr.tab === 'input') prGambarInput();
+  else if (stPr.tab === 'tempel') prGambarTempel();
+  else if (stPr.tab === 'laporan') prGambarLaporan();
+  else prGambarAkum();
+  tandaiTabelBisaGeser();
+}
+
+// ---------------------------------------------------------------------
+// 3a. INPUT MINGGUAN — kisi cepat S · IK · IP · A (JP)
+// ---------------------------------------------------------------------
+function prStatusMinggu(kelas, m) {
+  const pm = stPr.pm.find(r => r.kelas === kelas && Number(r.minggu) === m);
+  if (pm) return pm.status;                                  // 'selesai' | 'libur'
+  if (kelas === stPr.kelas && stPr.data.some(r => Number(r.minggu) === m)) return 'terisi';
+  return 'belum';
+}
+
+function prGambarInput() {
+  const m = stPr.minggu;
+  const baris = stPr.data.filter(r => Number(r.minggu) === m);
+  const peta = {};
+  baris.forEach(r => {
+    const o = peta[r.nisn] = peta[r.nisn] || { jp:{}, ket:new Set(), nama:r.nama_siswa };
+    o.jp[r.jenis] = r.jp;
+    if (r.keterangan) o.ket.add(r.keterangan);
+  });
+  // Santri yang punya catatan tetapi sudah pindah kelas tetap tampil.
+  const daftar = stPr.siswa.map(s => ({ nisn:String(s.nisn), nama:s.nama_siswa }));
+  Object.keys(peta).forEach(n => { if (!daftar.some(d => d.nisn === n)) daftar.push({ nisn:n, nama:peta[n].nama || n, luar:true }); });
+
+  const chipMinggu = [1,2,3,4,5].map(i => {
+    const st = prStatusMinggu(stPr.kelas, i);
+    const rs = stPr.data.filter(r => Number(r.minggu) === i);
+    const n = new Set(rs.map(r => r.nisn)).size;
+    const ik = { selesai:'fa-circle-check', libur:'fa-umbrella-beach', terisi:'fa-circle-half-stroke', belum:'fa-circle' }[st];
+    const ket = st === 'libur' ? 'Libur' : st === 'belum' ? 'Belum diinput' : n ? `${n} santri · ${rs.reduce((a, r) => a + r.jp, 0)} JP` : 'Nihil (hadir semua)';
+    return `<button class="pr-wk st-${st} ${i === m ? 'on' : ''}" data-prwk="${i}">
+      <b><i class="fa-solid ${ik}"></i> <span class="pj">Minggu ke-</span><span class="pp">M</span>${i}</b><small>${ket}</small></button>`;
+  }).join('');
+
+  const kelasLain = MDS.kelas;
+  const selesaiSemua = kelasLain.reduce((a, k) => a + [1,2,3,4,5].filter(i => ['selesai','libur'].includes(prStatusMinggu(k, i))).length, 0);
+  const matriks = `<details class="pr-matriks">
+    <summary><i class="fa-solid fa-table-list"></i> Papan kelengkapan semua kelas — ${esc(prPeriodeTeks())}
+      <span class="tag tag-sea">${selesaiSemua} / ${kelasLain.length * 5} minggu</span></summary>
+    <div class="pr-lebar"><table class="pr-mx">
+      <thead><tr><th>Kelas</th>${[1,2,3,4,5].map(i => `<th>M${i}</th>`).join('')}</tr></thead>
+      <tbody>${kelasLain.map(k => `<tr><th>${esc(k)}</th>${[1,2,3,4,5].map(i => {
+        const st = prStatusMinggu(k, i);
+        return `<td><button class="pr-mx-c st-${st}" data-prlompat="${esc(k)}|${i}"
+          title="${esc(k)} minggu ke-${i}: ${st}">${{ selesai:'✓', libur:'L', terisi:'•', belum:'–' }[st]}</button></td>`;
+      }).join('')}</tr>`).join('')}</tbody></table></div>
+    <p class="pr-cat">✓ selesai · L libur · – belum diinput. Klik sel untuk langsung membuka kelas &amp; minggunya.</p>
+  </details>`;
+
+  const bolehIsi = bisa('presensi.isi');
+  const kisi = daftar.map((s, i) => {
+    const o = peta[s.nisn] || { jp:{}, ket:new Set() };
+    return `<div class="pr-row" data-nisn="${esc(s.nisn)}" data-nama="${esc(s.nama)}">
+      <span class="pr-no">${i + 1}</span>
+      <span class="pr-nama"><b>${esc(s.nama)}</b><small>${esc(s.nisn)}${s.luar ? ' · sudah pindah kelas' : ''}</small></span>
+      ${PR_KODE.map(k => `<input class="pr-in j-${k}" data-j="${k}" placeholder="${k}" inputmode="numeric" autocomplete="off"
+          aria-label="${PR_INFO[k].nama} ${esc(s.nama)} (JP)" value="${o.jp[k] || ''}" ${bolehIsi ? '' : 'readonly'}>`).join('')}
+      <input class="pr-ket" placeholder="Keterangan" value="${esc([...o.ket].join('; '))}" ${bolehIsi ? '' : 'readonly'}
+          aria-label="Keterangan ${esc(s.nama)}">
+      <span class="pr-tot" title="Total JP minggu ini">0</span>
+    </div>`;
+  }).join('');
+
+  $('prIsi').innerHTML = `
+    <div class="pr-weeks">${chipMinggu}</div>
+    ${matriks}
+    <div class="minis">${PR_JENIS.map(j => `<div class="mini ${j.mini}">
+      <span>${j.nama}</span><b id="prSum${j.k}">0</b></div>`).join('')}</div>
+    <div class="pr-grid-wrap">
+      <div class="pr-grid" id="prGrid">
+        <div class="pr-row pr-head">
+          <span class="pr-no">No</span><span class="pr-nama">Nama Santri · ${esc(stPr.kelas)}</span>
+          ${PR_JENIS.map(j => `<span class="pr-h j-${j.k}" title="${j.nama}">${j.k}</span>`).join('')}
+          <span class="pr-h">Keterangan</span><span class="pr-h">Σ JP</span>
+        </div>
+        ${kisi || `<div class="pr-kosong">Tidak ada santri pada kelas ini.</div>`}
+      </div>
+    </div>
+    <div class="md-bar pr-bar">
+      <span class="note-min"><i class="fa-solid fa-keyboard"></i>
+        Kosong = hadir · <b>Enter/↓</b> turun satu santri · <b>2h</b> = 2 hari = ${2*JP_PER_HARI} JP · <b>Ctrl+S</b> simpan</span>
+      ${bolehIsi ? `<span class="pr-aksi">
+        <button class="btn btn-ghost btn-sm" id="prLibur"><i class="fa-solid fa-umbrella-beach"></i>Tandai Libur</button>
+        <button class="btn btn-ghost btn-sm" id="prSimpan"><i class="fa-solid fa-floppy-disk"></i>Simpan</button>
+        ${m < 5 ? `<button class="btn btn-primary btn-sm" id="prSimpanLanjut"><i class="fa-solid fa-forward"></i>Simpan &amp; Minggu ke-${m + 1}</button>` : ''}
+      </span>` : '<span class="tag tag-off">Hanya baca</span>'}
+    </div>`;
+
+  prHitungKisi();
+  stPr.kotor = false;
+  prPasangInput();
+}
+
+function prHitungKisi() {
+  const jml = { S:0, IK:0, IP:0, A:0 };
+  document.querySelectorAll('#prGrid .pr-row[data-nisn]').forEach(row => {
+    let t = 0;
+    row.querySelectorAll('.pr-in').forEach(inp => {
+      const v = prNilaiJp(inp.value);
+      inp.classList.toggle('salah', Number.isNaN(v));
+      if (!Number.isNaN(v)) { t += v; jml[inp.dataset.j] += v; }
+    });
+    const tot = row.querySelector('.pr-tot');
+    tot.textContent = t || '·';
+    tot.classList.toggle('lebih', t > JP_MAKS_MINGGU);
+    row.classList.toggle('ada', t > 0);
+  });
+  PR_KODE.forEach(k => { const b = $('prSum' + k); if (b) b.textContent = `${jml[k]} JP`; });
+}
+
+function prPasangInput() {
+  const grid = $('prGrid');
+  const kolom = ['S','IK','IP','A','ket'];
+  const fokus = (row, j) => {
+    if (!row) return;
+    const t = j === 'ket' ? row.querySelector('.pr-ket') : row.querySelector(`.pr-in[data-j="${j}"]`);
+    if (t) { t.focus(); t.select?.(); }
+  };
+  const barisBerikut = (row, arah) => {
+    let r = arah > 0 ? row.nextElementSibling : row.previousElementSibling;
+    while (r && !r.dataset.nisn) r = arah > 0 ? r.nextElementSibling : r.previousElementSibling;
+    return r;
+  };
+
+  grid.addEventListener('input', () => { stPr.kotor = true; prHitungKisi(); });
+  grid.addEventListener('focusin', e => { if (e.target.matches('.pr-in')) e.target.select(); });
+  grid.addEventListener('change', e => {
+    if (!e.target.matches('.pr-in')) return;
+    const v = prNilaiJp(e.target.value);
+    if (!Number.isNaN(v)) e.target.value = v || '';
+    prHitungKisi();
+  });
+  grid.addEventListener('keydown', e => {
+    const t = e.target; const row = t.closest('.pr-row[data-nisn]'); if (!row) return;
+    const j = t.matches('.pr-ket') ? 'ket' : t.dataset.j;
+    if (e.key === 'Enter' || (e.key === 'ArrowDown' && j !== 'ket') || (e.key === 'ArrowDown' && e.altKey)) {
+      e.preventDefault();
+      if (t.matches('.pr-in')) t.dispatchEvent(new Event('change', { bubbles:true }));
+      fokus(barisBerikut(row, e.shiftKey ? -1 : 1), j);
+    } else if (e.key === 'ArrowUp' && j !== 'ket') {
+      e.preventDefault(); fokus(barisBerikut(row, -1), j);
+    } else if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && t.selectionStart === t.selectionEnd) {
+      const ujung = e.key === 'ArrowRight' ? t.selectionStart >= t.value.length : t.selectionStart === 0;
+      if (!ujung) return;
+      const i = kolom.indexOf(j) + (e.key === 'ArrowRight' ? 1 : -1);
+      if (i >= 0 && i < kolom.length) { e.preventDefault(); fokus(row, kolom[i]); }
+    }
+  });
+
+  document.querySelectorAll('[data-prwk]').forEach(b => b.addEventListener('click', async () => {
+    const m = Number(b.dataset.prwk);
+    if (m === stPr.minggu || !(await prBolehPindah())) return;
+    stPr.minggu = m; prGambarInput();
+  }));
+  document.querySelectorAll('[data-prlompat]').forEach(b => b.addEventListener('click', async () => {
+    const [k, m] = b.dataset.prlompat.split('|');
+    if (!(await prBolehPindah())) return;
+    stPr.kelas = k; stPr.minggu = Number(m); prSetelFilter();
+    await prMuat();
+  }));
+
+  $('prSimpan')?.addEventListener('click', () => prSimpanMinggu(false));
+  $('prSimpanLanjut')?.addEventListener('click', () => prSimpanMinggu(true));
+  $('prLibur')?.addEventListener('click', prTandaiLibur);
+
+  if (!window.__prCtrlS) {
+    window.__prCtrlS = true;
+    document.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && document.getElementById('prGrid')
+          && stPr.tab === 'input' && $('prSimpan')) {
+        e.preventDefault(); prSimpanMinggu(false);
+      }
+    });
   }
 }
 
-async function mdTampilkanRekapPresensi() {
-  const kelas = $('rpKelas').value;
-  const semester = $('rpSemester').value;
-  const tahun = Number($('rpTahun').value);
-  if (!kelas) return toast('error', 'Pilih kelas untuk rekap.');
+function prBarisKisi() {
+  const rows = [], salah = [], lebih = [];
+  document.querySelectorAll('#prGrid .pr-row[data-nisn]').forEach(row => {
+    const ket = row.querySelector('.pr-ket').value.trim();
+    let t = 0;
+    row.querySelectorAll('.pr-in').forEach(inp => {
+      const v = prNilaiJp(inp.value);
+      if (Number.isNaN(v)) { salah.push(row.dataset.nama); return; }
+      if (v > 0) {
+        t += v;
+        rows.push({ nisn: row.dataset.nisn, nama_siswa: row.dataset.nama, minggu: stPr.minggu,
+                    jenis: inp.dataset.j, jp: v, keterangan: ket || null });
+      }
+    });
+    if (t > JP_MAKS_MINGGU) lebih.push(`${row.dataset.nama} (${t} JP)`);
+  });
+  return { rows, salah, lebih };
+}
 
+async function prKirim(minggu, rows, libur, btn, label) {
+  const asli = mulaiSimpan(btn, label || 'Menyimpan presensi…');
+  try {
+    const { data } = await q(db.rpc('simpan_presensi', {
+      p_kelas: stPr.kelas, p_tahun: prTahun(stPr.ta, stPr.bulan), p_bulan: stPr.bulan,
+      p_minggu: minggu, p_rows: rows, p_jenjang: APP.ctx.jenjang || null, p_libur: libur || []
+    }), 'simpan presensi');
+    selesaiSimpan(btn, asli, true, 'Presensi tersimpan');
+    stPr.kotor = false;
+    return data || {};
+  } catch (err) {
+    selesaiSimpan(btn, asli, false, 'Gagal menyimpan');
+    fireError(err);
+    return null;
+  }
+}
+
+async function prSimpanMinggu(lanjut) {
+  const { rows, salah, lebih } = prBarisKisi();
+  if (salah.length) return toast('error', `Isian JP tidak valid: ${[...new Set(salah)].slice(0, 3).join(', ')}. Gunakan angka atau format 2h.`);
+  if (lebih.length) {
+    const r = await Swal.fire({ icon:'warning', title:'JP melebihi satu minggu',
+      html:`Lebih dari ${JP_MAKS_MINGGU} JP (6 hari) dalam seminggu:<br><b>${esc(lebih.join(', '))}</b><br>Tetap simpan?`,
+      showCancelButton:true, confirmButtonText:'Tetap simpan', cancelButtonText:'Periksa lagi', confirmButtonColor:'#14618B' });
+    if (!r.isConfirmed) return;
+  }
+  const btn = lanjut ? $('prSimpanLanjut') : $('prSimpan');
+  const hasil = await prKirim([stPr.minggu], rows, [], btn);
+  if (!hasil) return;
+  const n = new Set(rows.map(r => r.nisn)).size;
+  toast('success', `${stPr.kelas} · ${BULAN_ID[stPr.bulan-1]} minggu ke-${stPr.minggu}: ${n ? `${n} santri tidak hadir` : 'nihil, hadir semua'} — tersimpan.`);
+  if (lanjut && stPr.minggu < 5) stPr.minggu++;
+  await prMuat();
+  if (lanjut) setTimeout(() => document.querySelector('#prGrid .pr-in')?.focus(), 60);
+}
+
+async function prTandaiLibur() {
+  const ada = stPr.data.filter(r => Number(r.minggu) === stPr.minggu).length;
+  const r = await Swal.fire({ icon:'question', title:`Minggu ke-${stPr.minggu} libur?`,
+    html: ada ? `Minggu ini sudah berisi <b>${ada} catatan</b> yang akan <b>dihapus</b>.` :
+                'Minggu ini akan ditandai libur dan tidak dihitung sebagai tunggakan input.',
+    showCancelButton:true, confirmButtonText:'Tandai libur', cancelButtonText:'Batal', confirmButtonColor:'#14618B' });
+  if (!r.isConfirmed) return;
+  if (await prKirim([stPr.minggu], [], [stPr.minggu], $('prLibur'), 'Menandai libur…')) {
+    toast('success', `Minggu ke-${stPr.minggu} ditandai libur.`);
+    await prMuat();
+  }
+}
+
+// ---------------------------------------------------------------------
+// 3b. TEMPEL / IMPOR EXCEL — baca blok bagian D–G apa adanya
+// ---------------------------------------------------------------------
+const PR_SINGKAT = /^(MUHAMMAD|MUHAMAD|MUHAMMED|MUHAMED|MOHAMMAD|MUHD|MHD|MOHD|MOH|MUH)$/;
+function prToken(nama) {
+  return String(nama || '').toUpperCase().replace(/\(.*?\)/g, ' ')
+    .split(/[^A-Z]+/).filter(Boolean).map(t => PR_SINGKAT.test(t) ? 'M' : t);
+}
+function prMirip(a, b) {
+  if (a === b) return 1;
+  if (a.length >= 3 && b.startsWith(a)) return 0.92;
+  const m = a.length, n = b.length; if (!m || !n) return 0;
+  let prev = Array.from({ length:n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++)
+      cur[j] = Math.min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+    prev = cur;
+  }
+  return 1 - prev[n] / Math.max(m, n);
+}
+function prSkorNama(asal, target) {
+  const ta = prToken(asal), tb = prToken(target);
+  if (!ta.length || !tb.length) return 0;
+  const inti = ta.reduce((s, t) => s + Math.max(...tb.map(u => prMirip(t, u))), 0) / ta.length;
+  return inti - 0.02 * Math.abs(ta.length - tb.length);
+}
+function prCocokkan(asal) {
+  const alias = prLokal('alias') || {};
+  const kunci = prToken(asal).join(' ');
+  if (alias[kunci] && stPr.siswa.some(s => String(s.nisn) === alias[kunci]))
+    return { nisn: alias[kunci], skor: 1, ragu: false, alias: true };
+  const urut = stPr.siswa.map(s => ({ nisn:String(s.nisn), skor:prSkorNama(asal, s.nama_siswa) }))
+    .sort((a, b) => b.skor - a.skor);
+  const [p1, p2] = urut;
+  if (!p1 || p1.skor < 0.8) return { nisn:'', skor:p1?.skor || 0, ragu:true };
+  return { nisn:p1.nisn, skor:p1.skor, ragu: !!p2 && p1.skor - p2.skor < 0.06 };
+}
+
+function prKodeDari(teks) {
+  if (/IZIN\s*KEGIATAN|\(IK\)|^IK$/.test(teks)) return 'IK';
+  if (/IZIN\s*PULANG|\(IP\)|^IP$/.test(teks)) return 'IP';
+  if (/SAKIT|^S$/.test(teks)) return 'S';
+  if (/ALPA|ALFA|ALPHA|TANPA\s*KET|^A$/.test(teks)) return 'A';
+  return null;
+}
+
+/** Mengurai teks tempelan (dari Excel sekolah, WhatsApp, atau ketikan bebas). */
+function prUraiTeks(teks, bawaan) {
+  const hasil = [], lewat = [];
+  let jenis = null, minggu = null, diam = false, adaJudul = false;
+  teks.replace(/\r/g, '').split('\n').forEach((mentah, idx) => {
+    const sel = mentah.split('\t').map(s => s.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+    if (!sel.length) return;
+    const gab = sel.join(' ').toUpperCase();
+
+    const mg = gab.match(/^MINGGU\s*(?:KE)?\s*[-–.:]?\s*([1-5])\b/);
+    if (mg) { minggu = Number(mg[1]); return; }
+    if (/BERMASALAH|GURU YANG|INVENTARIS|LAIN-LAIN|MUTASI|KEADAAN SISWA|ABSENSI SISWA DALAM/.test(gab)) {
+      diam = true; jenis = null; return;                      // bagian di luar D–G / rekap C
+    }
+    if (/KARENA/.test(gab)) {
+      const k = prKodeDari(gab.replace(/.*KARENA/, ''));
+      if (k) { jenis = k; diam = false; adaJudul = true; }
+      return;
+    }
+    const pendek = gab.replace(/[:.\-]+$/g, '').trim();
+    if (/^(SAKIT|S|IZIN KEGIATAN( \(IK\))?|IK|IZIN PULANG( \(IP\))?|IP|ALPA|ALFA|ALPHA|A|TANPA KETERANGAN)$/.test(pendek)) {
+      if (!diam) { jenis = prKodeDari(pendek); adaJudul = true; }
+      return;
+    }
+    if (/NAMA SISWA|^NO\b|JUMLAH .* PER-?JP|^LAPORAN|^MADRASAH|^TAHUN AJARAN|^BULAN|^KELAS|^WALI KELAS|MENGETAHUI|KEPALA MADRASAH/.test(gab)) return;
+    if (diam) return;
+
+    // --- baris data ---
+    let nama = '', jp = NaN, ket = '';
+    if (sel.length === 1) {
+      const t = sel[0].replace(/^\d+\s*[.)]\s*/, '');
+      const m = t.match(/^(.*?[A-Za-z'.\-][^0-9]*?)\s*[:=\-–]?\s*(\d+(?:[.,]\d+)?)\s*(jp|j\.p|h|hr|hari)?\b\.?\s*(.*)$/i);
+      if (m) { nama = m[1]; jp = prNilaiJp(m[2] + (m[3] && !/^j/i.test(m[3]) ? 'h' : '')); ket = m[4]; }
+      else nama = t;
+    } else {
+      let i = 0;
+      while (i < sel.length && /^\d+[.)]?$/.test(sel[i])) i++;   // kolom NO
+      nama = sel[i] || '';
+      for (let j = i + 1; j < sel.length; j++) {
+        const v = prNilaiJp(sel[j].replace(/\s+/g, '').replace(/j\.?p$/i, 'jp'));
+        if (!Number.isNaN(v)) { jp = v; ket = sel.slice(j + 1).join(' '); break; }
+      }
+    }
+    nama = nama.replace(/\(.*?\)/g, '').replace(/[:=\-–]+$/, '').trim();
+    if (!/[A-Za-z]{2,}/.test(nama)) return;
+    const j = jenis || (adaJudul ? null : bawaan.jenis);
+    const m = minggu || bawaan.minggu;
+    if (!j) { lewat.push({ baris: idx + 1, teks: mentah.trim(), alasan:'jenis belum jelas' }); return; }
+    if (Number.isNaN(jp) || !jp) { lewat.push({ baris: idx + 1, teks: mentah.trim(), alasan:'tanpa JP' }); return; }
+    const c = prCocokkan(nama);
+    hasil.push({ asal: nama, nisn: c.nisn, skor: c.skor, ragu: c.ragu, alias: !!c.alias,
+                 minggu: m, jenis: j, jp, ket: ket.replace(/^[-–:]\s*/, '').trim(), pakai: !!c.nisn });
+  });
+  return { hasil, lewat };
+}
+
+function prGambarTempel() {
+  const t = stPr.tempel || {};
+  const bolehIsi = bisa('presensi.isi');
+  $('prIsi').innerHTML = `
+    <div class="card-note"><i class="fa-solid fa-wand-magic-sparkles"></i>
+      Salin blok dari lembar <b>Laporan Bulanan Wali Kelas</b> (bagian D–G, boleh satu bulan penuh),
+      daftar dari WhatsApp, atau buka berkas Excel-nya langsung. Judul bagian
+      (SAKIT / IZIN KEGIATAN / IZIN PULANG / ALPA) dan <b>MINGGU KE-n</b> dikenali otomatis;
+      nama dicocokkan ke santri <b>${esc(stPr.kelas)}</b> walau ejaannya berbeda.</div>
+    <div class="md-form pr-tempel-form">
+      <div class="field"><label class="label">Jenis bila tanpa judul</label>
+        <select id="ptJenis" class="input">${PR_JENIS.map(j =>
+          `<option value="${j.k}" ${t.jenis === j.k ? 'selected' : ''}>${j.k} · ${j.nama}</option>`).join('')}</select></div>
+      <div class="field"><label class="label">Minggu bila tanpa judul</label>
+        <select id="ptMinggu" class="input">${[1,2,3,4,5].map(i =>
+          `<option value="${i}" ${(t.minggu || stPr.minggu) === i ? 'selected' : ''}>Minggu ke-${i}</option>`).join('')}</select></div>
+      <div class="field"><label class="label">Cara menyimpan</label>
+        <select id="ptMode" class="input">
+          <option value="timpa" ${t.mode !== 'gabung' ? 'selected' : ''}>Timpa minggu yang ada di tempelan</option>
+          <option value="gabung" ${t.mode === 'gabung' ? 'selected' : ''}>Gabungkan dengan data lama</option></select></div>
+      <div class="field"><label class="label">Berkas Excel sekolah</label>
+        <label class="btn btn-ghost btn-sm pr-file"><i class="fa-solid fa-file-excel"></i>Buka .xlsx
+          <input type="file" id="ptFile" accept=".xlsx,.xls,.ods" hidden></label></div>
+      <div class="field wide"><label class="label">Teks tempelan</label>
+        <textarea id="ptTeks" class="input pr-teks" rows="9" spellcheck="false"
+          placeholder="Contoh:&#10;MINGGU KE-2&#10;SAKIT&#10;Beyli	8&#10;M. Irja 6 JP demam&#10;ALPA&#10;Kalkautsar 2h">${esc(t.teks || '')}</textarea></div>
+    </div>
+    <div class="md-bar"><span class="note-min" id="ptInfo"><i class="fa-solid fa-circle-info"></i>
+      Tidak ada yang tersimpan sebelum Anda menekan tombol simpan di pratinjau.</span>
+      <button class="btn btn-primary btn-sm" id="ptBaca"><i class="fa-solid fa-magnifying-glass"></i>Baca Teks</button></div>
+    <div id="ptPratinjau"></div>`;
+
+  const simpanForm = () => {
+    stPr.tempel = { ...(stPr.tempel || {}), teks:$('ptTeks').value, jenis:$('ptJenis').value,
+                    minggu:Number($('ptMinggu').value), mode:$('ptMode').value };
+  };
+  ['ptTeks','ptJenis','ptMinggu','ptMode'].forEach(id => $(id).addEventListener('change', simpanForm));
+  $('ptBaca').addEventListener('click', () => { simpanForm(); prBacaTempel(); });
+  $('ptFile').addEventListener('change', e => prBukaExcel(e.target.files[0]));
+  if (t.hasil) prGambarPratinjau(bolehIsi);
+}
+
+function prBacaTempel() {
+  const t = stPr.tempel;
+  if (!t.teks?.trim()) return toast('error', 'Tempel teks terlebih dahulu.');
+  const { hasil, lewat } = prUraiTeks(t.teks, { jenis:t.jenis, minggu:t.minggu });
+  t.hasil = hasil; t.lewat = lewat;
+  if (!hasil.length) toast('warning', 'Tidak ada baris santri + JP yang terbaca.');
+  prGambarPratinjau(bisa('presensi.isi'));
+}
+
+function prGambarPratinjau(bolehIsi) {
+  const t = stPr.tempel; const el = $('ptPratinjau'); if (!el) return;
+  const h = t.hasil || [];
+  const opsi = (pilih) => `<option value="">— pilih santri —</option>` + stPr.siswa.map(s =>
+    `<option value="${esc(s.nisn)}" ${String(s.nisn) === pilih ? 'selected' : ''}>${esc(s.nama_siswa)}</option>`).join('');
+  const cocok = h.filter(r => r.nisn && !r.ragu).length;
+  const cek = h.filter(r => !r.nisn || r.ragu).length;
+  const minggu = [...new Set(h.filter(r => r.pakai && r.nisn).map(r => r.minggu))].sort();
+  const lama = stPr.data.filter(r => minggu.includes(Number(r.minggu))).length;
+
+  el.innerHTML = `
+    <div class="minis">
+      <div class="mini t"><span>Terbaca</span><b>${h.length}</b></div>
+      <div class="mini s"><span>Cocok otomatis</span><b>${cocok}</b></div>
+      <div class="mini a"><span>Perlu dicek</span><b>${cek}</b></div>
+      <div class="mini m"><span>Dilewati</span><b>${(t.lewat || []).length}</b></div>
+    </div>
+    ${(t.lewat || []).length ? `<details class="pr-lewat"><summary>${t.lewat.length} baris dilewati — lihat</summary>
+      <ul>${t.lewat.map(l => `<li><code>baris ${l.baris}</code> ${esc(l.teks)} <em>(${esc(l.alasan)})</em></li>`).join('')}</ul></details>` : ''}
+    <div class="tbl" style="margin-top:12px"><table class="pr-prev">
+      <thead><tr><th class="center">Pakai</th><th>Tertulis</th><th>Santri ${esc(stPr.kelas)}</th>
+        <th class="center">Minggu</th><th class="center">Jenis</th><th class="center">JP</th><th>Keterangan</th></tr></thead>
+      <tbody>${h.map((r, i) => `<tr class="${!r.nisn ? 'pr-x' : r.ragu ? 'pr-ragu' : ''}" data-i="${i}">
+        <td class="center"><input type="checkbox" class="pt-pakai" ${r.pakai ? 'checked' : ''} ${r.nisn ? '' : 'disabled'}></td>
+        <td>${esc(r.asal)}${r.alias ? ' <span class="tag tag-sea">alias</span>' : ''}</td>
+        <td><select class="input pt-santri">${opsi(r.nisn)}</select>
+          ${!r.nisn ? '<small class="pr-cat">tidak dikenali</small>' : r.ragu ? '<small class="pr-cat">mirip nama lain — periksa</small>' : ''}</td>
+        <td class="center">${r.minggu}</td>
+        <td class="center"><span class="pr-jb j-${r.jenis}">${r.jenis}</span></td>
+        <td class="center"><b>${r.jp}</b></td>
+        <td>${esc(r.ket || '')}</td></tr>`).join('') || barisKosong(7, 'Belum ada baris terbaca.', '')}</tbody>
+    </table></div>
+    ${bolehIsi && h.length ? `<div class="md-bar">
+      <span class="note-min"><i class="fa-solid fa-triangle-exclamation"></i>
+        ${t.mode === 'gabung' ? 'Mode gabung: data lama dipertahankan, baris yang sama diganti.' :
+          lama ? `Mode timpa: <b>${lama} catatan lama</b> pada minggu ${minggu.join(', ')} akan diganti.` :
+                 `Minggu ${minggu.join(', ') || '-'} akan ditandai selesai.`}</span>
+      <button class="btn btn-primary btn-sm" id="ptSimpan"><i class="fa-solid fa-floppy-disk"></i>
+        Simpan ke ${esc(stPr.kelas)} · ${esc(prPeriodeTeks())}</button></div>` : ''}`;
+
+  el.querySelectorAll('tr[data-i]').forEach(tr => {
+    const r = h[Number(tr.dataset.i)];
+    tr.querySelector('.pt-pakai').addEventListener('change', e => { r.pakai = e.target.checked; prGambarPratinjau(bolehIsi); });
+    tr.querySelector('.pt-santri').addEventListener('change', e => {
+      r.nisn = e.target.value; r.ragu = false; r.pakai = !!r.nisn;
+      if (r.nisn) {                                    // ingat ejaan ini untuk tempelan berikutnya
+        const alias = prLokal('alias') || {};
+        alias[prToken(r.asal).join(' ')] = r.nisn; prLokal('alias', alias);
+      }
+      prGambarPratinjau(bolehIsi);
+    });
+  });
+  $('ptSimpan')?.addEventListener('click', prSimpanTempel);
+  tandaiTabelBisaGeser();
+}
+
+async function prSimpanTempel() {
+  const t = stPr.tempel;
+  const pakai = t.hasil.filter(r => r.pakai && r.nisn);
+  if (!pakai.length) return toast('error', 'Tidak ada baris yang dipilih.');
+  const minggu = [...new Set(pakai.map(r => r.minggu))].sort();
+  const nama = Object.fromEntries(stPr.siswa.map(s => [String(s.nisn), s.nama_siswa]));
+
+  const peta = new Map();
+  if (t.mode === 'gabung') {
+    stPr.data.filter(r => minggu.includes(Number(r.minggu))).forEach(r =>
+      peta.set(`${r.nisn}|${r.minggu}|${r.jenis}`, { nisn:r.nisn, nama_siswa:r.nama_siswa,
+        minggu:Number(r.minggu), jenis:r.jenis, jp:r.jp, keterangan:r.keterangan }));
+  }
+  const baru = new Map();
+  pakai.forEach(r => {
+    const k = `${r.nisn}|${r.minggu}|${r.jenis}`;
+    const o = baru.get(k) || { nisn:r.nisn, nama_siswa:nama[r.nisn] || r.asal, minggu:r.minggu,
+                               jenis:r.jenis, jp:0, keterangan:null };
+    o.jp = Math.min(60, o.jp + r.jp);
+    if (r.ket) o.keterangan = o.keterangan ? `${o.keterangan}; ${r.ket}` : r.ket;
+    baru.set(k, o);
+  });
+  baru.forEach((v, k) => peta.set(k, v));
+
+  const lama = stPr.data.filter(r => minggu.includes(Number(r.minggu))).length;
+  const r = await Swal.fire({ icon:'question', title:'Simpan hasil tempelan?',
+    html:`<b>${baru.size}</b> catatan ke <b>${esc(stPr.kelas)}</b> · ${esc(prPeriodeTeks())}, minggu ${minggu.join(', ')}.
+      ${t.mode !== 'gabung' && lama ? `<br><span style="color:#9F1239">${lama} catatan lama pada minggu tersebut diganti.</span>` : ''}`,
+    showCancelButton:true, confirmButtonText:'Simpan', cancelButtonText:'Batal', confirmButtonColor:'#14618B' });
+  if (!r.isConfirmed) return;
+
+  const hasil = await prKirim(minggu, [...peta.values()], [], $('ptSimpan'), 'Menyimpan tempelan…');
+  if (!hasil) return;
+  toast('success', `${baru.size} catatan tersimpan (minggu ${minggu.join(', ')}).`);
+  stPr.tempel = { jenis:t.jenis, minggu:t.minggu, mode:t.mode };
+  stPr.tab = 'laporan';
+  document.querySelectorAll('[data-prtab]').forEach(x => x.classList.toggle('on', x.dataset.prtab === 'laporan'));
+  await prMuat();
+}
+
+/** SheetJS dimuat hanya saat dibutuhkan (impor/ekspor Excel). */
+let PR_XLSX = null;
+function prMuatXlsx() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (PR_XLSX) return PR_XLSX;
+  PR_XLSX = new Promise((ok, gagal) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload = () => ok(window.XLSX);
+    s.onerror = () => { PR_XLSX = null; gagal(new Error('Pustaka Excel gagal dimuat. Periksa koneksi internet.')); };
+    document.head.appendChild(s);
+  });
+  return PR_XLSX;
+}
+
+async function prBukaExcel(berkas) {
+  if (!berkas) return;
   loading(true);
   try {
-    const { data, error } = await q(db.from('data_presensi').select('*')
-      .eq('kelas', kelas).eq('semester', semester).eq('tahun', tahun), 'rekap presensi');
-    if (error) throw error;
+    const XLSX = await prMuatXlsx();
+    const wb = XLSX.read(await berkas.arrayBuffer(), { type:'array' });
+    const bulanNama = BULAN_ID[stPr.bulan - 1].toUpperCase();
+    const bulanan = wb.SheetNames.filter(n => /LAPORAN|BULAN/i.test(n) && !/AKUMULASI/i.test(n));
+    loading(false);
 
-    const bulan = bulanSemester(semester);
-    const peta = new Map();
-    (data || []).forEach(r => {
-      const k = String(r.nisn);
-      if (!peta.has(k)) peta.set(k, {
-        nisn: k, nama: r.nama_siswa || '(tidak ditemukan)',
-        bulan: {}, total: { hadir:0, izin:0, sakit:0, alpa:0 }
-      });
-      const o = peta.get(k);
-      const b = Number(r.bulan);
-      o.bulan[b] = o.bulan[b] || { hadir:0, izin:0, sakit:0, alpa:0 };
-      ['hadir','izin','sakit','alpa'].forEach(x => {
-        const v = Number(r[x]) || 0;
-        o.bulan[b][x] += v;
-        o.total[x] += v;
-      });
+    let nama = wb.SheetNames.find(n => n.toUpperCase().includes(bulanNama)) || bulanan[0] || wb.SheetNames[0];
+    if (wb.SheetNames.length > 1) {
+      const r = await Swal.fire({ title:'Pilih sheet', input:'select',
+        inputOptions: Object.fromEntries(wb.SheetNames.map(n => [n, n])), inputValue: nama,
+        showCancelButton:true, confirmButtonText:'Baca sheet', cancelButtonText:'Batal', confirmButtonColor:'#14618B' });
+      if (!r.isConfirmed) return;
+      nama = r.value;
+    }
+    if (/AKUMULASI/i.test(nama)) return toast('warning', 'Sheet Akumulasi tidak memuat rincian per minggu. Pilih sheet "Laporan Bulan …".');
+
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[nama], { header:1, raw:false, blankrows:false, defval:'' });
+    const teks = aoa.map(r => r.map(v => String(v ?? '').replace(/[\t\n]/g, ' ')).join('\t')).join('\n');
+
+    // Bulan diambil dari NAMA SHEET: judul di dalam sheet sering tertinggal
+    // dari salinan bulan sebelumnya (contoh: sheet Agustus bertuliskan SEPTEMBER).
+    const b = BULAN_ID.findIndex(x => nama.toUpperCase().includes(x.toUpperCase())) + 1;
+    stPr.tempel = { ...(stPr.tempel || {}), teks, sumber: `${berkas.name} › ${nama}`,
+                    jenis:$('ptJenis').value, minggu:Number($('ptMinggu').value), mode:$('ptMode').value };
+    if (b && b !== stPr.bulan) {
+      stPr.bulan = b; prSetelFilter();
+      toast('info', `Bulan disesuaikan dengan nama sheet: ${BULAN_ID[b-1]}.`);
+      await prMuat();                                 // muat data bulan itu (untuk peringatan timpa)
+    } else prGambarTempel();
+    prBacaTempel();
+    const info = $('ptInfo'); if (info) info.innerHTML = `<i class="fa-solid fa-file-excel"></i> Dibaca dari <b>${esc(stPr.tempel.sumber)}</b>`;
+  } catch (err) { loading(false); fireError(err); }
+}
+
+// ---------------------------------------------------------------------
+// 3c. LAPORAN BULANAN — bagian C s.d. G persis lembar sekolah
+// ---------------------------------------------------------------------
+function prWalasOtomatis(kelas) {
+  const g = (stPr.walasDb || []).find(p => p.role === 'Walas' && (p.kelas_binaan || []).includes(kelas));
+  return g?.nama || '';
+}
+
+async function prMuatWalas() {
+  if (stPr.walasDb) return;
+  try {
+    const { data } = await db.from('profiles').select('nama,role,kelas_binaan,aktif').eq('role', 'Walas');
+    stPr.walasDb = (data || []).filter(p => p.aktif !== false);
+  } catch (e) { stPr.walasDb = []; }
+}
+
+function prDokumen() {
+  const tahun = prTahun(stPr.ta, stPr.bulan);
+  const akhir = new Date(tahun, stPr.bulan, 0).getDate();
+  const ttd = prLokal('ttd:' + (APP.ctx.jenjang || '')) || {};
+  const walas = prLokal('walas:' + stPr.kelas) || prWalasOtomatis(stPr.kelas);
+  return {
+    madrasah: APP.ctx.jenjang === 'MTs' ? "MADRASAH TSANAWIYAH RUHUL QUR'ANI" : 'MADRASAH ALIYAH RUHUL QURANI',
+    ta: prLabelTa(stPr.ta), bulan: BULAN_ID[stPr.bulan - 1].toUpperCase(), kelas: stPr.kelas,
+    walas, kepala: ttd.kepala ?? 'Muammar Zainun, Lc., M.Ag.', tempat: ttd.tempat ?? 'Aceh Barat',
+    tanggal: `${akhir} ${BULAN_ID[stPr.bulan - 1]} ${tahun}`,
+    jumlah: stPr.siswa.length
+  };
+}
+
+/** Susun isi bagian C–G dari data bulan terpilih. */
+function prIsiLaporan() {
+  const libur = new Set(stPr.pm.filter(r => r.kelas === stPr.kelas && r.status === 'libur').map(r => Number(r.minggu)));
+  const bag = {};
+  PR_KODE.forEach(k => {
+    const rs = stPr.data.filter(r => r.jenis === k);
+    bag[k] = {
+      siswa: new Set(rs.map(r => r.nisn)).size,
+      jp: rs.reduce((a, r) => a + r.jp, 0),
+      minggu: [1,2,3,4,5].map(m => ({
+        m, libur: libur.has(m),
+        baris: rs.filter(r => Number(r.minggu) === m)
+                 .sort((a, b) => String(a.nama_siswa).localeCompare(String(b.nama_siswa)))
+      }))
+    };
+  });
+  return bag;
+}
+
+function prHtmlLaporan(dok, bag) {
+  const B = 'border:1px solid #000;padding:3px 6px;';
+  const TH = B + 'font-weight:bold;text-align:center;background:#f2f2f2;';
+  const judulBag = (h, t) => `<p style="font-weight:bold;margin:16px 0 6px;">${h}.&nbsp;&nbsp;&nbsp;${t}</p>`;
+  const rincian = (k) => {
+    const j = PR_INFO[k];
+    const isi = bag[k].minggu.map(w => {
+      const kepala = `<tr><td colspan="4" style="${B}font-weight:bold;background:#fafafa;">MINGGU KE-${w.m}${w.libur ? ' (LIBUR)' : ''}</td></tr>`;
+      const rows = w.baris.length ? w.baris.map((r, i) => `<tr>
+          <td style="${B}text-align:center;width:34px;">${i + 1}</td>
+          <td style="${B}">${esc(r.nama_siswa)}</td>
+          <td style="${B}text-align:center;">${r.jp} JP</td>
+          <td style="${B}">${esc(r.keterangan || '')}</td></tr>`).join('')
+        : `<tr><td style="${B}text-align:center;">-</td><td style="${B}color:#666;">${w.libur ? 'Libur' : 'Nihil'}</td>
+             <td style="${B}"></td><td style="${B}"></td></tr>`;
+      return kepala + rows;
+    }).join('');
+    return judulBag(PR_BAGIAN[k], `SISWA YANG TIDAK MASUK KARENA ${k === 'S' ? 'SAKIT' : j.judul}`) +
+      `<table style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead><tr><th style="${TH}width:34px;">NO</th><th style="${TH}">NAMA SISWA</th>
+          <th style="${TH}width:150px;">JUMLAH ${k === 'S' ? 'SAKIT' : k === 'A' ? 'ALPA' : k} PER-JP</th>
+          <th style="${TH}width:190px;">KETERANGAN</th></tr></thead><tbody>${isi}</tbody></table>`;
+  };
+
+  return `<div class="pr-dok" style="font-family:'Times New Roman',Times,serif;color:#000;font-size:12px;line-height:1.35;">
+    <div style="text-align:center;font-weight:bold;font-size:14px;">LAPORAN BULANAN WALI KELAS<br>
+      ${esc(dok.madrasah)}<br>TAHUN AJARAN ${esc(dok.ta)}</div>
+    <table style="margin:14px 0 4px;font-size:12px;">
+      <tr><td style="width:120px">BULAN</td><td>: ${esc(dok.bulan)}</td></tr>
+      <tr><td>KELAS</td><td>: ${esc(dok.kelas)}</td></tr>
+      <tr><td>WALI KELAS</td><td>: ${esc(dok.walas || '………………………')}</td></tr>
+    </table>
+    ${judulBag('C', 'ABSENSI SISWA DALAM SATU BULAN')}
+    <table style="width:70%;border-collapse:collapse;font-size:11px;">
+      <thead><tr><th style="${TH}">KETERANGAN</th><th style="${TH}">JUMLAH SISWA</th>
+        <th style="${TH}">TOTAL JP</th><th style="${TH}">≈ HARI</th></tr></thead>
+      <tbody>${PR_KODE.map(k => `<tr><td style="${B}">${PR_INFO[k].judul}</td>
+        <td style="${B}text-align:center;">${bag[k].siswa}</td>
+        <td style="${B}text-align:center;">${bag[k].jp}</td>
+        <td style="${B}text-align:center;">${prHari(bag[k].jp)}</td></tr>`).join('')}</tbody>
+    </table>
+    ${PR_KODE.map(rincian).join('')}
+    <table style="width:100%;margin-top:34px;font-size:12px;page-break-inside:avoid;">
+      <tr><td style="width:50%;text-align:center;">Mengetahui</td>
+          <td style="width:50%;text-align:center;">${esc(dok.tempat)}, ${esc(dok.tanggal)}</td></tr>
+      <tr><td style="text-align:center;">Kepala Madrasah</td><td style="text-align:center;">Wali Kelas</td></tr>
+      <tr><td style="height:62px;"></td><td></td></tr>
+      <tr><td style="text-align:center;font-weight:bold;">( ${esc(dok.kepala || '………………………')} )</td>
+          <td style="text-align:center;font-weight:bold;">( ${esc(dok.walas || '………………………')} )</td></tr>
+    </table>
+  </div>`;
+}
+
+async function prGambarLaporan() {
+  await prMuatWalas();
+  const dok = prDokumen();
+  const bag = prIsiLaporan();
+  const belumIsi = [1,2,3,4,5].filter(m => prStatusMinggu(stPr.kelas, m) === "belum");
+
+  $('prIsi').innerHTML = `
+    ${belumIsi.length ? `<div class="card-note"><i class="fa-solid fa-hourglass-half"></i>
+      Minggu ke-${belumIsi.join(', ')} belum diinput maupun ditandai libur — laporan mungkin belum lengkap.</div>` : ''}
+    <div class="md-form pr-ttd">
+      <div class="field"><label class="label">Wali Kelas ${esc(stPr.kelas)}</label>
+        <input id="plWalas" class="input" value="${esc(dok.walas)}" placeholder="Nama wali kelas"></div>
+      <div class="field"><label class="label">Kepala Madrasah</label>
+        <input id="plKepala" class="input" value="${esc(dok.kepala)}"></div>
+      <div class="field"><label class="label">Tempat</label>
+        <input id="plTempat" class="input" value="${esc(dok.tempat)}"></div>
+    </div>
+    <div class="minis">${PR_JENIS.map(j => `<div class="mini ${j.mini}"><span>${j.nama} · ${bag[j.k].siswa} santri</span>
+      <b>${bag[j.k].jp} JP</b></div>`).join('')}</div>
+    <div class="md-bar pr-bar"><span class="note-min"><i class="fa-solid fa-circle-info"></i>
+      Bagian C–G mengikuti lembar sekolah. Kolom JUMLAH SISWA = banyak santri berbeda, sama seperti rekap wali kelas.</span>
+      <span class="pr-aksi">
+        <button class="btn btn-ghost btn-sm" id="plSalin"><i class="fa-solid fa-copy"></i>Salin ke Excel</button>
+        <button class="btn btn-ghost btn-sm" id="plXlsx"><i class="fa-solid fa-file-excel"></i>Unduh .xlsx</button>
+        <button class="btn btn-primary btn-sm" id="plCetak"><i class="fa-solid fa-print"></i>Cetak / PDF</button>
+      </span></div>
+    <div class="pr-lebar"><div class="pr-kertas" id="plKertas">${prHtmlLaporan(dok, bag)}</div></div>`;
+
+  const perbarui = () => {
+    prLokal('walas:' + stPr.kelas, $('plWalas').value.trim());
+    prLokal('ttd:' + (APP.ctx.jenjang || ''), { kepala:$('plKepala').value.trim(), tempat:$('plTempat').value.trim() });
+    $('plKertas').innerHTML = prHtmlLaporan(prDokumen(), bag);
+  };
+  ['plWalas','plKepala','plTempat'].forEach(id => $(id).addEventListener('change', perbarui));
+  $('plCetak').addEventListener('click', () => {
+    $('printArea').innerHTML = `<div class="laporan" style="padding:16px 22px;background:#fff;">${prHtmlLaporan(prDokumen(), bag)}</div>`;
+    window.print();
+  });
+  $('plXlsx').addEventListener('click', () => prEksporLaporanXlsx(prDokumen(), bag));
+  $('plSalin').addEventListener('click', async () => {
+    const teks = prBarisLaporan(prDokumen(), bag).map(r => r.join('\t')).join('\n');
+    try { await navigator.clipboard.writeText(teks); toast('success', 'Tersalin. Tempel di sel B1 lembar Excel.'); }
+    catch (e) { toast('error', 'Peramban menolak akses papan klip.'); }
+  });
+}
+
+/** Baris bentuk lembar sekolah (kolom B–E) untuk salin & ekspor. */
+function prBarisLaporan(dok, bag) {
+  const r = [
+    ['LAPORAN BULANAN WALI KELAS'], [dok.madrasah], [`TAHUN AJARAN ${dok.ta}`], [],
+    [`BULAN                : ${dok.bulan}`], [`KELAS                : ${dok.kelas}`],
+    [`WALI KELAS     : ${dok.walas}`], [],
+    ['C.      ABSENSI SISWA DALAM SATU BULAN'],
+    ['KETERANGAN', '', 'JUMLAH SISWA', 'TOTAL JP'],
+    ...PR_KODE.map(k => [PR_INFO[k].judul, '', bag[k].siswa, bag[k].jp]), []
+  ];
+  PR_KODE.forEach(k => {
+    r.push([`${PR_BAGIAN[k]}.      SISWA YANG TIDAK MASUK KARENA ${k === 'S' ? 'SAKIT' : PR_INFO[k].judul}`]);
+    r.push(['NO', 'NAMA SISWA', `JUMLAH ${k === 'S' ? 'SAKIT' : k === 'A' ? 'ALPA' : k} PER-JP`, 'KETERANGAN']);
+    bag[k].minggu.forEach(w => {
+      r.push([`MINGGU KE-${w.m}${w.libur ? ' (LIBUR)' : ''}`]);
+      if (!w.baris.length) r.push(['', w.libur ? 'Libur' : 'Nihil', '', '']);
+      w.baris.forEach((x, i) => r.push([i + 1, x.nama_siswa, x.jp, x.keterangan || '']));
     });
+    r.push([]);
+  });
+  r.push(['Mengetahui', '', `${dok.tempat}, ${dok.tanggal}`], ['Kepala Madrasah', '', 'Wali Kelas'], [], [], [],
+         [`(${dok.kepala})`, '', `( ${dok.walas} )`]);
+  return r;
+}
 
-    const rows = [...peta.values()].sort((a, b) => a.nama.localeCompare(b.nama));
-    MDS.rekap = { kelas, semester, tahun, bulan, rows };
-
-    const sel = (t) => `<span class="md-cell">
-      <i style="color:var(--teal)">H</i>${t.hadir||0}
-      <i style="color:var(--sea)">I</i>${t.izin||0}
-      <i style="color:var(--amber)">S</i>${t.sakit||0}
-      <i style="color:var(--maroon)">A</i>${t.alpa||0}</span>`;
-
-    $('rpHead').innerHTML = `<tr><th>Nama Santri</th>
-      ${bulan.map(b => `<th>${BULAN_ID[b-1]}</th>`).join('')}
-      <th>Total Semester</th></tr>`;
-
-    $('rpBody').innerHTML = rows.map((r, i) => `<tr>
-      <td><div class="primary">${i+1}. ${esc(r.nama)}</div>
-          <div class="secondary">${esc(r.nisn)}</div></td>
-      ${bulan.map(b => `<td>${sel(r.bulan[b] || {})}</td>`).join('')}
-      <td>${sel(r.total)}</td>
-    </tr>`).join('') || barisKosong(bulan.length + 2, 'Belum ada data presensi.',
-      'Isi presensi mingguan terlebih dahulu pada periode ini.');
-
-    const jml = rows.reduce((a, r) => {
-      ['hadir','izin','sakit','alpa'].forEach(x => a[x] += r.total[x]); return a;
-    }, { hadir:0, izin:0, sakit:0, alpa:0 });
-
-    $('rpSummary').innerHTML = `<div class="minis" style="padding:0 20px 6px">
-      <div class="mini t"><span>Total Hadir</span><b>${angka(jml.hadir)}</b></div>
-      <div class="mini s"><span>Total Izin</span><b>${angka(jml.izin)}</b></div>
-      <div class="mini a"><span>Total Sakit</span><b>${angka(jml.sakit)}</b></div>
-      <div class="mini m"><span>Total Alpa</span><b>${angka(jml.alpa)}</b></div></div>`;
-
-    tandaiTabelBisaGeser();
+async function prEksporLaporanXlsx(dok, bag) {
+  loading(true);
+  try {
+    const XLSX = await prMuatXlsx();
+    const aoa = prBarisLaporan(dok, bag).map(r => ['', ...r]);        // mulai kolom B seperti sekolah
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{ wch:2 }, { wch:6 }, { wch:34 }, { wch:20 }, { wch:28 }];
+    ws['!merges'] = [0, 1, 2].map(r => ({ s:{ r, c:1 }, e:{ r, c:4 } }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Laporan Bulan ${BULAN_ID[stPr.bulan - 1]}`.slice(0, 31));
+    XLSX.writeFile(wb, `Presensi-${stPr.kelas}-${BULAN_ID[stPr.bulan - 1]}-${prTahun(stPr.ta, stPr.bulan)}.xlsx`);
+    toast('success', 'Berkas Excel diunduh');
   } catch (err) { fireError(err); }
   finally { loading(false); }
 }
 
-function mdEksporRekapPresensi() {
-  const r = MDS.rekap;
-  if (!r || !r.rows.length) return toast('error', 'Tampilkan rekap terlebih dahulu.');
-
-  const kepala = ['NISN','Nama'];
-  r.bulan.forEach(b => kepala.push(
-    `${BULAN_ID[b-1]} H`, `${BULAN_ID[b-1]} I`, `${BULAN_ID[b-1]} S`, `${BULAN_ID[b-1]} A`));
-  kepala.push('Total H','Total I','Total S','Total A');
-
-  const baris = r.rows.map(x => {
-    const kolom = [x.nisn, x.nama];
-    r.bulan.forEach(b => {
-      const t = x.bulan[b] || {};
-      kolom.push(t.hadir||0, t.izin||0, t.sakit||0, t.alpa||0);
-    });
-    kolom.push(x.total.hadir, x.total.izin, x.total.sakit, x.total.alpa);
-    return kolom;
+// ---------------------------------------------------------------------
+// 3d. AKUMULASI SEMESTER — S · IP · IK · A per bulan, Total, ÷ 8, Bulat
+// ---------------------------------------------------------------------
+function prRekapAkum() {
+  const bulan = bulanSemester(prSmt(stPr.bulan));
+  const peta = new Map();
+  stPr.siswa.forEach(s => peta.set(String(s.nisn), { nisn:String(s.nisn), nama:s.nama_siswa, b:{}, t:{ S:0, IK:0, IP:0, A:0 } }));
+  (stPr.akum || []).forEach(r => {
+    if (!peta.has(r.nisn)) peta.set(r.nisn, { nisn:r.nisn, nama:r.nama_siswa || r.nisn, b:{}, t:{ S:0, IK:0, IP:0, A:0 }, luar:true });
+    const o = peta.get(r.nisn);
+    const bb = o.b[r.bulan] = o.b[r.bulan] || { S:0, IK:0, IP:0, A:0 };
+    bb[r.jenis] += r.jp; o.t[r.jenis] += r.jp;
   });
+  const rows = [...peta.values()].sort((a, b) => String(a.nama).localeCompare(String(b.nama)));
+  return { bulan, rows };
+}
 
-  unduhCsv(`presensi-${r.kelas}-${r.semester}-${r.tahun}.csv`, [kepala, ...baris]);
+function prGambarAkum() {
+  const { bulan, rows } = prRekapAkum();
+  const adaBulan = new Set((stPr.akum || []).map(r => r.bulan));
+  const jumlah = rows.reduce((a, r) => { PR_KODE.forEach(k => a[k] += r.t[k]); return a; }, { S:0, IK:0, IP:0, A:0 });
+  const perhatian = rows.filter(r => prBulat(r.t.A) >= 3).sort((a, b) => b.t.A - a.t.A);
+  const sel = (v, k) => v ? `<span class="pr-v j-${k}">${v}</span>` : '<span class="pr-0">·</span>';
+
+  const kepala1 = `<tr><th rowspan="2">No</th><th rowspan="2" class="pr-sticky">Nama Santri</th>
+    ${stPr.rinci ? bulan.map(b => `<th colspan="4" class="${adaBulan.has(b) ? '' : 'pr-redup'}">${BULAN_ID[b-1]}</th>`).join('') : ''}
+    <th colspan="4">Total (JP)</th><th colspan="4">÷ ${JP_PER_HARI} (hari)</th><th colspan="4">Dibulatkan</th></tr>`;
+  const kepala2 = `<tr>${[...(stPr.rinci ? bulan : []), 't', 'h', 'r'].map(() =>
+    PR_URUT_AKUM.map(k => `<th class="j-${k}">${k}</th>`).join('')).join('')}</tr>`;
+
+  const isi = rows.map((r, i) => `<tr class="${prBulat(r.t.A) >= 3 ? 'pr-waspada' : ''}">
+    <td class="center">${i + 1}</td>
+    <td class="pr-sticky"><b>${esc(r.nama)}</b>${r.luar ? ' <small>(pindah)</small>' : ''}</td>
+    ${stPr.rinci ? bulan.map(b => PR_URUT_AKUM.map(k => `<td class="center">${sel(r.b[b]?.[k] || 0, k)}</td>`).join('')).join('') : ''}
+    ${PR_URUT_AKUM.map(k => `<td class="center pr-tg">${sel(r.t[k], k)}</td>`).join('')}
+    ${PR_URUT_AKUM.map(k => `<td class="center">${r.t[k] ? prHari(r.t[k]) : '·'}</td>`).join('')}
+    ${PR_URUT_AKUM.map(k => `<td class="center pr-tg"><b>${prBulat(r.t[k]) || '·'}</b></td>`).join('')}
+  </tr>`).join('');
+
+  $('prIsi').innerHTML = `
+    <div class="minis">${PR_JENIS.map(j => `<div class="mini ${j.mini}"><span>${j.nama} · ≈ ${prHari(jumlah[j.k])} hari</span>
+      <b>${jumlah[j.k]} JP</b></div>`).join('')}</div>
+    ${perhatian.length ? `<div class="card-note pr-note-a"><i class="fa-solid fa-bell"></i>
+      Alpa ≥ 3 hari semester ini: ${perhatian.slice(0, 8).map(r => `<b>${esc(r.nama)}</b> (${prBulat(r.t.A)} hr)`).join(', ')}.</div>` : ''}
+    <div class="md-bar pr-bar">
+      <span class="note-min"><i class="fa-solid fa-circle-info"></i>
+        TA ${prLabelTa(stPr.ta)} · Semester ${prSmt(stPr.bulan)} · urutan kolom S · IP · IK · A seperti sheet
+        <i>Akumulasi Kehadiran</i>. Bulan belum berisi data tampil redup.</span>
+      <span class="pr-aksi">
+        <button class="btn btn-ghost btn-sm" id="paRinci"><i class="fa-solid fa-${stPr.rinci ? 'compress' : 'expand'}"></i>${stPr.rinci ? 'Ringkas' : 'Rinci per bulan'}</button>
+        <button class="btn btn-ghost btn-sm" id="paXlsx"><i class="fa-solid fa-file-excel"></i>Unduh .xlsx (berumus)</button>
+        <button class="btn btn-primary btn-sm" id="paCetak"><i class="fa-solid fa-print"></i>Cetak</button>
+      </span></div>
+    <div class="pr-lebar"><table class="pr-akum" id="paTabel"><thead>${kepala1}${kepala2}</thead>
+      <tbody>${isi || `<tr><td colspan="40" style="padding:0">${kosong('Belum ada santri.', '')}</td></tr>`}</tbody></table></div>`;
+
+  $('paRinci').addEventListener('click', () => { stPr.rinci = !stPr.rinci; prGambarAkum(); });
+  $('paXlsx').addEventListener('click', prEksporAkumXlsx);
+  $('paCetak').addEventListener('click', () => {
+    const dok = prDokumen();
+    $('printArea').innerHTML = `<style>@page{size:A4 landscape;margin:10mm}</style>
+      <div class="laporan" style="font-family:Arial,sans-serif;color:#000;padding:8px;background:#fff">
+      <div style="text-align:center;font-weight:bold;font-size:14px">AKUMULASI KEHADIRAN<br>${esc(dok.madrasah)}<br>TAHUN AJARAN ${esc(dok.ta)}</div>
+      <p style="font-size:11px;margin:10px 0 6px">KELAS : ${esc(dok.kelas)} &nbsp;·&nbsp; WALI KELAS : ${esc(dok.walas || '-')} &nbsp;·&nbsp; SEMESTER ${prSmt(stPr.bulan).toUpperCase()} &nbsp;·&nbsp; satuan JP, 1 hari = ${JP_PER_HARI} JP</p>
+      <div class="pr-cetak-akum">${$('paTabel').outerHTML}</div></div>`;
+    window.print();
+  });
+}
+
+/** Ekspor meniru sheet "Akumulasi Kehadiran" sekolah, lengkap dengan rumusnya. */
+async function prEksporAkumXlsx() {
+  loading(true);
+  try {
+    const XLSX = await prMuatXlsx();
+    const { bulan, rows } = prRekapAkum();
+    const dok = prDokumen();
+    const kol = (n) => XLSX.utils.encode_col(n);
+    const awalBulan = bulan.map((_, i) => 2 + i * 5);                 // C, H, M, R, W, AB
+    const aTot = 2 + 6 * 5, aBagi = aTot + 5, aBulat = aBagi + 5;     // AG, AL, AQ
+    const ws = {};
+    const set = (r, c, v) => { ws[kol(c) + (r + 1)] = typeof v === 'object' ? v : { t: typeof v === 'number' ? 'n' : 's', v }; };
+
+    set(0, 1, 'AKUMULASI KEHADIRAN'); set(1, 1, dok.madrasah); set(2, 1, `TAHUN AJARAN ${dok.ta}`);
+    set(4, 1, `KELAS            :  ${dok.kelas}`); set(5, 1, `WALI KELAS : ${dok.walas}`);
+    set(7, 0, 'No.'); set(7, 1, 'Nama Siswa');
+    bulan.forEach((b, i) => set(7, awalBulan[i], BULAN_ID[b - 1]));
+    set(7, aTot, 'Total'); set(7, aBagi, 'Total'); set(7, aBulat, 'ROUND');
+    [...awalBulan, aTot, aBagi, aBulat].forEach(c => PR_URUT_AKUM.forEach((k, j) => set(8, c + j, k)));
+
+    rows.forEach((r, i) => {
+      const n = 9 + i, ex = n + 1;
+      set(n, 0, i + 1); set(n, 1, r.nama);
+      bulan.forEach((b, bi) => PR_URUT_AKUM.forEach((k, j) => { const v = r.b[b]?.[k]; if (v) set(n, awalBulan[bi] + j, v); }));
+      PR_URUT_AKUM.forEach((k, j) => {
+        const sum = awalBulan.map(c => kol(c + j) + ex).join(',');
+        set(n, aTot + j,   { t:'n', f:`SUM(${sum})`, v:r.t[k] });
+        set(n, aBagi + j,  { t:'n', f:`${kol(aTot + j)}${ex}/${JP_PER_HARI}`, v:r.t[k] / JP_PER_HARI });
+        set(n, aBulat + j, { t:'n', f:`ROUND(${kol(aBagi + j)}${ex},0)`, v:prBulat(r.t[k]) });
+      });
+    });
+    ws['!ref'] = `A1:${kol(aBulat + 3)}${9 + rows.length}`;
+    ws['!merges'] = [
+      ...[0, 1, 2].map(r => ({ s:{ r, c:1 }, e:{ r, c:aBulat + 3 } })),
+      { s:{ r:7, c:0 }, e:{ r:8, c:0 } }, { s:{ r:7, c:1 }, e:{ r:8, c:1 } },
+      ...[...awalBulan, aTot, aBagi, aBulat].map(c => ({ s:{ r:7, c }, e:{ r:7, c:c + 3 } }))
+    ];
+    ws['!cols'] = Array.from({ length:aBulat + 4 }, (_, c) => ({ wch: c === 1 ? 28 : c === 0 ? 4 : 5 }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Akumulasi Kehadiran');
+    XLSX.writeFile(wb, `Akumulasi-Kehadiran-${stPr.kelas}-${prSmt(stPr.bulan)}-${prLabelTa(stPr.ta).replace('/', '-')}.xlsx`);
+    toast('success', 'Akumulasi Excel diunduh');
+  } catch (err) { fireError(err); }
+  finally { loading(false); }
 }
 
 // ---------------------------------------------------------------------

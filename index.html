@@ -4421,6 +4421,170 @@
   }
 }
 
+
+/* ══════════════════════════════════════════════════════════════════
+   v2.13 · PRESENSI FORMAT LAPORAN WALI KELAS (JP · S / IK / IP / A)
+   Kisi input memakai grid div (bukan <table>) agar di ponsel tetap
+   satu baris ringkas per santri, bukan kartu panjang berlabel.
+   ══════════════════════════════════════════════════════════════════ */
+@layer modul {
+  .pr-tabs { border-top:1px solid var(--line-soft); }
+  .pr-tabs .chip i { margin-right:4px; opacity:.8; }
+  .pr-muat { padding:28px var(--pad); color:var(--text-3); font-size:13px; }
+  .pr-cat { font-size:11.5px; color:var(--text-3); margin:6px 0 0; }
+
+  /* --- status minggu --- */
+  .pr-dok th, .pr-dok td { font-family:inherit; letter-spacing:normal; text-transform:none; font-size:inherit;
+    color:#000; padding:2px 4px; border-bottom:0; background:transparent; height:auto; vertical-align:middle; }
+  .pr-dok tr:hover td { background:transparent; }
+  .pr-dok th, .pr-dok td { color:#000 !important; font-family:inherit !important; letter-spacing:normal !important;
+    text-transform:none !important; box-shadow:none !important; }
+  .pr-dok tr::before, .pr-dok tr::after, .pr-dok td::before { display:none !important; }
+  .pr-weeks { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:8px; padding:16px var(--pad) 0; }
+  .pr-wk {
+    display:flex; flex-direction:column; align-items:flex-start; gap:2px; text-align:left;
+    padding:9px 11px; border-radius:var(--r); border:1px solid var(--line); background:var(--surface);
+    font-size:12.5px; color:var(--text-2); cursor:pointer;
+    transition:border-color var(--cepat), box-shadow var(--cepat), transform var(--cepat);
+  }
+  .pr-wk small { font-size:11px; color:var(--text-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+  .pr-wk:hover { transform:translateY(-1px); border-color:color-mix(in oklab, var(--sea) 30%, var(--line)); }
+  .pr-wk.st-selesai b { color:var(--teal); }
+  .pr-wk.st-libur b { color:var(--violet); }
+  .pr-wk.st-terisi b { color:var(--amber); }
+  .pr-wk.st-belum b { color:var(--text-3); }
+  .pr-wk.on { border-color:var(--sea); box-shadow:var(--ring); background:color-mix(in oklab, var(--sea) 5%, white); }
+  @media (max-width:640px) {
+    .pr-weeks { grid-template-columns:repeat(5, minmax(74px,1fr)); overflow-x:auto; scroll-snap-type:x mandatory; }
+    .pr-wk { scroll-snap-align:start; padding:8px 9px; }
+    .pr-weeks .pr-wk .pj { display:none; } .pr-weeks .pr-wk .pp { display:inline; }
+    .pr-filter { grid-template-columns:minmax(0,.85fr) minmax(0,1fr) minmax(0,1.3fr) !important; gap:8px; }
+    .pr-filter .input { padding-inline:9px 22px; font-size:12.5px; min-height:40px; background-position:right 6px center; }
+    .pr-filter .label { font-size:9.5px; }
+    .pr-tabs { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+    .pr-tabs .chip { flex:none; }
+  }
+
+  /* --- papan kelengkapan --- */
+  .pr-matriks { margin:12px var(--pad) 0; border:1px solid var(--line-soft); border-radius:var(--r); padding:8px 12px; }
+  .pr-matriks summary { cursor:pointer; font-size:12.5px; font-weight:600; color:var(--text-2); display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .pr-mx { border-collapse:collapse; margin-top:10px; font-size:12px; }
+  .pr-mx th, .pr-mx td { padding:3px 5px; text-align:center; }
+  .pr-mx tbody th { text-align:left; font-weight:600; color:var(--text-2); padding-right:12px; white-space:nowrap; }
+  .pr-mx-c { width:30px; height:26px; border-radius:7px; border:1px solid var(--line); background:var(--surface); font-weight:700; cursor:pointer; }
+  .pr-mx-c.st-selesai { background:var(--teal-bg); color:var(--teal); border-color:transparent; }
+  .pr-mx-c.st-libur { background:var(--violet-bg); color:var(--violet); border-color:transparent; }
+  .pr-mx-c.st-terisi { background:var(--amber-bg); color:var(--amber); border-color:transparent; }
+  .pr-mx-c.st-belum { color:var(--text-3); }
+
+  .pr-lebar { overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%; }
+
+  /* --- kisi input --- */
+  .pr-grid-wrap { padding:14px var(--pad) 4px; }
+  .pr-grid { border:1px solid var(--line); border-radius:var(--r); overflow:hidden; }
+  .pr-row {
+    display:grid; align-items:center; gap:6px;
+    grid-template-columns:34px minmax(150px,1.6fr) repeat(4, 58px) minmax(120px,1fr) 46px;
+    padding:5px 10px; border-top:1px solid var(--line-soft);
+  }
+  .pr-row:first-child { border-top:0; }
+  .pr-row.ada { background:color-mix(in oklab, var(--brass) 5%, white); }
+  .pr-row:focus-within { background:color-mix(in oklab, var(--sea) 6%, white); }
+  .pr-head { background:var(--paper); font-size:11px; font-weight:700; color:var(--text-3); letter-spacing:.04em; text-transform:uppercase; position:sticky; top:0; z-index:1; }
+  .pr-h { text-align:center; }
+  .pr-h.j-S { color:var(--amber); } .pr-h.j-IK { color:var(--sea); } .pr-h.j-IP { color:var(--violet); } .pr-h.j-A { color:var(--maroon); }
+  .pr-no { font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--text-3); text-align:center; }
+  .pr-nama { display:flex; flex-direction:column; min-width:0; }
+  .pr-nama b { font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pr-nama small { font-size:10.5px; color:var(--text-3); font-family:'IBM Plex Mono', monospace; }
+  .pr-in, .pr-ket {
+    width:100%; min-width:0; height:34px; border:1px solid var(--line); border-radius:8px; background:var(--surface);
+    font:600 14px/1 'IBM Plex Mono', monospace; text-align:center; color:var(--text); padding:0 4px;
+    transition:border-color var(--cepat), box-shadow var(--cepat), background var(--cepat);
+  }
+  .pr-ket { font-family:inherit; font-size:13px; font-weight:400; text-align:left; padding:0 9px; }
+  .pr-in::placeholder { font-size:11px; font-weight:500; color:color-mix(in oklab, var(--text-3) 45%, transparent); }
+  .pr-ket::placeholder { color:color-mix(in oklab, var(--text-3) 60%, transparent); }
+  .pr-in:focus, .pr-ket:focus { outline:none; border-color:var(--sea); box-shadow:var(--ring); }
+  .pr-in:not(:placeholder-shown) { font-weight:700; }
+  .pr-in.j-S { color:var(--amber); } .pr-in.j-IK { color:var(--sea); }
+  .pr-in.j-IP { color:var(--violet); } .pr-in.j-A { color:var(--maroon); }
+  .pr-wk .pp { display:none; }
+  .pr-in.j-S { background:color-mix(in oklab, var(--amber) 4%, white); }
+  .pr-in.j-IK { background:color-mix(in oklab, var(--sea) 4%, white); }
+  .pr-in.j-IP { background:color-mix(in oklab, var(--violet) 4%, white); }
+  .pr-in.j-A { background:color-mix(in oklab, var(--maroon) 4%, white); }
+  .pr-in.salah { border-color:var(--maroon); background:var(--maroon-bg); }
+  .pr-in[readonly], .pr-ket[readonly] { background:var(--paper); }
+  .pr-tot { font:700 13px 'IBM Plex Mono', monospace; text-align:center; color:var(--text-3); }
+  .pr-row.ada .pr-tot { color:var(--text); }
+  .pr-tot.lebih { color:var(--maroon) !important; }
+  .pr-kosong { padding:22px; text-align:center; color:var(--text-3); }
+  .pr-bar .pr-aksi { display:flex; gap:8px; flex-wrap:wrap; }
+
+  @media (max-width:760px) {
+    .pr-grid-wrap { padding:12px 12px 4px; }
+    .pr-head { display:none; }
+    .pr-row {
+      grid-template-columns:26px repeat(4, minmax(0,1fr)) 40px;
+      grid-template-areas:"no nama nama nama nama tot" ". s ik ip a ." ". ket ket ket ket .";
+      row-gap:6px; padding:9px 10px;
+    }
+    .pr-no { grid-area:no; } .pr-nama { grid-area:nama; } .pr-tot { grid-area:tot; }
+    .pr-in[data-j="S"] { grid-area:s; } .pr-in[data-j="IK"] { grid-area:ik; }
+    .pr-in[data-j="IP"] { grid-area:ip; } .pr-in[data-j="A"] { grid-area:a; }
+    .pr-ket { grid-area:ket; height:32px; }
+    .pr-in { height:40px; font-size:16px; }
+    .pr-in::placeholder { font:600 10px 'IBM Plex Mono', monospace; color:var(--text-3); }
+    .pr-bar .pr-aksi { width:100%; }
+    .pr-bar .pr-aksi .btn { flex:1; min-height:42px; }
+  }
+
+  /* --- tempel --- */
+  .pr-teks { font-family:'IBM Plex Mono', monospace; font-size:12.5px; min-height:160px; tab-size:4; white-space:pre; }
+  .pr-file { cursor:pointer; width:100%; justify-content:center; min-height:44px; }
+  .pr-lewat { margin:10px var(--pad) 0; font-size:12px; color:var(--text-2); }
+  .pr-lewat summary { cursor:pointer; color:var(--amber); font-weight:600; }
+  .pr-lewat code { font-size:10.5px; color:var(--text-3); margin-right:6px; }
+  .pr-prev select.input { min-width:190px; height:34px; padding:4px 8px; font-size:12.5px; }
+  .pr-prev tr.pr-x td { background:var(--maroon-bg); }
+  .pr-prev tr.pr-ragu td { background:var(--amber-bg); }
+  .pr-jb { display:inline-block; min-width:28px; padding:2px 6px; border-radius:6px; font:700 11px 'IBM Plex Mono', monospace; }
+  .pr-jb.j-S { background:var(--amber-bg); color:var(--amber); } .pr-jb.j-IK { background:#E7F1F7; color:var(--sea); }
+  .pr-jb.j-IP { background:var(--violet-bg); color:var(--violet); } .pr-jb.j-A { background:var(--maroon-bg); color:var(--maroon); }
+
+  /* --- laporan (kertas) --- */
+  .pr-ttd { padding-bottom:4px; }
+  .pr-kertas {
+    margin:14px var(--pad) 18px; padding:28px 34px; background:#fff; color:#000;
+    border:1px solid var(--line); border-radius:6px; box-shadow:var(--shadow);
+    min-width:640px; max-width:860px;
+  }
+  @media (max-width:760px) { .pr-kertas { margin:12px; padding:18px; } }
+
+  /* --- akumulasi --- */
+  .pr-note-a { color:var(--maroon); }
+  .pr-akum { border-collapse:separate; border-spacing:0; font-size:12px; margin:12px var(--pad) 16px; }
+  .pr-akum th, .pr-akum td { padding:5px 6px; border-bottom:1px solid var(--line-soft); white-space:nowrap; }
+  .pr-akum thead th { background:var(--paper); font-size:11px; color:var(--text-2); text-align:center; border-bottom:1px solid var(--line); }
+  .pr-akum thead tr:first-child th { border-left:1px solid var(--line); }
+  .pr-akum th.j-S { color:var(--amber); } .pr-akum th.j-IK { color:var(--sea); }
+  .pr-akum th.j-IP { color:var(--violet); } .pr-akum th.j-A { color:var(--maroon); }
+  .pr-akum .pr-redup { opacity:.45; }
+  .pr-akum .pr-sticky { position:sticky; left:0; background:var(--surface); z-index:1; min-width:170px; text-align:left; }
+  .pr-akum thead .pr-sticky { background:var(--paper); }
+  .pr-akum .pr-tg { background:color-mix(in oklab, var(--brass) 6%, white); }
+  .pr-akum tr.pr-waspada td { background:var(--maroon-bg); }
+  .pr-v { font-family:'IBM Plex Mono', monospace; font-weight:600; }
+  .pr-v.j-S { color:var(--amber); } .pr-v.j-IK { color:var(--sea); } .pr-v.j-IP { color:var(--violet); } .pr-v.j-A { color:var(--maroon); }
+  .pr-0 { color:var(--line); }
+
+  @media print {
+    .pr-cetak-akum table { border-collapse:collapse !important; margin:0 !important; font-size:9px !important; width:100%; }
+    .pr-cetak-akum th, .pr-cetak-akum td { border:1px solid #000 !important; padding:2px 3px !important; background:#fff !important; color:#000 !important; position:static !important; }
+    .pr-cetak-akum .pr-0 { color:#fff !important; }
+  }
+}
 </style>
 </head>
 <body>
