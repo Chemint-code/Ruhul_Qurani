@@ -14,6 +14,9 @@
    - v2.12: Laporan pembinaan Ustadz GEN-Z → pengesahan guru kelas
      binaan (modul 28e); pengesah dikunci di database lewat
      boleh_sahkan_pembinaan()
+   - v2.16: Laboratorium Kebijakan (modul 39, khusus Admin) — model &
+     mutu data, IPP lengkap, sebaran, uji ekor (Taleb), percobaan aturan,
+     sensitivitas, Monte Carlo, buku catatan & memo syura
    - v2.14: Indeks Peringatan Pembinaan memuat unsur kelima, Kehadiran
      kelas (data_presensi), dan Peta Sebaran memuat kolom kehadiran &
      alpa per angkatan (modul 38, catatan (5))
@@ -217,7 +220,11 @@ const HAK = {
   'izin.perpanjang' : ['Admin','Guru','Klinik'],
 
   // --- Presensi Madrasah -------------------------------------------
+  // v2.15 — batas sesungguhnya ada di RLS data_presensi & presensi_minggu
+  // (baca: Admin/Guru/Walas/Guru BK). Pimpinan hanya menerima ringkasan
+  // analisis lewat RPC kehadiran_analisis() — tanpa rincian sakit.
   'presensi.lihat'  : ['Admin','Guru','Walas','Guru BK'],
+  'presensi.analisis': ['Admin','Guru','Walas','Guru BK','Pimpinan'],
   'presensi.isi'    : ['Admin','Guru','Walas'],
 
   // --- Pembinaan & Master ------------------------------------------
@@ -473,6 +480,7 @@ const MENU_ROLE = {
   audit:       ['Admin','Pimpinan'],
   rekap:       ['Admin'],
   bidang:      ['Admin','Guru','Walas','Guru BK','Guru Piket','Pimpinan'],
+  lab:         ['Admin'],
   pengasuhan:  ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
   madrasah:    ['Admin','Guru','Walas','Guru BK','Guru Piket','Osis','Ustadz GEN-Z'],
   perizinan:   ['Admin','Guru','Guru Piket','Klinik'],
@@ -494,6 +502,7 @@ const JUDUL = {
   audit:      { lat:'Jejak Audit',     ar:'سجل التغييرات',      teks:'Jejak Audit Sistem' },
   rekap:      { lat:'Rekap',           ar:'حصر المخالفات',      teks:'Rekap Pelanggaran' },
   bidang:     { lat:'Evaluasi Bidang', ar:'تقويم المجالات',     teks:'Evaluasi Bidang Pelanggaran' },
+  lab:        { lat:'Laboratorium',    ar:'مختبر السياسات',     teks:'Laboratorium Kebijakan' },
   pengasuhan: { lat:'Pengasuhan',      ar:'التربية والانضباط',  teks:'Unit Pengasuhan' },
   madrasah:   { lat:'Madrasah',        ar:'المدرسة',            teks:'Modul Madrasah' },
   perizinan:  { lat:'Perizinan',       ar:'الاستئذان',          teks:'Pusat Perizinan' },
@@ -1954,6 +1963,7 @@ async function navigateTo(view) {
     else if (view === 'audit')       await viewAudit();
     else if (view === 'rekap')       await viewRekap();
     else if (view === 'bidang')      await viewEvaluasiBidang();
+    else if (view === 'lab')         await viewLab();
     else if (view === 'pengasuhan')  await viewPengasuhan();
     else if (view === 'madrasah')    await viewMadrasah();
     else if (view === 'perizinan')   await viewPerizinan();
@@ -7168,13 +7178,22 @@ function bangunLaporanHTML(data) {
 
     <h3 style="${H3}">1. Presensi Madrasah
       <span style="font-weight:normal;font-size:10px;color:#64748b;">(satuan JP · 1 hari = ${JP_PER_HARI} JP)</span></h3>
-    <table style="${TABEL}font-size:11px;">
+    ${data.presensiTerkunci ? (() => {
+      const k = data.presensiRingkas;
+      const isi = k
+        ? `Kehadiran <b>${k.hadirPct}%</b> dari ${angka(k.jpAmati)} JP teramati (${k.pekan} pekan) ·
+           alpa <b>${k.alpa} JP</b> (${prHari(k.alpa)} hr) · tidak hadir berizin ${k.berizin} JP.`
+        : 'Belum ada pekan presensi yang teramati untuk santri ini.';
+      const tdMentah = (h) => `<td style="border:1px solid #cbd5e1;padding:5px;">${h}</td>`;
+      return `<table style="${TABEL}font-size:11px;"><tbody><tr>${tdMentah(isi)}</tr>
+        <tr>${tdMentah('<span style="color:#64748b;font-size:10px;">Ringkasan analisis. Rincian presensi per jenis dan per minggu hanya dibuka bagi Guru, Wali Kelas, dan Guru BK.</span>')}</tr></tbody></table>`;
+    })() : `<table style="${TABEL}font-size:11px;">
       <thead><tr>${['Bulan','Sakit','Izin Kegiatan','Izin Pulang','Alpa','Total'].map(th).join('')}</tr></thead>
       <tbody>${baris(data.presensi, p => {
         const sel = (jp) => jp ? `${jp} JP (${prHari(jp)} hr)` : '-';
         return `<tr>${td(p.bulan)}${td(sel(p.S),'text-align:center')}${td(sel(p.IK),'text-align:center')}${td(sel(p.IP),'text-align:center')}${td(sel(p.A),'text-align:center')}${td(sel(p.total),'text-align:center;font-weight:bold')}</tr>`;
       }, 'Belum ada data presensi.', 6)}</tbody>
-    </table>
+    </table>`}
 
     <h3 style="${H3}">
       2. Akumulasi Perkembangan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
@@ -7298,13 +7317,41 @@ async function ambilLaporan(nisn) {
   // Presensi selalu dibaca dari data_presensi (format JP S/IK/IP/A, v2.13);
   // bagian presensi dari RPC lama (log_presensi_madrasah, H/I/S/A) diabaikan.
   data.presensi = [];
-  try {
-    const { data: rows, error } = await db.from('data_presensi')
-      .select('tahun,bulan,jenis,jp')
-      .eq('nisn', String(nisn));
-    if (!error && rows?.length) data.presensi = agregatPresensiCetak(rows);
-  } catch (e) {
-    console.warn('Presensi cetak tidak tersedia:', e?.message || e);
+  if (bisa('presensi.lihat')) {
+    try {
+      const { data: rows, error } = await db.from('data_presensi')
+        .select('tahun,bulan,jenis,jp')
+        .eq('nisn', String(nisn));
+      if (!error && rows?.length) data.presensi = agregatPresensiCetak(rows);
+    } catch (e) {
+      console.warn('Presensi cetak tidak tersedia:', e?.message || e);
+    }
+  } else {
+    // v2.15 — Pimpinan tidak membuka rincian presensi; lembar cetaknya
+    // memuat ringkasan analisis saja (kehadiran % dan alpa), dihitung
+    // dari RPC kehadiran_analisis() atas seluruh pekan yang teramati.
+    data.presensiTerkunci = true;
+    data.presensiRingkas = null;
+    if (bisa('presensi.analisis')) {
+      try {
+        const { data: j } = await db.rpc('kehadiran_analisis', { p_tahun_mulai: 2000 });
+        if (j) {
+          const n = String(nisn);
+          const rows = [];
+          (j.rows || []).filter(r => String(r.nisn) === n).forEach(r => {
+            const d0 = { nisn: n, kelas: r.kelas, tahun: r.tahun, bulan: r.bulan, minggu: r.minggu };
+            if (Number(r.alpa))    rows.push({ ...d0, jenis: 'A', jp: Number(r.alpa) });
+            if (Number(r.berizin)) rows.push({ ...d0, jenis: 'B', jp: Number(r.berizin) });
+          });
+          const akhir = new Date(); akhir.setHours(23, 59, 59, 999);
+          const kh = hitungKehadiran({ siswa: [{ nisn: n, kelas: data.siswa.kelas }],
+            presensi: { rows, pekan: j.pekan || [] }, mulai: new Date(2000, 0, 1), akhir });
+          data.presensiRingkas = kh[n] || null;
+        }
+      } catch (e) {
+        console.warn('Ringkasan kehadiran cetak tidak tersedia:', e?.message || e);
+      }
+    }
   }
 
   // Tabel baru (prestasi, tahfiz, target) belum ada di RPC lama —
@@ -8351,12 +8398,21 @@ async function viewMadrasah() {
         <p>Cari jenis pelanggaran dari Master Pelanggaran madrasah, lengkap dengan catatan.</p>
         <span class="go">Buka panel <i class="fa-solid fa-arrow-right"></i></span>
       </button>
-      <button class="mod-card ${stMd.panel==='presensi'?'on':''}" data-mdpanel="presensi">
+      ${bisa('presensi.lihat')
+        ? `<button class="mod-card ${stMd.panel==='presensi'?'on':''}" data-mdpanel="presensi">
         <div class="ico" style="background:var(--teal-bg);color:var(--teal)"><i class="fa-solid fa-calendar-check"></i></div>
         <div class="k">Kehadiran · format wali kelas</div><b>Presensi Kelas (JP)</b>
         <p>Input mingguan S · IK · IP · A, tempel dari Excel sekolah, laporan bulanan C–G, dan akumulasi semester.</p>
         <span class="go">Buka panel <i class="fa-solid fa-arrow-right"></i></span>
-      </button>
+      </button>`
+        : `<button class="mod-card terkunci" disabled aria-disabled="true"
+            title="Presensi kelas hanya dapat dibuka Guru, Wali Kelas, dan Guru BK">
+        <div class="ico" style="background:var(--paper);color:var(--text-3)"><i class="fa-solid fa-lock"></i></div>
+        <div class="k">Kehadiran · format wali kelas</div><b>Presensi Kelas (JP)</b>
+        <p>Terkunci untuk peran ${esc(role())}. Data kehadiran santri hanya dibuka bagi
+           Guru, Wali Kelas, dan Guru BK.</p>
+        <span class="go"><i class="fa-solid fa-lock"></i> Terkunci</span>
+      </button>`}
     </div>
 
     <div id="mdPanel"></div>`;
@@ -8378,6 +8434,9 @@ async function viewMadrasah() {
 
 function mdGambarPanel() {
   const el = $('mdPanel'); if (!el) return;
+  // Pilihan panel tersimpan di memori halaman dan dapat terbawa dari
+  // sesi peran lain; presensi tidak pernah dibuka untuk peran terkunci.
+  if (stMd.panel === 'presensi' && !bisa('presensi.lihat')) stMd.panel = 'atribut';
   if (stMd.panel === 'pelanggaran') { el.innerHTML = mdPanelPelanggaran(); mdPasangPelanggaran(); }
   else if (stMd.panel === 'presensi') { el.innerHTML = mdPanelPresensi(); mdPasangPresensi(); }
   else { el.innerHTML = mdPanelAtribut(); mdPasangAtribut(); }
@@ -15550,26 +15609,36 @@ function tglTengahMinggu(tahun, bulan, minggu) {
  * Kehadiran cukup menjadi "tidak teramati".
  */
 async function muatPresensiJendela(bulanKunci) {
+  // Peran tanpa hak analisis tidak meminta apa pun ke server.
+  if (!bisa('presensi.analisis')) return { dari: bulanKunci[0], rows: [], pekan: [], terkunci: true };
   const c = cacheGet('presensiJendela');
   if (c && c.dari === bulanKunci[0]) return c;
   const th0 = Number(String(bulanKunci[0]).slice(0, 4));
   const bolehBulan = new Set(bulanKunci);
   const kunciBln = (r) => `${r.tahun}-${String(r.bulan).padStart(2, '0')}`;
-  const ambil = async (tabel, select) => {
-    const hasil = [];
-    for (let from = 0; from < 40000; from += 1000) {
-      const { data, error } = await db.from(tabel).select(select)
-        .gte('tahun', th0).range(from, from + 999);
-      if (error) throw error;
-      hasil.push(...(data || []));
-      if (!data || data.length < 1000) break;
-    }
-    return hasil.filter(r => bolehBulan.has(kunciBln(r)));
-  };
-  const [rows, pekan] = await Promise.all([
-    amanKosong(() => ambil('data_presensi', 'nisn,kelas,tahun,bulan,minggu,jenis,jp'), 'presensi'),
-    amanKosong(() => ambil('presensi_minggu', 'kelas,tahun,bulan,minggu,status'), 'penanda pekan')
-  ]);
+
+  // v2.15 — dibaca lewat RPC kehadiran_analisis(): server hanya mengirim
+  // alpa dan ketidakhadiran berizin (S+IP) per santri per pekan, tanpa
+  // rincian sakit. Dengan begitu Pimpinan menerima analisisnya tanpa
+  // pernah memegang tabel presensi mentah.
+  let j = null;
+  try {
+    const { data, error } = await db.rpc('kehadiran_analisis', { p_tahun_mulai: th0 });
+    if (error) throw error;
+    j = data;
+  } catch (e) {
+    console.warn('Ringkasan kehadiran tidak dapat dibaca:', e?.message || e);
+    return { dari: bulanKunci[0], rows: [], pekan: [], gagal: true };
+  }
+  if (!j) return cacheSet('presensiJendela', { dari: bulanKunci[0], rows: [], pekan: [], terkunci: true });
+
+  const rows = [];
+  (j.rows || []).filter(r => bolehBulan.has(kunciBln(r))).forEach(r => {
+    const dasar = { nisn: r.nisn, kelas: r.kelas, tahun: r.tahun, bulan: r.bulan, minggu: r.minggu };
+    if (Number(r.alpa))    rows.push({ ...dasar, jenis: 'A', jp: Number(r.alpa) });
+    if (Number(r.berizin)) rows.push({ ...dasar, jenis: 'B', jp: Number(r.berizin) });
+  });
+  const pekan = (j.pekan || []).filter(p => bolehBulan.has(kunciBln(p)));
   return cacheSet('presensiJendela', { dari: bulanKunci[0], rows, pekan });
 }
 
@@ -15610,7 +15679,8 @@ function hitungKehadiran({ siswa, presensi, mulai, akhir }) {
     const kPekan = kunciPekan(r), kelas = String(r.kelas || '');
     if (!amatiKelas[kelas]?.[kPekan]) return;       // pekan belum selesai: diabaikan
     kelasSantri[n].add(kelas);
-    const a = absen[n] = absen[n] || { S:0, IK:0, IP:0, A:0 };
+    // B = berizin (S + IP) — bentuk ringkas dari RPC kehadiran_analisis().
+    const a = absen[n] = absen[n] || { S:0, IK:0, IP:0, A:0, B:0 };
     if (r.jenis in a) a[r.jenis] += Number(r.jp) || 0;
   });
 
@@ -15622,11 +15692,11 @@ function hitungKehadiran({ siswa, presensi, mulai, akhir }) {
       if (sudah.has(kp)) return; sudah.add(kp); jpAmati += jp;
     }));
     if (!jpAmati) return;                            // tidak teramati
-    const a = absen[n] || { S:0, IK:0, IP:0, A:0 };
-    const tidakHadir = Math.min(jpAmati, a.S + a.IP + a.A);
+    const a = absen[n] || { S:0, IK:0, IP:0, A:0, B:0 };
+    const tidakHadir = Math.min(jpAmati, a.S + a.IP + a.B + a.A);
     hasil[n] = {
       jpAmati: Math.round(jpAmati), pekan: sudah.size,
-      alpa: a.A, sakit: a.S, izinPulang: a.IP, izinKegiatan: a.IK, tidakHadir,
+      alpa: a.A, berizin: a.S + a.IP + a.B, tidakHadir,
       hadirPct:   Math.round((1 - tidakHadir / jpAmati) * 1000) / 10,
       alpaRasio:  Math.min(1, a.A / jpAmati),
       absenRasio: tidakHadir / jpAmati,
@@ -15690,10 +15760,35 @@ function bulanTerakhir(n) {
 }
 
 /**
- * Hitung empat unsur Indeks Peringatan Pembinaan per santri pada jendela
- * berjalan. Tidak ada penjumlahan menjadi skor tunggal — itu disengaja.
+ * Aturan penjenjangan IPP yang berlaku. Seluruh ambang dikumpulkan di sini
+ * supaya Laboratorium Kebijakan (modul 39) dapat menguji aturan tandingan
+ * tanpa menyentuh aturan yang sedang dipakai dashboard.
  */
-function hitungIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presensi, hari = IPP_JENDELA }) {
+const IPP_ATURAN_BAKU = Object.freeze({
+  hari: IPP_JENDELA,
+  bebanT3: 50,            // poin pelanggaran dalam jendela → tier 3
+  bebanT2: 1,             // poin minimal → tier 2
+  pakaiMacet: true,
+  macetMin: 2,            // pembinaan minimal sebelum "macet" dinilai
+  macetPct: 50,           // % tuntas di bawah ini = macet → tier 3
+  pakaiPutus: true,
+  putusT2: 2,             // izin keluar ≥ n → tier 2
+  pakaiHadir: true,
+  alpaJp: KH_AMBANG_ALPA_JP,
+  alpaKronis: KH_AMBANG_ALPA_KRONIS,
+  absenKronis: KH_AMBANG_KRONIS,
+  minAmati: KH_MIN_AMATI,
+  pakaiIkatan: true,
+  ikatanAmbang: IPP_AMBANG_IKATAN
+});
+
+/**
+ * Tahap 1 — himpun unsur mentah per santri pada jendela berjalan.
+ * Mahal (menyapu seluruh tabel), jadi dipisah dari penerapan aturan:
+ * simulasi kebijakan cukup menghimpun sekali lalu menerapkan aturan
+ * berkali-kali.
+ */
+function hitungUnsurIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presensi, hari = IPP_JENDELA }) {
   const akhir = new Date(); akhir.setHours(23, 59, 59, 999);
   const mulai = tambahHari(akhir, -(hari - 1)); mulai.setHours(0, 0, 0, 0);
   const dalam = (v) => { const d = tglDari(kunciTgl(v)); return !!d && d >= mulai && d <= akhir; };
@@ -15705,7 +15800,7 @@ function hitungIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presensi,
       const sw = s || {};
       peta[n] = { nisn: n, nama: sw.nama_siswa || '(tidak ditemukan)', kelas: sw.kelas || '-',
         beban: 0, kasus: 0, ikatan: 0, prestasi: 0, tahfiz: 0, putus: 0,
-        binaTotal: 0, binaSelesai: 0, kh: null };
+        binaTotal: 0, binaSelesai: 0, kh: null, kat: {} };
     }
     return peta[n];
   };
@@ -15714,8 +15809,12 @@ function hitungIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presensi,
   (detail || []).forEach(r => {
     if (!dalam(r.tanggal)) return;
     const it = ent(r.nisn); if (!it) return;
-    it.beban += Number(r.bobot_pelanggaran) || 0;
+    const poin = Number(r.bobot_pelanggaran) || 0;
+    it.beban += poin;
     it.kasus++;
+    const k = ['Ringan','Sedang','Berat'].includes(r.kategori) ? r.kategori : 'Lainnya';
+    const o = it.kat[k] = it.kat[k] || { n: 0, poin: 0 };
+    o.n++; o.poin += poin;
   });
   (prestasi || []).forEach(r => {
     if (!dalam(r.tanggal)) return;
@@ -15744,35 +15843,55 @@ function hitungIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presensi,
   Object.entries(kh).forEach(([n, v]) => { if (peta[n]) peta[n].kh = v; });
 
   const daftar = Object.values(peta);
-  const punyaIkatan = daftar.filter(x => x.ikatan > 0).length;
-  const teramati = daftar.filter(x => x.kh).length;
-  // Kriteria "Ikatan nol" hanya diaktifkan bila pencatatan positif sudah
-  // cukup merata. Lihat catatan (4) di kepala modul.
-  const ikatanAktif = daftar.length
-    ? (punyaIkatan / daftar.length) >= IPP_AMBANG_IKATAN : false;
-
   daftar.forEach(it => {
     it.respons = it.binaTotal ? Math.round(it.binaSelesai / it.binaTotal * 100) : null;
-    const macet = it.binaTotal >= 2 && it.respons !== null && it.respons < 50;
-    const k = it.kh;
-    const alpaKronis = !!k && k.cukup && k.alpaRasio >= KH_AMBANG_ALPA_KRONIS;
-    const alpaHari   = !!k && k.alpa >= KH_AMBANG_ALPA_JP;
-    const absenKronis = !!k && k.cukup && k.absenRasio >= KH_AMBANG_KRONIS;
-    it.alpa = k ? k.alpa : 0;
-    if (it.beban >= 50 || macet || alpaKronis) it.tingkat = 3;
-    else if (it.beban > 0 || it.putus >= 2 || alpaHari || absenKronis
-             || (ikatanAktif && it.ikatan === 0)) it.tingkat = 2;
-    else it.tingkat = 1;
+    it.alpa = it.kh ? it.kh.alpa : 0;
+  });
+  return {
+    daftar, mulai, akhir, hari,
+    punyaIkatan: daftar.filter(x => x.ikatan > 0).length,
+    teramati: daftar.filter(x => x.kh).length,
+    hadirTerkunci: !!presensi?.terkunci
+  };
+}
+
+/**
+ * Tahap 2 — terapkan aturan penjenjangan. Murni: unsur tidak diubah,
+ * setiap santri menghasilkan objek baru. `bendera` mencatat aturan mana
+ * yang menyala, dipakai untuk mengukur sumbangan unik tiap aturan.
+ */
+function terapkanAturanIpp(unsur, aturanIn) {
+  const A = { ...IPP_ATURAN_BAKU, ...(aturanIn || {}) };
+  const n = unsur.daftar.length;
+  // Kriteria "Ikatan nol" hanya diaktifkan bila pencatatan positif sudah
+  // cukup merata. Lihat catatan (4) di kepala modul.
+  const ikatanAktif = A.pakaiIkatan && n ? (unsur.punyaIkatan / n) >= A.ikatanAmbang : false;
+
+  const daftar = unsur.daftar.map(u => {
+    const k = A.pakaiHadir ? u.kh : null;
+    const cukup = !!k && k.jpAmati >= A.minAmati;
+    const b = {
+      bebanT3:    u.beban >= A.bebanT3,
+      bebanT2:    u.beban >= A.bebanT2 && u.beban < A.bebanT3,
+      macet:      A.pakaiMacet && u.binaTotal >= A.macetMin && u.respons !== null && u.respons < A.macetPct,
+      alpaKronis: cukup && k.alpaRasio >= A.alpaKronis,
+      alpaHari:   !!k && k.alpa >= A.alpaJp,
+      absenKronis: cukup && k.absenRasio >= A.absenKronis,
+      putus:      A.pakaiPutus && u.putus >= A.putusT2,
+      ikatanNol:  ikatanAktif && u.ikatan === 0
+    };
+    const tingkat = (b.bebanT3 || b.macet || b.alpaKronis) ? 3
+      : (b.bebanT2 || b.putus || b.alpaHari || b.absenKronis || b.ikatanNol) ? 2 : 1;
 
     const sebab = [];
-    if (it.beban >= 50) sebab.push(`beban ${it.beban} poin`);
-    else if (it.beban > 0) sebab.push(`${it.kasus} catatan · ${it.beban} poin`);
-    if (macet) sebab.push(`${it.binaTotal - it.binaSelesai} pembinaan belum tuntas`);
-    if (alpaHari || alpaKronis) sebab.push(`alpa ${k.alpa} JP (${Math.round(k.alpaRasio * 100)}% jam teramati)`);
-    if (absenKronis) sebab.push(`tidak hadir ${Math.round(k.absenRasio * 100)}% jam pelajaran`);
-    if (it.putus >= 2) sebab.push(`${it.putus} kali izin keluar`);
-    if (ikatanAktif && it.ikatan === 0) sebab.push('tidak ada catatan positif');
-    it.sebab = sebab.join(' · ') || 'Tidak ada indikasi';
+    if (b.bebanT3) sebab.push(`beban ${u.beban} poin`);
+    else if (u.beban > 0) sebab.push(`${u.kasus} catatan · ${u.beban} poin`);
+    if (b.macet) sebab.push(`${u.binaTotal - u.binaSelesai} pembinaan belum tuntas`);
+    if (b.alpaHari || b.alpaKronis) sebab.push(`alpa ${k.alpa} JP (${Math.round(k.alpaRasio * 100)}% jam teramati)`);
+    if (b.absenKronis) sebab.push(`tidak hadir ${Math.round(k.absenRasio * 100)}% jam pelajaran`);
+    if (b.putus) sebab.push(`${u.putus} kali izin keluar`);
+    if (b.ikatanNol) sebab.push('tidak ada catatan positif');
+    return { ...u, tingkat, bendera: b, sebab: sebab.join(' · ') || 'Tidak ada indikasi' };
   });
 
   const maks = {
@@ -15780,17 +15899,26 @@ function hitungIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presensi,
     ikatan: Math.max(1, ...daftar.map(x => x.ikatan)),
     putus:  Math.max(1, ...daftar.map(x => x.putus))
   };
-
-  const urut = { 3:3, 2:2, 1:1 };
-  daftar.sort((a, b) => (urut[b.tingkat] - urut[a.tingkat]) || (b.beban - a.beban)
+  daftar.sort((a, b) => (b.tingkat - a.tingkat) || (b.beban - a.beban)
     || (b.alpa - a.alpa) || (a.ikatan - b.ikatan));
 
+  let tier3 = 0, tier2 = 0, tier1 = 0;
+  daftar.forEach(x => { if (x.tingkat === 3) tier3++; else if (x.tingkat === 2) tier2++; else tier1++; });
   return {
-    daftar, maks, ikatanAktif, punyaIkatan, teramati, mulai, akhir, hari,
-    tier3: daftar.filter(x => x.tingkat === 3).length,
-    tier2: daftar.filter(x => x.tingkat === 2).length,
-    tier1: daftar.filter(x => x.tingkat === 1).length
+    daftar, maks, ikatanAktif, aturan: A,
+    punyaIkatan: unsur.punyaIkatan, teramati: unsur.teramati,
+    mulai: unsur.mulai, akhir: unsur.akhir, hari: unsur.hari,
+    hadirTerkunci: unsur.hadirTerkunci,
+    tier3, tier2, tier1
   };
+}
+
+/**
+ * Indeks Peringatan Pembinaan per santri pada jendela berjalan (aturan
+ * baku). Tidak ada penjumlahan menjadi skor tunggal — itu disengaja.
+ */
+function hitungIpp(args) {
+  return terapkanAturanIpp(hitungUnsurIpp(args), { hari: args.hari || IPP_JENDELA });
 }
 
 /**
@@ -16006,6 +16134,8 @@ function panelSebaran({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presen
       <b>${nilai}</b></td>`;
   };
 
+  // Peran tanpa hak analisis presensi: kedua kolom kehadiran tidak dipasang.
+  const hadirTutup = !!presensi?.terkunci;
   const tubuh = isi.map(r => `<tr>
     <td class="sb-nm"><b>Angkatan ${esc(r.angkatan)}</b><small>${angka(r.santri)} santri</small></td>
     ${sel(r.plg100, maks.plg, 'merah')}
@@ -16015,14 +16145,14 @@ function panelSebaran({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presen
     <td class="sb-sel">${r.tuntas === null
       ? '<span style="color:var(--text-3)">—</span>'
       : `<b>${r.tuntas}%</b>`}</td>
-    <td class="sb-sel" title="${r.khSantri ? `${r.khSantri} santri teramati · ${angka(Math.round(r.khAmati))} JP` : 'Belum ada pekan presensi yang ditandai selesai'}">${r.hadir === null
+    ${hadirTutup ? '' : `<td class="sb-sel" title="${r.khSantri ? `${r.khSantri} santri teramati · ${angka(Math.round(r.khAmati))} JP` : 'Belum ada pekan presensi yang ditandai selesai'}">${r.hadir === null
       ? '<span style="color:var(--text-3)">—</span>'
       : `<b>${r.hadir}%</b><small class="sb-n">${angka(r.khSantri)} santri</small>`}</td>
     ${r.alpaPer === null
       ? '<td class="sb-sel"><span style="color:var(--text-3)">—</span></td>'
-      : sel(r.alpaPer, maks.alpa, 'merah')}
+      : sel(r.alpaPer, maks.alpa, 'merah')}`}
     <td class="sb-tren">${lencanaTren(r.tren)}</td>
-  </tr>`).join('') || barisKosong(9, 'Belum ada santri terdata.', 'Isi data santri terlebih dahulu.');
+  </tr>`).join('') || barisKosong(hadirTutup ? 7 : 9, 'Belum ada santri terdata.', 'Isi data santri terlebih dahulu.');
 
   const html = kartu('Peta Sebaran Perkembangan per Angkatan',
     `<div class="tbl"><table class="sebar">
@@ -16030,15 +16160,15 @@ function panelSebaran({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presen
         <th>Angkatan</th>
         <th>Pelanggaran</th><th>Apresiasi</th><th>Setoran</th>
         <th>Izin keluar</th><th>Pembinaan tuntas</th>
-        <th>Kehadiran kelas</th><th>Alpa (JP/santri)</th><th>Tren pelanggaran</th>
+        ${hadirTutup ? '' : '<th>Kehadiran kelas</th><th>Alpa (JP/santri)</th>'}<th>Tren pelanggaran</th>
       </tr></thead><tbody>${tubuh}</tbody></table></div>
     <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
     <p class="sb-kaki">Empat kolom pertama dihitung <b>per 100 santri</b> agar angkatan
       berukuran berbeda dapat dibandingkan. Kolom tren adalah kemiringan garis regresi
       linear atas jumlah pelanggaran bulanan — dihitung hanya pada tingkat kelompok,
-      tempat jumlah catatannya memadai. Kolom <b>kehadiran</b> dan <b>alpa</b> dihitung atas
+      tempat jumlah catatannya memadai.${hadirTutup ? '' : ` Kolom <b>kehadiran</b> dan <b>alpa</b> dihitung atas
       santri yang pekan presensinya sudah ditandai selesai (izin kegiatan dihitung hadir);
-      angkatan tanpa pekan teramati bertanda —.</p>`,
+      angkatan tanpa pekan teramati bertanda —.`}</p>`,
     '', `${bulanKunci.length} bulan terakhir`);
 
   return { html, isi };
@@ -16168,7 +16298,10 @@ function panelIpp(ipp, { batas = 10 } = {}) {
   // alpa ditampilkan terpisah karena alpa — bukan sakit — yang dibaca
   // sebagai sinyal keterputusan.
   const unsurHadir = (k) => {
-    if (!k) return `<span class="ipp-u" title="Kehadiran — belum ada pekan presensi yang ditandai selesai">
+    if (ipp.hadirTerkunci) return '';
+    if (!k) return `<span class="ipp-u" title="${ipp.hadirTerkunci
+        ? 'Kehadiran — terkunci untuk peran Anda'
+        : 'Kehadiran — belum ada pekan presensi yang ditandai selesai'}">
       <span class="ipp-bar ungu"><i style="width:0%"></i></span><b>—</b></span>`;
     const judul = `Kehadiran — ${k.hadirPct}% dari ${k.jpAmati} JP teramati (${k.pekan} pekan); alpa ${k.alpa} JP`;
     return `<span class="ipp-u" title="${esc(judul)}">
@@ -16202,7 +16335,9 @@ function panelIpp(ipp, { batas = 10 } = {}) {
        Kriteria ini menyala sendiri setelah pencatatan positif mencapai
        ${Math.round(IPP_AMBANG_IKATAN * 100)}% santri.`;
 
-  const catatanHadir = ipp.teramati
+  const catatanHadir = ipp.hadirTerkunci
+    ? `Unsur <b>Kehadiran</b> tidak ditampilkan untuk peran ${esc(role())}.`
+    : ipp.teramati
     ? `Unsur <b>Kehadiran</b> terbaca untuk ${angka(ipp.teramati)} dari ${angka(ipp.daftar.length)}
        santri — hanya pekan presensi yang sudah ditandai selesai yang dihitung; santri lain
        bertanda —. Yang dibaca sebagai sinyal adalah <b>alpa</b> (≥ ${KH_AMBANG_ALPA_JP} JP → tier 2,
@@ -16218,11 +16353,11 @@ function panelIpp(ipp, { batas = 10 } = {}) {
       <span><i class="ipp-dot hijau"></i>Ikatan</span>
       <span><i class="ipp-dot kuning"></i>Keterputusan</span>
       <span><i class="ipp-dot biru"></i>Respons</span>
-      <span><i class="ipp-dot ungu"></i>Kehadiran</span>
+      ${ipp.hadirTerkunci ? '' : '<span><i class="ipp-dot ungu"></i>Kehadiran</span>'}
     </div>
-    <div class="ipp">${baris}</div>
-    <p class="sb-kaki">Kelima unsur <b>sengaja tidak dijumlahkan</b> menjadi satu skor:
-      satu angka tunggal menyembunyikan sebab, sedangkan lima batang berdampingan
+    <div class="ipp${ipp.hadirTerkunci ? ' tanpa-hadir' : ''}">${baris}</div>
+    <p class="sb-kaki">${ipp.hadirTerkunci ? 'Unsur-unsur ini' : 'Kelima unsur'} <b>sengaja tidak dijumlahkan</b> menjadi satu skor:
+      satu angka tunggal menyembunyikan sebab, sedangkan batang-batang berdampingan
       menunjukkan ikatan mana yang mengendur. Yang ditampilkan adalah <b>status</b> pada
       jendela ${ipp.hari} hari berjalan, bukan arah perubahan — jumlah titik waktu per
       santri belum memadai untuk menaksir tren perorangan. ${catatanIkatan}
@@ -16271,7 +16406,8 @@ async function blokSebaran({ siswa, detail, izin, pembinaan, ipp = true, batasIp
   const bina6     = dalamJendela(pembinaan, 'tanggal_pembinaan');
   // Presensi sudah terpotong enam bulan saat dimuat; di sini hanya
   // disaring pada santri yang boleh dilihat peran ini.
-  const presensiRaw = { rows: saring(presensiAll.rows || []), pekan: presensiAll.pekan || [] };
+  const presensiRaw = { rows: saring(presensiAll.rows || []), pekan: presensiAll.pekan || [],
+    terkunci: !!presensiAll.terkunci };
 
   const pos = panelPositif({ siswa, prestasi, tahfiz, bulanKunci });
   const seb = panelSebaran({ siswa, detail: detail6, prestasi, tahfiz,
@@ -16307,6 +16443,1299 @@ async function blokSebaran({ siswa, detail, izin, pembinaan, ipp = true, batasIp
       tandaiTabelBisaGeser();
     }
   };
+}
+
+// =====================================================================
+// 39. LABORATORIUM KEBIJAKAN & OBSERVATORIUM PERKEMBANGAN  (v2.16 · Admin)
+//
+//     Halaman kerja analis manajemen pendidikan Islam. Seluruhnya dihitung
+//     di peramban dari tabel yang sudah ada; tidak ada satu pun penulisan
+//     ke database. Dasar rancangannya:
+//
+//     (1) TIGA LAPIS KLAIM, DILABELI TERBUKA di setiap panel:
+//         · Deskriptif      — apa yang tercatat. Tidak lebih.
+//         · Kontrafaktual   — bila ATURAN penjenjangan diubah, siapa yang
+//                             berpindah tier. Deterministik dan pasti,
+//                             karena yang diubah adalah alat ukurnya,
+//                             bukan santrinya.
+//         · Skenario        — bila PERILAKU berubah sesuai asumsi, berapa
+//                             sebaran bebannya. Simulasi Monte Carlo atas
+//                             asumsi yang ditulis; bukan ramalan.
+//         Mencampur ketiganya adalah kesalahan paling lazim dalam
+//         pengambilan keputusan berbasis data.
+//
+//     (2) EKOR LEBIH PENTING DARIPADA RERATA (Taleb). Beban pembinaan
+//         dayah ditentukan oleh sedikit santri dan sedikit kejadian berat.
+//         Panel "Ekor & Angsa Hitam" menguji sebaran: konsentrasi (Gini,
+//         Lorenz, pangsa Pareto), tebal ekor (kurtosis, rasio maks/jumlah,
+//         taksiran Hill), dan kerapuhan (berapa bergantung pada segelintir
+//         santri). Masalah kalkun ikut dimodelkan: santri tanpa riwayat
+//         tetap diberi peluang melanggar di skenario — ketiadaan catatan
+//         di masa lalu bukan bukti ketiadaan di masa depan.
+//
+//     (3) DAPAT DIREPLIKASI. Monte Carlo memakai benih acak tetap; setiap
+//         percobaan (hipotesis + parameter + hasil) dapat disimpan di Buku
+//         Catatan Percobaan dan diulang persis sama.
+//
+//     (4) ARTEFAK PENCATATAN DIAKUI. Tanggal pelanggaran adalah tanggal
+//         INPUT, yang terhimpun pada sedikit hari. Deret waktu harian
+//         karena itu tidak dibaca sebagai dinamika perilaku.
+// =====================================================================
+
+const LAB = {
+  tab: 'model', hari: IPP_JENDELA,
+  data: null, unsur: null, baku: null, eksp: null, mc: null,
+  aturan: { ...IPP_ATURAN_BAKU },
+  kap: { pengasuh: 27, perPengasuh: 3 },
+  mcAtur: { ringan: 0, sedang: 0, berat: 0, latar: 10, pShock: 10, kShock: 3, iterasi: 1000, seed: 1447 },
+  f: { tier: '23', ang: '', cari: '', hal: 1 },
+  sapuan: 'bebanT3', hipotesis: ''
+};
+
+/** Instrumen (variabel percobaan) yang dapat diubah di Laboratorium. */
+const LAB_PARAM = [
+  { k:'bebanT3',     label:'Beban → tier 3',                    satuan:'poin',    min:10,   max:200, step:5 },
+  { k:'bebanT2',     label:'Beban → tier 2',                    satuan:'poin',    min:1,    max:60,  step:1 },
+  { k:'macetMin',    label:'Pembinaan minimal dinilai',         satuan:'kali',    min:1,    max:10,  step:1,    syarat:'pakaiMacet' },
+  { k:'macetPct',    label:'Tuntas di bawah → macet (tier 3)',  satuan:'%',       min:0,    max:100, step:5,    syarat:'pakaiMacet' },
+  { k:'putusT2',     label:'Izin keluar → tier 2',              satuan:'kali',    min:1,    max:10,  step:1,    syarat:'pakaiPutus' },
+  { k:'alpaJp',      label:'Alpa → tier 2',                     satuan:'JP',      min:1,    max:48,  step:1,    syarat:'pakaiHadir' },
+  { k:'alpaKronis',  label:'Alpa kronis → tier 3',              satuan:'% jam',   min:0.02, max:0.5, step:0.01, pct:true, syarat:'pakaiHadir' },
+  { k:'absenKronis', label:'Tidak hadir kronis → tier 2',       satuan:'% jam',   min:0.02, max:0.5, step:0.01, pct:true, syarat:'pakaiHadir' },
+  { k:'ikatanAmbang',label:'Ikatan nol aktif bila cakupan ≥',   satuan:'% santri',min:0,    max:1,   step:0.05, pct:true, syarat:'pakaiIkatan' }
+];
+const LAB_SAKLAR = [
+  { k:'pakaiMacet',  label:'Aturan pembinaan macet' },
+  { k:'pakaiPutus',  label:'Aturan keterputusan (izin keluar)' },
+  { k:'pakaiHadir',  label:'Aturan kehadiran kelas' },
+  { k:'pakaiIkatan', label:'Aturan ikatan nol' }
+];
+const LAB_BENDERA = [
+  { k:'bebanT3',     nama:'Beban tinggi',        tier:3, unsur:'Beban' },
+  { k:'macet',       nama:'Pembinaan macet',     tier:3, unsur:'Respons' },
+  { k:'alpaKronis',  nama:'Alpa kronis',         tier:3, unsur:'Kehadiran' },
+  { k:'bebanT2',     nama:'Ada beban',           tier:2, unsur:'Beban' },
+  { k:'alpaHari',    nama:'Alpa ≥ ambang',       tier:2, unsur:'Kehadiran' },
+  { k:'absenKronis', nama:'Tidak hadir kronis',  tier:2, unsur:'Kehadiran' },
+  { k:'putus',       nama:'Sering izin keluar',  tier:2, unsur:'Keterputusan' },
+  { k:'ikatanNol',   nama:'Ikatan nol',          tier:2, unsur:'Ikatan' }
+];
+
+/* ---------------------------------------------------------------------
+   Statistik — kecil, tanpa pustaka, dapat diperiksa baris per baris
+   --------------------------------------------------------------------- */
+const Stat = {
+  /** Pembangkit acak berbenih (mulberry32) — hasil simulasi dapat diulang. */
+  rng(benih) {
+    let a = (Number(benih) || 1) >>> 0;
+    return () => {
+      a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  },
+  /** Bilangan Poisson (Knuth; hampiran normal untuk λ besar). */
+  poisson(l, r) {
+    if (!(l > 0)) return 0;
+    if (l > 30) {
+      const u = 1 - r(), v = r();
+      const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+      return Math.max(0, Math.round(l + Math.sqrt(l) * z));
+    }
+    const L = Math.exp(-l); let k = 0, p = 1;
+    do { k++; p *= r(); } while (p > L);
+    return k - 1;
+  },
+  jumlah: (a) => a.reduce((x, y) => x + y, 0),
+  rerata(a) { return a.length ? Stat.jumlah(a) / a.length : 0; },
+  sd(a) {
+    if (a.length < 2) return 0;
+    const m = Stat.rerata(a);
+    return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1));
+  },
+  kuantil(a, p) {
+    if (!a.length) return 0;
+    const s = [...a].sort((x, y) => x - y);
+    const i = (s.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i);
+    return s[lo] + (s[hi] - s[lo]) * (i - lo);
+  },
+  /** Kurtosis berlebih (normal = 0). */
+  kurtosis(a) {
+    const n = a.length; if (n < 4) return null;
+    const m = Stat.rerata(a);
+    const m2 = a.reduce((s, x) => s + (x - m) ** 2, 0) / n;
+    const m4 = a.reduce((s, x) => s + (x - m) ** 4, 0) / n;
+    return m2 ? m4 / (m2 * m2) - 3 : null;
+  },
+  peringkat(a) {
+    const idx = a.map((v, i) => [v, i]).sort((x, y) => x[0] - y[0]);
+    const r = new Array(a.length);
+    for (let i = 0; i < idx.length;) {
+      let j = i; while (j + 1 < idx.length && idx[j + 1][0] === idx[i][0]) j++;
+      const rata = (i + j) / 2 + 1;
+      for (let k = i; k <= j; k++) r[idx[k][1]] = rata;
+      i = j + 1;
+    }
+    return r;
+  },
+  pearson(x, y) {
+    const n = x.length; if (n < 3) return null;
+    const mx = Stat.rerata(x), my = Stat.rerata(y);
+    let a = 0, bx = 0, by = 0;
+    for (let i = 0; i < n; i++) { a += (x[i] - mx) * (y[i] - my); bx += (x[i] - mx) ** 2; by += (y[i] - my) ** 2; }
+    return bx && by ? a / Math.sqrt(bx * by) : null;
+  },
+  spearman(x, y) { return Stat.pearson(Stat.peringkat(x), Stat.peringkat(y)); },
+  gini(a) {
+    const s = [...a].sort((x, y) => x - y), n = s.length, t = Stat.jumlah(s);
+    if (!n || !t) return 0;
+    let w = 0; s.forEach((x, i) => { w += (i + 1) * x; });
+    return (2 * w) / (n * t) - (n + 1) / n;
+  },
+  lorenz(a) {
+    const s = [...a].sort((x, y) => x - y), n = s.length, t = Stat.jumlah(s) || 1;
+    const out = [{ x: 0, y: 0 }]; let c = 0;
+    const lang = Math.max(1, Math.floor(n / 60));
+    s.forEach((v, i) => { c += v; if ((i + 1) % lang === 0 || i === n - 1) out.push({ x: (i + 1) / n, y: c / t }); });
+    return out;
+  },
+  /** Taksiran Hill untuk indeks ekor α dari k pengamatan terbesar. */
+  hill(a, kFrak = 0.1) {
+    const s = a.filter(x => x > 0).sort((x, y) => y - x);
+    const k = Math.max(5, Math.floor(s.length * kFrak));
+    if (s.length < k + 2 || !(s[k] > 0)) return null;
+    let t = 0; for (let i = 0; i < k; i++) t += Math.log(s[i] / s[k]);
+    return t > 0 ? { alfa: k / t, k, n: s.length } : null;
+  },
+  /** Rasio maks/jumlah atas x^p — alat Taleb untuk menilai kestabilan momen ke-p. */
+  maksJumlah(a, p) {
+    const pk = a.map(x => Math.abs(x) ** p), t = Stat.jumlah(pk);
+    return t ? Math.max(...pk) / t : 0;
+  }
+};
+
+const labPct  = (x, d = 1) => `${(Math.round(x * 100 * 10 ** d) / 10 ** d).toLocaleString('id-ID')}%`;
+const labDes  = (x, d = 2) => x === null || x === undefined || !isFinite(x) ? '—'
+  : Number(x).toLocaleString('id-ID', { minimumFractionDigits: d, maximumFractionDigits: d });
+const labKlaim = (jenis) => {
+  const t = { d:['deskriptif','Apa yang tercatat'], k:['kontrafaktual','Bila aturan diubah — pasti'],
+              s:['skenario','Bila perilaku berubah — asumsi, bukan ramalan'] }[jenis];
+  return `<span class="lab-klaim ${t[0]}" title="${esc(t[1])}"><i class="fa-solid ${
+    jenis === 'd' ? 'fa-eye' : jenis === 'k' ? 'fa-code-branch' : 'fa-dice'}"></i>${t[0]}</span>`;
+};
+const labCatatan = (teks) => `<p class="lab-epis"><i class="fa-solid fa-circle-info"></i><span>${teks}</span></p>`;
+
+function labSimpanLokal(k, v) {
+  try {
+    if (v === undefined) return JSON.parse(localStorage.getItem('lab:' + k) || 'null');
+    localStorage.setItem('lab:' + k, JSON.stringify(v));
+  } catch (e) { return null; }
+}
+
+/* ---------------------------------------------------------------------
+   Data & perhitungan dasar
+   --------------------------------------------------------------------- */
+async function labMuatData() {
+  const [siswaAll, detailAll, izinAll, pbnAll, prsAll, thfAll] = await Promise.all([
+    amanKosong(muatSiswa, 'santri'), amanKosong(muatDetail, 'pelanggaran'),
+    amanKosong(muatIzin, 'perizinan'), amanKosong(muatPembinaan, 'pembinaan'),
+    amanKosong(muatPrestasi, 'prestasi'), amanKosong(muatTahfiz, 'tahfiz')
+  ]);
+  const presensi = await muatPresensiJendela(bulanTerakhir(7)).catch(() => ({ rows: [], pekan: [] }));
+  LAB.data = {
+    siswa: siswaAll.filter(aktifSantri),
+    detail: detailAll.filter(aktifDetail),
+    izin: izinAll,
+    pembinaan: pbnAll.filter(aktifPembinaan),
+    prestasi: prsAll.filter(aktifPrestasi),
+    tahfiz: thfAll.filter(aktifTahfiz),
+    presensi
+  };
+}
+
+function labHitung() {
+  const d = LAB.data;
+  LAB.unsur = hitungUnsurIpp({ ...d, hari: LAB.hari });
+  LAB.baku = terapkanAturanIpp(LAB.unsur, { hari: LAB.hari });
+  LAB.eksp = terapkanAturanIpp(LAB.unsur, { ...LAB.aturan, hari: LAB.hari });
+  LAB.mc = null;
+}
+
+const labKapasitas = () => Math.max(1, (Number(LAB.kap.pengasuh) || 0) * (Number(LAB.kap.perPengasuh) || 0));
+
+/** Baris dalam jendela aktif. */
+function labDalamJendela(rows, kolom) {
+  const { mulai, akhir } = LAB.unsur;
+  return rows.filter(r => { const t = tglDari(kunciTgl(r[kolom])); return !!t && t >= mulai && t <= akhir; });
+}
+
+/* ---------------------------------------------------------------------
+   Tampilan utama
+   --------------------------------------------------------------------- */
+async function viewLab() {
+  await labMuatData();
+  const simpan = labSimpanLokal('kap'); if (simpan) LAB.kap = { ...LAB.kap, ...simpan };
+  labHitung();
+
+  const tabs = [
+    ['model',  'fa-sitemap',          'Model & Mutu Data'],
+    ['ipp',    'fa-list-ol',          'IPP Lengkap'],
+    ['sebar',  'fa-table-cells',      'Sebaran Angkatan'],
+    ['ekor',   'fa-feather-pointed',  'Ekor & Angsa Hitam'],
+    ['lab',    'fa-flask',            'Laboratorium Kebijakan'],
+    ['memo',   'fa-book-open',        'Buku Catatan & Memo Syura']
+  ];
+
+  $('viewRoot').innerHTML = `
+    <section class="hero lab-hero" style="padding:24px">
+      <div class="eyebrow"><span class="ar">مختبر السياسات</span><span class="rule"></span>
+        <span class="lat">Observatorium Perkembangan</span></div>
+      <h2 style="font-size:clamp(24px,3vw,32px)">Laboratorium Kebijakan</h2>
+      <p>Indeks Peringatan Pembinaan dan sebaran perkembangan dibaca sebagai model ilmiah:
+         definisi operasional yang terbuka, uji mutu data, uji ekor sebaran, dan percobaan
+         aturan sebelum aturan itu diberlakukan kepada santri yang nyata.</p>
+      <div class="meta lab-meta">
+        <span>${labKlaim('d')}</span><span>${labKlaim('k')}</span><span>${labKlaim('s')}</span>
+        <label class="lab-jendela"><i class="fa-regular fa-calendar"></i>Jendela
+          <select id="labHari" class="input">${[30, 60, 90, 120, 180].map(h =>
+            `<option value="${h}" ${h === LAB.hari ? 'selected' : ''}>${h} hari</option>`).join('')}</select></label>
+      </div>
+    </section>
+    <div class="chips lab-tabs" role="tablist">${tabs.map(([k, ik, t]) =>
+      `<button class="chip ${LAB.tab === k ? 'on' : ''}" data-labtab="${k}" role="tab">
+        <i class="fa-solid ${ik}"></i> ${t}</button>`).join('')}</div>
+    <div id="labIsi"></div>`;
+
+  $('labHari').addEventListener('change', (e) => {
+    LAB.hari = Number(e.target.value) || IPP_JENDELA;
+    labHitung(); labGambar();
+  });
+
+  const isi = $('labIsi');
+  isi.addEventListener('input', labSaatInput);
+  isi.addEventListener('change', labSaatUbah);
+
+  onKlik((e) => {
+    const t = e.target.closest('[data-labtab]');
+    if (t) {
+      LAB.tab = t.dataset.labtab;
+      document.querySelectorAll('[data-labtab]').forEach(b => b.classList.toggle('on', b === t));
+      return labGambar();
+    }
+    const a = e.target.closest('[data-lab]');
+    if (a) return labAksi(a.dataset.lab, a);
+    const pg = e.target.closest('[data-pg]');
+    if (pg && !pg.disabled) {
+      const [id, h] = pg.dataset.pg.split(':');
+      if (id === 'labIpp') { LAB.f.hal = Number(h) || 1; $('labIppTabel').innerHTML = labTabelIpp(); tandaiTabelBisaGeser(); }
+      return;
+    }
+    const d = e.target.closest('[data-detail]');
+    if (d) return bukaDetailSantri(d.dataset.detail);
+  });
+
+  labGambar();
+}
+
+function labGambar() {
+  Object.keys(APP.charts).filter(k => k.startsWith('lab')).forEach(k => {
+    try { APP.charts[k].destroy(); } catch (e) {} delete APP.charts[k];
+  });
+  const el = $('labIsi'); if (!el) return;
+  const t = LAB.tab;
+  if (t === 'model')      { el.innerHTML = labTabModel();  labGrafikModel(); }
+  else if (t === 'ipp')   { el.innerHTML = labTabIpp(); }
+  else if (t === 'sebar') { el.innerHTML = labTabSebar(); labGrafikSebar(); }
+  else if (t === 'ekor')  { el.innerHTML = labTabEkor();   labGrafikEkor(); }
+  else if (t === 'lab')   { el.innerHTML = labTabLab();    labGrafikLab(); }
+  else                    { el.innerHTML = labTabMemo(); }
+  tandaiTabelBisaGeser();
+}
+
+/* =====================================================================
+   TAB 1 — MODEL & MUTU DATA
+   ===================================================================== */
+function labTabModel() {
+  const A = LAB.eksp.aturan, U = LAB.unsur, d = LAB.data, n = U.daftar.length || 1;
+  const pctA = (x) => `${Math.round(x * 100)}%`;
+
+  const alur = `<div class="lab-alur">
+    <div class="lab-kol"><small>Sumber catatan</small>
+      <span>detail_data</span><span>log_prestasi · log_tahfiz</span><span>log_perizinan</span>
+      <span>log_pembinaan</span><span>data_presensi · presensi_minggu</span></div>
+    <i class="fa-solid fa-arrow-right lab-panah"></i>
+    <div class="lab-kol"><small>Unsur (ikatan sosial Hirschi · indikator EWS)</small>
+      <span class="u merah">Beban</span><span class="u hijau">Ikatan</span><span class="u kuning">Keterputusan</span>
+      <span class="u biru">Respons</span><span class="u ungu">Kehadiran</span></div>
+    <i class="fa-solid fa-arrow-right lab-panah"></i>
+    <div class="lab-kol"><small>Aturan penjenjangan (instrumen)</small>
+      <span>8 aturan ambang · tidak dijumlahkan</span><span>ambang dapat diuji di Laboratorium</span></div>
+    <i class="fa-solid fa-arrow-right lab-panah"></i>
+    <div class="lab-kol"><small>Dukungan berjenjang (SWPBIS)</small>
+      <span class="t t3">Tier 3 · intensif, individual</span><span class="t t2">Tier 2 · tersasar</span>
+      <span class="t t1">Tier 1 · universal</span></div>
+    <i class="fa-solid fa-arrow-right lab-panah"></i>
+    <div class="lab-kol"><small>Keputusan</small>
+      <span>Musyawarah pengasuh (<i>syura</i>)</span><span>Memo & catatan percobaan</span></div>
+  </div>`;
+
+  const barisDef = [
+    ['Beban', 'Luaran perilaku yang dipantau; rujukan disiplin (SWPBIS)',
+     'Jumlah bobot poin pelanggaran aktif dalam jendela', 'detail_data', 'Rasio (poin)',
+     `≥ ${A.bebanT3} → tier 3 · ≥ ${A.bebanT2} → tier 2`, 'Ta’dīb'],
+    ['Ikatan', 'Commitment & involvement (Hirschi)',
+     'Jumlah catatan apresiasi + setoran hafalan dalam jendela', 'log_prestasi, log_tahfiz', 'Hitungan',
+     A.pakaiIkatan ? `0 → tier 2, aktif bila cakupan ≥ ${pctA(A.ikatanAmbang)} santri` : 'nonaktif', 'Ta’dīb'],
+    ['Keterputusan', 'Involvement terbalik (Hirschi)',
+     'Jumlah izin keluar yang dimulai dalam jendela', 'log_perizinan', 'Hitungan',
+     A.pakaiPutus ? `≥ ${A.putusT2} → tier 2` : 'nonaktif', 'Amanah'],
+    ['Respons', 'Attachment yang dilembagakan; kesetiaan pelaksanaan',
+     'Persentase pembinaan berstatus Selesai dalam jendela', 'log_pembinaan', 'Rasio (%)',
+     A.pakaiMacet ? `< ${A.macetPct}% dari ≥ ${A.macetMin} pembinaan → tier 3` : 'nonaktif', 'Ta’dīb'],
+    ['Kehadiran', 'Behavioral engagement; indikator kehadiran EWS (Henry dkk., 2011)',
+     'JP hadir ÷ JP teramati; alpa dalam JP. Hanya pekan bertanda selesai', 'data_presensi, presensi_minggu', 'Rasio (%, JP)',
+     A.pakaiHadir ? `alpa ≥ ${A.alpaJp} JP → 2 · alpa ≥ ${pctA(A.alpaKronis)} → 3 · absen ≥ ${pctA(A.absenKronis)} → 2` : 'nonaktif', 'Tabayyun · Itqān']
+  ].map(r => `<tr>${r.map((c, i) => i === 0 ? `<td><b>${esc(c)}</b></td>` : `<td>${esc(c)}</td>`).join('')}</tr>`).join('');
+
+  // ---- Mutu data ----
+  const hariKal = LAB.hari;
+  const dW = labDalamJendela(d.detail, 'tanggal');
+  const hariIsi = new Set(dW.map(r => kunciTgl(r.tanggal))).size;
+  const perHari = {}; dW.forEach(r => { const k = kunciTgl(r.tanggal); perHari[k] = (perHari[k] || 0) + 1; });
+  const puncak = Math.max(0, ...Object.values(perHari));
+  const santriDari = (rows) => new Set(rows.map(r => String(r.nisn))).size;
+  const pW = labDalamJendela(d.prestasi, 'tanggal'), tW = labDalamJendela(d.tahfiz, 'tanggal');
+  const iW = labDalamJendela(d.izin, 'tanggal_mulai'), bW = labDalamJendela(d.pembinaan, 'tanggal_pembinaan');
+  const proses = bW.filter(r => String(r.status_pembinaan) !== 'Selesai');
+  const tuaProses = proses.filter(r => {
+    const t = tglDari(kunciTgl(r.tanggal_pembinaan)); return t && (Date.now() - t) / 864e5 > 14;
+  }).length;
+  const kelasSemua = new Set(d.siswa.map(s => s.kelas).filter(Boolean)).size;
+  const kelasAmati = new Set((d.presensi.pekan || []).filter(p => p.status === 'selesai').map(p => p.kelas)).size;
+
+  const mutu = [
+    ['Pelanggaran', dW.length, santriDari(dW),
+     `${hariIsi} dari ${hariKal} hari berisi catatan (${pctA(hariIsi / hariKal)}); hari tersibuk memuat ${dW.length ? pctA(puncak / dW.length) : '0%'} catatan`,
+     hariIsi / hariKal < 0.3 ? 'buruk' : hariIsi / hariKal < 0.6 ? 'sedang' : 'baik'],
+    ['Apresiasi', pW.length, santriDari(pW), 'Sisi positif; menentukan aktif tidaknya aturan ikatan nol',
+     santriDari(pW) / n < 0.15 ? 'buruk' : 'sedang'],
+    ['Setoran tahfiz', tW.length, santriDari(tW), 'Konsistensi ibadah sebagai ikatan positif',
+     santriDari(tW) / n < 0.15 ? 'buruk' : 'sedang'],
+    ['Perizinan', iW.length, santriDari(iW), 'Tanggal mulai izin', 'baik'],
+    ['Pembinaan', bW.length, santriDari(bW),
+     `${proses.length} masih "Dalam Proses" (${bW.length ? pctA(proses.length / bW.length) : '0%'}), ${tuaProses} di antaranya > 14 hari — aturan macet membaca ini sebagai respons rendah`,
+     bW.length && proses.length / bW.length > 0.5 ? 'buruk' : 'sedang'],
+    ['Presensi kelas', (d.presensi.rows || []).length, U.teramati,
+     d.presensi.terkunci ? 'Terkunci untuk peran ini' : `${kelasAmati} dari ${kelasSemua} kelas memiliki pekan bertanda selesai`,
+     U.teramati / n < 0.3 ? 'buruk' : 'sedang']
+  ].map(([nm, baris, sn, ket, mutu]) => `<tr>
+    <td><b>${esc(nm)}</b></td><td class="num">${angka(baris)}</td>
+    <td class="num">${angka(sn)} <small>(${pctA(sn / n)})</small></td>
+    <td>${esc(ket)}</td><td><span class="lab-mutu ${mutu}">${{ baik:'memadai', sedang:'terbatas', buruk:'lemah' }[mutu]}</span></td></tr>`).join('');
+
+  // ---- Validitas: korelasi Spearman antar-unsur ----
+  const L = LAB.unsur.daftar;
+  const varb = [
+    ['Beban', x => x.beban], ['Ikatan', x => x.ikatan], ['Keterputusan', x => x.putus],
+    ['Respons', x => x.respons], ['Alpa', x => x.kh ? x.kh.alpa : null],
+    ['Absen %', x => x.kh ? x.kh.absenRasio : null]
+  ];
+  const sel = (i, j) => {
+    if (i === j) return `<td class="lab-r diag">1</td>`;
+    const pas = L.map(x => [varb[i][1](x), varb[j][1](x)]).filter(([a, b]) => a !== null && b !== null && a !== undefined && b !== undefined);
+    const r = pas.length >= 10 ? Stat.spearman(pas.map(p => p[0]), pas.map(p => p[1])) : null;
+    if (r === null) return `<td class="lab-r" title="n = ${pas.length}">—</td>`;
+    const w = r >= 0 ? '159,18,57' : '20,97,139';
+    return `<td class="lab-r" style="background:rgba(${w},${(Math.abs(r) * 0.45).toFixed(3)})" title="ρ = ${labDes(r)} · n = ${pas.length}">
+      <b>${labDes(r)}</b><small>n ${pas.length}</small></td>`;
+  };
+  const matriks = `<div class="tbl"><table class="lab-korel"><thead><tr><th></th>${varb.map(v => `<th>${esc(v[0])}</th>`).join('')}</tr></thead>
+    <tbody>${varb.map((v, i) => `<tr><td><b>${esc(v[0])}</b></td>${varb.map((_, j) => sel(i, j)).join('')}</tr>`).join('')}</tbody></table></div>`;
+
+  return `
+    ${kartu('Kerangka Model', `<div class="card-body">${alur}
+      ${labCatatan(`Kelima unsur <b>tidak dijumlahkan</b>. Satu skor komposit menyembunyikan sebab;
+        yang ditanyakan model ini bukan "berapa skornya", melainkan "ikatan mana yang mengendur"
+        — pertanyaan yang menuntun <i>tabayyun</i> sebelum penetapan.`)}</div>`,
+      labKlaim('d'), 'Alur dari catatan menjadi keputusan musyawarah')}
+
+    ${kartu('Definisi Operasional Variabel', `<div class="tbl"><table>
+      <thead><tr><th>Unsur</th><th>Konstruk teoretis</th><th>Definisi operasional</th><th>Sumber</th>
+        <th>Skala</th><th>Aturan berlaku</th><th>Nilai</th></tr></thead><tbody>${barisDef}</tbody></table></div>
+      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>`,
+      '', `Jendela ${LAB.hari} hari · aturan yang tampil mengikuti isian Laboratorium`)}
+
+    ${kartu('Mutu Data — sebelum angka dipercaya', `<div class="tbl"><table>
+      <thead><tr><th>Sumber</th><th>Baris</th><th>Santri tercakup</th><th>Catatan mutu</th><th>Status</th></tr></thead>
+      <tbody>${mutu}</tbody></table></div>
+      <div class="card-body">${chartBox('labHarian')}
+      ${labCatatan(`Grafik ini adalah <b>tanggal input</b>, bukan tanggal kejadian. Bila catatan menumpuk
+        pada sedikit hari, deret harian menggambarkan kebiasaan mencatat — bukan dinamika perilaku.
+        Membacanya sebagai perilaku adalah <i>ludic fallacy</i>: memperlakukan model sebagai kenyataan.
+        Ketepatan waktu pencatatan (<i>itqān</i>) adalah prasyarat analisis, bukan hiasan.`)}</div>`,
+      labKlaim('d'), `Jendela ${LAB.hari} hari`)}
+
+    ${kartu('Validitas Konvergen & Diskriminan — korelasi Spearman antar-unsur', `${matriks}
+      <div class="card-body">${labCatatan(`ρ sedang (0,3–0,5) antara dua unsur perilaku menandakan keduanya
+        mengukur hal yang berkaitan tanpa saling menggandakan — itulah alasan unsur baru layak ditambahkan.
+        ρ mendekati 1 berarti satu unsur mubazir; ρ mendekati 0 dengan unsur perilaku lain perlu
+        dipertanyakan maknanya. Bila unsur positif (Ikatan) justru searah dengan unsur negatif, curigai
+        <b>efek pencatat</b>: kelas yang pengasuhnya rajin mencatat tampak lebih baik sekaligus lebih buruk —
+        yang terukur adalah kerajinan mencatat, bukan perilaku. Pasangan dengan n &lt; 10 tidak dihitung.`)}</div>`,
+      labKlaim('d'), 'Warna merah = searah, biru = berlawanan; pekat = kuat')}
+
+    ${kartu('Rujukan Model', `<div class="card-body lab-rujuk">
+      <p>Hirschi, T. (1969). <i>Causes of delinquency</i>. University of California Press.</p>
+      <p>Henry, K. L., Knight, K. E., & Thornberry, T. P. (2011). School disengagement as a predictor of dropout, delinquency, and problem substance use. <i>Journal of Youth and Adolescence, 41</i>(2), 156–166.</p>
+      <p>Bradshaw, C. P., Waasdorp, T. E., & Leaf, P. J. (2012). Effects of school-wide positive behavioral interventions and supports on child behavior problems. <i>Pediatrics, 130</i>(5).</p>
+      <p>McMahon, B. M., & Sembiante, S. F. (2019). Re-envisioning the purpose of early warning systems. <i>Review of Education, 8</i>(1), 266–301.</p>
+      <p>Hill, B. M. (1975). A simple general approach to inference about the tail of a distribution. <i>The Annals of Statistics, 3</i>(5), 1163–1174.</p>
+      <p>Taleb, N. N. (2007). <i>The black swan: The impact of the highly improbable</i>. Random House.</p>
+      <p>Taleb, N. N. (2012). <i>Antifragile: Things that gain from disorder</i>. Random House.</p>
+    </div>`, '', 'Pijakan teoretis setiap panel di halaman ini')}`;
+}
+
+function labGrafikModel() {
+  const dW = labDalamJendela(LAB.data.detail, 'tanggal');
+  const hari = [];
+  for (let t = new Date(LAB.unsur.mulai); t <= LAB.unsur.akhir; t = tambahHari(t, 1)) hari.push(kunciTgl(t));
+  const peta = Object.fromEntries(hari.map(h => [h, 0]));
+  dW.forEach(r => { const k = kunciTgl(r.tanggal); if (k in peta) peta[k]++; });
+  buatChart('labHarian', 'labHarian', {
+    type: 'bar',
+    data: { labels: hari.map(h => tgl(h)), datasets: [{ label: 'Catatan pelanggaran per tanggal input',
+      data: hari.map(h => peta[h]), backgroundColor: '#9F1239', borderRadius: 3 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 10 } }, y: { beginAtZero: true, ticks: { precision: 0 } } } }
+  });
+}
+
+/* =====================================================================
+   TAB 2 — IPP LENGKAP
+   ===================================================================== */
+function labTabIpp() {
+  const E = LAB.baku, n = E.daftar.length || 1;
+
+  // Sumbangan unik: santri yang HANYA dinaikkan oleh aturan ini.
+  const unik = LAB_BENDERA.map(b => {
+    const kena = E.daftar.filter(x => x.bendera[b.k]);
+    const satu = kena.filter(x => {
+      const lain = LAB_BENDERA.filter(z => z.k !== b.k && x.bendera[z.k]);
+      return b.tier === 3 ? !lain.some(z => z.tier === 3) : lain.length === 0;
+    });
+    return { ...b, kena: kena.length, unik: satu.length };
+  });
+  const maksKena = Math.max(1, ...unik.map(u => u.kena));
+  const tUnik = unik.map(u => `<tr>
+    <td><b>${esc(u.nama)}</b><small class="lab-sub">${esc(u.unsur)} · menaikkan ke tier ${u.tier}</small></td>
+    <td><span class="lab-bar"><i style="width:${Math.round(u.kena / maksKena * 100)}%"></i></span></td>
+    <td class="num">${angka(u.kena)}</td><td class="num"><b>${angka(u.unik)}</b></td>
+    <td class="num">${labPct(u.kena / n)}</td></tr>`).join('');
+
+  const angs = ['VII','VIII','IX','X','XI','XII'];
+  const F = LAB.f;
+  const opsiAng = angs.map(a => `<option ${F.ang === a ? 'selected' : ''}>${a}</option>`).join('');
+
+  return `
+    <div class="stats">
+      ${stat('Tier 3 · intensif', angka(E.tier3), 'fa-solid fa-triangle-exclamation', 'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)', `${labPct(E.tier3 / n)} santri · kapasitas ${angka(labKapasitas())}`)}
+      ${stat('Tier 2 · tersasar', angka(E.tier2), 'fa-solid fa-circle-half-stroke', 'background:var(--amber-bg);color:var(--amber)', 'var(--amber)', labPct(E.tier2 / n) + ' santri')}
+      ${stat('Tier 1 · universal', angka(E.tier1), 'fa-solid fa-circle-check', 'background:var(--teal-bg);color:var(--teal)', 'var(--teal)', labPct(E.tier1 / n) + ' santri')}
+      ${stat('Kehadiran teramati', angka(E.teramati), 'fa-solid fa-calendar-check', 'background:var(--violet-bg);color:var(--violet)', 'var(--violet)', labPct(E.teramati / n) + ' santri')}
+    </div>
+    ${labCatatan(`Dalam kerangka SWPBIS, tier 3 lazimnya menampung porsi kecil santri (kerap disebut
+      sekitar 1–5%). Porsi yang jauh lebih besar bukan bukti dayah lebih bermasalah; lebih sering itu tanda
+      <b>aturannya terlalu longgar</b> atau <b>datanya belum rapi</b>. Uji keduanya di tab Laboratorium.`)}
+
+    ${kartu('Sumbangan Setiap Aturan', `<div class="tbl"><table class="lab-unik">
+      <thead><tr><th>Aturan</th><th>Proporsi</th><th>Menandai</th><th>Unik</th><th>% santri</th></tr></thead>
+      <tbody>${tUnik}</tbody></table></div>
+      <div class="card-body">${labCatatan(`<b>Unik</b> = santri yang tidak akan terangkat ke tier tersebut
+        seandainya aturan ini dihapus. Aturan dengan sumbangan unik nol adalah kandidat <i>via negativa</i>
+        — dihapus tanpa kehilangan daya deteksi. Aturan yang menandai banyak santri tetapi sumbangan
+        uniknya besar adalah penentu utama beban kerja pengasuh.`)}</div>`,
+      labKlaim('d'), 'Aturan baku yang sedang dipakai dashboard')}
+
+    ${kartu('Daftar Lengkap Indeks Peringatan Pembinaan', `
+      <div class="md-form lab-filter">
+        <div class="field"><label class="label">Tier</label>
+          <select class="input" data-labf="tier">
+            ${[['23','Tier 2 & 3'],['3','Tier 3'],['2','Tier 2'],['1','Tier 1'],['123','Semua']].map(([v, t]) =>
+              `<option value="${v}" ${F.tier === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        <div class="field"><label class="label">Angkatan</label>
+          <select class="input" data-labf="ang"><option value="">Semua</option>${opsiAng}</select></div>
+        <div class="field" style="flex:2"><label class="label">Cari nama / kelas / sebab</label>
+          <input class="input" data-labf="cari" value="${esc(F.cari)}" placeholder="mis. alpa, XI-D, macet"></div>
+      </div>
+      <div id="labIppTabel">${labTabelIpp()}</div>`,
+      `<button class="btn btn-ghost btn-sm" data-lab="csv-ipp"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>`,
+      `Jendela ${LAB.hari} hari · ${tgl(kunciTgl(E.mulai))} – ${tgl(kunciTgl(E.akhir))}`)}`;
+}
+
+function labSaringIpp() {
+  const F = LAB.f, cari = F.cari.trim().toLowerCase();
+  return LAB.baku.daftar.filter(x => F.tier.includes(String(x.tingkat))
+    && (!F.ang || angkatanDariKelas(x.kelas) === F.ang)
+    && (!cari || `${x.nama} ${x.kelas} ${x.sebab}`.toLowerCase().includes(cari)));
+}
+
+function labTabelIpp() {
+  const rows = labSaringIpp(), UK = 40;
+  const hal = Math.min(LAB.f.hal, Math.max(1, Math.ceil(rows.length / UK)));
+  const potong = rows.slice((hal - 1) * UK, hal * UK);
+  const tubuh = potong.map(x => `<tr data-detail="${esc(x.nisn)}" style="cursor:pointer">
+    <td><span class="tag ${x.tingkat === 3 ? 'tag-berat' : x.tingkat === 2 ? 'tag-sedang' : 'tag-ok'}">T${x.tingkat}</span></td>
+    <td><b>${esc(x.nama)}</b><small class="lab-sub">${esc(x.kelas)}</small></td>
+    <td class="num">${x.beban}</td><td class="num">${x.ikatan}</td><td class="num">${x.putus}</td>
+    <td class="num">${x.respons === null ? '—' : x.respons + '%'}</td>
+    <td class="num">${x.kh ? Math.round(x.kh.hadirPct) + '%' : '—'}</td>
+    <td class="num">${x.kh ? x.kh.alpa : '—'}</td>
+    <td><small>${esc(x.sebab)}</small></td></tr>`).join('')
+    || barisKosong(9, 'Tidak ada santri yang cocok.', 'Longgarkan saringan di atas.');
+  return `<div class="tbl"><table>
+    <thead><tr><th>Tier</th><th>Santri</th><th>Beban</th><th>Ikatan</th><th>Izin keluar</th>
+      <th>Respons</th><th>Kehadiran</th><th>Alpa (JP)</th><th>Sebab</th></tr></thead>
+    <tbody>${tubuh}</tbody></table></div>
+    <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
+    ${pager('labIpp', hal, rows.length, UK)}`;
+}
+
+/* =====================================================================
+   TAB 3 — SEBARAN ANGKATAN
+   ===================================================================== */
+function labTabSebar() {
+  const d = LAB.data, bk = bulanTerakhir(6);
+  const jendela = new Set(bk);
+  const dj = (rows, kol) => rows.filter(r => jendela.has(bulanDari(kunciTgl(r[kol]))));
+  const nisnBoleh = new Set(d.siswa.map(s => String(s.nisn)));
+  const saring = (rows) => rows.filter(r => nisnBoleh.has(String(r.nisn)));
+  const seb = panelSebaran({ siswa: d.siswa, detail: dj(d.detail, 'tanggal'),
+    prestasi: dj(saring(d.prestasi), 'tanggal'), tahfiz: dj(saring(d.tahfiz), 'tanggal'),
+    izin: dj(d.izin, 'tanggal_mulai'), pembinaan: dj(d.pembinaan, 'tanggal_pembinaan'),
+    presensi: { ...d.presensi, rows: saring(d.presensi.rows || []) }, bulanKunci: bk });
+
+  // Per kelas (jendela IPP)
+  const kel = {};
+  LAB.baku.daftar.forEach(x => {
+    const k = kel[x.kelas] = kel[x.kelas] || { kelas: x.kelas, n: 0, t3: 0, t2: 0, beban: 0, amati: 0, tidak: 0, alpa: 0, khN: 0 };
+    k.n++; if (x.tingkat === 3) k.t3++; if (x.tingkat === 2) k.t2++;
+    k.beban += x.beban;
+    if (x.kh) { k.khN++; k.amati += x.kh.jpAmati; k.tidak += x.kh.tidakHadir; k.alpa += x.kh.alpa; }
+  });
+  const daftarKel = Object.values(kel).filter(k => k.kelas && k.kelas !== '-')
+    .map(k => ({ ...k, rawan: (k.t3 + k.t2) / k.n, bebanRata: k.beban / k.n,
+      hadir: k.amati ? 1 - k.tidak / k.amati : null, alpaRata: k.khN ? k.alpa / k.khN : null }))
+    .sort((a, b) => b.t3 / b.n - a.t3 / a.n || b.rawan - a.rawan);
+  const maksBeban = Math.max(1, ...daftarKel.map(k => k.bebanRata));
+  const tKel = daftarKel.map(k => `<tr>
+    <td><b>${esc(k.kelas)}</b></td><td class="num">${k.n}</td>
+    <td class="num">${k.t3} <small>(${labPct(k.t3 / k.n, 0)})</small></td>
+    <td class="num">${k.t2} <small>(${labPct(k.t2 / k.n, 0)})</small></td>
+    <td class="sb-sel" style="background:rgba(159,18,57,${(k.bebanRata / maksBeban * 0.32).toFixed(3)})"><b>${labDes(k.bebanRata, 1)}</b></td>
+    <td class="num">${k.hadir === null ? '—' : labPct(k.hadir)}</td>
+    <td class="num">${k.alpaRata === null ? '—' : labDes(k.alpaRata, 1)}</td></tr>`).join('')
+    || barisKosong(7, 'Belum ada kelas terdata.', '');
+
+  return `${seb.html}
+    ${kartu('Komposisi Tier per Angkatan', `${chartBox('labKomposisi')}
+      <div class="card-body">${labCatatan(`Proporsi, bukan jumlah — angkatan besar tidak otomatis tampak
+        lebih bermasalah. Jendela ${LAB.hari} hari, aturan baku.`)}</div>`, labKlaim('d'))}
+    ${kartu('Peta Kelas — urut dari porsi tier 3 tertinggi', `<div class="tbl"><table class="sebar">
+      <thead><tr><th>Kelas</th><th>Santri</th><th>Tier 3</th><th>Tier 2</th><th>Beban / santri</th>
+        <th>Kehadiran</th><th>Alpa / santri (JP)</th></tr></thead><tbody>${tKel}</tbody></table></div>
+      <div class="card-body">${labCatatan(`Kelas kecil mudah tampak ekstrem karena satu santri saja
+        menggeser persentasenya jauh. Bandingkan kolom Santri sebelum menyimpulkan — ini hukum bilangan
+        kecil, bukan pola.`)}</div>`, labKlaim('d'), `Jendela ${LAB.hari} hari`)}`;
+}
+
+function labGrafikSebar() {
+  const angs = ['VII','VIII','IX','X','XI','XII'];
+  const hit = Object.fromEntries(angs.map(a => [a, { 1: 0, 2: 0, 3: 0, n: 0 }]));
+  LAB.baku.daftar.forEach(x => { const a = angkatanDariKelas(x.kelas); if (hit[a]) { hit[a][x.tingkat]++; hit[a].n++; } });
+  const ada = angs.filter(a => hit[a].n);
+  const p = (a, t) => hit[a].n ? Math.round(hit[a][t] / hit[a].n * 1000) / 10 : 0;
+  buatChart('labKomposisi', 'labKomposisi', {
+    type: 'bar',
+    data: { labels: ada.map(a => `Angkatan ${a}`), datasets: [
+      { label: 'Tier 3', data: ada.map(a => p(a, 3)), backgroundColor: '#9F1239', borderColor: '#fff', borderWidth: 2 },
+      { label: 'Tier 2', data: ada.map(a => p(a, 2)), backgroundColor: '#B45309', borderColor: '#fff', borderWidth: 2 },
+      { label: 'Tier 1', data: ada.map(a => p(a, 1)), backgroundColor: '#0F766E', borderColor: '#fff', borderWidth: 2 }] },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 9 } },
+        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw}%` } } },
+      scales: { x: { stacked: true, max: 100, ticks: { callback: v => v + '%' } }, y: { stacked: true, grid: { display: false } } } }
+  });
+}
+
+/* =====================================================================
+   TAB 4 — EKOR & ANGSA HITAM
+   ===================================================================== */
+function labStatEkor() {
+  const L = LAB.unsur.daftar;
+  const kasus = L.map(x => x.kasus), poin = L.map(x => x.beban);
+  const total = Stat.jumlah(kasus), totPoin = Stat.jumlah(poin);
+  const urut = [...L].sort((a, b) => b.kasus - a.kasus || b.beban - a.beban);
+  const pangsaAtas = (k) => total ? Stat.jumlah(urut.slice(0, k).map(x => x.kasus)) / total : 0;
+  const pangsaPoin = (k) => totPoin ? Stat.jumlah([...L].sort((a, b) => b.beban - a.beban).slice(0, k).map(x => x.beban)) / totPoin : 0;
+  const n = L.length;
+  return {
+    n, total, totPoin, urut,
+    rerata: Stat.rerata(kasus), median: Stat.kuantil(kasus, 0.5), sd: Stat.sd(kasus),
+    maks: Math.max(0, ...kasus), kurt: Stat.kurtosis(kasus),
+    gini: Stat.gini(kasus), giniPoin: Stat.gini(poin),
+    nol: kasus.filter(x => x === 0).length,
+    atas1: pangsaAtas(Math.max(1, Math.ceil(n * 0.01))), atas10: pangsaAtas(Math.ceil(n * 0.1)),
+    atas20: pangsaAtas(Math.ceil(n * 0.2)),
+    top: [5, 10, 20].map(k => ({ k, kasus: pangsaAtas(k), poin: pangsaPoin(k) })),
+    hill: Stat.hill(poin), ms: [1, 2, 3, 4].map(p => ({ p, r: Stat.maksJumlah(poin, p) })),
+    lorenz: Stat.lorenz(kasus), kasus
+  };
+}
+
+function labTabEkor() {
+  const S = labStatEkor(), n = S.n || 1;
+  const dW = labDalamJendela(LAB.data.detail, 'tanggal');
+  const berat = dW.filter(r => r.kategori === 'Berat')
+    .sort((a, b) => kunciTgl(a.tanggal).localeCompare(kunciTgl(b.tanggal)));
+  const tglBerat = [...new Set(berat.map(r => kunciTgl(r.tanggal)))];
+  const jarak = tglBerat.slice(1).map((t, i) => (tglDari(t) - tglDari(tglBerat[i])) / 864e5);
+  const peta = petaNama();
+  // Kejadian kelompok: ≥ 3 santri, kelas & pelanggaran sama, satu tanggal —
+  // risiko yang saling bertaut, bukan kejadian perorangan yang independen.
+  const kelompok = {};
+  dW.forEach(r => {
+    const k = `${kunciTgl(r.tanggal)}|${r.kelas || peta[String(r.nisn)]?.kelas || '-'}|${r.kode_pelanggaran || r.nama_pelanggaran || '-'}`;
+    (kelompok[k] = kelompok[k] || new Set()).add(String(r.nisn));
+  });
+  const klaster = Object.entries(kelompok).filter(([, v]) => v.size >= 3)
+    .map(([k, v]) => { const [t, kl, kd] = k.split('|'); return { t, kl, kd, n: v.size }; })
+    .sort((a, b) => b.n - a.n);
+  const santriKlaster = klaster.reduce((a, c) => a + c.n, 0);
+
+  // Putusan — dirumuskan dari angka, bukan dipilih.
+  // Ambang dibuat konservatif: pada data hitungan berbatas, satu indikator
+  // saja mudah menyala karena kebetulan. "Tebal" menuntut kurtosis tinggi
+  // ATAU α Hill < 2; "sedang" cukup α < 4 atau rasio maks/jumlah p=4 > 0,1.
+  const terkonsentrasi = S.gini >= 0.6 || S.atas10 >= 0.4;
+  const alfa = S.hill ? S.hill.alfa : null;
+  const ekorTebal  = (S.kurt !== null && S.kurt > 6) || (alfa !== null && alfa < 2);
+  const ekorSedang = !ekorTebal && ((alfa !== null && alfa < 4) || S.ms[3].r > 0.1);
+  const putusan = terkonsentrasi && ekorTebal
+    ? ['Extremistan', 'buruk', 'Beban terkonsentrasi dan ekornya tebal: satu-dua santri dapat mengubah wajah statistik dayah. Rerata tidak mewakili siapa pun; kebijakan harus dirancang untuk ekornya.']
+    : terkonsentrasi && ekorSedang
+      ? ['Terkonsentrasi, ekor sedang', 'sedang', 'Pola Pareto nyata dan ekor atasnya lebih tebal daripada sebaran normal, tetapi belum liar: statistik dayah belum dikuasai satu-dua santri. Rerata menyesatkan untuk perencanaan; rencanakan kapasitas dari persentil atas, bukan dari rata-rata.']
+    : terkonsentrasi
+      ? ['Terkonsentrasi, ekor tipis', 'sedang', 'Pola Pareto nyata, tetapi jumlah kasus per santri berbatas sehingga ekornya tidak liar. Intervensi tersasar pada kelompok kecil memberi hasil terbesar; sisi Extremistan dayah lebih mungkin terletak pada DAMPAK kejadian berat daripada jumlah catatan.']
+      : ['Mediocristan', 'baik', 'Beban tersebar relatif merata; rerata cukup mewakili. Kebijakan universal (tier 1) lebih tepat daripada pengejaran individu.'];
+
+  const barisBerat = berat.slice(-12).reverse().map(r => `<tr data-detail="${esc(r.nisn)}" style="cursor:pointer">
+    <td>${tgl(r.tanggal)}</td><td><b>${esc(peta[String(r.nisn)]?.nama_siswa || r.nisn)}</b></td>
+    <td>${esc(r.kelas || peta[String(r.nisn)]?.kelas || '-')}</td>
+    <td>${esc(r.nama_pelanggaran || r.kode_pelanggaran || '-')}</td><td class="num">${Number(r.bobot_pelanggaran) || 0}</td></tr>`).join('')
+    || barisKosong(5, 'Tidak ada pelanggaran Berat dalam jendela ini.', 'Ketiadaan dalam jendela bukan bukti ketiadaan di luar jendela.');
+
+  return `
+    <div class="lab-putusan ${putusan[1]}">
+      <div><small>Putusan sebaran · jendela ${LAB.hari} hari</small><b>${putusan[0]}</b></div>
+      <p>${putusan[2]}</p>
+    </div>
+
+    <div class="stats">
+      ${stat('Koefisien Gini', labDes(S.gini), 'fa-solid fa-chart-area', 'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)', `0 = merata · 1 = satu santri menanggung semua · poin ${labDes(S.giniPoin)}`)}
+      ${stat('10% santri teratas', labPct(S.atas10, 0), 'fa-solid fa-users-line', 'background:var(--amber-bg);color:var(--amber)', 'var(--amber)', `menanggung porsi catatan · 20%: ${labPct(S.atas20, 0)} · 1%: ${labPct(S.atas1, 0)}`)}
+      ${stat('Kurtosis berlebih', labDes(S.kurt), 'fa-solid fa-mountain', 'background:var(--violet-bg);color:var(--violet)', 'var(--violet)', 'normal = 0 · > 6 menandakan ekor tebal')}
+      ${stat('Santri tanpa catatan', labPct(S.nol / n, 0), 'fa-solid fa-feather', 'background:var(--teal-bg);color:var(--teal)', 'var(--teal)', `${angka(S.nol)} dari ${angka(S.n)} — bukan berarti tanpa risiko`)}
+    </div>
+
+    <div class="grid-half">
+      ${kartu('Kurva Lorenz — ketimpangan beban', `${chartBox('labLorenz')}
+        <div class="card-body">${labCatatan(`Garis putus-putus = kesetaraan sempurna. Makin jauh kurva melengkung
+          ke bawah, makin sedikit santri yang menanggung sebagian besar catatan.`)}</div>`, labKlaim('d'))}
+      ${kartu('Sebaran jumlah catatan per santri', `${chartBox('labHist')}
+        <div class="card-body">${labCatatan(`Rerata ${labDes(S.rerata)} · median ${labDes(S.median, 0)} · simpangan baku
+          ${labDes(S.sd)} · maksimum ${S.maks}. Rerata jauh di atas median = sebaran condong kanan.`)}</div>`, labKlaim('d'))}
+    </div>
+
+    <div class="grid-half">
+      ${kartu('Uji Ekor — rasio maks/jumlah & taksiran Hill', `<div class="card-body">
+        <div class="tbl"><table><thead><tr><th>Momen ke-p</th><th>maks(xᵖ) ÷ Σxᵖ</th><th>Bacaan</th></tr></thead><tbody>
+        ${S.ms.map(m => `<tr><td>p = ${m.p}</td><td class="num"><b>${labDes(m.r, 3)}</b></td>
+          <td><small>${m.r > 0.1 ? 'didominasi satu pengamatan — momen ini tidak stabil' : 'tidak didominasi satu pengamatan'}</small></td></tr>`).join('')}
+        </tbody></table></div>
+        <p class="lab-hill">Indeks ekor Hill (poin, ${S.hill ? `k = ${S.hill.k} dari ${S.hill.n}` : 'data kurang'}):
+          <b>α ≈ ${S.hill ? labDes(S.hill.alfa) : '—'}</b>
+          ${S.hill ? (S.hill.alfa < 2 ? '— ragam tidak stabil (ekor sangat tebal)' : S.hill.alfa < 4 ? '— ekor tebal sedang' : '— ekor relatif tipis') : ''}</p>
+        ${labCatatan(`Rasio maks/jumlah (Taleb) yang tinggi pada p = 4 berarti kurtosis dan simpangan baku di
+          atas ditentukan oleh satu-dua santri saja — angka-angka itu jangan dipakai untuk menetapkan ambang.
+          Taksiran Hill pada data hitungan berbatas bersifat <b>indikatif</b>: nilai-nilai kembar dan jumlah yang
+          kecil membuatnya bias.`)}</div>`, labKlaim('d'))}
+      ${kartu('Via Negativa — seberapa bergantung pada segelintir santri', `<div class="card-body">
+        <div class="tbl"><table><thead><tr><th>Santri teratas</th><th>Porsi catatan</th><th>Porsi poin</th><th>Bila separuhnya pulih</th></tr></thead><tbody>
+        ${S.top.map(t => `<tr><td><b>${t.k} santri</b> <small>(${labPct(t.k / n, 1)})</small></td>
+          <td class="num">${labPct(t.kasus)}</td><td class="num">${labPct(t.poin)}</td>
+          <td class="num">total dayah turun <b>${labPct(t.kasus / 2)}</b></td></tr>`).join('')}
+        </tbody></table></div>
+        ${labCatatan(`Sistem yang bebannya bertumpu pada segelintir orang itu <b>rapuh</b>: kepindahan, kepulangan,
+          atau pulihnya beberapa santri mengubah seluruh statistik. Bagi manajemen, ini juga peluang —
+          pembinaan intensif yang tepat sasaran (tier 3) memberi hasil terbesar per jam pengasuh. Kolom
+          terakhir adalah aritmetika, bukan janji keberhasilan.`)}</div>`, labKlaim('d'))}
+    </div>
+
+    ${kartu('Kejadian Berat — sisi angsa hitam', `<div class="stats lab-stats-mini">
+        ${stat('Kejadian Berat', angka(berat.length), 'fa-solid fa-bolt', 'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)', `${labPct(dW.length ? berat.length / dW.length : 0)} dari seluruh catatan`)}
+        ${stat('Santri terlibat', angka(new Set(berat.map(r => r.nisn)).size), 'fa-solid fa-user', 'background:var(--amber-bg);color:var(--amber)', 'var(--amber)', 'dalam jendela')}
+        ${stat('Jarak antarkejadian', jarak.length ? labDes(Stat.rerata(jarak), 1) + ' hari' : '—', 'fa-solid fa-ruler-horizontal', 'background:#E7F1F7;color:var(--sea)', 'var(--sea)', 'rerata, pada tanggal input')}
+        ${stat('Kejadian kelompok', angka(klaster.length), 'fa-solid fa-people-group', 'background:var(--violet-bg);color:var(--violet)', 'var(--violet)', `${angka(santriKlaster)} catatan, semua kategori · ≥ 3 santri, kelas & pelanggaran sama, satu tanggal`)}
+      </div>
+      ${klaster.length ? `<div class="card-body" style="padding-bottom:0">${labCatatan(`Kelompok terbesar:
+        ${klaster.slice(0, 5).map(c => `<b>${esc(c.kl)}</b> · ${esc(c.kd)} · ${tgl(c.t)} (${c.n} santri)`).join('; ')}.
+        Pelanggaran yang terjadi berkelompok adalah <b>risiko bertaut</b>: satu peristiwa menaikkan banyak santri
+        sekaligus, sehingga beban pengasuh melonjak serentak — inilah alasan skenario Monte Carlo memuat kejutan satu kelas.
+        Sebagian kelompok bisa juga berupa satu penertiban massal pada hari input; periksa sebelum menyimpulkan.`)}</div>` : ''}
+      <div class="tbl"><table><thead><tr><th>Tanggal</th><th>Santri</th><th>Kelas</th><th>Pelanggaran</th><th>Poin</th></tr></thead>
+        <tbody>${barisBerat}</tbody></table></div>
+      <div class="card-body">${labCatatan(`Angsa hitam (Taleb, 2007): jarang, berdampak besar, dan tampak dapat
+        dijelaskan <b>sesudah</b> terjadi. Indeks ini tidak meramalkan kejadian Berat dan tidak boleh diklaim
+        demikian. Yang dapat dikelola adalah <b>kerapuhan</b>: apakah prosedur tabayyun, jalur pembinaan, dan
+        pemberitahuan wali siap bekerja ketika kejadian itu datang — bukan kapan ia datang.`)}</div>`,
+      labKlaim('d'), '12 kejadian terakhir dalam jendela')}`;
+}
+
+function petaNama() { return Object.fromEntries(LAB.data.siswa.map(s => [String(s.nisn), s])); }
+
+function labGrafikEkor() {
+  const S = labStatEkor();
+  buatChart('labLorenz', 'labLorenz', {
+    type: 'line',
+    data: { datasets: [
+      { label: 'Kurva Lorenz', data: S.lorenz, borderColor: '#9F1239', backgroundColor: 'rgba(159,18,57,.10)',
+        fill: true, borderWidth: 2, pointRadius: 0, tension: 0.15 },
+      { label: 'Kesetaraan', data: [{ x: 0, y: 0 }, { x: 1, y: 1 }], borderColor: '#94A3B8',
+        borderDash: [5, 5], borderWidth: 1.5, pointRadius: 0 }] },
+    options: { responsive: true, maintainAspectRatio: false, parsing: false,
+      plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 9 } },
+        tooltip: { callbacks: { label: (c) => `${Math.round(c.raw.x * 100)}% santri → ${Math.round(c.raw.y * 100)}% catatan` } } },
+      scales: { x: { type: 'linear', min: 0, max: 1, title: { display: true, text: 'Porsi santri (terendah → tertinggi)' },
+          ticks: { callback: v => Math.round(v * 100) + '%' } },
+        y: { min: 0, max: 1, title: { display: true, text: 'Porsi catatan' }, ticks: { callback: v => Math.round(v * 100) + '%' } } } }
+  });
+  const hist = {}; S.kasus.forEach(k => { hist[k] = (hist[k] || 0) + 1; });
+  const lab = Array.from({ length: S.maks + 1 }, (_, i) => i);
+  buatChart('labHist', 'labHist', {
+    type: 'bar',
+    data: { labels: lab.map(String), datasets: [{ label: 'Jumlah santri', data: lab.map(i => hist[i] || 0),
+      backgroundColor: lab.map(i => i === 0 ? '#0F766E' : '#14618B'), borderRadius: 3 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false },
+        tooltip: { callbacks: { title: (c) => `${c[0].label} catatan`, label: (c) => `${c.raw} santri` } } },
+      scales: { x: { title: { display: true, text: 'Catatan pelanggaran per santri' }, grid: { display: false } },
+        y: { beginAtZero: true, title: { display: true, text: 'Santri' }, ticks: { precision: 0 } } } }
+  });
+}
+
+/* =====================================================================
+   TAB 5 — LABORATORIUM KEBIJAKAN
+   ===================================================================== */
+function labNilaiTampil(p, v) { return p.pct ? `${Math.round(v * 100)}%` : `${v}`; }
+
+function labTabLab() {
+  const A = LAB.aturan, B = LAB.baku, E = LAB.eksp, kap = labKapasitas();
+  const beda = LAB_PARAM.some(p => A[p.k] !== IPP_ATURAN_BAKU[p.k]) || LAB_SAKLAR.some(s => A[s.k] !== IPP_ATURAN_BAKU[s.k]);
+
+  const saklar = LAB_SAKLAR.map(s => `<label class="lab-saklar">
+    <input type="checkbox" data-labs="${s.k}" ${A[s.k] ? 'checked' : ''}> <span>${esc(s.label)}</span></label>`).join('');
+  const penggeser = LAB_PARAM.map(p => {
+    const mati = p.syarat && !A[p.syarat];
+    const ubah = A[p.k] !== IPP_ATURAN_BAKU[p.k];
+    return `<div class="lab-param ${mati ? 'mati' : ''} ${ubah ? 'ubah' : ''}">
+      <div class="lab-param-k"><span>${esc(p.label)}</span>
+        <b id="labV-${p.k}">${labNilaiTampil(p, A[p.k])}</b></div>
+      <input type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${A[p.k]}" data-labp="${p.k}" ${mati ? 'disabled' : ''}>
+      <small>baku ${labNilaiTampil(p, IPP_ATURAN_BAKU[p.k])} ${esc(p.satuan)}</small></div>`;
+  }).join('');
+
+  return `
+    ${kartu('Instrumen Percobaan — aturan penjenjangan', `<div class="card-body">
+      <div class="lab-hipo"><label class="label">Hipotesis kebijakan</label>
+        <textarea class="input" id="labHipo" rows="2" placeholder="Contoh: Menaikkan ambang beban tier 3 menjadi 80 poin akan menurunkan beban tier 3 ke bawah kapasitas pengasuh tanpa melepaskan santri yang tidak hadir kronis.">${esc(LAB.hipotesis)}</textarea></div>
+      <div class="lab-saklar-baris">${saklar}</div>
+      <div class="lab-params">${penggeser}</div>
+      <div class="lab-kap">
+        <div class="field"><label class="label">Pengasuh yang sanggup menangani tier 3</label>
+          <input type="number" min="1" max="200" class="input" data-labk="pengasuh" value="${LAB.kap.pengasuh}"></div>
+        <div class="field"><label class="label">Santri tier 3 per pengasuh</label>
+          <input type="number" min="1" max="30" class="input" data-labk="perPengasuh" value="${LAB.kap.perPengasuh}"></div>
+        <div class="lab-kap-hasil"><small>Kapasitas tier 3</small><b id="labKap">${angka(kap)} santri</b></div>
+      </div>
+      <div class="lab-aksi">
+        <button class="btn btn-ghost btn-sm" data-lab="baku"><i class="fa-solid fa-rotate-left"></i>Kembalikan aturan baku</button>
+        <button class="btn btn-primary btn-sm" data-lab="simpan"><i class="fa-solid fa-bookmark"></i>Simpan ke Buku Catatan</button>
+      </div></div>`,
+      labKlaim('k'), beda ? 'Aturan tandingan sedang diuji — dashboard tetap memakai aturan baku' : 'Masih sama dengan aturan baku')}
+
+    <div id="labHasil">${labHasilEksp()}</div>
+
+    ${kartu('Analisis Sensitivitas — seberapa rapuh angka tier 3 terhadap pilihan ambang', `
+      ${chartBox('labTornado', true)}
+      <div class="card-body">${labCatatan(`Setiap ambang digeser 25% ke bawah dan ke atas (yang lain tetap).
+        Batang panjang = keputusan yang <b>sensitif</b> terhadap angka yang dipilih secara arbitrer; di sanalah
+        ambang harus dimusyawarahkan dan dilandasi data, bukan kebiasaan. Batang pendek = ambang yang aman
+        dipertahankan.`)}</div>`, labKlaim('k'), 'Perubahan jumlah santri tier 3 terhadap aturan percobaan')}
+
+    ${kartu('Kurva Respons — sapuan satu instrumen', `<div class="card-body lab-sapu">
+        <label class="label">Instrumen</label>
+        <select class="input" id="labSapuan">${LAB_PARAM.map(p =>
+          `<option value="${p.k}" ${LAB.sapuan === p.k ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></div>
+      ${chartBox('labSapu', true)}
+      <div class="card-body">${labCatatan(`Cari <b>titik belok</b>: rentang ketika sedikit perubahan ambang
+        memindahkan banyak santri. Ambang yang diletakkan tepat di titik belok membuat penjenjangan tidak
+        stabil — dua musyrif dengan catatan sedikit berbeda akan menghasilkan keputusan yang jauh berbeda.
+        Garis putus-putus = kapasitas tier 3.`)}</div>`, labKlaim('k'))}
+
+    ${labKartuSkenario()}`;
+}
+
+function labHasilEksp() {
+  const B = LAB.baku, E = LAB.eksp, kap = labKapasitas(), n = E.daftar.length || 1;
+  const petaB = Object.fromEntries(B.daftar.map(x => [x.nisn, x.tingkat]));
+  const tr = { 1: { 1: 0, 2: 0, 3: 0 }, 2: { 1: 0, 2: 0, 3: 0 }, 3: { 1: 0, 2: 0, 3: 0 } };
+  const pindah = [];
+  E.daftar.forEach(x => {
+    const a = petaB[x.nisn] || 1; tr[a][x.tingkat]++;
+    if (a !== x.tingkat) pindah.push({ ...x, dari: a });
+  });
+  pindah.sort((a, b) => (b.tingkat - b.dari) - (a.tingkat - a.dari) || b.beban - a.beban);
+  const rasio = E.tier3 / kap;
+  const kelasBeban = rasio > 1 ? 'buruk' : rasio > 0.8 ? 'sedang' : 'baik';
+  const sel = (a, b) => `<td class="lab-tr ${a === b ? 'diag' : !tr[a][b] ? '' : a < b ? 'naik' : 'turun'}"><b>${tr[a][b]}</b></td>`;
+
+  const daftarPindah = pindah.slice(0, 30).map(x => `<tr data-detail="${esc(x.nisn)}" style="cursor:pointer">
+    <td><b>${esc(x.nama)}</b><small class="lab-sub">${esc(x.kelas)}</small></td>
+    <td><span class="tag ${x.dari === 3 ? 'tag-berat' : x.dari === 2 ? 'tag-sedang' : 'tag-ok'}">T${x.dari}</span>
+      <i class="fa-solid fa-arrow-right" style="opacity:.5"></i>
+      <span class="tag ${x.tingkat === 3 ? 'tag-berat' : x.tingkat === 2 ? 'tag-sedang' : 'tag-ok'}">T${x.tingkat}</span></td>
+    <td><small>${esc(x.sebab)}</small></td></tr>`).join('')
+    || barisKosong(3, 'Tidak ada santri yang berpindah tier.', 'Aturan percobaan menghasilkan penjenjangan yang sama dengan aturan baku.');
+
+  return `<div class="grid-half">
+    ${kartu('Hasil Percobaan', `<div class="card-body">
+      <div class="lab-banding">
+        ${[3, 2, 1].map(t => `<div class="lab-bd t${t}"><small>Tier ${t}</small>
+          <b>${angka(E['tier' + t])}</b><span>${B['tier' + t] === E['tier' + t] ? 'tetap' :
+            (E['tier' + t] > B['tier' + t] ? '+' : '') + (E['tier' + t] - B['tier' + t])} dari baku ${angka(B['tier' + t])}</span></div>`).join('')}
+      </div>
+      <div class="lab-muat ${kelasBeban}">
+        <div class="lab-muat-k"><span>Beban tier 3 terhadap kapasitas pengasuh</span><b>${labPct(rasio, 0)}</b></div>
+        <span class="lab-muat-bar"><i style="width:${Math.min(100, rasio * 100)}%"></i></span>
+        <small>${angka(E.tier3)} santri ÷ kapasitas ${angka(kap)} · ${rasio > 1
+          ? `kelebihan ${angka(E.tier3 - kap)} santri — tier 3 yang melebihi kapasitas berubah menjadi daftar, bukan pembinaan`
+          : `sisa kapasitas ${angka(kap - E.tier3)} santri`}</small>
+      </div>
+      <p class="lab-sub" style="margin-top:10px">Porsi tier 3: <b>${labPct(E.tier3 / n)}</b> santri · tier 2 atau 3: <b>${labPct((E.tier3 + E.tier2) / n)}</b></p>
+    </div>`, labKlaim('k'))}
+    ${kartu('Matriks Transisi — baku → percobaan', `<div class="card-body">
+      <div class="tbl"><table class="lab-trans"><thead><tr><th>Baku ↓ · Percobaan →</th><th>T1</th><th>T2</th><th>T3</th></tr></thead>
+        <tbody>${[1, 2, 3].map(a => `<tr><td><b>Tier ${a}</b></td>${sel(a, 1)}${sel(a, 2)}${sel(a, 3)}</tr>`).join('')}</tbody></table></div>
+      ${labCatatan(`Diagonal = santri yang tidak terpengaruh. Di atas diagonal = dinaikkan oleh aturan baru
+        (menambah beban pengasuh); di bawah = dilepas (risiko santri yang semestinya dibina menjadi tak terlihat).
+        Kebijakan yang baik bukan yang menurunkan angka, melainkan yang melepas santri yang tepat.`)}</div>`, labKlaim('k'))}
+  </div>
+  ${kartu(`Santri yang Berpindah Tier (${angka(pindah.length)})`, `<div class="tbl"><table>
+    <thead><tr><th>Santri</th><th>Perpindahan</th><th>Sebab menurut aturan percobaan</th></tr></thead>
+    <tbody>${daftarPindah}</tbody></table></div>
+    ${pindah.length > 30 ? `<div class="card-body"><small class="lab-sub">Menampilkan 30 dari ${angka(pindah.length)}.</small></div>` : ''}`,
+    labKlaim('k'), 'Nama nyata — setiap baris adalah akibat nyata dari satu angka ambang')}`;
+}
+
+/** Jumlah tier 3 & 2 untuk satu set aturan (dipakai sensitivitas dan sapuan). */
+function labUjiAturan(atur) {
+  const r = terapkanAturanIpp(LAB.unsur, { ...atur, hari: LAB.hari });
+  return { t3: r.tier3, t2: r.tier2 };
+}
+
+function labBulatkan(p, v) {
+  const x = Math.min(p.max, Math.max(p.min, v));
+  return p.pct ? Math.round(x / p.step) * p.step : Math.round(x / p.step) * p.step;
+}
+
+function labGrafikLab() {
+  const A = LAB.aturan, dasar = labUjiAturan(A).t3;
+  const aktif = LAB_PARAM.filter(p => !p.syarat || A[p.syarat]);
+  const hasil = aktif.map(p => {
+    const bawah = labBulatkan(p, A[p.k] * 0.75), atas = labBulatkan(p, A[p.k] * 1.25);
+    return { p, bawah, atas,
+      dBawah: labUjiAturan({ ...A, [p.k]: bawah }).t3 - dasar,
+      dAtas:  labUjiAturan({ ...A, [p.k]: atas }).t3 - dasar };
+  }).sort((a, b) => (Math.abs(b.dBawah) + Math.abs(b.dAtas)) - (Math.abs(a.dBawah) + Math.abs(a.dAtas)));
+
+  buatChart('labTornado', 'labTornado', {
+    type: 'bar',
+    data: { labels: hasil.map(h => h.p.label), datasets: [
+      { label: 'Ambang −25%', data: hasil.map(h => h.dBawah), backgroundColor: '#14618B', borderRadius: 4 },
+      { label: 'Ambang +25%', data: hasil.map(h => h.dAtas),  backgroundColor: '#B45309', borderRadius: 4 }] },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 9 } },
+        tooltip: { callbacks: { label: (c) => {
+          const h = hasil[c.dataIndex], v = c.datasetIndex === 0 ? h.bawah : h.atas;
+          return `${c.dataset.label} (${labNilaiTampil(h.p, v)}): ${c.raw > 0 ? '+' : ''}${c.raw} santri tier 3`; } } } },
+      scales: { x: { title: { display: true, text: 'Perubahan jumlah santri tier 3' }, ticks: { precision: 0 } },
+        y: { grid: { display: false } } } }
+  });
+  labGambarSapuan();
+  if (LAB.mc) labGambarMc();
+}
+
+function labGambarSapuan() {
+  const p = LAB_PARAM.find(x => x.k === LAB.sapuan) || LAB_PARAM[0];
+  const A = LAB.aturan, titik = [];
+  const langkah = Math.max(p.step, (p.max - p.min) / 30);
+  for (let v = p.min; v <= p.max + 1e-9; v += langkah) {
+    const nv = labBulatkan(p, v);
+    if (titik.length && titik[titik.length - 1].v === nv) continue;
+    titik.push({ v: nv, ...labUjiAturan({ ...A, [p.k]: nv, ...(p.syarat ? { [p.syarat]: true } : {}) }) });
+  }
+  const kap = labKapasitas();
+  buatChart('labSapu', 'labSapu', {
+    type: 'line',
+    data: { labels: titik.map(t => labNilaiTampil(p, t.v)), datasets: [
+      { label: 'Tier 3', data: titik.map(t => t.t3), borderColor: '#9F1239', borderWidth: 2, pointRadius: 2, tension: 0.2 },
+      { label: 'Tier 2', data: titik.map(t => t.t2), borderColor: '#B45309', borderWidth: 2, pointRadius: 2, tension: 0.2 },
+      { label: 'Kapasitas tier 3', data: titik.map(() => kap), borderColor: '#64748B', borderDash: [6, 5], borderWidth: 1.5, pointRadius: 0 }] },
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 9 } } },
+      scales: { x: { title: { display: true, text: `${p.label} (${p.satuan}) · nilai sekarang ${labNilaiTampil(p, A[p.k])}` },
+          ticks: { maxTicksLimit: 12 } },
+        y: { beginAtZero: true, title: { display: true, text: 'Santri' }, ticks: { precision: 0 } } } }
+  });
+}
+
+/* ---- Skenario perilaku (Monte Carlo) ---- */
+function labKartuSkenario() {
+  const M = LAB.mcAtur;
+  const isian = (k, label, min, max, step, satuan) => `<div class="field"><label class="label">${label}</label>
+    <div class="lab-isian"><input type="number" class="input" data-labm="${k}" min="${min}" max="${max}" step="${step}" value="${M[k]}"><span>${satuan}</span></div></div>`;
+  return kartu('Skenario Perilaku — simulasi Monte Carlo', `<div class="card-body">
+    <div class="lab-mc-isian">
+      ${isian('ringan', 'Perubahan pelanggaran Ringan', -90, 300, 5, '%')}
+      ${isian('sedang', 'Perubahan pelanggaran Sedang', -90, 300, 5, '%')}
+      ${isian('berat',  'Perubahan pelanggaran Berat',  -90, 300, 5, '%')}
+      ${isian('latar',  'Peluang pelanggar baru (masalah kalkun)', 0, 100, 5, '% laju rata-rata')}
+      ${isian('pShock', 'Peluang kejutan satu kelas', 0, 100, 5, '% per jendela')}
+      ${isian('kShock', 'Besar kejutan', 1, 10, 0.5, '× laju')}
+      ${isian('iterasi','Iterasi', 200, 5000, 100, 'kali')}
+      ${isian('seed',   'Benih acak', 1, 999999, 1, '')}
+    </div>
+    <div class="lab-aksi"><button class="btn btn-primary btn-sm" data-lab="mc"><i class="fa-solid fa-dice"></i>Jalankan simulasi</button></div>
+    <div id="labMcHasil">${LAB.mc ? labHasilMc() : `<p class="lab-sub">Belum dijalankan.</p>`}</div>
+    ${labCatatan(`<b>Asumsi yang dipakai, ditulis terbuka:</b> (1) laju tiap santri pada jendela berikutnya sama dengan
+      jendela ini, dikalikan perubahan per kategori — kegigihan perilaku; (2) jumlah pelanggaran mengikuti
+      sebaran Poisson; (3) santri tanpa riwayat tetap mendapat laju latar — ketiadaan catatan bukan jaminan
+      (masalah kalkun, Taleb); (4) kejutan: satu kelas acak lajunya dilipatgandakan — peristiwa kelompok
+      yang tidak tampak dalam data; (5) unsur selain beban (respons, izin, kehadiran, ikatan) dibekukan.
+      Keluarannya adalah <b>sebaran kemungkinan di bawah asumsi ini</b>, bukan ramalan. Ubah asumsinya dan
+      perhatikan persentil ke-95 — di sanalah perencanaan kapasitas diuji.`)}
+  </div>`, labKlaim('s'), `Aturan percobaan · jendela ${LAB.hari} hari berikutnya`);
+}
+
+function labJalankanMc() {
+  const M = LAB.mcAtur, E = LAB.eksp, A = E.aturan;
+  const r = Stat.rng(M.seed);
+  const ubah = { Ringan: 1 + M.ringan / 100, Sedang: 1 + M.sedang / 100, Berat: 1 + M.berat / 100, Lainnya: 1 };
+  const daftar = E.daftar;
+  const totKasus = Stat.jumlah(daftar.map(x => x.kasus)), totPoin = Stat.jumlah(daftar.map(x => x.beban));
+  const lajuRata = daftar.length ? totKasus / daftar.length : 0;
+  const poinRata = totKasus ? totPoin / totKasus : 0;
+  const lajuLatar = lajuRata * (M.latar / 100);
+  const kelas = [...new Set(daftar.map(x => x.kelas))];
+
+  // Unsur di luar beban dibekukan: cukup simpan apakah aturan lain sudah menaikkan santri.
+  const pra = daftar.map(x => {
+    const b = x.bendera;
+    return { kelas: x.kelas, t3Lain: b.macet || b.alpaKronis,
+      t2Lain: b.putus || b.alpaHari || b.absenKronis || b.ikatanNol,
+      kat: Object.entries(x.kat || {}).map(([k, o]) => ({ l: o.n * (ubah[k] || 1), p: o.n ? o.poin / o.n : 0 })) };
+  });
+
+  const it = Math.min(5000, Math.max(200, Number(M.iterasi) || 1000));
+  const t3s = [], t2s = [], kasusS = []; let lebih = 0, kejut = 0;
+  const kap = labKapasitas();
+  for (let i = 0; i < it; i++) {
+    const kelasKejut = r() < M.pShock / 100 ? kelas[Math.floor(r() * kelas.length)] : null;
+    if (kelasKejut) kejut++;
+    let t3 = 0, t2 = 0, ks = 0;
+    for (const s of pra) {
+      const f = s.kelas === kelasKejut ? M.kShock : 1;
+      let poin = 0;
+      for (const c of s.kat) { const n = Stat.poisson(c.l * f, r); poin += n * c.p; ks += n; }
+      if (lajuLatar > 0) { const n = Stat.poisson(lajuLatar * f, r); poin += n * poinRata; ks += n; }
+      if (poin >= A.bebanT3 || s.t3Lain) t3++;
+      else if (poin >= A.bebanT2 || s.t2Lain) t2++;
+    }
+    t3s.push(t3); t2s.push(t2); kasusS.push(ks);
+    if (t3 > kap) lebih++;
+  }
+  LAB.mc = { t3s, t2s, kasusS, lebih, kejut, it, kap, M: { ...M },
+    q: (a) => ({ p5: Stat.kuantil(a, 0.05), p50: Stat.kuantil(a, 0.5), p95: Stat.kuantil(a, 0.95), maks: Math.max(...a) }) };
+}
+
+function labHasilMc() {
+  const R = LAB.mc; if (!R) return '';
+  const q3 = R.q(R.t3s), q2 = R.q(R.t2s), qk = R.q(R.kasusS);
+  const f = (x) => angka(Math.round(x));
+  return `<div class="tbl"><table class="lab-mc"><thead><tr><th>Keluaran</th><th>P5</th><th>Median</th><th>P95</th><th>Terburuk</th></tr></thead><tbody>
+    <tr><td><b>Santri tier 3</b></td><td class="num">${f(q3.p5)}</td><td class="num"><b>${f(q3.p50)}</b></td><td class="num">${f(q3.p95)}</td><td class="num">${f(q3.maks)}</td></tr>
+    <tr><td><b>Santri tier 2</b></td><td class="num">${f(q2.p5)}</td><td class="num"><b>${f(q2.p50)}</b></td><td class="num">${f(q2.p95)}</td><td class="num">${f(q2.maks)}</td></tr>
+    <tr><td><b>Catatan pelanggaran</b></td><td class="num">${f(qk.p5)}</td><td class="num"><b>${f(qk.p50)}</b></td><td class="num">${f(qk.p95)}</td><td class="num">${f(qk.maks)}</td></tr>
+  </tbody></table></div>
+  <div class="lab-mc-ring">
+    <span class="${R.lebih / R.it > 0.2 ? 'buruk' : R.lebih / R.it > 0.05 ? 'sedang' : 'baik'}">
+      Peluang tier 3 melampaui kapasitas (${angka(R.kap)}): <b>${labPct(R.lebih / R.it)}</b></span>
+    <span>${angka(R.kejut)} dari ${angka(R.it)} iterasi memuat kejutan · benih ${R.M.seed}</span>
+  </div>
+  ${chartBox('labMc')}`;
+}
+
+function labGambarMc() {
+  const R = LAB.mc; if (!R || !$('labMc')) return;
+  const min = Math.min(...R.t3s), maks = Math.max(...R.t3s);
+  const lebar = Math.max(1, Math.ceil((maks - min + 1) / 30));
+  const kotak = [];
+  for (let v = min; v <= maks; v += lebar) kotak.push({ a: v, b: v + lebar - 1, n: 0 });
+  R.t3s.forEach(v => { const k = kotak[Math.floor((v - min) / lebar)]; if (k) k.n++; });
+  buatChart('labMc', 'labMc', {
+    type: 'bar',
+    data: { labels: kotak.map(k => lebar === 1 ? String(k.a) : `${k.a}–${k.b}`), datasets: [{
+      label: 'Iterasi', data: kotak.map(k => k.n),
+      backgroundColor: kotak.map(k => k.b > R.kap ? '#9F1239' : '#14618B'), borderRadius: 3 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false },
+        tooltip: { callbacks: { title: (c) => `${c[0].label} santri tier 3`, label: (c) => `${c.raw} iterasi` } } },
+      scales: { x: { title: { display: true, text: 'Santri tier 3 pada jendela berikutnya (merah = melampaui kapasitas)' }, grid: { display: false } },
+        y: { beginAtZero: true, title: { display: true, text: 'Iterasi' }, ticks: { precision: 0 } } } }
+  });
+}
+
+/* =====================================================================
+   TAB 6 — BUKU CATATAN PERCOBAAN & MEMO SYURA
+   ===================================================================== */
+function labCatatanDaftar() { return labSimpanLokal('catatan') || []; }
+
+function labTabMemo() {
+  const cat = labCatatanDaftar();
+  const baris = cat.map(c => `<tr>
+    <td>${esc(new Date(c.waktu).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }))}</td>
+    <td><b>${esc(c.hipotesis || '(tanpa hipotesis)')}</b>
+      <small class="lab-sub">${esc(labRingkasAturan(c.aturan))} · jendela ${c.hari} hari</small></td>
+    <td class="num">${c.hasil.t3} <small>(baku ${c.hasil.b3})</small></td>
+    <td class="num">${c.hasil.t2} <small>(baku ${c.hasil.b2})</small></td>
+    <td class="num">${labPct(c.hasil.muat, 0)}</td>
+    <td class="num">${c.mc ? `${c.mc.p50} / ${c.mc.p95}` : '—'}</td>
+    <td><button class="btn btn-ghost btn-sm" data-lab="muat:${esc(c.id)}"><i class="fa-solid fa-flask"></i>Ulangi</button>
+      <button class="btn btn-ghost btn-sm" data-lab="hapus:${esc(c.id)}"><i class="fa-solid fa-trash"></i></button></td></tr>`).join('')
+    || barisKosong(7, 'Belum ada percobaan tersimpan.', 'Rancang aturan di tab Laboratorium, lalu tekan "Simpan ke Buku Catatan".');
+
+  return `
+    ${kartu('Buku Catatan Percobaan', `<div class="tbl"><table>
+      <thead><tr><th>Waktu</th><th>Hipotesis & aturan</th><th>Tier 3</th><th>Tier 2</th><th>Beban kapasitas</th><th>MC median / P95</th><th></th></tr></thead>
+      <tbody>${baris}</tbody></table></div>
+      <div class="card-body">${labCatatan(`Buku catatan tersimpan di perangkat ini saja. Setiap percobaan dapat
+        diulang persis sama (aturan, jendela, dan benih acak ikut disimpan) — syarat replikasi dalam laporan tesis.`)}</div>`,
+      cat.length ? `<button class="btn btn-ghost btn-sm" data-lab="csv-catatan"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>` : '',
+      `${cat.length} percobaan`)}
+    ${kartu('Memo untuk Musyawarah Pengasuh', `<div class="card-body">
+      <textarea class="input lab-memo" id="labMemo" rows="22" spellcheck="false">${esc(labSusunMemo())}</textarea>
+      <div class="lab-aksi">
+        <button class="btn btn-primary btn-sm" data-lab="salin-memo"><i class="fa-solid fa-copy"></i>Salin memo</button>
+        <button class="btn btn-ghost btn-sm" data-lab="unduh-memo"><i class="fa-solid fa-download"></i>Unduh .txt</button>
+      </div>
+      ${labCatatan(`Memo disusun otomatis dari angka di halaman ini dan <b>boleh disunting</b> sebelum dibawa ke
+        musyawarah. Memo ini bahan <i>syura</i>, bukan keputusan: ia menyebut apa yang tercatat, apa yang
+        berubah bila aturan diubah, dan batas-batas data — keputusan tetap pada musyawarah.`)}</div>`,
+      '', 'Disusun dari Model, IPP, Ekor, dan Laboratorium')}`;
+}
+
+function labRingkasAturan(a) {
+  if (!a) return 'aturan baku';
+  const beda = LAB_PARAM.filter(p => a[p.k] !== IPP_ATURAN_BAKU[p.k]).map(p => `${p.label} ${labNilaiTampil(p, a[p.k])}`)
+    .concat(LAB_SAKLAR.filter(s => a[s.k] !== IPP_ATURAN_BAKU[s.k]).map(s => `${s.label} ${a[s.k] ? 'aktif' : 'nonaktif'}`));
+  return beda.length ? beda.join('; ') : 'aturan baku';
+}
+
+function labSusunMemo() {
+  const B = LAB.baku, E = LAB.eksp, S = labStatEkor(), n = B.daftar.length || 1, kap = labKapasitas();
+  const dW = labDalamJendela(LAB.data.detail, 'tanggal');
+  const hariIsi = new Set(dW.map(r => kunciTgl(r.tanggal))).size;
+  const bW = labDalamJendela(LAB.data.pembinaan, 'tanggal_pembinaan');
+  const proses = bW.filter(r => String(r.status_pembinaan) !== 'Selesai').length;
+  const unikMacet = B.daftar.filter(x => x.bendera.macet && !x.bendera.bebanT3 && !x.bendera.alpaKronis).length;
+  const beda = labRingkasAturan(LAB.aturan);
+  const pc = (x) => labPct(x, 0);
+  const baris = [
+    'MEMO ANALISIS — BAHAN MUSYAWARAH PENGASUH',
+    `Dayah Ruhul Qurani · disusun ${new Date().toLocaleDateString('id-ID', { dateStyle: 'long' })}`,
+    `Jendela pengamatan: ${LAB.hari} hari (${tgl(kunciTgl(B.mulai))} – ${tgl(kunciTgl(B.akhir))}) · ${angka(n)} santri aktif`,
+    '',
+    'A. APA YANG TERCATAT (deskriptif)',
+    `1. Indeks Peringatan Pembinaan menurut aturan baku: tier 3 = ${B.tier3} santri (${pc(B.tier3 / n)}), tier 2 = ${B.tier2} (${pc(B.tier2 / n)}), tier 1 = ${B.tier1} (${pc(B.tier1 / n)}).`,
+    `2. Kapasitas pembinaan intensif diperkirakan ${kap} santri (${LAB.kap.pengasuh} pengasuh × ${LAB.kap.perPengasuh}); beban tier 3 = ${pc(B.tier3 / kap)} dari kapasitas.`,
+    `3. Sebaran pelanggaran ${S.gini >= 0.6 || S.atas10 >= 0.4 ? 'terkonsentrasi' : 'relatif merata'}: koefisien Gini ${labDes(S.gini)}; 10% santri teratas menanggung ${pc(S.atas10)} catatan; 10 santri teratas ${pc(S.top[1].kasus)}.`,
+    `4. ${unikMacet} santri berada di tier 3 semata-mata karena aturan "pembinaan macet" (bukan karena beban atau kehadiran).`,
+    '',
+    'B. BATAS DATA (tabayyun sebelum menetapkan)',
+    `1. Catatan pelanggaran jatuh pada ${hariIsi} dari ${LAB.hari} hari kalender — tanggal yang tersimpan adalah tanggal input, bukan tanggal kejadian.`,
+    `2. ${proses} dari ${bW.length} pembinaan dalam jendela masih berstatus "Dalam Proses"; bila sebagian sebenarnya sudah dilaksanakan, aturan macet menaikkan santri secara keliru.`,
+    `3. Kehadiran kelas baru teramati pada ${B.teramati} santri (${pc(B.teramati / n)}).`,
+    '',
+    'C. BILA ATURAN DIUBAH (kontrafaktual — pasti)',
+    beda === 'aturan baku'
+      ? '1. Belum ada aturan tandingan yang diuji.'
+      : `1. Aturan yang diuji: ${beda}.`,
+    beda === 'aturan baku' ? '' :
+      `2. Hasil: tier 3 = ${E.tier3} (baku ${B.tier3}), tier 2 = ${E.tier2} (baku ${B.tier2}); beban tier 3 = ${pc(E.tier3 / kap)} dari kapasitas.`,
+    LAB.hipotesis ? `3. Hipotesis: ${LAB.hipotesis}` : '',
+    '',
+    'D. SKENARIO (asumsi — bukan ramalan)',
+    LAB.mc
+      ? `1. Dengan perubahan Ringan ${LAB.mc.M.ringan}%, Sedang ${LAB.mc.M.sedang}%, Berat ${LAB.mc.M.berat}%, laju latar ${LAB.mc.M.latar}%, dan peluang kejutan ${LAB.mc.M.pShock}% (×${LAB.mc.M.kShock}): median tier 3 = ${Math.round(Stat.kuantil(LAB.mc.t3s, 0.5))}, P95 = ${Math.round(Stat.kuantil(LAB.mc.t3s, 0.95))}; peluang melampaui kapasitas ${pc(LAB.mc.lebih / LAB.mc.it)} (${LAB.mc.it} iterasi, benih ${LAB.mc.M.seed}).`
+      : '1. Simulasi belum dijalankan.',
+    '',
+    'E. PERTANYAAN UNTUK MUSYAWARAH',
+    '1. Apakah ambang tier 3 yang berlaku sepadan dengan kapasitas pembinaan intensif yang benar-benar tersedia?',
+    '2. Siapa yang menuntaskan status pembinaan yang tertunda, dan kapan?',
+    '3. Untuk santri terkonsentrasi di ekor atas: pembinaan individual oleh siapa, dengan sasaran tertulis apa?',
+    '4. Apakah prosedur tabayyun, pemberitahuan wali, dan jalur pembinaan siap bila kejadian Berat datang di luar dugaan?',
+    '',
+    'Catatan: memo ini disusun otomatis dari catatan chemint dan menjadi bahan musyawarah (syura), bukan keputusan.'
+  ];
+  return baris.filter((b, i, a) => !(b === '' && a[i - 1] === '')).join('\n');
+}
+
+/* ---------------------------------------------------------------------
+   Peristiwa
+   --------------------------------------------------------------------- */
+let labTunda = null;
+function labSaatInput(e) {
+  const t = e.target;
+  if (t.dataset.labp) {
+    const p = LAB_PARAM.find(x => x.k === t.dataset.labp);
+    LAB.aturan[p.k] = p.pct ? Math.round(Number(t.value) * 100) / 100 : Number(t.value);
+    const v = $('labV-' + p.k); if (v) v.textContent = labNilaiTampil(p, LAB.aturan[p.k]);
+    t.closest('.lab-param')?.classList.toggle('ubah', LAB.aturan[p.k] !== IPP_ATURAN_BAKU[p.k]);
+    clearTimeout(labTunda);
+    labTunda = setTimeout(labPerbaruiEksp, 120);
+  } else if (t.dataset.labf === 'cari') {
+    LAB.f.cari = t.value; LAB.f.hal = 1;
+    clearTimeout(labTunda);
+    labTunda = setTimeout(() => { $('labIppTabel').innerHTML = labTabelIpp(); tandaiTabelBisaGeser(); }, 200);
+  } else if (t.id === 'labHipo') {
+    LAB.hipotesis = t.value;
+  } else if (t.id === 'labMemo') {
+    // disunting pengguna — dibiarkan
+  }
+}
+
+function labSaatUbah(e) {
+  const t = e.target;
+  if (t.dataset.labs) {
+    LAB.aturan[t.dataset.labs] = t.checked;
+    labPerbaruiEksp(true);
+  } else if (t.dataset.labk) {
+    LAB.kap[t.dataset.labk] = Math.max(1, Number(t.value) || 1);
+    labSimpanLokal('kap', LAB.kap);
+    const k = $('labKap'); if (k) k.textContent = `${angka(labKapasitas())} santri`;
+    labPerbaruiEksp();
+  } else if (t.dataset.labm) {
+    LAB.mcAtur[t.dataset.labm] = Number(t.value) || 0;
+  } else if (t.dataset.labf && t.dataset.labf !== 'cari') {
+    LAB.f[t.dataset.labf] = t.value; LAB.f.hal = 1;
+    $('labIppTabel').innerHTML = labTabelIpp(); tandaiTabelBisaGeser();
+  } else if (t.id === 'labSapuan') {
+    LAB.sapuan = t.value; labGambarSapuan();
+  }
+}
+
+/** Terapkan aturan percobaan; gambar ulang hasil tanpa merusak isian yang sedang disentuh. */
+function labPerbaruiEksp(gambarUlangInstrumen) {
+  LAB.eksp = terapkanAturanIpp(LAB.unsur, { ...LAB.aturan, hari: LAB.hari });
+  LAB.mc = null;
+  if (LAB.tab !== 'lab') return;
+  if (gambarUlangInstrumen) { labGambar(); return; }
+  const h = $('labHasil'); if (h) h.innerHTML = labHasilEksp();
+  const m = $('labMcHasil'); if (m) m.innerHTML = `<p class="lab-sub">Aturan berubah — jalankan ulang simulasi.</p>`;
+  labGrafikLab();
+  tandaiTabelBisaGeser();
+}
+
+function labAksi(aksi, el) {
+  if (aksi === 'baku') {
+    LAB.aturan = { ...IPP_ATURAN_BAKU };
+    labPerbaruiEksp(true);
+    return toast('success', 'Aturan dikembalikan ke baku.');
+  }
+  if (aksi === 'mc') {
+    document.querySelectorAll('[data-labm]').forEach(i => { LAB.mcAtur[i.dataset.labm] = Number(i.value) || 0; });
+    el.disabled = true;
+    setTimeout(() => {
+      try { labJalankanMc(); } finally { el.disabled = false; }
+      const m = $('labMcHasil'); if (m) m.innerHTML = labHasilMc();
+      labGambarMc(); tandaiTabelBisaGeser();
+    }, 20);
+    return;
+  }
+  if (aksi === 'simpan') {
+    const E = LAB.eksp, B = LAB.baku;
+    const c = { id: String(Date.now()), waktu: Date.now(), hipotesis: LAB.hipotesis.trim(), hari: LAB.hari,
+      aturan: { ...LAB.aturan }, kap: { ...LAB.kap },
+      hasil: { t3: E.tier3, t2: E.tier2, t1: E.tier1, b3: B.tier3, b2: B.tier2, muat: E.tier3 / labKapasitas() },
+      mc: LAB.mc ? { p50: Math.round(Stat.kuantil(LAB.mc.t3s, 0.5)), p95: Math.round(Stat.kuantil(LAB.mc.t3s, 0.95)),
+        lebih: LAB.mc.lebih / LAB.mc.it, M: LAB.mc.M } : null };
+    const daftar = labCatatanDaftar(); daftar.unshift(c);
+    labSimpanLokal('catatan', daftar.slice(0, 100));
+    return toast('success', 'Percobaan tersimpan di Buku Catatan.');
+  }
+  if (aksi.startsWith('muat:')) {
+    const c = labCatatanDaftar().find(x => x.id === aksi.slice(5)); if (!c) return;
+    LAB.aturan = { ...IPP_ATURAN_BAKU, ...c.aturan };
+    LAB.kap = { ...LAB.kap, ...(c.kap || {}) };
+    LAB.hipotesis = c.hipotesis || '';
+    if (c.mc?.M) LAB.mcAtur = { ...LAB.mcAtur, ...c.mc.M };
+    if (c.hari !== LAB.hari) { LAB.hari = c.hari; const s = $('labHari'); if (s) s.value = String(c.hari); labHitung(); }
+    else LAB.eksp = terapkanAturanIpp(LAB.unsur, { ...LAB.aturan, hari: LAB.hari });
+    LAB.tab = 'lab';
+    document.querySelectorAll('[data-labtab]').forEach(b => b.classList.toggle('on', b.dataset.labtab === 'lab'));
+    labGambar();
+    return toast('info', 'Percobaan dimuat ulang. Jalankan simulasi untuk mereplikasi skenario.');
+  }
+  if (aksi.startsWith('hapus:')) {
+    labSimpanLokal('catatan', labCatatanDaftar().filter(x => x.id !== aksi.slice(6)));
+    return labGambar();
+  }
+  if (aksi === 'csv-ipp') {
+    const rows = labSaringIpp();
+    return unduhCsv(`IPP_${hariIni()}.csv`, [
+      ['NISN','Nama','Kelas','Tier','Beban (poin)','Catatan','Ikatan','Izin keluar','Respons (%)','Kehadiran (%)','Alpa (JP)','JP teramati','Sebab'],
+      ...rows.map(x => [x.nisn, x.nama, x.kelas, x.tingkat, x.beban, x.kasus, x.ikatan, x.putus,
+        x.respons ?? '', x.kh ? x.kh.hadirPct : '', x.kh ? x.kh.alpa : '', x.kh ? x.kh.jpAmati : '', x.sebab])]);
+  }
+  if (aksi === 'csv-catatan') {
+    return unduhCsv(`Percobaan_Kebijakan_${hariIni()}.csv`, [
+      ['Waktu','Hipotesis','Jendela (hari)','Aturan','Tier 3','Tier 2','Tier 3 baku','Tier 2 baku','Beban kapasitas','MC median T3','MC P95 T3','Peluang lampaui kapasitas','Benih'],
+      ...labCatatanDaftar().map(c => [new Date(c.waktu).toISOString(), c.hipotesis, c.hari, labRingkasAturan(c.aturan),
+        c.hasil.t3, c.hasil.t2, c.hasil.b3, c.hasil.b2, Math.round(c.hasil.muat * 100) + '%',
+        c.mc?.p50 ?? '', c.mc?.p95 ?? '', c.mc ? Math.round(c.mc.lebih * 100) + '%' : '', c.mc?.M?.seed ?? ''])]);
+  }
+  if (aksi === 'salin-memo') {
+    const teks = $('labMemo')?.value || '';
+    return navigator.clipboard.writeText(teks)
+      .then(() => toast('success', 'Memo tersalin.'))
+      .catch(() => toast('error', 'Peramban menolak menyalin. Pilih teks lalu salin manual.'));
+  }
+  if (aksi === 'unduh-memo') {
+    const teks = $('labMemo')?.value || '';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([teks], { type: 'text/plain;charset=utf-8' }));
+    a.download = `Memo_Syura_${hariIni()}.txt`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+  }
 }
 
 // ---------------------------------------------------------------------

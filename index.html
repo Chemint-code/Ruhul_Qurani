@@ -3765,6 +3765,112 @@
     .ipp-nm small { white-space:normal; }
   }
 
+  /* ---- Laboratorium Kebijakan (v2.16, Admin) ---- */
+  .lab-meta { align-items:center; flex-wrap:wrap; }
+  .lab-jendela { display:inline-flex; align-items:center; gap:8px; }
+  .lab-jendela .input { padding:5px 10px; min-height:0; width:auto; font-size:12.5px; }
+  .lab-tabs { border:none; padding-inline:0; margin:14px 0 4px; }
+  @media (max-width:640px) {
+    .lab-tabs { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; padding-bottom:6px; }
+    .lab-tabs::-webkit-scrollbar { display:none; }
+    .lab-tabs .chip { flex:none; }
+  }
+  .lab-klaim { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:999px;
+    font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
+  .lab-klaim.deskriptif    { background:#E7F1F7; color:#14618B; }
+  .lab-klaim.kontrafaktual { background:#FDF1E4; color:#B45309; }
+  .lab-klaim.skenario      { background:#F1ECFC; color:#5B21B6; }
+  .lab-epis { display:flex; gap:9px; align-items:flex-start; margin:12px 0 0; padding:10px 12px;
+    border-radius:10px; background:var(--paper); color:var(--text-2); font-size:12.3px; line-height:1.65; }
+  .lab-epis > i { color:var(--text-3); margin-top:3px; }
+  .lab-sub { display:block; color:var(--text-3); font-size:11.5px; line-height:1.5; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+  .lab-alur { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:10px; align-items:stretch; }
+  .lab-alur > .lab-panah { display:none; }
+  .lab-kol { display:flex; flex-direction:column; gap:6px; padding:12px; border-radius:12px;
+    border:1px solid var(--line-soft); background:var(--surface); min-width:0; }
+  .lab-kol small { font-size:9.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--text-3); }
+  .lab-kol span { font-size:12px; padding:5px 8px; border-radius:7px; background:var(--paper); }
+  .lab-kol .u { border-left:3px solid; }
+  .lab-kol .u.merah{border-color:#9F1239} .lab-kol .u.hijau{border-color:#0F766E} .lab-kol .u.kuning{border-color:#B45309}
+  .lab-kol .u.biru{border-color:#14618B} .lab-kol .u.ungu{border-color:#5B21B6}
+  .lab-kol .t.t3{background:#FCE8EE;color:#9F1239} .lab-kol .t.t2{background:#FDF1E4;color:#B45309}
+  .lab-kol .t.t1{background:#E6F4F1;color:#0F766E}
+  @media (max-width:900px) { .lab-alur { grid-template-columns:1fr 1fr; } }
+  @media (max-width:560px) { .lab-alur { grid-template-columns:1fr; } }
+
+  .lab-mutu { font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; white-space:nowrap; }
+  .lab-mutu.baik{background:#E6F4F1;color:#0F766E} .lab-mutu.sedang{background:#FDF1E4;color:#B45309}
+  .lab-mutu.buruk{background:#FCE8EE;color:#9F1239}
+  table.lab-korel td, table.lab-korel th { text-align:center; }
+  table.lab-korel td:first-child { text-align:left; }
+  .lab-r b { display:block; font-variant-numeric:tabular-nums; }
+  .lab-r small { font-size:10px; color:var(--text-3); }
+  .lab-r.diag { color:var(--text-3); }
+  .lab-rujuk p { margin:0 0 8px; padding-left:22px; text-indent:-22px; font-size:12.5px; line-height:1.6; color:var(--text-2); }
+
+  .lab-bar { display:block; height:8px; border-radius:5px; background:var(--paper); overflow:hidden; min-width:80px; }
+  .lab-bar i { display:block; height:100%; border-radius:5px; background:#14618B; }
+  .lab-filter { padding:14px var(--pad) 4px; }
+
+  .lab-putusan { display:grid; grid-template-columns:minmax(160px,auto) 1fr; gap:16px; align-items:center;
+    padding:16px 18px; border-radius:var(--r-lg); margin-bottom:16px; border:1px solid; }
+  .lab-putusan small { display:block; font-size:10px; letter-spacing:.1em; text-transform:uppercase; opacity:.8; }
+  .lab-putusan b { font-size:20px; }
+  .lab-putusan p { margin:0; font-size:13px; line-height:1.65; }
+  .lab-putusan.baik{background:#E6F4F1;border-color:#B6E0D6;color:#0B5A53}
+  .lab-putusan.sedang{background:#FDF1E4;border-color:#F2D2AC;color:#8A3F07}
+  .lab-putusan.buruk{background:#FCE8EE;border-color:#F3BFCD;color:#7E0E2D}
+  @media (max-width:640px) { .lab-putusan { grid-template-columns:1fr; } }
+  .lab-hill { margin:12px 0 0; font-size:13px; }
+  .lab-stats-mini { padding:14px var(--pad) 0; }
+
+  .lab-hipo textarea { width:100%; resize:vertical; }
+  .lab-saklar-baris { display:flex; flex-wrap:wrap; gap:8px 18px; margin:14px 0; }
+  .lab-saklar { display:inline-flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; }
+  .lab-params { display:grid; grid-template-columns:repeat(auto-fill, minmax(230px,1fr)); gap:12px; }
+  .lab-param { padding:11px 12px; border-radius:11px; border:1px solid var(--line-soft); background:var(--surface);
+    transition:opacity .16s ease, border-color .16s ease; }
+  .lab-param.ubah { border-color:#B45309; background:#FFFBF5; }
+  .lab-param.mati { opacity:.45; }
+  .lab-param-k { display:flex; justify-content:space-between; gap:10px; font-size:12.5px; }
+  .lab-param-k b { font-variant-numeric:tabular-nums; }
+  .lab-param input[type=range] { width:100%; margin:8px 0 2px; accent-color:#B45309; }
+  .lab-param small { color:var(--text-3); font-size:11px; }
+  .lab-kap { display:grid; grid-template-columns:1fr 1fr auto; gap:12px; align-items:end; margin-top:14px; }
+  .lab-kap-hasil { padding:8px 14px; border-radius:10px; background:var(--paper); }
+  .lab-kap-hasil small { display:block; font-size:11px; color:var(--text-3); }
+  @media (max-width:640px) { .lab-kap { grid-template-columns:1fr; } }
+  .lab-aksi { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+
+  .lab-banding { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .lab-bd { padding:12px; border-radius:12px; background:var(--paper); min-width:0; }
+  .lab-bd small { display:block; font-size:11px; color:var(--text-3); }
+  .lab-bd b { display:block; font-size:24px; font-variant-numeric:tabular-nums; }
+  .lab-bd span { font-size:11.5px; color:var(--text-2); }
+  .lab-bd.t3 b{color:#9F1239} .lab-bd.t2 b{color:#B45309} .lab-bd.t1 b{color:#0F766E}
+  .lab-muat { margin-top:14px; }
+  .lab-muat-k { display:flex; justify-content:space-between; gap:10px; font-size:12.5px; }
+  .lab-muat-bar { display:block; height:10px; border-radius:6px; background:var(--paper); overflow:hidden; margin:6px 0; }
+  .lab-muat-bar i { display:block; height:100%; border-radius:6px; }
+  .lab-muat.baik .lab-muat-bar i{background:#0F766E} .lab-muat.sedang .lab-muat-bar i{background:#B45309}
+  .lab-muat.buruk .lab-muat-bar i{background:#9F1239}
+  .lab-muat small { color:var(--text-3); font-size:11.5px; }
+  table.lab-trans td, table.lab-trans th { text-align:center; }
+  table.lab-trans td:first-child { text-align:left; }
+  .lab-tr.diag{background:var(--paper)} .lab-tr.naik{background:#FCE8EE;color:#9F1239} .lab-tr.turun{background:#E7F1F7;color:#14618B}
+  .lab-sapu { display:flex; align-items:center; gap:10px; padding-bottom:0; }
+  .lab-sapu .input { max-width:320px; }
+
+  .lab-mc-isian { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px,1fr)); gap:10px 12px; }
+  .lab-isian { display:flex; align-items:center; gap:6px; }
+  .lab-isian span { font-size:11.5px; color:var(--text-3); white-space:nowrap; }
+  .lab-mc-ring { display:flex; flex-wrap:wrap; gap:8px 18px; margin:12px 0 4px; font-size:12.5px; color:var(--text-2); }
+  .lab-mc-ring .baik b{color:#0F766E} .lab-mc-ring .sedang b{color:#B45309} .lab-mc-ring .buruk b{color:#9F1239}
+  #labMcHasil { margin-top:14px; }
+  .lab-memo { width:100%; font-family:'IBM Plex Mono', ui-monospace, monospace; font-size:12.5px; line-height:1.6; resize:vertical; }
+
 /* ══════════════════════════════════════════════════════════════════════
    PENYEMPURNAAN v2.12 — LAPISAN "PARIPURNA"                (September 2026)
 
@@ -4720,6 +4826,7 @@
         <div class="nav-isi">
           <button class="nav-item" data-view="rekap"><i class="fa-solid fa-layer-group"></i>Rekap Pelanggaran</button>
           <button class="nav-item" data-view="bidang"><i class="fa-solid fa-diagram-project"></i>Evaluasi Bidang</button>
+          <button class="nav-item" data-view="lab"><i class="fa-solid fa-flask"></i>Laboratorium Kebijakan</button>
         </div>
       </details>
 
