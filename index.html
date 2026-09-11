@@ -3819,7 +3819,12 @@
 
   /* ═══════════════ 2 · LATAR AURORA ═══════════════ */
   body { background: var(--paper); }
-  #appShell { position: relative; isolation: isolate; }
+  /* JANGAN beri #appShell `isolation`, `z-index`, `transform`, atau
+     `filter`: semua itu membuat konteks tumpukan baru sehingga z-index
+     bilah sisi (60) dan scrim (55) terkurung di dalamnya — bilah tab
+     bawah (45, saudara #appShell) lalu menutupi tombol Keluar di ponsel.
+     Lapisan aurora (z-index -1) tetap di belakang isi tanpa itu, karena
+     latar body dilukis pada kanvas di bawah semua lapisan. */
   #appShell::before {
     content: ''; position: fixed; inset: -12vmax; z-index: -1; pointer-events: none;
     background:
