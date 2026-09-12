@@ -468,6 +468,126 @@ function filterBinaanUnit(rows, field = 'kelas') {
   return lingkupUnitSantri(filterBinaan(rows, field));
 }
 
+/* =====================================================================
+ * 3c. KAMAR ASRAMA & PERAN MUDABBIR   (v2.17)
+ * =====================================================================
+ * Kamar disimpan sebagai BILANGAN (`nomor_kamar`), bukan string. Kunci
+ * sebuah kamar adalah pasangan (unit_gender, nomor_kamar): Kamar 21
+ * putra dan Kamar 21 putri adalah dua kamar berbeda. Label tampilan
+ * "Asrama Putra Kamar 21" DITURUNKAN di sini, tidak disimpan — sejalan
+ * dengan unitDariKelas() dan angkatanDariKelas(), dan supaya perubahan
+ * format label tidak pernah menjadi urusan migration.
+ *
+ * MUDABBIR adalah santri kelas XI yang ditugaskan musyrif asrama tidur
+ * di kamar angkatan VII atau X sebagai penjaga kamar. Santri XI yang
+ * tidak terpilih menghuni kamar yang 100% berisi angkatan XI.
+ *
+ * Statusnya disimpan EKSPLISIT (`peran_kamar`), tidak disimpulkan dari
+ * komposisi kamar, meskipun penyimpulan itu mungkin dan tidak akan
+ * salah-tanda. Alasannya: komposisi kamar di atas berlaku untuk TAHUN
+ * AJARAN INI, dan menurunkan sebuah penugasan dari pola hunian yang
+ * umurnya satu tahun berarti logikanya patah diam-diam ketika kebijakan
+ * kamar berubah — tanpa ada yang memberi tahu.
+ *
+ * Catatan mudabbir DIKELUARKAN dari statistik kamar yang ia jaga: ia
+ * pengawas, bukan binaan kamar itu. Pelanggaran seorang mudabbir adalah
+ * sinyal mutu pengawasan, dan mencampurnya ke dalam angka kamar
+ * mengencerkan kedua-duanya.
+ * ===================================================================== */
+const KAMAR_MIN = 1;
+const KAMAR_MAKS = 999;
+const PERAN_MUDABBIR = 'mudabbir';
+
+/** Angkatan asal mudabbir, dan angkatan yang kamarnya dijaga. */
+const ANGKATAN_MUDABBIR = 'XI';
+const ANGKATAN_DIJAGA = ['VII', 'X'];
+
+/** Nomor kamar satu baris santri. null bila belum didata / tidak sah. */
+function nomorKamar(s) {
+  const n = Number(s?.nomor_kamar ?? s?.siswa?.nomor_kamar);
+  return Number.isInteger(n) && n >= KAMAR_MIN && n <= KAMAR_MAKS ? n : null;
+}
+
+/** Apakah baris ini santri yang bertugas sebagai mudabbir? */
+function isMudabbir(s) {
+  const v = s?.peran_kamar ?? s?.siswa?.peran_kamar;
+  return String(v ?? '').trim().toLowerCase() === PERAN_MUDABBIR;
+}
+
+/**
+ * Kunci gabungan kamar untuk pengelompokan: 'putra#21'.
+ * '' bila kamar belum didata. Unit diambil lewat unitBaris() sehingga
+ * baris tanpa kolom unit_gender (mis. detail_data) tetap terlayani.
+ */
+function kunciKamar(s) {
+  const n = nomorKamar(s);
+  return n === null ? '' : `${unitBaris(s) || UNIT_PUTRA}#${n}`;
+}
+
+/** Nomor kamar dari kunci gabungan. */
+function kamarDariKunci(k) { return Number(String(k).split('#')[1]) || 0; }
+
+/** Label kamar untuk tampilan. '' bila kamar belum didata. */
+function labelKamar(s) {
+  const n = nomorKamar(s);
+  if (n === null) return '';
+  const u = unitBaris(s) || UNIT_PUTRA;
+  return `Asrama ${u === UNIT_PUTRI ? 'Putri' : 'Putra'} Kamar ${n}`;
+}
+
+/** Label ringkas untuk kolom tabel: 'Kamar 21'. '' bila belum didata. */
+function labelKamarRingkas(s) {
+  const n = nomorKamar(s);
+  return n === null ? '' : `Kamar ${n}`;
+}
+
+/**
+ * Periksa satu isian kamar sebelum dikirim ke database.
+ *
+ * Dipakai bersama oleh editor per-santri (v2.17) dan — bila kelak
+ * ditambahkan — jalur unggah massal, supaya keduanya tidak pernah
+ * berbeda aturan. Mengembalikan { ok, nilai:{nomor_kamar, peran_kamar},
+ * masalah:[] }; `masalah` kosong berarti lolos.
+ *
+ * Pemeriksaan "mudabbir harus kelas XI" sengaja ada DI SINI, bukan di
+ * CHECK database: syaratnya bergantung pada bentuk string `kelas`, dan
+ * menaruhnya di database membuat setiap perubahan penamaan kelas
+ * menjadi urusan migration.
+ */
+function periksaKamar(kamarMentah, peranMentah, kelas) {
+  const masalah = [];
+  const teks = String(kamarMentah ?? '').trim();
+  const mauMudabbir = String(peranMentah ?? '').trim().toLowerCase() === PERAN_MUDABBIR;
+
+  let nomor = null;
+  if (teks !== '') {
+    if (!/^\d{1,3}$/.test(teks)) {
+      masalah.push(`Nomor kamar "${teks}" harus bilangan bulat tanpa huruf atau tanda baca`);
+    } else {
+      const n = Number(teks);
+      if (n < KAMAR_MIN || n > KAMAR_MAKS) {
+        masalah.push(`Nomor kamar ${n} di luar rentang ${KAMAR_MIN}–${KAMAR_MAKS}`);
+      } else nomor = n;
+    }
+  }
+
+  if (mauMudabbir) {
+    const a = angkatanDariKelas(kelas);
+    if (a !== ANGKATAN_MUDABBIR) {
+      masalah.push(`Mudabbir ditugaskan dari kelas ${ANGKATAN_MUDABBIR}; santri ini angkatan ${a || 'tidak dikenali'}`);
+    }
+    if (nomor === null && !masalah.length) {
+      masalah.push('Mudabbir harus punya nomor kamar — ia bertugas menjaga satu kamar tertentu');
+    }
+  }
+
+  return {
+    ok: masalah.length === 0,
+    nilai: { nomor_kamar: nomor, peran_kamar: mauMudabbir && nomor !== null ? PERAN_MUDABBIR : null },
+    masalah
+  };
+}
+
 const MENU_ROLE = {
   dashboard:   ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
   pimpinan:    ['Admin','Pimpinan'],
@@ -2908,7 +3028,7 @@ async function viewPimpinan(opsi = {}) {
 // ---------------------------------------------------------------------
 // 12. PROFIL SANTRI
 // ---------------------------------------------------------------------
-const stSiswa = { page:1, size:30, cari:'', kelas:'', jenjang:'' };
+const stSiswa = { page:1, size:30, cari:'', kelas:'', jenjang:'', kamar:'' };
 
 async function viewSiswa() {
   $('viewRoot').innerHTML = kartu('Daftar Santri', `
@@ -2918,6 +3038,9 @@ async function viewSiswa() {
       <select id="filterJenjang" class="input">
         <option value="">Semua Jenjang</option>
         ${['MTs','MA'].map(j => `<option ${j===stSiswa.jenjang?'selected':''}>${j}</option>`).join('')}
+      </select>
+      <select id="filterKamar" class="input" title="Kamar asrama (v2.17)">
+        <option value="">Semua kamar</option>
       </select>
       <span class="sep"></span>
       <button class="btn btn-ghost btn-sm" id="resetSiswa"><i class="fa-solid fa-rotate-left"></i>Reset</button>
@@ -2937,17 +3060,25 @@ async function viewSiswa() {
   $('filterJenjang').addEventListener('change', e => {
     stSiswa.jenjang = e.target.value; stSiswa.page = 1; muatTabelSiswa();
   });
+  $('filterKamar').addEventListener('change', e => {
+    stSiswa.kamar = e.target.value; stSiswa.page = 1; muatTabelSiswa();
+  });
   saranKelas($('filterKelas'), (nilai) => { stSiswa.kelas = nilai; stSiswa.page = 1; muatTabelSiswa(); });
   $('resetSiswa').addEventListener('click', () => {
-    Object.assign(stSiswa, { page:1, cari:'', kelas:'', jenjang:'' });
+    Object.assign(stSiswa, { page:1, cari:'', kelas:'', jenjang:'', kamar:'' });
     $('cariSiswa').value = ''; $('filterKelas').value = ''; $('filterJenjang').value = '';
+    $('filterKamar').value = '';
     muatTabelSiswa();
   });
   $('csvSiswa')?.addEventListener('click', async () => {
     const rows = saringSiswa(await muatSiswa());
     unduhCsv(`santri-${hariIni()}.csv`, [
-      ['NISN','Nama','Kelas','Jenjang','Asrama','Status Keberadaan','Total Poin'],
-      ...rows.map(s => [s.nisn, s.nama_siswa, s.kelas, s.jenjang, s.asrama, s.status_keberadaan, s.total_poin_pelanggaran])
+      // v2.17: 'Asrama' tetap kolom GEDUNG apa adanya; kamar dan peran
+      // menjadi kolom tersendiri supaya keduanya tidak lagi tertukar.
+      ['NISN','Nama','Kelas','Jenjang','Asrama (gedung)','Kamar','Peran Kamar','Status Keberadaan','Total Poin'],
+      ...rows.map(s => [s.nisn, s.nama_siswa, s.kelas, s.jenjang, s.asrama,
+        nomorKamar(s) ?? '', isMudabbir(s) ? 'Mudabbir' : '',
+        s.status_keberadaan, s.total_poin_pelanggaran])
     ]);
   });
 
@@ -2967,12 +3098,37 @@ function saringSiswa(all) {
   let rows = filterBinaanUnit(all.filter(aktifSantri), 'kelas');
   if (stSiswa.kelas)   rows = rows.filter(s => s.kelas === stSiswa.kelas);
   if (stSiswa.jenjang) rows = rows.filter(s => (s.jenjang || angkatanJenjang(s.kelas)) === stSiswa.jenjang);
+  // v2.17 — penyaring kamar. Nilainya kunci gabungan 'putra#21', bukan
+  // nomor telanjang: Kamar 21 putra dan Kamar 21 putri adalah dua kamar
+  // berbeda, dan akun yang melihat kedua unit harus bisa memilih salah
+  // satunya. '-' berarti "belum didata", dipakai untuk menemukan sisa
+  // santri yang kamarnya masih kosong.
+  if (stSiswa.kamar === '-')     rows = rows.filter(s => nomorKamar(s) === null);
+  else if (stSiswa.kamar)        rows = rows.filter(s => kunciKamar(s) === stSiswa.kamar);
   if (stSiswa.cari) {
     const k = stSiswa.cari.toLowerCase();
     rows = rows.filter(s => String(s.nama_siswa||'').toLowerCase().includes(k) ||
                             String(s.nisn||'').toLowerCase().includes(k));
   }
   return rows;
+}
+
+/**
+ * Baris kedua pada kolom kelas: jenjang · gedung · kamar · peran.
+ * Gedung (`asrama`) dan kamar (`nomor_kamar`) ditampilkan TERPISAH dan
+ * berdampingan — keduanya dua tingkat yang berbeda, dan menyatukannya
+ * dalam satu teks persis yang membuat keduanya pernah tertukar.
+ */
+function subKelasSantri(s) {
+  const bag = [];
+  if (s.jenjang) bag.push(esc(s.jenjang));
+  if (s.asrama)  bag.push(esc(s.asrama));
+  const km = labelKamarRingkas(s);
+  if (km) bag.push(`<b>${esc(km)}</b>`);
+  if (isMudabbir(s)) {
+    bag.push('<span class="peran-mud"><i class="fa-solid fa-shield-halved"></i>Mudabbir</span>');
+  }
+  return bag.length ? `<div class="secondary">${bag.join(' · ')}</div>` : '';
 }
 
 function angkatanJenjang(kelas) {
@@ -2982,8 +3138,48 @@ function angkatanJenjang(kelas) {
   return '';
 }
 
+/**
+ * Isi pilihan kamar dari kamar yang BENAR-BENAR ADA dalam cakupan akun
+ * ini — bukan daftar 1..N yang dikarang. Karena sumbernya santri yang
+ * sudah melewati filterBinaanUnit(), kamar unit lain tidak akan pernah
+ * muncul di daftar: akun Guru unit putra tidak melihat kamar putri
+ * sebagai pilihan, bukan karena disembunyikan, melainkan karena
+ * santrinya memang tidak ada dalam himpunan yang ia terima.
+ */
+function isiPilihanKamar(all) {
+  const sel = $('filterKamar'); if (!sel) return;
+  const lingkup = filterBinaanUnit((all || []).filter(aktifSantri), 'kelas');
+
+  const peta = new Map();                 // kunci -> { kunci, nomor, unit, n }
+  let tanpaKamar = 0;
+  lingkup.forEach(s => {
+    const k = kunciKamar(s);
+    if (!k) { tanpaKamar++; return; }
+    const it = peta.get(k) || { kunci: k, nomor: nomorKamar(s), unit: unitBaris(s) || UNIT_PUTRA, n: 0 };
+    it.n++; peta.set(k, it);
+  });
+
+  const duaUnit = new Set([...peta.values()].map(it => it.unit)).size > 1;
+  const daftar = [...peta.values()].sort((a, b) =>
+    a.unit === b.unit ? a.nomor - b.nomor : (a.unit === UNIT_PUTRA ? -1 : 1));
+
+  sel.innerHTML = `<option value="">Semua kamar</option>`
+    + daftar.map(it => `<option value="${esc(it.kunci)}">`
+        + `${duaUnit ? (it.unit === UNIT_PUTRI ? 'Putri · ' : 'Putra · ') : ''}`
+        + `Kamar ${it.nomor} (${it.n})</option>`).join('')
+    + (tanpaKamar ? `<option value="-">Belum didata (${tanpaKamar})</option>` : '');
+
+  // Pilihan yang sedang aktif bisa hilang setelah data disegarkan
+  // (mis. santri terakhir di kamar itu dipindah). Jangan biarkan
+  // penyaring menunjuk kamar yang sudah tidak ada — tabel akan kosong
+  // tanpa sebab yang terlihat.
+  sel.value = stSiswa.kamar;
+  if (sel.value !== stSiswa.kamar) { stSiswa.kamar = ''; sel.value = ''; }
+}
+
 async function muatTabelSiswa() {
   const all = await muatSiswa();
+  isiPilihanKamar(all);
   const rows = saringSiswa(all);
   const pages = Math.max(1, Math.ceil(rows.length / stSiswa.size));
   if (stSiswa.page > pages) stSiswa.page = pages;
@@ -2994,8 +3190,7 @@ async function muatTabelSiswa() {
   $('tbSiswa').innerHTML = hal.map(s => `<tr>
     <td class="secondary nowrap" style="padding-top:14px">${esc(s.nisn)}</td>
     <td><div class="primary">${esc(s.nama_siswa)}</div></td>
-    <td>${esc(s.kelas||'-')}${s.jenjang || s.asrama
-      ? `<div class="secondary">${esc(s.jenjang||'')}${s.asrama ? ' · '+esc(s.asrama) : ''}</div>` : ''}</td>
+    <td>${esc(s.kelas||'-')}${subKelasSantri(s)}</td>
     <td><span class="tag ${s.status_keberadaan==='Hadir'?'tag-ok':'tag-wait'}">${esc(s.status_keberadaan||'Hadir')}</span></td>
     <td class="num center" style="color:${Number(s.total_poin_pelanggaran)>=50?'var(--maroon)':'var(--text)'}">${s.total_poin_pelanggaran||0}</td>
     <td class="right"><button class="btn-link" data-detail="${esc(s.nisn)}">
@@ -3097,7 +3292,7 @@ async function bukaDetailSantri(nisn) {
         <div class="santri-head">
           <div>
             <p class="nm">${esc(s.nama_siswa)}</p>
-            <p class="id">NISN ${esc(s.nisn)} · Kelas ${esc(s.kelas||'-')}${s.jenjang?' · '+esc(s.jenjang):''}${s.asrama?' · Asrama '+esc(s.asrama):''}</p>
+            <p class="id">NISN ${esc(s.nisn)} · Kelas ${esc(s.kelas||'-')}${s.jenjang?' · '+esc(s.jenjang):''}${s.asrama?' · '+esc(s.asrama):''}${labelKamar(s)?' · '+esc(labelKamar(s)):''}${isMudabbir(s)?' · <span class="peran-mud"><i class="fa-solid fa-shield-halved"></i>Mudabbir</span>':''}</p>
           </div>
           <div style="display:flex;gap:9px;flex-wrap:wrap">
             <div class="poin-badge">
@@ -3133,6 +3328,7 @@ async function bukaDetailSantri(nisn) {
           ${bolehCetak() ? `<button class="btn btn-primary btn-sm" id="dCetak"><i class="fa-solid fa-print"></i>Cetak Laporan</button>` : ''}
           ${bolehPdf() ? `<button class="btn btn-ghost btn-sm" id="dPdf"><i class="fa-solid fa-file-pdf"></i>Unduh PDF</button>` : ''}
           ${bolehTulis() ? `<button class="btn btn-ghost btn-sm" id="dReset"><i class="fa-solid fa-rotate-left"></i>Reset ke Hadir</button>` : ''}
+          ${isAdmin() ? `<button class="btn btn-ghost btn-sm" id="dKamar"><i class="fa-solid fa-bed"></i>Atur Kamar</button>` : ''}
         </div>
 
         ${trenPanelHTML()}
@@ -3148,6 +3344,12 @@ async function bukaDetailSantri(nisn) {
         $('dCetak')?.addEventListener('click', () => cetakLaporan(nisn));
         $('dPdf')?.addEventListener('click', () => unduhLaporanPdf(nisn));
         $('dReset')?.addEventListener('click', () => resetStatus(nisn));
+        // SweetAlert tidak bisa bertumpuk: tutup detail dulu, lalu buka
+        // kembali setelah selesai — pola yang sama dengan target pembinaan.
+        $('dKamar')?.addEventListener('click', () => {
+          Swal.close();
+          setTimeout(async () => { await modalAturKamar(nisn, s); bukaDetailSantri(nisn); }, 220);
+        });
 
         // Grafik tren — hanya di layar, tidak ikut tercetak.
         gambarTrenSantri(nisn).catch(e => console.warn('[tren]', e.message));
@@ -3178,6 +3380,113 @@ async function resetStatus(nisn) {
     toast('success', 'Status dikembalikan ke Hadir');
     if (APP.view === 'siswa') muatTabelSiswa();
   } catch (err) { fireError(err); }
+}
+
+/**
+ * Atur kamar & peran mudabbir satu santri.   (v2.17)
+ *
+ * DIBATASI ADMIN, dan pembatasan itu ditegakkan DI KLIEN saja. Perlu
+ * diketahui apa adanya: kebijakan `p_siswa_update` berbunyi
+ *   boleh_tulis() AND (lihat_semua_kelas() OR kelas = ANY (my_kelas()))
+ * sehingga peran Osis dan Ustadz GEN-Z — yang lolos KEDUA fungsi itu —
+ * sebenarnya juga berhak menulis ke baris santri mana pun, termasuk unit
+ * seberang. Database tidak akan menolak mereka. Karena itu gerbang yang
+ * lebih longgar di layar ini tidak akan didukung apa pun di belakangnya,
+ * dan penetapan kamar memang tindakan administratif, bukan pembinaan
+ * harian. Bila kelak peran lain perlu mengisi kamar, RLS-lah yang harus
+ * dibereskan lebih dulu — bukan gerbang ini yang dilonggarkan.
+ *
+ * UPDATE hanya menyentuh dua kolom yang memang diubah. `asrama` (gedung)
+ * tidak pernah ikut terkirim, sehingga 28 baris gedung putri tidak bisa
+ * tertimpa dari layar ini bahkan karena kekeliruan.
+ */
+async function modalAturKamar(nisn, s) {
+  if (!isAdmin()) return;
+
+  const kini = nomorKamar(s);
+  const mudKini = isMudabbir(s);
+  const angk = angkatanDariKelas(s.kelas);
+  const bolehMudabbir = angk === ANGKATAN_MUDABBIR;
+  const unit = unitBaris(s) || UNIT_PUTRA;
+  const labelUnit = unit === UNIT_PUTRI ? 'Putri' : 'Putra';
+
+  const res = await Swal.fire({
+    title: 'Atur Kamar Asrama',
+    width: 560,
+    showCancelButton: true,
+    cancelButtonText: 'Batal',
+    confirmButtonText: 'Simpan',
+    confirmButtonColor: '#14618B',
+    showLoaderOnConfirm: true,
+    allowOutsideClick: () => !Swal.isLoading(),
+    html: `<div class="stack" style="text-align:left">
+      <p class="hint" style="margin:0 0 12px">
+        <b>${esc(s.nama_siswa)}</b> · ${esc(s.kelas || '-')} · unit ${esc(labelUnit)}
+      </p>
+
+      <label class="label" for="kmNomor">Nomor kamar</label>
+      <input id="kmNomor" class="input" inputmode="numeric" autocomplete="off"
+             placeholder="mis. 21" value="${kini === null ? '' : kini}">
+      <p class="hint" style="margin:6px 2px 14px">
+        Bilangan ${KAMAR_MIN}–${KAMAR_MAKS}. Nomor kamar berlaku <b>dalam unit
+        ${esc(labelUnit)}</b> — Kamar 21 putra dan Kamar 21 putri adalah dua
+        kamar berbeda. Kosongkan untuk menghapus data kamar santri ini.
+      </p>
+
+      <label class="switch-row" for="kmMud" ${bolehMudabbir ? '' : 'style="opacity:.55"'}>
+        <input type="checkbox" id="kmMud" ${mudKini ? 'checked' : ''} ${bolehMudabbir ? '' : 'disabled'}>
+        <span>Bertugas sebagai <b>mudabbir</b> (penjaga kamar)</span>
+      </label>
+      <p class="hint" style="margin:6px 2px 0">
+        ${bolehMudabbir
+          ? `Mudabbir disaring dan ditugaskan musyrif asrama dari kelas
+             ${ANGKATAN_MUDABBIR} untuk menjaga kamar angkatan
+             ${ANGKATAN_DIJAGA.join(' dan ')}. Catatan pelanggaran/prestasi
+             mudabbir <b>tidak dihitung</b> sebagai angka kamar yang ia jaga;
+             ia dilaporkan terpisah.`
+          : `Hanya santri kelas ${ANGKATAN_MUDABBIR} yang dapat ditugaskan
+             sebagai mudabbir. Santri ini angkatan ${esc(angk || 'tidak dikenali')}.`}
+      </p>
+
+      <div id="kmMasalah" class="pra-peringatan" style="display:none;margin-top:14px"></div>
+    </div>`,
+    didOpen: () => {
+      const inp = Swal.getPopup()?.querySelector('#kmNomor');
+      inp?.focus(); inp?.select();
+    },
+    preConfirm: async () => {
+      const pop = Swal.getPopup();
+      const teks = pop.querySelector('#kmNomor').value;
+      const mau = pop.querySelector('#kmMud').checked;
+
+      const cek = periksaKamar(teks, mau ? PERAN_MUDABBIR : '', s.kelas);
+      if (!cek.ok) {
+        Swal.showValidationMessage(cek.masalah.join(' · '));
+        return false;
+      }
+      try {
+        const { error } = await db.from('siswa')
+          .update({ nomor_kamar: cek.nilai.nomor_kamar, peran_kamar: cek.nilai.peran_kamar })
+          .eq('nisn', String(nisn));
+        if (error) throw error;
+        return cek.nilai;
+      } catch (err) {
+        const m = String(err?.message || '');
+        Swal.showValidationMessage(/column .* does not exist/i.test(m)
+          ? 'Ditolak database: kolom nomor_kamar belum ada. Jalankan migration v2.17 terlebih dahulu.'
+          : pesanKirim(err));
+        return false;
+      }
+    }
+  });
+
+  if (!res.isConfirmed || !res.value) return;
+
+  cacheHapus('siswa', 'petaSiswa', 'kelas', 'detail');
+  toast('success', res.value.nomor_kamar === null
+    ? 'Data kamar dikosongkan'
+    : `Tersimpan — Kamar ${res.value.nomor_kamar}${res.value.peran_kamar ? ' · mudabbir' : ''}`);
+  if (APP.view === 'siswa') muatTabelSiswa();
 }
 
 // ---------------------------------------------------------------------
@@ -16175,6 +16484,325 @@ function panelSebaran({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presen
 }
 
 /* ---------------------------------------------------------------------
+   Panel 2b — Matriks silang KELAS x KAMAR   (v2.17)
+
+   Mengapa matriks, bukan dropdown kamar.
+
+   Kelas dan kamar adalah dua sumbu yang MEMOTONG SILANG, bukan dua
+   tingkat dalam satu hierarki. Ada dua pohon yang bertemu hanya di akar
+   (unit) dan di daun (santri):
+
+       unit > angkatan > kelas > santri        (akademik)
+       unit > kamar            > santri        (kepengasuhan)
+
+   Satu kelas tersebar ke beberapa kamar; satu kamar dihuni beberapa
+   kelas. Tidak ada arah yang bisa dibaca "terdiri atas".
+
+   Akibatnya keras: yang ingin dilihat — kamar 14 dan kamar 15 yang
+   sama-sama berisi VII-D tetapi berlawanan coraknya — adalah suku
+   INTERAKSI, dan interaksi tidak pernah muncul pada penyaring tunggal,
+   karena penyaring tunggal meruntuhkan sumbu yang satunya:
+
+     · pilih kelas VII-D saja  -> kamar 14 dan 15 menyatu jadi satu
+       angka; pelanggaran dan prestasi saling menghapus, VII-D tampak
+       biasa saja dan polanya hilang;
+     · pilih kamar 15 saja     -> kamar 15 terlihat tinggi, tetapi tanpa
+       pembanding yang setara (kamar 14, kelas yang sama);
+     · berjenjang kelas->kamar -> satu sel tunggal tanpa konteks.
+
+   Hanya penyandingan dua sumbu sekaligus yang memunculkannya, dan itu
+   sebuah matriks. Penyaring berjenjang tetap benar DI DALAM
+   masing-masing pohon; matriks wajib di perpotongannya.
+
+   Dua kehati-hatian yang dibawa dari modul ini sendiri:
+
+   (1) TIDAK dinormalkan per 100 santri. panelSebaran memakai per-100
+       karena membandingkan angkatan berisi 100-250 orang. Di sini satu
+       sel berisi 2-8 orang; per-100 melipatgandakan satu kejadian
+       menjadi angka tiga digit yang tampak dramatis padahal isinya satu
+       anak. Yang ditampilkan cacah mentah, lajunya di title.
+
+   (2) Sel dengan binaan < KAMAR_MIN_SEL TIDAK diwarnai. Ini aturan yang
+       sama dengan penahanan label tren per santri: menyimpulkan "kamar
+       ini didominasi pelanggaran" dari satu-dua anak adalah membangkitkan
+       label dari kebisingan. Baris ringkas di kaki tabel memberi bacaan
+       per kamar yang cacahnya jauh lebih kokoh.
+   --------------------------------------------------------------------- */
+
+/** Cakupan data kamar minimum sebelum matriks ditampilkan (v2.17). */
+const AMBANG_KAMAR = 0.30;
+/** Cacah santri binaan minimum dalam satu sel sebelum sel itu diwarnai. */
+const KAMAR_MIN_SEL = 3;
+
+/** Urutan angkatan untuk mengurutkan baris matriks. */
+const URUT_ANGKATAN = ['VII','VIII','IX','X','XI','XII'];
+
+/**
+ * Matriks sebaran kelas x kamar.
+ *
+ * Seluruh masukan sudah tersaring unit/kelas binaan di blokSebaran():
+ * `siswa` datang dari filterBinaanUnit()/lingkupUnitSantri() milik
+ * pemanggil, dan baris log sudah dibuang bila NISN-nya di luar himpunan
+ * itu. Kamar diturunkan dari `siswa` yang sama lewat peta NISN -> kamar,
+ * persis pola petaKelas() untuk angkatan. Dengan begitu pemisahan unit
+ * didapat dari gerbang yang sudah ada — tidak ada query kamar
+ * tersendiri, karena query tersendiri justru akan melewatinya.
+ */
+function panelKamar({ siswa, detail, prestasi, tahfiz, pembinaan }) {
+  const total = (siswa || []).length;
+  // Bentuk kembalian SELALU sama ({ html, ... }) termasuk pada jalur
+  // tampilan-kosong, supaya pemanggil tidak perlu membedakan jalur.
+  const bungkus = (isi, tambah) => Object.assign(
+    { html: kartu('Matriks Kelas × Kamar', isi, '', 'sebaran silang'),
+      kolom: [], kamar: {}, sel: {}, cakupan: 0 }, tambah || {});
+
+  if (!total) {
+    return bungkus(kosong('Belum ada santri terdata.',
+      'Isi data santri terlebih dahulu.', 'fa-users'));
+  }
+
+  const berkamar = siswa.filter(s => nomorKamar(s) !== null);
+  const perlu = Math.ceil(total * AMBANG_KAMAR);
+
+  // Tampilan-kosong edukatif: selama cakupan masih tipis, matriks yang
+  // hampir seluruhnya sel kosong lebih menyesatkan daripada tidak ada
+  // matriks sama sekali — ia terbaca sebagai "tidak ada pola", padahal
+  // yang belum ada adalah datanya. Ajakan ini menyebutkan angkanya,
+  // dan panel menyala sendiri begitu ambang terlampaui.
+  if (berkamar.length < perlu) {
+    return bungkus(`<div class="empty">
+      <i class="fa-solid fa-bed"></i>
+      <p>Data kamar baru terisi ${angka(berkamar.length)} dari ${angka(total)} santri</p>
+      <small>Matriks kelas × kamar terbuka setelah ${angka(perlu)} santri
+        (${Math.round(AMBANG_KAMAR * 100)}%) memiliki nomor kamar. Kurang
+        ${angka(perlu - berkamar.length)} lagi. Isi lewat tombol
+        <b>Atur Kamar</b> pada jendela detail santri.</small></div>`,
+      { cakupan: berkamar.length / total });
+  }
+
+  // ---- 1. Peta NISN -> kamar, kelas, angkatan, peran -----------------
+  const peta = {};
+  berkamar.forEach(s => {
+    peta[String(s.nisn)] = {
+      kunci: kunciKamar(s),
+      nomor: nomorKamar(s),
+      unit: unitBaris(s) || UNIT_PUTRA,
+      kelas: s.kelas || '—',
+      angkatan: angkatanDariKelas(s.kelas) || '—',
+      mudabbir: isMudabbir(s),
+      nama: s.nama_siswa || '—'
+    };
+  });
+
+  // ---- 2. Agregasi per kamar dan per sel -----------------------------
+  const kamar = {};   // kunci -> ringkasan satu kamar
+  const sel = {};     // 'kelas|kunci' -> ringkasan satu sel
+
+  const kamarBaru = (i) => ({
+    kunci: i.kunci, nomor: i.nomor, unit: i.unit,
+    binaan: 0, mudabbir: 0, namaMudabbir: [],
+    plg: 0, poin: 0, prs: 0, thf: 0, bina: 0, binaSelesai: 0,
+    mPlg: 0, mPrs: 0,                      // catatan mudabbir, terpisah
+    ang: {}
+  });
+  const selBaru = () => ({ n: 0, mud: 0, plg: 0, poin: 0, prs: 0, thf: 0 });
+
+  berkamar.forEach(s => {
+    const i = peta[String(s.nisn)];
+    if (!kamar[i.kunci]) kamar[i.kunci] = kamarBaru(i);
+    const k = kamar[i.kunci];
+    const ks = `${i.kelas}|${i.kunci}`;
+    if (!sel[ks]) sel[ks] = selBaru();
+
+    if (i.mudabbir) {
+      k.mudabbir++; k.namaMudabbir.push(i.nama);
+      sel[ks].mud++;
+    } else {
+      k.binaan++;
+      k.ang[i.angkatan] = (k.ang[i.angkatan] || 0) + 1;
+      sel[ks].n++;
+    }
+  });
+
+  // Catatan mudabbir dipisahkan di sini, bukan dibuang: ia pengawas,
+  // bukan binaan kamar itu, sehingga tidak boleh masuk ke angka kamar —
+  // tetapi ia tetap dilaporkan, karena justru itu sinyal mutu pengawasan.
+  const bagi = (rows, kerja) => (rows || []).forEach(r => {
+    const i = peta[String(r.nisn)];
+    if (!i) return;
+    kerja(kamar[i.kunci], sel[`${i.kelas}|${i.kunci}`], i, r);
+  });
+
+  bagi(detail, (k, c, i, r) => {
+    if (i.mudabbir) { k.mPlg++; return; }
+    k.plg++; c.plg++;
+    const p = Number(r.bobot_pelanggaran) || 0;
+    k.poin += p; c.poin += p;
+  });
+  bagi(prestasi, (k, c, i) => { if (i.mudabbir) { k.mPrs++; return; } k.prs++; c.prs++; });
+  bagi(tahfiz,   (k, c, i) => { if (i.mudabbir) { k.mPrs++; return; } k.thf++; c.thf++; });
+  bagi(pembinaan, (k, c, i, r) => {
+    if (i.mudabbir) return;
+    k.bina++; if (String(r.status_pembinaan) === 'Selesai') k.binaSelesai++;
+  });
+
+  // ---- 3. Sumbu ------------------------------------------------------
+  const kolom = Object.values(kamar).sort((a, b) =>
+    a.unit === b.unit ? a.nomor - b.nomor : (a.unit === UNIT_PUTRA ? -1 : 1));
+
+  const barisKelas = [...new Set(berkamar.map(s => peta[String(s.nisn)].kelas))]
+    .sort((a, b) => {
+      const ia = URUT_ANGKATAN.indexOf(angkatanDariKelas(a));
+      const ib = URUT_ANGKATAN.indexOf(angkatanDariKelas(b));
+      return ia === ib ? String(a).localeCompare(String(b)) : ia - ib;
+    });
+
+  // ---- 4. Skala warna ------------------------------------------------
+  // Skor sel = pelanggaran dikurangi (apresiasi + setoran), per santri.
+  // Positif condong merah, negatif condong hijau. Puncaknya diambil
+  // hanya dari sel yang memang diwarnai, supaya satu sel berisi satu
+  // anak tidak menetapkan skala bagi seluruh tabel.
+  const lajuSel = (c) => c.n ? (c.plg - (c.prs + c.thf)) / c.n : 0;
+  const diwarnai = (c) => c && c.n >= KAMAR_MIN_SEL;
+  const puncak = Math.max(0.5, ...Object.values(sel)
+    .filter(diwarnai).map(c => Math.abs(lajuSel(c))));
+
+  const selHtml = (kelas, k) => {
+    const c = sel[`${kelas}|${k.kunci}`];
+    if (!c || (!c.n && !c.mud)) return '<td class="mtx-sel mtx-nol"></td>';
+
+    const judulDasar = `${esc(kelas)} · Kamar ${k.nomor}`;
+    // Penanda mudabbir memakai HURUF, bukan ikon. Sel ini isinya hanya
+    // penanda itu: bila ikonnya gagal dimuat, sel menjadi kotak ungu
+    // kosong tanpa keterangan apa pun. Huruf tidak bisa gagal.
+    if (!c.n && c.mud) {
+      return `<td class="mtx-sel mtx-mud" title="${judulDasar} — ${c.mud} mudabbir bertugas di kamar ini (catatannya tidak dihitung sebagai angka kamar)">
+        <b>M</b></td>`;
+    }
+
+    const laju = lajuSel(c);
+    const rinci = `${judulDasar} — ${c.n} santri binaan`
+      + `${c.mud ? ` + ${c.mud} mudabbir` : ''}`
+      + ` · ${c.plg} pelanggaran (${c.poin} poin) · ${c.prs} apresiasi · ${c.thf} setoran`
+      + (c.n >= KAMAR_MIN_SEL ? ` · laju bersih ${laju.toFixed(2)}/santri`
+                              : ` · terlalu sedikit untuk diberi corak (min. ${KAMAR_MIN_SEL})`);
+
+    if (!diwarnai(c)) {
+      return `<td class="mtx-sel mtx-tipis" title="${rinci}">
+        <b>${c.n}</b>${c.mud ? '<sup class="mtx-m">M</sup>' : ''}</td>`;
+    }
+    // Lantai 0,16 disengaja. Tanpa lantai, sel yang lajunya nol tampil
+    // BENING — tidak bisa dibedakan dari sel yang sengaja tidak diwarnai
+    // karena terlalu tipis, padahal maknanya berlawanan: yang satu
+    // "sudah dihitung dan seimbang", yang satu "belum cukup untuk
+    // dinilai". Corak samar biru menandai yang pertama.
+    const p = Math.max(0.16, Math.min(1, Math.abs(laju) / puncak));
+    const rgb = laju > 0 ? '159,18,57' : laju < 0 ? '15,118,110' : '20,97,139';
+    return `<td class="mtx-sel" title="${rinci}"
+      style="background:rgba(${rgb},${(p * 0.34).toFixed(3)})">
+      <b>${c.n}</b>${c.mud ? '<sup class="mtx-m">M</sup>' : ''}</td>`;
+  };
+
+  // ---- 5. Kemurnian angkatan per kamar -------------------------------
+  // Dihitung HANYA atas santri binaan. Mudabbir memang berasal dari
+  // angkatan lain secara struktural; memasukkannya akan menekan
+  // kemurnian justru pada kamar yang paling tertata, lalu terbaca
+  // seolah kamar itu "campur".
+  const kamarIsi = kolom.filter(k => k.binaan > 0);
+  const murni = kamarIsi.map(k => Math.max(...Object.values(k.ang)) / k.binaan);
+  const rerataMurni = murni.length ? murni.reduce((a, b) => a + b, 0) / murni.length : 0;
+  const murniPenuh = murni.filter(v => v >= 0.999).length;
+
+  const totalMudabbir = kolom.reduce((a, k) => a + k.mudabbir, 0);
+  const kamarDijaga = kolom.filter(k => k.mudabbir > 0).length;
+  const mPlgTotal = kolom.reduce((a, k) => a + k.mPlg, 0);
+  const mPrsTotal = kolom.reduce((a, k) => a + k.mPrs, 0);
+
+  // ---- 6. Perakitan --------------------------------------------------
+  const kepala = kolom.map(k =>
+    `<th class="mtx-kol" title="${esc(labelKamar({ nomor_kamar: k.nomor, unit_gender: k.unit }))}">
+       ${k.nomor}${k.mudabbir ? '<sup class="mtx-m">M</sup>' : ''}</th>`).join('');
+
+  const tubuh = barisKelas.map(kelas => `<tr>
+    <th class="mtx-baris" scope="row">${esc(kelas)}</th>
+    ${kolom.map(k => selHtml(kelas, k)).join('')}
+  </tr>`).join('');
+
+  const ringkasKamar = kolom.map(k => {
+    const laju = k.binaan ? (k.plg - (k.prs + k.thf)) / k.binaan : 0;
+    const rinci = `Kamar ${k.nomor} — ${k.binaan} binaan`
+      + `${k.mudabbir ? ` · mudabbir: ${k.namaMudabbir.map(esc).join(', ')}` : ' · tanpa mudabbir'}`
+      + ` · ${k.plg} pelanggaran (${k.poin} poin) · ${k.prs} apresiasi · ${k.thf} setoran`
+      + ` · pembinaan ${k.binaSelesai}/${k.bina} tuntas`
+      + (k.binaan ? ` · laju bersih ${laju.toFixed(2)}/santri` : '');
+    return `<td class="mtx-sel mtx-ring" title="${rinci}"><b>${k.binaan}</b></td>`;
+  }).join('');
+
+  const isi = `
+    <div class="mtx-wrap">
+      <table class="mtx">
+        <thead>
+          <tr><th class="mtx-pojok">Kelas \\ Kamar</th>${kepala}</tr>
+        </thead>
+        <tbody>${tubuh}</tbody>
+        <tfoot>
+          <tr><th class="mtx-baris" scope="row">Σ binaan</th>${ringkasKamar}</tr>
+        </tfoot>
+      </table>
+    </div>
+    <p class="mtx-hint"><i class="fa-solid fa-arrows-left-right"></i>
+      Geser ke samping untuk kamar lainnya. Kolom kelas tetap di tempatnya.</p>
+
+    <div class="mtx-kaki">
+      <p><b>Cara membaca.</b> Angka dalam sel adalah <b>cacah santri binaan</b>
+         kelas itu yang menghuni kamar itu — bukan jumlah kejadian, dan
+         sengaja tidak dinormalkan per 100 karena satu sel hanya berisi
+         beberapa anak. Coraknya: <span class="mtx-cth mtx-cth-m"></span> condong
+         pelanggaran, <span class="mtx-cth mtx-cth-h"></span> condong apresiasi
+         dan setoran, <span class="mtx-cth mtx-cth-b"></span> seimbang.
+         Sel berisi kurang dari ${KAMAR_MIN_SEL} santri binaan
+         <b>tidak diberi corak sama sekali</b> dan angkanya dikelabukan —
+         menyimpulkan corak satu kamar dari satu dua anak sama saja dengan
+         membangkitkan label dari kebisingan, dan itu harus terlihat berbeda
+         dari sel yang memang sudah dihitung lalu ternyata seimbang.
+         Huruf <b class="mtx-m-cth">M</b> menandai kamar yang dijaga mudabbir.
+         Baris <b>Σ binaan</b> di kaki tabel memberi bacaan per kamar yang
+         cacahnya lebih kokoh. Arahkan kursor ke sel mana pun untuk rinciannya.</p>
+
+      <p><b>Kemurnian angkatan.</b> Rata-rata
+         <b>${Math.round(rerataMurni * 100)}%</b> penghuni binaan satu kamar
+         berasal dari angkatan yang sama; <b>${angka(murniPenuh)}</b> dari
+         ${angka(kamarIsi.length)} kamar murni satu angkatan.
+         ${rerataMurni >= 0.95
+           ? 'Setinggi ini, kamar praktis berimpit dengan angkatan — perbedaan antar kamar sebagian besar masih perbedaan antar angkatan, dan keduanya belum dapat dipisahkan.'
+           : 'Pada tingkat ini kamar membawa keterangan yang tidak habis dijelaskan oleh angkatan, sehingga perbandingan antar kamar di dalam satu kelas memang bermakna.'}
+         Mudabbir tidak ikut dihitung di sini karena ia memang berasal dari
+         angkatan lain menurut penugasannya.</p>
+
+      ${totalMudabbir ? `<p><b>Mudabbir.</b> ${angka(totalMudabbir)} mudabbir
+         bertugas di ${angka(kamarDijaga)} kamar. Catatan mereka sendiri
+         (${angka(mPlgTotal)} pelanggaran, ${angka(mPrsTotal)} apresiasi/setoran)
+         <b>tidak dihitung</b> sebagai angka kamar yang mereka jaga — mereka
+         pengawas, bukan binaan kamar itu, dan mencampurnya akan membuat
+         mutu pengawasan terbaca sebagai kondisi santri.</p>`
+        : `<p><b>Mudabbir.</b> Belum ada santri yang ditandai sebagai mudabbir
+           dalam cakupan ini. Tandai lewat tombol <b>Atur Kamar</b> pada jendela
+           detail santri kelas ${ANGKATAN_MUDABBIR}.</p>`}
+
+      <p class="mtx-batas"><i class="fa-solid fa-triangle-exclamation"></i>
+         <span><b>Batas bacaan.</b> Matriks ini membaca <b>hunian kamar saat ini</b>.
+         Kejadian yang tercatat sebelum santri pindah kamar tetap dihitung pada
+         kamarnya yang sekarang. Selama riwayat pindah kamar belum dicatat,
+         perbedaan antar kamar dibaca sebagai <b>petunjuk untuk ditelusuri</b>,
+         bukan sebagai sebab. Matriks ini juga menampilkan
+         ${angka(berkamar.length)} dari ${angka(total)} santri dalam cakupan —
+         santri yang kamarnya belum didata tidak muncul di sel mana pun.</span></p>
+    </div>`;
+
+  return bungkus(isi, { kolom, kamar, sel, cakupan: berkamar.length / total });
+}
+
+/* ---------------------------------------------------------------------
    Panel 3 — Target pembinaan
    --------------------------------------------------------------------- */
 
@@ -16412,6 +17040,10 @@ async function blokSebaran({ siswa, detail, izin, pembinaan, ipp = true, batasIp
   const pos = panelPositif({ siswa, prestasi, tahfiz, bulanKunci });
   const seb = panelSebaran({ siswa, detail: detail6, prestasi, tahfiz,
     izin: izin6, pembinaan: bina6, presensi: presensiRaw, bulanKunci });
+  // v2.17 — matriks silang kelas x kamar. Memakai `siswa` yang SAMA
+  // dengan panel di atasnya, jadi lingkup unit/kelas binaannya identik
+  // dan tidak ada jalur data kamar yang menembus gerbang itu.
+  const kmr = panelKamar({ siswa, detail: detail6, prestasi, tahfiz, pembinaan: bina6 });
   const tgt = panelTarget({ siswa, goals: saring(goals), targetTahfiz: saring(targetThf), tahfiz });
 
   let ippHtml = '';
@@ -16428,6 +17060,7 @@ async function blokSebaran({ siswa, detail, izin, pembinaan, ipp = true, batasIp
       <span class="lat">Peta Perkembangan Santri</span></div>
     ${pos.html}
     ${seb.html}
+    ${kmr.html}
     ${tgt.html}
     ${ippHtml}`;
 

@@ -3765,6 +3765,126 @@
     .ipp-nm small { white-space:normal; }
   }
 
+  /* ---- Matriks silang KELAS x KAMAR (v2.17) ----------------------------
+     Sengaja TIDAK memakai pembungkus `.tbl`. Pembungkus itu mengubah
+     tabel menjadi kartu berlabel di ponsel — perlakuan yang tepat untuk
+     tabel daftar, tetapi merusak matriks: satu baris kelas akan menjadi
+     kartu berisi puluhan baris "Kamar 14: 3", dan justru penyandingan
+     dua sumbu itulah seluruh guna matriks ini. Di layar sempit ia tetap
+     matriks, digeser mendatar, dengan kolom kelas yang menempel. */
+  .mtx-wrap {
+    max-width:100%; overflow-x:auto; overscroll-behavior-x:contain;
+    -webkit-overflow-scrolling:touch;
+    border-top:1px solid var(--line-soft);
+  }
+  table.mtx { border-collapse:separate; border-spacing:0; width:auto; min-width:100%; }
+  table.mtx th, table.mtx td {
+    border-bottom:1px solid var(--line-soft);
+    border-right:1px solid var(--line-soft);
+  }
+
+  /* Kolom kelas menempel supaya konteks baris tidak hilang saat digeser. */
+  .mtx-pojok, .mtx-baris {
+    position:sticky; left:0; z-index:2;
+    background:var(--surface);
+    text-align:left; white-space:nowrap;
+    padding:9px 14px; min-width:104px;
+    font-size:12.5px; font-weight:600; color:var(--text-2);
+    box-shadow:1px 0 0 var(--line-soft);
+  }
+  .mtx-pojok {
+    z-index:3; background:var(--paper);
+    font-size:11px; font-weight:600; color:var(--text-3); letter-spacing:.02em;
+  }
+  table.mtx thead th { position:sticky; top:0; z-index:1; background:var(--paper); }
+  .mtx-kol {
+    padding:8px 6px; min-width:40px; text-align:center;
+    font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:600;
+    color:var(--text-2);
+  }
+  .mtx-sel {
+    text-align:center; vertical-align:middle;
+    padding:9px 6px; min-width:40px;
+  }
+  .mtx-sel b {
+    font-family:'IBM Plex Mono', monospace; font-size:12.5px; font-weight:600;
+  }
+  /* Sel kosong dibiarkan polos. Pada data nyata sebagian besar sel MEMANG
+     kosong — satu kelas hanya menempati beberapa kamar — sehingga arsiran
+     akan menutupi seluruh matriks dengan derau dan justru menenggelamkan
+     sel yang berisi. Yang kosong harus mundur, yang berisi harus maju. */
+  .mtx-nol { background:var(--paper); }
+  .mtx-tipis b { color:var(--text-3); font-weight:500; }
+  .mtx-mud { background:var(--violet-bg); }
+  .mtx-mud b { color:var(--violet); font-size:11px; font-weight:700; }
+  .mtx-m, .mtx-m-cth {
+    color:var(--violet); font-family:'IBM Plex Mono', monospace;
+    font-size:9.5px; font-weight:700; margin-left:2px;
+  }
+  .mtx-m-cth {
+    display:inline-block; padding:0 4px; border-radius:4px;
+    background:var(--violet-bg); font-size:10.5px; margin:0 1px;
+  }
+  table.mtx tfoot .mtx-ring {
+    background:var(--paper); border-top:2px solid var(--line);
+  }
+  table.mtx tfoot .mtx-ring b { color:var(--text-2); }
+  table.mtx tfoot .mtx-baris { background:var(--paper); border-top:2px solid var(--line); }
+
+  .mtx-hint {
+    display:flex; align-items:center; gap:8px;
+    margin:0; padding:8px var(--pad);
+    font-size:11.5px; color:var(--text-3);
+    border-bottom:1px solid var(--line-soft);
+  }
+  .mtx-hint i { color:var(--sea); }
+
+  .mtx-kaki {
+    padding:12px var(--pad) 16px;
+    font-size:12px; line-height:1.65; color:var(--text-3);
+  }
+  .mtx-kaki p { margin:0 0 10px; }
+  .mtx-kaki p:last-child { margin-bottom:0; }
+  .mtx-kaki b { color:var(--text-2); font-weight:600; }
+  .mtx-cth {
+    display:inline-block; width:11px; height:11px; border-radius:3px;
+    vertical-align:-1px; margin:0 1px;
+  }
+  .mtx-cth-m { background:rgba(159,18,57,.34); }
+  .mtx-cth-h { background:rgba(15,118,110,.34); }
+  .mtx-cth-b { background:rgba(20,97,139,.055); box-shadow:inset 0 0 0 1px var(--line); }
+  .mtx-batas {
+    display:flex; gap:9px; align-items:flex-start;
+    padding:10px 12px; border-radius:9px;
+    background:var(--maroon-bg); color:var(--text-2);
+  }
+  .mtx-batas i { color:var(--maroon); margin-top:2px; flex:none; }
+
+  /* Penanda mudabbir pada daftar & detail santri. */
+  .peran-mud {
+    display:inline-flex; align-items:center; gap:4px;
+    padding:1px 7px; border-radius:20px;
+    background:var(--violet-bg); color:var(--violet);
+    font-size:10.5px; font-weight:600; white-space:nowrap;
+  }
+  .peran-mud i { font-size:9px; }
+
+  /* Baris sakelar pada jendela Atur Kamar. */
+  .switch-row {
+    display:flex; align-items:flex-start; gap:10px;
+    padding:11px 13px; border-radius:9px;
+    background:var(--paper); border:1px solid var(--line-soft);
+    cursor:pointer; font-size:13px; color:var(--text-2);
+  }
+  .switch-row input { margin-top:2px; flex:none; width:16px; height:16px; accent-color:var(--sea); }
+  .switch-row input:disabled { cursor:not-allowed; }
+
+  @media (max-width:640px) {
+    .mtx-pojok, .mtx-baris { min-width:86px; padding:8px 10px; font-size:11.5px; }
+    .mtx-kol, .mtx-sel { min-width:36px; padding:8px 4px; }
+    .mtx-kaki, .mtx-hint { padding-inline:14px; }
+  }
+
   /* ---- Laboratorium Kebijakan (v2.16, Admin) ---- */
   .lab-meta { align-items:center; flex-wrap:wrap; }
   .lab-jendela { display:inline-flex; align-items:center; gap:8px; }
