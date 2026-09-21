@@ -782,23 +782,333 @@ function cacheHapus(...ks) {
   });
 }
 
-/** PostgREST membatasi 1000 baris per request; ambil bertahap. */
+/**
+ * PostgREST membatasi 1000 baris per request; ambil bertahap.
+ *
+ * v2.18.1 — halaman-halaman diminta SERENTAK, bukan berurutan. Jumlah
+ * baris terakhir tiap tabel diingat di perangkat (`rq_jml`), sehingga
+ * tabel 1.383 baris langsung diminta 2 halaman sekaligus: satu kali
+ * menunggu server, bukan dua. Opsi tambahan pada `atur`:
+ *   saring(q) — penyaring tambahan (dipakai sinkron-delta)
+ *   pk        — kolom pengurut kedua supaya halaman tidak tumpang tindih
+ *   label     — teks untuk penanda kemajuan di layar
+ */
 async function ambilSemua(tabel, select, atur) {
   const hasil = [], step = 1000;
-  for (let from = 0; from < 40000; from += step) {
-    let query = db.from(tabel).select(select).range(from, from + step - 1);
-    if (atur?.order) query = query.order(atur.order, { ascending: atur.asc !== false });
-    const { data, error } = await query;
-    if (error) throw error;
-    hasil.push(...(data || []));
-    if (!data || data.length < step) break;
+  const buat = (from) => {
+    let q = db.from(tabel).select(select);
+    if (atur?.saring) q = atur.saring(q);
+    if (atur?.order) q = q.order(atur.order, { ascending: atur.asc !== false });
+    if (atur?.pk) q = q.order(atur.pk, { ascending: true });
+    return q.range(from, from + step - 1);
+  };
+  const pakaiPetunjuk = !atur?.saring;
+  const serentak = Math.max(1, Math.min(8, Math.ceil((pakaiPetunjuk ? petunjukJumlah(tabel) : 0) / step)));
+  if (atur?.label) progres(atur.label, `Mengunduh ${atur.label}…`);
+  try {
+    let habis = false;
+    const halaman = await Promise.all(Array.from({ length: serentak }, (_, i) => buat(i * step)));
+    for (const { data, error } of halaman) {
+      if (error) throw error;
+      hasil.push(...(data || []));
+      if (!data || data.length < step) habis = true;
+    }
+    for (let from = serentak * step; !habis && from < 40000; from += step) {
+      if (atur?.label) progres(atur.label, `Mengunduh ${atur.label} · ${angka(hasil.length)} baris…`);
+      const { data, error } = await buat(from);
+      if (error) throw error;
+      hasil.push(...(data || []));
+      if (!data || data.length < step) habis = true;
+    }
+    if (pakaiPetunjuk) catatJumlah(tabel, hasil.length);
+    return hasil;
+  } finally {
+    if (atur?.label) progres(atur.label, null);
   }
-  return hasil;
+}
+
+function petunjukJumlah(tabel) {
+  try { return Number(JSON.parse(localStorage.getItem('rq_jml') || '{}')[tabel]) || 0; } catch (e) { return 0; }
+}
+function catatJumlah(tabel, n) {
+  try {
+    const m = JSON.parse(localStorage.getItem('rq_jml') || '{}');
+    m[tabel] = n; localStorage.setItem('rq_jml', JSON.stringify(m));
+  } catch (e) {}
+}
+
+/** Satukan pemanggilan serentak untuk kunci yang sama (satu request, bukan dua). */
+const JANJI_MUAT = {};
+function sekali(k, fn) {
+  if (JANJI_MUAT[k]) return JANJI_MUAT[k];
+  const j = Promise.resolve().then(fn).finally(() => { delete JANJI_MUAT[k]; });
+  JANJI_MUAT[k] = j;
+  return j;
+}
+
+/* ---------------------------------------------------------------------
+ * 3b. DATA TERSIMPAN DI PERANGKAT + SINKRON-DELTA  (v2.18.1)
+ *
+ * Sebelumnya seluruh data (±1,6 MB) diunduh ulang dari nol setiap kali
+ * aplikasi dibuka. Sekarang empat tabel terbesar disimpan di IndexedDB
+ * per akun. Saat dibuka lagi, hanya diminta:
+ *   • baris yang updated_at-nya berubah sejak sinkron terakhir, dan
+ *   • ID baris yang DIHAPUS sejak itu (dibaca dari audit_log, yang sejak
+ *     v2.18 mencatat baris_id dengan benar).
+ * Sekali sehari dimuat ulang penuh untuk menyapu perubahan tak langsung
+ * (mis. nama pelanggaran di master diganti). Bila jaringan putus, data
+ * tersimpan tetap ditampilkan.
+ * ------------------------------------------------------------------- */
+const VERSI_LOKAL = 1;
+const PENUH_SETIAP = 24 * 3600_000;
+const SPEK_LOKAL = {
+  siswa:     { tabel: 'siswa',         select: '*', pk: 'nisn',         order: 'nama_siswa',        asc: true,  audit: 'siswa',           label: 'data santri' },
+  detail:    { tabel: 'detail_data',   select: '*', pk: 'id_log',       order: 'tanggal',           asc: false, audit: 'log_pelanggaran', label: 'catatan pelanggaran' },
+  pembinaan: { tabel: 'log_pembinaan', select: '*, siswa(nama_siswa,kelas,jenjang)', pk: 'id_pembinaan', order: 'tanggal_pembinaan', asc: false, audit: 'log_pembinaan', label: 'pembinaan', relasi: true },
+  izin:      { tabel: 'log_perizinan', select: '*, siswa(nama_siswa,kelas,jenjang)', pk: 'id_izin',      order: 'tanggal_mulai',     asc: false, audit: 'log_perizinan', label: 'perizinan', relasi: true }
+};
+const META_LOKAL = {};      // kunci -> { tanda, auditId, penuh }
+
+let _idb = null;
+function idbBuka() {
+  if (_idb) return _idb;
+  _idb = new Promise((ok, gagal) => {
+    if (!('indexedDB' in window)) return gagal(new Error('IndexedDB tidak tersedia'));
+    const r = indexedDB.open('rq-lokal', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('data');
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => gagal(r.error);
+  });
+  _idb.catch(() => {});
+  return _idb;
+}
+async function idbAmbil(k) {
+  try {
+    const d = await idbBuka();
+    return await new Promise((ok, g) => {
+      const q = d.transaction('data').objectStore('data').get(k);
+      q.onsuccess = () => ok(q.result || null); q.onerror = () => g(q.error);
+    });
+  } catch (e) { return null; }
+}
+async function idbSimpan(k, v) {
+  try {
+    const d = await idbBuka();
+    await new Promise((ok, g) => {
+      const t = d.transaction('data', 'readwrite');
+      t.objectStore('data').put(v, k); t.oncomplete = ok; t.onerror = () => g(t.error);
+    });
+  } catch (e) { console.warn('[lokal] gagal menyimpan', k, e); }
+}
+async function idbKosongkan() {
+  try {
+    const d = await idbBuka();
+    await new Promise((ok) => {
+      const t = d.transaction('data', 'readwrite');
+      t.objectStore('data').clear(); t.oncomplete = ok; t.onerror = ok;
+    });
+  } catch (e) {}
+}
+const kunciLokal = (k) => `${APP.uid}:${k}:${VERSI_LOKAL}`;
+
+/** Penanda sinkron = updated_at terbesar (jam SERVER), mundur 1 detik sebagai tumpang tindih aman. */
+function tandaSinkron(rows, lama) {
+  let m = lama ? Date.parse(lama) : 0;
+  for (const r of rows) { const t = Date.parse(r.updated_at); if (t > m) m = t; }
+  return m ? new Date(m - 1000).toISOString() : null;
+}
+
+async function ambilSpek(s, saring) {
+  const atur = { order: s.order, asc: s.asc, pk: s.pk, saring, label: saring ? null : s.label };
+  if (!s.relasi) return ambilSemua(s.tabel, s.select, atur);
+  try { return await lengkapiSiswa(await ambilSemua(s.tabel, s.select, atur)); }
+  catch (e) {
+    if (!/relationship|schema cache/i.test(e.message || '')) throw e;
+    return lengkapiSiswa(await ambilSemua(s.tabel, '*', atur));
+  }
+}
+
+async function idAuditTerakhir() {
+  const { data, error } = await db.from('audit_log').select('id').order('id', { ascending: false }).limit(1);
+  if (error) throw error;
+  return data?.[0]?.id || 0;
+}
+async function hapusSejak(tabel, sejakId) {
+  const { data, error } = await db.from('audit_log').select('id,baris_id')
+    .eq('tabel', tabel).eq('aksi', 'DELETE').gt('id', sejakId).order('id').limit(5000);
+  if (error) throw error;
+  const ids = new Set((data || []).map(r => r.baris_id).filter(Boolean));
+  const maxId = (data || []).reduce((m, r) => Math.max(m, r.id), sejakId);
+  return { ids, maxId };
+}
+
+function urutkanSpek(rows, s) {
+  const arah = s.asc ? 1 : -1;
+  return rows.sort((a, b) => {
+    const x = String(a[s.order] ?? ''), y = String(b[s.order] ?? '');
+    const c = s.order === 'nama_siswa' ? x.localeCompare(y, 'id') : (x < y ? -1 : x > y ? 1 : 0);
+    return c * arah || String(a[s.pk]).localeCompare(String(b[s.pk]));
+  });
+}
+
+function simpanLokalNanti(kunci) {
+  if (!APP.uid || !SPEK_LOKAL[kunci] || !META_LOKAL[kunci]) return;
+  clearTimeout(simpanLokalNanti[kunci]);
+  simpanLokalNanti[kunci] = setTimeout(() => {
+    const rows = CACHE[kunci]?.v; if (!rows) return;
+    const m = META_LOKAL[kunci];
+    m.tanda = tandaSinkron(rows, m.tanda);
+    idbSimpan(kunciLokal(kunci), { rows, ...m });
+  }, 1500);
+}
+
+/** Paksa muat penuh pada pembukaan berikutnya (mis. setelah unggah santri). */
+function tandaiMuatPenuh(...ks) {
+  ks.forEach(k => { if (META_LOKAL[k]) META_LOKAL[k].penuh = 0; });
+  ks.forEach(async k => {
+    if (!APP.uid) return;
+    const rec = await idbAmbil(kunciLokal(k));
+    if (rec) { rec.penuh = 0; idbSimpan(kunciLokal(k), rec); }
+  });
+}
+
+/**
+ * v2.18.1 — pola "tampilkan dulu, segarkan di belakang":
+ *   • Pertama kali di perangkat ini → tunggu muat penuh (rangka + pil kemajuan).
+ *   • Sesudahnya → data tersimpan LANGSUNG dikembalikan (±15 ms), lalu
+ *     sinkron-delta (atau muat penuh harian) berjalan di belakang. Bila
+ *     ternyata ada perubahan nyata, tampilan disegarkan diam-diam.
+ */
+async function muatTersimpan(kunci) {
+  const s = SPEK_LOKAL[kunci];
+  if (!APP.uid) return ambilSpek(s);
+  const dipaksa = META_LOKAL[kunci]?.penuh === 0;
+  const rec = dipaksa ? null : await idbAmbil(kunciLokal(kunci));
+  if (!rec?.rows || !rec.tanda) {
+    try { return await muatPenuhLokal(kunci); }
+    catch (e) {
+      // Muat penuh yang DIPAKSA gagal (mis. luring) → masih ada salinan lama.
+      const lama = dipaksa ? await idbAmbil(kunciLokal(kunci)) : null;
+      if (lama?.rows) { tandaiLuring(e); META_LOKAL[kunci] = metaDari(lama); return lama.rows; }
+      throw e;
+    }
+  }
+  META_LOKAL[kunci] = metaDari(rec);
+  sinkronLatar(kunci, rec);
+  return rec.rows;
+}
+
+const metaDari = (r) => ({ tanda: r.tanda, auditId: r.auditId, penuh: r.penuh });
+
+async function muatPenuhLokal(kunci) {
+  const s = SPEK_LOKAL[kunci];
+  const auditId = s.audit ? await idAuditTerakhir() : 0;
+  const rows = urutkanSpek([...new Map((await ambilSpek(s)).map(r => [r[s.pk], r])).values()], s);
+  META_LOKAL[kunci] = { tanda: tandaSinkron(rows), auditId, penuh: Date.now() };
+  idbSimpan(kunciLokal(kunci), { rows, ...META_LOKAL[kunci] });
+  return rows;
+}
+
+/** Delta: baris berubah + baris terhapus, serentak. Mengembalikan {rows, berubah}. */
+async function sinkronDelta(kunci, rec) {
+  const s = SPEK_LOKAL[kunci];
+  const [ubah, hapus] = await Promise.all([
+    ambilSpek(s, q => q.gte('updated_at', rec.tanda)),
+    s.audit ? hapusSejak(s.audit, rec.auditId) : { ids: new Set(), maxId: rec.auditId }
+  ]);
+  const peta = new Map(rec.rows.map(r => [r[s.pk], r]));
+  let berubah = 0, identitasBerubah = false;
+  ubah.forEach(r => {
+    const lama = peta.get(r[s.pk]);
+    // Tumpang tindih 1 detik selalu mengembalikan beberapa baris yang sama; itu bukan perubahan.
+    if (!lama || lama.updated_at !== r.updated_at) berubah++;
+    if (kunci === 'siswa' && lama && ['nama_siswa','kelas','jenjang','asrama','unit_gender']
+          .some(k => lama[k] !== r[k])) identitasBerubah = true;
+    peta.set(r[s.pk], r);
+  });
+  hapus.ids.forEach(id => { if (peta.delete(id)) berubah++; });
+  const rows = urutkanSpek([...peta.values()], s);
+  META_LOKAL[kunci] = { tanda: tandaSinkron(ubah, rec.tanda), auditId: hapus.maxId, penuh: rec.penuh };
+  if (berubah) idbSimpan(kunciLokal(kunci), { rows, ...META_LOKAL[kunci] });
+  // Nama/kelas santri tertanam di baris pelanggaran, pembinaan, izin.
+  if (identitasBerubah) tandaiMuatPenuh('detail', 'pembinaan', 'izin');
+  return { rows, berubah };
+}
+
+function sinkronLatar(kunci, rec) {
+  const s = SPEK_LOKAL[kunci];
+  const harian = Date.now() - rec.penuh > PENUH_SETIAP;
+  sekali(`sinkron:${kunci}`, async () => {
+    progres(`sinkron:${kunci}`, `Menyinkronkan ${s.label}…`);
+    try {
+      const hasil = harian ? { rows: await muatPenuhLokal(kunci), berubah: 1 } : await sinkronDelta(kunci, rec);
+      if (!hasil.berubah) return;
+      CACHE[kunci] = { v: hasil.rows, at: Date.now() };
+      if (kunci === 'siswa') { delete CACHE.petaSiswa; delete CACHE.kelas; }
+      kabarDataBaru();
+    } catch (e) { tandaiLuring(e); }
+    finally { progres(`sinkron:${kunci}`, null); }
+  });
+}
+
+/** Segarkan tampilan yang sedang dibuka tanpa mengganggu orang yang sedang mengetik. */
+function kabarDataBaru() {
+  clearTimeout(kabarDataBaru.t);
+  kabarDataBaru.t = setTimeout(async () => {
+    if (!APP.profil || !APP.viewTampil) return;
+    if (APP.navSibuk) return kabarDataBaru();   // tunggu tampilan yang sedang dimuat selesai
+    const el = document.activeElement;
+    const sibuk = (window.Swal && Swal.isVisible()) || (el && ['INPUT','TEXTAREA','SELECT'].includes(el.tagName));
+    if (sibuk) { toast('info', 'Ada data terbaru — buka ulang menu ini untuk melihatnya.'); return; }
+    const y = window.scrollY;
+    await navigateTo(APP.view);
+    window.scrollTo({ top: y, behavior: 'auto' });
+  }, 400);
+}
+
+function tandaiLuring(e) {
+  console.warn('[lokal] jaringan gagal, memakai data tersimpan:', e?.message || e);
+  if (tandaiLuring.sudah) return;
+  tandaiLuring.sudah = true;
+  toast('info', 'Koneksi lemah — menampilkan data tersimpan di perangkat.');
+  setTimeout(() => { tandaiLuring.sudah = false; }, 60_000);
+}
+
+/* ---------- Penanda kemajuan (pil kecil di bawah layar) ---------- */
+const PROGRES = new Map();
+function progres(kunci, teks) {
+  if (teks) PROGRES.set(kunci, teks); else PROGRES.delete(kunci);
+  clearTimeout(progres.t);
+  // Tunda 350 ms: muat yang cepat tidak perlu berkedip di layar.
+  progres.t = setTimeout(gambarProgres, PROGRES.size ? 350 : 0);
+}
+function gambarProgres() {
+  let el = document.getElementById('rqProgres');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'rqProgres'; el.className = 'rq-progres'; el.setAttribute('role', 'status');
+    document.body.appendChild(el);
+  }
+  const daftar = [...PROGRES.values()];
+  el.innerHTML = daftar.length
+    ? `<span class="rq-putar"></span><span>${esc(daftar[0])}${daftar.length > 1 ? ` <b>+${daftar.length - 1}</b>` : ''}</span>`
+    : '';
+  el.classList.toggle('on', daftar.length > 0);
+}
+
+/** Rangka tampilan sementara (shimmer) selagi view pertama kali memuat data. */
+function rangkaMemuat() {
+  const kotak = (h, w) => `<div class="rq-sk" style="height:${h}px;${w ? `width:${w}` : ''}"></div>`;
+  return `<div class="rq-rangka" aria-busy="true" aria-label="Memuat">
+    ${kotak(118)}
+    <div class="rq-rangka-stat">${kotak(112)}${kotak(112)}${kotak(112)}${kotak(112)}</div>
+    <div class="rq-rangka-kartu">${kotak(18, '38%')}${kotak(12, '62%')}
+      ${Array.from({ length: 6 }, () => kotak(40)).join('')}</div>
+  </div>`;
 }
 
 async function muatSiswa() {
-  return cacheGet('siswa') || cacheSet('siswa',
-    await ambilSemua('siswa', '*', { order: 'nama_siswa' }));
+  return cacheGet('siswa') || sekali('siswa', async () => cacheSet('siswa', await muatTersimpan('siswa')));
 }
 
 /** Peta NISN -> baris siswa, untuk menggabungkan data tanpa relasi PostgREST. */
@@ -840,18 +1150,13 @@ async function amanKosong(fn, nama) {
 }
 
 async function muatDetail() {
-  return cacheGet('detail') || cacheSet('detail',
-    await ambilSemua('detail_data', '*', { order: 'tanggal', asc: false }));
+  return cacheGet('detail') || sekali('detail', async () => cacheSet('detail', await muatTersimpan('detail')));
 }
 async function muatIzin() {
-  return cacheGet('izin') || cacheSet('izin',
-    await ambilDenganRelasi('log_perizinan', '*, siswa(nama_siswa,kelas,jenjang)',
-      { order: 'tanggal_mulai', asc: false }));
+  return cacheGet('izin') || sekali('izin', async () => cacheSet('izin', await muatTersimpan('izin')));
 }
 async function muatPembinaan() {
-  return cacheGet('pembinaan') || cacheSet('pembinaan',
-    await ambilDenganRelasi('log_pembinaan', '*, siswa(nama_siswa,kelas,jenjang)',
-      { order: 'tanggal_pembinaan', asc: false }));
+  return cacheGet('pembinaan') || sekali('pembinaan', async () => cacheSet('pembinaan', await muatTersimpan('pembinaan')));
 }
 async function muatMaster() {
   return cacheGet('master') || cacheSet('master',
@@ -872,26 +1177,26 @@ async function muatDaftarKelas() {
 /** Data prestasi (poin positif) — pola sama dengan detail_data. */
 async function muatPrestasi() {
   const c = cacheGet('prestasi'); if (c) return c;
-  return cacheSet('prestasi', await amanKosong(
-    () => ambilSemua('log_prestasi', '*', { order:'tanggal', asc:false }), 'prestasi'));
+  return sekali('prestasi', async () => cacheSet('prestasi', await amanKosong(
+    () => ambilSemua('log_prestasi', '*', { order:'tanggal', asc:false }), 'prestasi')));
 }
 /** Data setoran tahfiz. */
 async function muatTahfiz() {
   const c = cacheGet('tahfiz'); if (c) return c;
-  return cacheSet('tahfiz', await amanKosong(
-    () => ambilSemua('log_tahfiz', '*', { order:'tanggal', asc:false }), 'tahfiz'));
+  return sekali('tahfiz', async () => cacheSet('tahfiz', await amanKosong(
+    () => ambilSemua('log_tahfiz', '*', { order:'tanggal', asc:false }), 'tahfiz')));
 }
 /** Katalog jenis prestasi. */
 async function muatMasterPrestasi() {
   const c = cacheGet('masterPrestasi'); if (c) return c;
-  return cacheSet('masterPrestasi', await amanKosong(
-    () => ambilSemua('master_prestasi', '*', { order:'kode_prestasi' }), 'master prestasi'));
+  return sekali('masterPrestasi', async () => cacheSet('masterPrestasi', await amanKosong(
+    () => ambilSemua('master_prestasi', '*', { order:'kode_prestasi' }), 'master prestasi')));
 }
 /** Target hafalan per santri per periode. */
 async function muatTargetTahfiz() {
   const c = cacheGet('targetTahfiz'); if (c) return c;
-  return cacheSet('targetTahfiz', await amanKosong(
-    () => ambilSemua('target_tahfiz', '*', { order:'periode', asc:false }), 'target tahfiz'));
+  return sekali('targetTahfiz', async () => cacheSet('targetTahfiz', await amanKosong(
+    () => ambilSemua('target_tahfiz', '*', { order:'periode', asc:false }), 'target tahfiz')));
 }
 
 const aktifPrestasi = (r) => String(r.status || 'Active').trim().toLowerCase() !== 'archived';
@@ -1334,8 +1639,9 @@ function pasangFallbackFoto(scopeEl) {
  */
 async function setupProfilUserLogin() {
   try {
-    const { data: authUser, error: authError } = await db.auth.getUser();
-    if (authError || !authUser?.user?.id) { console.warn('[profil] Tidak ada user yang login'); return; }
+    // v2.18.1: dari sesi tersimpan, bukan panggilan jaringan /auth/v1/user.
+    const authUser = { user: await penggunaSesi() };
+    if (!authUser.user?.id) { console.warn('[profil] Tidak ada user yang login'); return; }
 
     const userId = authUser.user.id;
     const namaUser = APP.profil?.nama_lengkap || APP.profil?.nama ||
@@ -1925,22 +2231,67 @@ $('btnLogout').addEventListener('click', async () => {
   if (!r.isConfirmed) return;
   if (APP.channel) db.removeChannel(APP.channel);
   try { sessionStorage.removeItem('rq_ctx'); } catch (e) {}
+  // v2.18.1: data santri tidak ditinggalkan di perangkat yang mungkin dipakai bergantian.
+  await idbKosongkan();
+  try { localStorage.removeItem('rq_profil'); localStorage.removeItem('rq_jml'); } catch (e) {}
   await db.auth.signOut();
   location.reload();
 });
 
-async function masukAplikasi() {
-  const { data: { user } } = await db.auth.getUser();
-  if (!user) return;
+function profilTersimpan(uid) {
+  try { const p = JSON.parse(localStorage.getItem('rq_profil') || 'null'); return p?.id === uid && p.aktif ? p : null; }
+  catch (e) { return null; }
+}
+function simpanProfil(p) { try { localStorage.setItem('rq_profil', JSON.stringify(p)); } catch (e) {} }
 
-  const { data: profil, error } = await db.from('profiles').select('*').eq('id', user.id).single();
-  if (error || !profil) {
-    await db.auth.signOut();
-    return fireError(new Error('Profil pengguna belum dibuat. Hubungi Admin.'));
-  }
-  if (!profil.aktif) {
-    await db.auth.signOut();
-    return fireError(new Error('Akun ini dinonaktifkan.'));
+/** v2.18.1: pengguna dari sesi tersimpan — tanpa bolak-balik ke server. */
+async function penggunaSesi() {
+  const { data } = await db.auth.getSession();
+  return data?.session?.user || null;
+}
+
+/**
+ * v2.18.1: empat data terbesar mulai diambil BERSAMAAN dengan profil,
+ * tidak menunggu profil selesai lalu dashboard dibuka. Dari data
+ * tersimpan di perangkat, ini biasanya hanya sinkron-delta kecil.
+ */
+function pramuatData() {
+  [muatSiswa, muatDetail, muatPembinaan, muatIzin].forEach(fn =>
+    fn().catch(e => console.warn('[pramuat]', e?.message || e)));
+}
+
+async function masukAplikasi() {
+  const user = await penggunaSesi();
+  if (!user) return;
+  APP.uid = user.id;
+  pramuatData();
+
+  // v2.18.1: profil terakhir disimpan di perangkat supaya aplikasi bisa
+  // langsung terbuka; profil dari server tetap diperiksa di belakang. Bila
+  // akun dinonaktifkan atau peran/kelas binaannya berubah, aplikasi keluar
+  // atau dimuat ulang. Hak akses sebenarnya tetap ditegakkan server (RLS).
+  const janjiProfil = db.from('profiles').select('*').eq('id', user.id).single();
+  let profil = profilTersimpan(user.id);
+  if (profil) {
+    janjiProfil.then(({ data, error }) => {
+      if (error) return;                                   // luring: pakai yang tersimpan
+      if (!data || !data.aktif) { localStorage.removeItem('rq_profil'); db.auth.signOut().then(() => location.reload()); return; }
+      simpanProfil(data);
+      const inti = (x) => JSON.stringify([x.role, x.kelas_binaan, x.unit_akses, x.jenjang_akses, x.korps, x.nama]);
+      if (inti(data) !== inti(profil)) location.reload();
+    });
+  } else {
+    const { data, error } = await janjiProfil;
+    profil = data;
+    if (error || !profil) {
+      await db.auth.signOut();
+      return fireError(new Error('Profil pengguna belum dibuat. Hubungi Admin.'));
+    }
+    if (!profil.aktif) {
+      await db.auth.signOut();
+      return fireError(new Error('Akun ini dinonaktifkan.'));
+    }
+    simpanProfil(profil);
   }
 
   APP.profil = profil;
@@ -1978,7 +2329,7 @@ async function masukAplikasi() {
   refreshBadgePesan();
 
   // Load foto profil (opsional, bisa dipanggil di sini atau di dashboard)
-  setupProfilUserLogin().catch(e => console.warn('[profil]', e));
+  APP.janjiProfil = setupProfilUserLogin().catch(e => console.warn('[profil]', e));
   // Sampul & logo bilah profil atas — dibaca sekali, dipakai seluruh sesi.
   muatDanTerapkanIdentitas();
 
@@ -2061,6 +2412,7 @@ async function navigateTo(view) {
     toast('error', `Role ${role()} tidak memiliki akses ke menu ini.`);
     view = rumah();
   }
+  const viewLama = APP.viewTampil;
   APP.view = view;
   APP.onKlik = null;
   // Dipakai CSS untuk cap air korps pada halaman kosong modul Pengasuhan.
@@ -2080,6 +2432,12 @@ async function navigateTo(view) {
   window.scrollTo({ top: 0, behavior: 'auto' });
 
   loading(true);
+  // v2.18.1: rangka shimmer langsung tampil saat BERPINDAH menu; view
+  // menimpanya begitu siap. Penyegaran menu yang sama (mis. dari realtime)
+  // tidak dikosongkan supaya layar tidak berkedip.
+  if (viewLama !== view || !$('viewRoot').children.length) $('viewRoot').innerHTML = rangkaMemuat();
+  APP.viewTampil = view;
+  APP.navSibuk = (APP.navSibuk || 0) + 1;
   try {
     if (view === 'dashboard')        await viewDashboard();
     else if (view === 'pimpinan')    await viewPimpinan();
@@ -2103,7 +2461,7 @@ async function navigateTo(view) {
     else if (view === 'pengguna')    await viewPengguna();
     tandaiTabelBisaGeser();
   } catch (err) { fireError(err); }
-  finally { loading(false); }
+  finally { loading(false); APP.navSibuk--; }
 }
 
 /** Petunjuk geser untuk tabel lebar di layar kecil. */
@@ -2398,7 +2756,13 @@ function kartuUnit() {
 
 async function viewDashboard() {
 
-   const profilePromise = setupProfilUserLogin();
+  // v2.18.1: foto profil sudah diminta saat login — jangan diminta dua kali.
+  const profilePromise = APP.janjiProfil || setupProfilUserLogin();
+  // v2.18.1: panel-panel di bawah dashboard dulu dimuat BERURUTAN setelah
+  // data utama (±4 kali menunggu server). Sekarang diminta serentak sejak
+  // awal; pemanggilan berikutnya di bawah menunggu janji yang sama.
+  [muatMasterPembinaan, petaLaporanBina, muatPrestasi, muatTahfiz, muatGoalSemua, muatTargetTahfiz]
+    .forEach(fn => { try { Promise.resolve(fn()).catch(() => {}); } catch (e) {} });
   const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
     amanKosong(muatSiswa, 'santri'),
     amanKosong(muatDetail, 'pelanggaran'),
@@ -5701,7 +6065,8 @@ function pesanKirim(error) {
 
 /** Bersihkan singgahan agar data baru langsung terlihat. */
 function segarkanSetelahUnggah(jenis) {
-  if (jenis === 'santri') cacheHapus('siswa', 'petaSiswa', 'kelas', 'detail');
+  if (jenis === 'santri') { cacheHapus('siswa', 'petaSiswa', 'kelas', 'detail'); tandaiMuatPenuh('detail', 'pembinaan', 'izin'); }
+  if (jenis === 'pelanggaran') tandaiMuatPenuh('detail');
   if (jenis === 'pelanggaran') cacheHapus('master');
   if (jenis === 'pembinaan') cacheHapus('aturanBina');
 }
@@ -6143,6 +6508,7 @@ async function modalMaster(existing) {
   });
   if (res.isConfirmed) {
     cacheHapus('master');
+    tandaiMuatPenuh('detail');   // nama/kategori/bobot tertanam di detail_data
     sync('done', 'Master tersimpan');
     toast('success', ubah ? 'Jenis pelanggaran diperbarui' : 'Jenis pelanggaran ditambahkan');
     gambarMaster();
@@ -6395,8 +6761,8 @@ const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 
 async function muatMasterPembinaan() {
   try {
-    return cacheGet('aturanBina') || cacheSet('aturanBina',
-      await ambilSemua('master_pembinaan', '*', { order: 'kategori' }));
+    return cacheGet('aturanBina') || await sekali('aturanBina', async () => cacheSet('aturanBina',
+      await ambilSemua('master_pembinaan', '*', { order: 'kategori' })));
   } catch (e) {
     console.warn('master_pembinaan tidak terbaca:', e.message);
     return cacheSet('aturanBina', []);
@@ -8621,6 +8987,7 @@ function sisipkanKeCache(kunci, pk, baru, hapus, kolomTgl) {
   c.v = c.v.filter(r => !hapus.has(r[pk]) && !ganti.has(r[pk])).concat(baru);
   c.v.sort((x, y) => String(y[kolomTgl] || '').localeCompare(String(x[kolomTgl] || '')));
   c.at = Date.now();
+  simpanLokalNanti(kunci);
 }
 
 async function tambalDetailRT() {
@@ -8666,6 +9033,7 @@ async function tambalSiswaRT(nisnList) {
     else { c.v.push(r); adaBaru = true; }
   });
   if (adaBaru) { delete CACHE.petaSiswa; delete CACHE.kelas; }
+  simpanLokalNanti('siswa');
 }
 
 // Perbarui badge izin & pesan saat pengguna kembali ke tab.
@@ -13768,7 +14136,9 @@ function guruPengesah(list, kelas) {
  */
 async function petaLaporanBina() {
   if (!bisa('pesan.lihat')) return new Map();
-  const c = cacheGet('laporan_bina'); if (c) return c;
+  return cacheGet('laporan_bina') || sekali('laporan_bina', petaLaporanBinaInti);
+}
+async function petaLaporanBinaInti() {
   let data = [];
   try {
     const res = await db.from(PESAN_TABEL)
@@ -16181,8 +16551,8 @@ const IPP_AMBANG_IKATAN = 0.20;
 /** Seluruh target pembinaan (goal_santri) — untuk agregasi dashboard. */
 async function muatGoalSemua() {
   const c = cacheGet('goalSemua'); if (c) return c;
-  return cacheSet('goalSemua', await amanKosong(
-    () => ambilSemua('goal_santri', '*', { order:'periode', asc:false }), 'target pembinaan'));
+  return sekali('goalSemua', async () => cacheSet('goalSemua', await amanKosong(
+    () => ambilSemua('goal_santri', '*', { order:'periode', asc:false }), 'target pembinaan')));
 }
 
 /**

@@ -4824,6 +4824,31 @@
     .pr-cetak-akum .pr-0 { color:#fff !important; }
   }
 }
+
+  /* ===== v2.18.1 — rangka memuat & penanda kemajuan ===== */
+  .rq-rangka { display:grid; gap:18px; }
+  .rq-rangka-stat { display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; }
+  @media (max-width:760px) { .rq-rangka-stat { grid-template-columns:repeat(2, 1fr); } }
+  .rq-rangka-kartu { display:grid; gap:12px; padding:20px; border:1px solid var(--line);
+    border-radius:var(--r-lg); background:var(--surface); }
+  .rq-sk { border-radius:12px; background:linear-gradient(90deg,
+      color-mix(in oklab, var(--sea) 7%, white) 0%,
+      color-mix(in oklab, var(--sea) 14%, white) 40%,
+      color-mix(in oklab, var(--sea) 7%, white) 80%);
+    background-size:220% 100%; animation:rq-kilau 1.25s ease-in-out infinite; }
+  @keyframes rq-kilau { from { background-position:120% 0; } to { background-position:-100% 0; } }
+  .rq-progres { position:fixed; left:50%; bottom:calc(84px + env(safe-area-inset-bottom, 0px));
+    transform:translate(-50%, 12px); z-index:1200; display:flex; align-items:center; gap:10px;
+    padding:9px 16px; border-radius:999px; background:#0B2B45; color:#F4EFE2;
+    font-size:13px; box-shadow:0 10px 30px rgba(11,43,69,.28); opacity:0; pointer-events:none;
+    transition:opacity .2s, transform .2s; max-width:calc(100vw - 32px); white-space:nowrap; }
+  .rq-progres.on { opacity:1; transform:translate(-50%, 0); }
+  .rq-progres b { color:#C9A227; font-weight:600; }
+  .rq-putar { width:14px; height:14px; border-radius:50%; flex:none;
+    border:2px solid rgba(201,162,39,.35); border-top-color:#C9A227; animation:rq-putar .8s linear infinite; }
+  @keyframes rq-putar { to { transform:rotate(360deg); } }
+  @media (min-width:900px) { .rq-progres { bottom:24px; } }
+  @media (prefers-reduced-motion: reduce) { .rq-sk, .rq-putar { animation:none; } }
 </style>
 </head>
 <body>
