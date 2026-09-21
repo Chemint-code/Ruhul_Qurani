@@ -598,6 +598,7 @@ const MENU_ROLE = {
   prestasi:    ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis','Pimpinan'],
   tahfiz:      ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Pimpinan'],
   audit:       ['Admin','Pimpinan'],
+  tutupbuku:   ['Admin','Pimpinan'],
   rekap:       ['Admin'],
   bidang:      ['Admin','Guru','Walas','Guru BK','Guru Piket','Pimpinan'],
   lab:         ['Admin'],
@@ -620,6 +621,7 @@ const JUDUL = {
   prestasi:   { lat:'Prestasi',        ar:'الإنجازات',          teks:'Prestasi & Apresiasi' },
   tahfiz:     { lat:'Tahfiz',          ar:'تحفيظ القرآن',       teks:'Tahfiz Al-Qur\'an' },
   audit:      { lat:'Jejak Audit',     ar:'سجل التغييرات',      teks:'Jejak Audit Sistem' },
+  tutupbuku:  { lat:'Tutup Buku',      ar:'إغلاق الدفاتر',      teks:'Tutup Buku Bulanan' },
   rekap:      { lat:'Rekap',           ar:'حصر المخالفات',      teks:'Rekap Pelanggaran' },
   bidang:     { lat:'Evaluasi Bidang', ar:'تقويم المجالات',     teks:'Evaluasi Bidang Pelanggaran' },
   lab:        { lat:'Laboratorium',    ar:'مختبر السياسات',     teks:'Laboratorium Kebijakan' },
@@ -764,7 +766,14 @@ try {
 const CACHE = {};
 const TTL = 90_000;
 
-function cacheGet(k) { const c = CACHE[k]; return (c && Date.now() - c.at < TTL) ? c.v : null; }
+/**
+ * v2.18 — Cache yang DITAMBAL realtime (lihat bagian 21) boleh hidup lebih
+ * lama, karena setiap perubahan dari perangkat lain sudah disisipkan ke
+ * dalamnya. Selama kanal realtime putus, semua kembali ke TTL 90 detik.
+ */
+const TTL_REALTIME = { detail: 15 * 60_000, pembinaan: 15 * 60_000, siswa: 5 * 60_000 };
+function ttlCache(k) { return (APP.realtimeOk && TTL_REALTIME[k]) || TTL; }
+function cacheGet(k) { const c = CACHE[k]; return (c && Date.now() - c.at < ttlCache(k)) ? c.v : null; }
 function cacheSet(k, v) { CACHE[k] = { v, at: Date.now() }; return v; }
 function cacheHapus(...ks) {
   ks.forEach(k => {
@@ -2081,6 +2090,7 @@ async function navigateTo(view) {
     else if (view === 'prestasi')    await viewPrestasi();
     else if (view === 'tahfiz')      await viewTahfiz();
     else if (view === 'audit')       await viewAudit();
+    else if (view === 'tutupbuku')   await viewTutupBuku();
     else if (view === 'rekap')       await viewRekap();
     else if (view === 'bidang')      await viewEvaluasiBidang();
     else if (view === 'lab')         await viewLab();
@@ -8493,7 +8503,7 @@ async function cetakRekapBulanan(rows, sumberLabel) {
 // ---------------------------------------------------------------------
 // 21. REALTIME
 // ---------------------------------------------------------------------
-const segarkan = debounce(async (tabel) => {
+const segarkanInti = async (tabel) => {
   if (tabel === 'log_perizinan') {
     cacheHapus('izin'); refreshBadgePending();
     if (APP.view === 'perizinan') gambarIzin();
@@ -8505,12 +8515,17 @@ const segarkan = debounce(async (tabel) => {
     else if (APP.view === 'bk') gambarPanelPesanBk();
     else if (APP.view === 'pembinaan') gambarBina();
   } else if (tabel === 'log_pelanggaran' || tabel === 'detail_data') {
-    cacheHapus('detail','siswa');
+    // v2.18: tambal baris yang berubah saja. Dulu seluruh riwayat + seluruh
+    // data santri diunduh ulang di SETIAP perangkat untuk satu catatan baru.
+    try { await tambalDetailRT(); }
+    catch (e) { console.warn('[realtime] tambal pelanggaran gagal, muat ulang penuh:', e); cacheHapus('detail','siswa'); }
     if (APP.view === 'pelanggaran') muatTabelPlg();
     else if (APP.view === 'rekap') gambarRekap();
     else if (['dashboard','pimpinan','bk','pengasuhan'].includes(APP.view)) navigateTo(APP.view);
   } else if (tabel === 'log_pembinaan') {
-    cacheHapus('pembinaan', 'laporan_bina');
+    try { await tambalPembinaanRT(); }
+    catch (e) { console.warn('[realtime] tambal pembinaan gagal, muat ulang penuh:', e); cacheHapus('pembinaan'); }
+    cacheHapus('laporan_bina');
     if (APP.view === 'pembinaan') gambarBina();
     else if (APP.view === 'rekapbina') gambarRb();
   } else if (tabel === 'log_prestasi') {
@@ -8521,19 +8536,136 @@ const segarkan = debounce(async (tabel) => {
     cacheHapus('tahfiz');
     if (APP.view === 'tahfiz') thfGambarPanel();
   }
-}, 700);
+};
+
+/**
+ * v2.18 — debounce PER TABEL. Sebelumnya satu debounce dipakai bersama,
+ * sehingga saat pelanggaran dicatat (event log_pelanggaran lalu, dalam
+ * milidetik yang sama, event log_pembinaan dari trigger) hanya tabel
+ * TERAKHIR yang disegarkan dan cache pelanggaran di perangkat lain
+ * tertinggal sampai TTL habis.
+ */
+const DEBOUNCE_RT = {};
+function segarkan(tabel) {
+  (DEBOUNCE_RT[tabel] ||= debounce(segarkanInti, 700))(tabel);
+}
 
 function aktifkanRealtime() {
   APP.channel = db.channel('rq-live')
     .on('postgres_changes', { event:'*', schema:'public', table:'log_perizinan' }, () => segarkan('log_perizinan'))
-    .on('postgres_changes', { event:'*', schema:'public', table:'log_pelanggaran' }, () => segarkan('log_pelanggaran'))
-    .on('postgres_changes', { event:'*', schema:'public', table:'log_pembinaan' }, () => segarkan('log_pembinaan'))
+    .on('postgres_changes', { event:'*', schema:'public', table:'log_pelanggaran' }, (p) => { catatRT('log_pelanggaran', p); segarkan('log_pelanggaran'); })
+    .on('postgres_changes', { event:'*', schema:'public', table:'log_pembinaan' }, (p) => { catatRT('log_pembinaan', p); segarkan('log_pembinaan'); })
     .on('postgres_changes', { event:'*', schema:'public', table:'pesan_bk' }, () => segarkan('pesan_bk'))
     .on('postgres_changes', { event:'*', schema:'public', table:'log_prestasi' }, () => segarkan('log_prestasi'))
     .on('postgres_changes', { event:'*', schema:'public', table:'log_tahfiz' }, () => segarkan('log_tahfiz'))
     .subscribe((status) => {
-      $('liveDot').classList.toggle('on', status === 'SUBSCRIBED');
+      const ok = status === 'SUBSCRIBED';
+      $('liveDot').classList.toggle('on', ok);
+      // v2.18: selama kanal putus, perubahan dari perangkat lain tidak
+      // tertambal. Begitu tersambung lagi, cache yang dijaga realtime
+      // dibuang sekali supaya tidak ada catatan yang terlewat.
+      if (ok && APP.rtPernahPutus) cacheHapus('detail', 'pembinaan', 'siswa');
+      if (!ok && APP.realtimeOk) APP.rtPernahPutus = true;
+      APP.realtimeOk = ok;
     });
+}
+
+/* ---------------------------------------------------------------------
+ * 21b. TAMBALAN REALTIME  (v2.18)
+ *
+ * Setiap event realtime hanya mencatat ID baris yang berubah ke antrean.
+ * `segarkan()` (debounce 700 ms) lalu mengambil HANYA baris-baris itu
+ * dengan satu request `.in()`, menyisipkannya ke cache, dan memperbarui
+ * total poin santri yang terdampak. Input massal 40 santri = 1 request,
+ * bukan 40 × unduh ulang seluruh riwayat di setiap perangkat.
+ * ------------------------------------------------------------------- */
+const antreanRT = {
+  log_pelanggaran: { pk: 'id_log',       naik: new Set(), hapus: new Set() },
+  log_pembinaan:   { pk: 'id_pembinaan', naik: new Set(), hapus: new Set() }
+};
+
+function catatRT(tabel, payload) {
+  const a = antreanRT[tabel]; if (!a) return;
+  if (payload?.eventType === 'DELETE') {
+    const id = payload.old?.[a.pk];
+    if (id) { a.hapus.add(id); a.naik.delete(id); }
+  } else {
+    const id = payload?.new?.[a.pk];
+    if (id) { a.naik.add(id); a.hapus.delete(id); }
+  }
+}
+
+/** Kosongkan antrean satu tabel; kembalikan salinannya. */
+function ambilAntreanRT(tabel) {
+  const a = antreanRT[tabel];
+  const hasil = { naik: [...a.naik], hapus: new Set(a.hapus) };
+  a.naik.clear(); a.hapus.clear();
+  return hasil;
+}
+
+/** Ambil baris berdasarkan daftar ID, dipotong 100 per request. */
+async function ambilMenurutId(tabel, select, kolom, ids) {
+  const hasil = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data, error } = await db.from(tabel).select(select).in(kolom, ids.slice(i, i + 100));
+    if (error) throw error;
+    hasil.push(...(data || []));
+  }
+  return hasil;
+}
+
+/** Sisipkan/ganti baris ke array cache, lalu urutkan menurun menurut tanggal. */
+function sisipkanKeCache(kunci, pk, baru, hapus, kolomTgl) {
+  const c = CACHE[kunci]; if (!c) return;
+  const ganti = new Set(baru.map(r => r[pk]));
+  c.v = c.v.filter(r => !hapus.has(r[pk]) && !ganti.has(r[pk])).concat(baru);
+  c.v.sort((x, y) => String(y[kolomTgl] || '').localeCompare(String(x[kolomTgl] || '')));
+  c.at = Date.now();
+}
+
+async function tambalDetailRT() {
+  const { naik, hapus } = ambilAntreanRT('log_pelanggaran');
+  const c = CACHE.detail;
+  if (!c) return;                               // belum dimuat: nanti dimuat utuh
+  if (!naik.length && !hapus.size) return;
+  const nisnKena = new Set();
+  c.v.forEach(r => { if (hapus.has(r.id_log)) nisnKena.add(String(r.nisn)); });
+  const baru = naik.length ? await ambilMenurutId('detail_data', '*', 'id_log', naik) : [];
+  baru.forEach(r => nisnKena.add(String(r.nisn)));
+  sisipkanKeCache('detail', 'id_log', baru, hapus, 'tanggal');
+  await tambalSiswaRT([...nisnKena]);
+}
+
+async function tambalPembinaanRT() {
+  const { naik, hapus } = ambilAntreanRT('log_pembinaan');
+  if (!CACHE.pembinaan) return;
+  if (!naik.length && !hapus.size) return;
+  let baru = [];
+  if (naik.length) {
+    try {
+      baru = await lengkapiSiswa(await ambilMenurutId('log_pembinaan',
+        '*, siswa(nama_siswa,kelas,jenjang)', 'id_pembinaan', naik));
+    } catch (e) {
+      if (!/relationship|schema cache/i.test(e.message || '')) throw e;
+      baru = await lengkapiSiswa(await ambilMenurutId('log_pembinaan', '*', 'id_pembinaan', naik));
+    }
+  }
+  sisipkanKeCache('pembinaan', 'id_pembinaan', baru, hapus, 'tanggal_pembinaan');
+}
+
+/** Total poin santri berubah lewat trigger; perbarui objeknya di tempat. */
+async function tambalSiswaRT(nisnList) {
+  const c = CACHE.siswa;
+  if (!c || !nisnList.length) return;
+  const segar = await ambilMenurutId('siswa', '*', 'nisn', nisnList);
+  const peta = CACHE.petaSiswa?.v;
+  let adaBaru = false;
+  segar.forEach(r => {
+    const lama = peta?.[String(r.nisn)] || c.v.find(x => String(x.nisn) === String(r.nisn));
+    if (lama) Object.assign(lama, r);          // objek yang sama dipakai petaSiswa
+    else { c.v.push(r); adaBaru = true; }
+  });
+  if (adaBaru) { delete CACHE.petaSiswa; delete CACHE.kelas; }
 }
 
 // Perbarui badge izin & pesan saat pengguna kembali ke tab.
@@ -15054,7 +15186,12 @@ function thfEksporCsv() {
 //     Ditulis oleh trigger SECURITY DEFINER di database, jadi tidak bisa
 //     dipalsukan atau dihapus dari aplikasi. Halaman ini hanya membaca.
 // =====================================================================
-const stAud = { page:1, size:25, cari:'', tabel:'', aksi:'', dari:'', sampai:'', rows:null };
+const stAud = { page:1, size:25, cari:'', tabel:'', aksi:'', dari:'', sampai:'', rows:null,
+                tanda:'hidup' };   // v2.18: 'hidup' | 'ditandai' (soft delete)
+
+/** v2.18: kolom ringan untuk daftar. Isi JSON diambil per baris saat dibuka. */
+const KOLOM_AUDIT_RINGAN = 'id,waktu,tabel,aksi,baris_id,nisn,user_id,user_nama,user_role,ringkas,dihapus_pada,alasan_hapus';
+const BATAS_AUDIT = 2000;
 
 const TABEL_AUDIT = ['log_pelanggaran','log_pembinaan','log_perizinan','log_prestasi',
   'log_tahfiz','goal_santri','target_tahfiz','master_pelanggaran','master_prestasi',
@@ -15070,8 +15207,9 @@ async function viewAudit() {
           <span class="lat">Akuntabilitas</span></div>
         <h2>Setiap catatan adalah amanah.</h2>
         <p>Seluruh penambahan, perubahan, dan penghapusan data tercatat lengkap dengan
-           pelakunya. Jejak ini ditulis langsung oleh database — aplikasi hanya boleh
-           membacanya, tidak bisa mengubah atau menghapusnya.</p>
+           pelakunya. Jejak ini ditulis langsung oleh database dan tidak bisa diubah dari
+           aplikasi. Jejak bulan yang sudah ditutup buku dan diarsipkan dapat ditandai
+           hapus oleh Admin, lalu dihapus permanen setelah masa tunggu 30 hari.</p>
       </div>
       <div class="adm-actions">
         <button class="btn btn-onnavy" id="audMuat"><i class="fa-solid fa-rotate"></i>Muat Ulang</button>
@@ -15095,6 +15233,10 @@ async function viewAudit() {
           <option value="">Semua aksi</option>
           <option>INSERT</option><option>UPDATE</option><option>DELETE</option>
         </select>
+        <select id="audFTanda" class="input" title="Status jejak">
+          <option value="hidup">Jejak aktif</option>
+          <option value="ditandai">Ditandai hapus</option>
+        </select>
         <input id="audDari" type="date" class="input" title="Dari tanggal">
         <input id="audSampai" type="date" class="input" title="Sampai tanggal">
         <span class="sep"></span>
@@ -15114,6 +15256,11 @@ async function viewAudit() {
   }, 260));
   $('audFTabel').addEventListener('change', e => { stAud.tabel = e.target.value; stAud.page = 1; audGambar(); });
   $('audFAksi').addEventListener('change', e => { stAud.aksi = e.target.value; stAud.page = 1; audGambar(); });
+  $('audFTanda').value = stAud.tanda;
+  $('audFTanda').addEventListener('change', async e => {
+    stAud.tanda = e.target.value; stAud.page = 1; stAud.rows = null;
+    await audMuat(); await audGambar();
+  });
   $('audDari').addEventListener('change', e => { stAud.dari = e.target.value; stAud.page = 1; audGambar(); });
   $('audSampai').addEventListener('change', e => { stAud.sampai = e.target.value; stAud.page = 1; audGambar(); });
   $('audReset').addEventListener('click', () => {
@@ -15140,8 +15287,13 @@ async function viewAudit() {
 async function audMuat() {
   if (stAud.rows) return stAud.rows;
   stAud.rows = await amanKosong(async () => {
-    const { data, error } = await db.from('audit_log').select('*')
-      .order('waktu', { ascending:false }).limit(3000);
+    // v2.18: tanpa data_lama/data_baru (±80% ukuran unduhan). Kolom
+    // dihapus_pada disaring di sini karena RLS audit_log tidak diubah.
+    let kueri = db.from('audit_log').select(KOLOM_AUDIT_RINGAN)
+      .order('waktu', { ascending:false }).limit(BATAS_AUDIT);
+    kueri = stAud.tanda === 'ditandai' ? kueri.not('dihapus_pada', 'is', null)
+                                       : kueri.is('dihapus_pada', null);
+    const { data, error } = await kueri;
     if (error) throw error;
     return data || [];
   }, 'audit_log');
@@ -15174,7 +15326,8 @@ async function audGambar() {
 
   $('audStat').innerHTML =
       stat('Jejak Tercatat', angka(semua.length), 'fa-solid fa-fingerprint',
-        'background:#E7F1F7;color:var(--sea)', 'var(--sea)', 'Maksimum 3.000 terbaru')
+        'background:#E7F1F7;color:var(--sea)', 'var(--sea)',
+        stAud.tanda === 'ditandai' ? 'Ditandai hapus · menunggu masa tunggu' : `Maksimum ${angka(BATAS_AUDIT)} terbaru`)
     + stat('Perubahan Hari Ini', angka(hariIniJml), 'fa-solid fa-bolt',
         'background:var(--teal-bg);color:var(--teal)', 'var(--teal)', tgl(hariIniKunci))
     + stat('Pelaku Berbeda', angka(pelaku), 'fa-solid fa-user-shield',
@@ -15216,8 +15369,13 @@ function waktuAudit(iso) {
 
 /** Rincian perubahan: kolom yang berubah ditandai. */
 async function audModalRincian(id) {
-  const r = (await audMuat()).find(x => String(x.id) === String(id));
-  if (!r) return;
+  const ringan = (await audMuat()).find(x => String(x.id) === String(id));
+  if (!ringan) return;
+  // v2.18: isi JSON diambil hanya untuk baris yang dibuka.
+  const { data: isi, error } = await db.from('audit_log')
+    .select('data_lama,data_baru').eq('id', ringan.id).maybeSingle();
+  if (error) return fireError(error);
+  const r = { ...ringan, ...(isi || {}) };
   const lama = r.data_lama || {}, baru = r.data_baru || {};
   const kunci = [...new Set([...Object.keys(lama), ...Object.keys(baru)])].sort();
   const beda = (k) => JSON.stringify(lama[k]) !== JSON.stringify(baru[k]);
@@ -15235,6 +15393,8 @@ async function audModalRincian(id) {
         <i class="fa-solid fa-user-shield"></i>
         ${esc(r.user_nama || '(sistem)')} · ${esc(r.user_role || '-')} · ${waktuAudit(r.waktu)}
         ${r.nisn ? ` · NISN ${esc(r.nisn)}` : ''}
+        ${r.baris_id ? ` · ID ${esc(r.baris_id)}` : ''}
+        ${r.dihapus_pada ? ` · <b>ditandai hapus ${waktuAudit(r.dihapus_pada)}</b>` : ''}
       </div>
       <div class="aud-diff">
         <section><h5>Sebelum</h5><div class="isi">${
@@ -18369,6 +18529,474 @@ function labAksi(aksi, el) {
     a.download = `Memo_Syura_${hariIni()}.txt`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1500);
   }
+}
+
+// =====================================================================
+// 40. TUTUP BUKU BULANAN & ARSIP STATIS  (v2.18 · Admin; Pimpinan baca)
+//
+//     Tiga lapis data:
+//       1. DINAMIS  — log_* di database, dimuat & ditambal realtime.
+//       2. REKAP    — rekap_bulanan_santri: satu baris per santri per
+//                     bulan (pelanggaran, pembinaan, izin, prestasi,
+//                     tahfiz). Disusun otomatis oleh pg_cron tanggal 1
+//                     pukul 07.00 WIB, atau manual dari halaman ini.
+//       3. ARSIP    — salinan beku satu bulan di bucket Storage `arsip`
+//                     (kuota 1 GB, terpisah dari kuota database 500 MB).
+//
+//     Baris mentah TIDAK dipindahkan dari log_pelanggaran:
+//     trg_pembinaan_otomatis menghitung tahap dari seluruh riwayat,
+//     memindahkannya akan mengembalikan semua santri ke tahap 1.
+// =====================================================================
+const stTb = { periode: '', status: null, rekap: null, cari: '', kelas: '', page: 1, size: 30 };
+
+const tbTanggal = (bulan) => `${bulan}-01`;
+const tbFolder  = (bulan) => bulan.replace('-', '/') + '/';
+function tbBulanBerikut(bulan) {
+  const [th, bl] = bulan.split('-').map(Number);
+  const d = new Date(th, bl, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function tbLabelBulan(bulan) {
+  const [th, bl] = String(bulan || '').split('-').map(Number);
+  if (!th || !bl) return String(bulan || '-');
+  return new Date(th, bl - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+}
+
+async function viewTutupBuku() {
+  if (!stTb.periode) stTb.periode = bulanSebelum(bulanIni());
+  const admin = isAdmin();
+
+  $('viewRoot').innerHTML = `
+    <section class="aud-head">
+      <div>
+        <div class="eyebrow"><span class="ar">إغلاق الدفاتر</span><span class="rule"></span>
+          <span class="lat">Tutup Buku Bulanan</span></div>
+        <h2>Bulan yang selesai, dibukukan.</h2>
+        <p>Rekap per santri disusun otomatis setiap tanggal 1 pukul 07.00 WIB. Setelah rekap
+           diperiksa, salinan lengkap bulan itu diarsipkan ke Storage. Sesudah itu jejak audit
+           bulan tersebut boleh ditandai hapus, dan dihapus permanen paling cepat 30 hari kemudian.</p>
+      </div>
+      <div class="adm-actions">
+        <input type="month" id="tbBulan" class="input" value="${esc(stTb.periode)}" title="Bulan">
+        ${admin ? `<button class="btn btn-brass" id="tbTutup"><i class="fa-solid fa-book-bookmark"></i>Tutup Buku</button>` : ''}
+      </div>
+    </section>
+
+    <div class="stats" id="tbStat"></div>
+
+    <section class="card">
+      <div class="card-head">
+        <div><h3>Buku yang Sudah Ditutup</h3>
+          <p class="sub">Tanda <b>berubah</b> berarti ada catatan bulan itu yang diubah setelah rekap disusun.</p></div>
+        ${admin ? `<div class="actions"><button class="btn btn-danger btn-sm" id="tbHapusPermanen">
+          <i class="fa-solid fa-dumpster-fire"></i>Hapus permanen audit ≥ 30 hari</button></div>` : ''}
+      </div>
+      <div class="tbl"><table class="adm-tbl">
+        <thead><tr><th>Bulan</th><th class="right">Pelanggaran</th><th class="right">Pembinaan</th>
+          <th class="right">Izin</th><th class="right">Prestasi</th><th class="right">Tahfiz</th>
+          <th>Rekap</th><th>Arsip</th><th>Jejak Audit</th><th class="right">Aksi</th></tr></thead>
+        <tbody id="tbStatus"><tr><td colspan="10" style="padding:22px;text-align:center;color:var(--text-3)">Memuat…</td></tr></tbody>
+      </table></div>
+      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div><h3>Rekap Per Santri · <span id="tbJudulBulan">${esc(tbLabelBulan(stTb.periode))}</span></h3>
+          <p class="sub" id="tbSub">Memuat…</p></div>
+        <div class="actions"><button class="btn btn-ghost btn-sm" id="tbCsv">
+          <i class="fa-solid fa-file-csv"></i>Ekspor CSV</button></div>
+      </div>
+      <div class="filters adm-filters">
+        <input id="tbCari" class="input grow" placeholder="Cari nama atau NISN…" value="${esc(stTb.cari)}">
+        <select id="tbKelas" class="input"><option value="">Semua kelas</option></select>
+      </div>
+      <div class="tbl"><table class="adm-tbl">
+        <thead><tr>
+          <th>Santri</th><th>Kelas</th>
+          <th class="right" title="Ringan / Sedang / Berat">Pelanggaran R/S/B</th><th class="right">Poin</th>
+          <th class="right" title="Selesai / total">Pembinaan</th>
+          <th class="right" title="Sakit / Keperluan / Pemberitahuan">Izin S/K/P</th>
+          <th class="right">Hari izin</th><th class="right">Telat balik</th>
+          <th class="right" title="Emas / Perak / Perunggu">Prestasi E/P/P</th><th class="right">Poin prestasi</th>
+          <th class="right">Setoran</th><th class="right" title="Ziyadah / Murajaah">Halaman Z/M</th>
+          <th class="right">Target</th><th>Kelancaran akhir</th>
+        </tr></thead>
+        <tbody id="tbBody"></tbody>
+      </table></div>
+      <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
+      <div id="tbPager"></div>
+    </section>`;
+
+  $('tbBulan').addEventListener('change', async e => {
+    if (!e.target.value) return;
+    stTb.periode = e.target.value; stTb.rekap = null; stTb.page = 1; stTb.kelas = '';
+    $('tbJudulBulan').textContent = tbLabelBulan(stTb.periode);
+    await tbMuatRekap(); tbGambar();
+  });
+  $('tbCari').addEventListener('input', debounce(e => { stTb.cari = e.target.value.trim(); stTb.page = 1; tbGambarRekap(); }, 260));
+  $('tbKelas').addEventListener('change', e => { stTb.kelas = e.target.value; stTb.page = 1; tbGambarRekap(); });
+  $('tbCsv').addEventListener('click', tbEksporCsv);
+  $('tbTutup')?.addEventListener('click', () => tbTutupBuku(stTb.periode));
+  $('tbHapusPermanen')?.addEventListener('click', tbHapusPermanen);
+
+  onKlik((e) => {
+    const b = e.target.closest('[data-tb]');
+    if (b) {
+      const [aksi, bulan] = b.dataset.tb.split(':');
+      if (aksi === 'susun')    return tbSusunUlang(bulan);
+      if (aksi === 'arsip')    return tbTutupBuku(bulan, { lewatiRekap: true });
+      if (aksi === 'tandai')   return tbTandaiAudit(bulan);
+      if (aksi === 'pulihkan') return tbPulihkanAudit(bulan);
+      if (aksi === 'unduh')    return tbUnduhArsip(bulan);
+      if (aksi === 'lihat') {
+        stTb.periode = bulan; stTb.rekap = null; stTb.page = 1; stTb.kelas = '';
+        $('tbBulan').value = bulan; $('tbJudulBulan').textContent = tbLabelBulan(bulan);
+        return tbMuatRekap().then(tbGambar);
+      }
+    }
+    const p = e.target.closest('[data-pg]');
+    if (p && p.dataset.pg.startsWith('tb:')) { stTb.page = Number(p.dataset.pg.split(':')[1]); tbGambarRekap(); }
+  });
+
+  await Promise.all([tbMuatStatus(), tbMuatRekap()]);
+  tbGambar();
+}
+
+async function tbMuatStatus() {
+  const { data } = await q(db.rpc('status_tutup_buku'), 'status_tutup_buku');
+  stTb.status = data || [];
+}
+
+async function tbMuatRekap() {
+  const [rows, peta] = await Promise.all([
+    ambilSemuaSaring('rekap_bulanan_santri', '*', (k) => k.eq('periode', tbTanggal(stTb.periode))),
+    petaSiswa()
+  ]);
+  stTb.rekap = rows.map(r => ({ ...r, nama_siswa: peta[String(r.nisn)]?.nama_siswa || '(tidak ditemukan)' }))
+    .sort((a, b) => String(a.kelas || '').localeCompare(String(b.kelas || ''), 'id', { numeric: true })
+                 || String(a.nama_siswa).localeCompare(String(b.nama_siswa), 'id'));
+}
+
+/** Seperti ambilSemua(), dengan penyaring tambahan pada kueri. */
+async function ambilSemuaSaring(tabel, select, saring, urut) {
+  const hasil = [], step = 1000;
+  for (let from = 0; from < 200000; from += step) {
+    let k = db.from(tabel).select(select);
+    k = saring ? saring(k) : k;
+    (urut || []).forEach(([kol, naik]) => { k = k.order(kol, { ascending: naik !== false }); });
+    const { data, error } = await k.range(from, from + step - 1);
+    if (error) throw error;
+    hasil.push(...(data || []));
+    if (!data || data.length < step) break;
+  }
+  return hasil;
+}
+
+function tbGambar() {
+  if (APP.view !== 'tutupbuku') return;
+  tbGambarStatus();
+  tbGambarRekap();
+  tandaiTabelBisaGeser();
+}
+
+function tbGambarStatus() {
+  const admin = isAdmin();
+  const rows = stTb.status || [];
+  $('tbStatus').innerHTML = rows.map(r => {
+    const bulan = String(r.periode).slice(0, 7);
+    const arsip = r.path_arsip
+      ? `<span class="tag tag-ok">Tersimpan</span><div class="secondary">${esc(tgl(r.diarsipkan_pada))}</div>`
+      : `<span class="tag tag-sedang">Belum</span>`;
+    const rekap = r.berubah
+      ? `<span class="tag tag-berat" title="Ada catatan bulan ini yang berubah setelah rekap disusun">Berubah</span>`
+      : `<span class="tag tag-ok">Cocok</span>`;
+    const audit = `${angka(r.audit_hidup)} aktif${Number(r.audit_ditandai) ? `<div class="secondary">${angka(r.audit_ditandai)} ditandai hapus</div>` : ''}`;
+    const aksi = [
+      `<button class="btn-link" data-tb="lihat:${bulan}"><i class="fa-solid fa-table"></i> Rekap</button>`,
+      r.path_arsip ? `<button class="btn-link" data-tb="unduh:${bulan}"><i class="fa-solid fa-download"></i> Arsip</button>` : '',
+      admin && r.berubah ? `<button class="btn-link" data-tb="susun:${bulan}"><i class="fa-solid fa-rotate"></i> Susun ulang</button>` : '',
+      admin && !r.path_arsip ? `<button class="btn-link" data-tb="arsip:${bulan}"><i class="fa-solid fa-box-archive"></i> Arsipkan</button>` : '',
+      admin && r.path_arsip && Number(r.audit_hidup) ? `<button class="btn-link" data-tb="tandai:${bulan}"><i class="fa-solid fa-eraser"></i> Tandai audit</button>` : '',
+      admin && Number(r.audit_ditandai) ? `<button class="btn-link" data-tb="pulihkan:${bulan}"><i class="fa-solid fa-trash-arrow-up"></i> Pulihkan</button>` : ''
+    ].filter(Boolean).join(' ');
+    return `<tr>
+      <td><b>${esc(tbLabelBulan(bulan))}</b><div class="secondary">disusun ${esc(tgl(r.ditutup_pada))}</div></td>
+      <td class="right">${angka(r.jml_pelanggaran)}</td>
+      <td class="right">${angka(r.jml_pembinaan)}${Number(r.jml_pembinaan_terbuka) ? `<div class="secondary">${angka(r.jml_pembinaan_terbuka)} belum selesai</div>` : ''}</td>
+      <td class="right">${angka(r.jml_izin)}</td>
+      <td class="right">${angka(r.jml_prestasi)}</td>
+      <td class="right">${angka(r.jml_tahfiz)}</td>
+      <td>${rekap}</td><td>${arsip}</td><td>${audit}</td>
+      <td class="right">${aksi}</td>
+    </tr>`;
+  }).join('') || barisKosong(10, 'Belum ada bulan yang ditutup.',
+    'Rekap pertama disusun otomatis tanggal 1 bulan depan, atau tekan Tutup Buku.');
+}
+
+function tbSaring() {
+  let out = stTb.rekap || [];
+  if (stTb.kelas) out = out.filter(r => String(r.kelas) === stTb.kelas);
+  if (stTb.cari) {
+    const k = stTb.cari.toLowerCase();
+    out = out.filter(r => String(r.nama_siswa).toLowerCase().includes(k) || String(r.nisn).includes(k));
+  }
+  return out;
+}
+
+function tbGambarRekap() {
+  if (APP.view !== 'tutupbuku') return;
+  const semua = stTb.rekap || [];
+  const kelasList = [...new Set(semua.map(r => r.kelas).filter(Boolean))]
+    .sort((a, b) => String(a).localeCompare(String(b), 'id', { numeric: true }));
+  const sel = $('tbKelas');
+  sel.innerHTML = `<option value="">Semua kelas</option>` +
+    kelasList.map(k => `<option${k === stTb.kelas ? ' selected' : ''}>${esc(k)}</option>`).join('');
+
+  const jml = (kol) => semua.reduce((a, r) => a + Number(r[kol] || 0), 0);
+  const plg = jml('plg_ringan') + jml('plg_sedang') + jml('plg_berat') + jml('plg_lain');
+  const hal = Math.round((jml('tahfiz_ziyadah_hal') + jml('tahfiz_murajaah_hal')) * 10) / 10;
+  $('tbStat').innerHTML =
+      stat('Santri Tercatat', angka(semua.length), 'fa-solid fa-users',
+        'background:#E7F1F7;color:var(--sea)', 'var(--sea)', tbLabelBulan(stTb.periode))
+    + stat('Pelanggaran', angka(plg), 'fa-solid fa-triangle-exclamation',
+        'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)',
+        `Pembinaan selesai ${angka(jml('pbn_selesai'))} / ${angka(jml('pbn_total'))}`)
+    + stat('Perizinan', angka(jml('izin_total')), 'fa-solid fa-door-open',
+        'background:var(--amber-bg);color:var(--amber)', 'var(--amber)',
+        `${angka(jml('izin_hari'))} hari · ${angka(jml('izin_telat_balik'))} telat balik`)
+    + stat('Prestasi', angka(jml('prestasi_total')), 'fa-solid fa-medal',
+        'background:var(--teal-bg);color:var(--teal)', 'var(--teal)', `${angka(jml('prestasi_poin'))} poin`)
+    + stat('Tahfiz', angka(jml('tahfiz_setoran')), 'fa-solid fa-book-quran',
+        'background:var(--teal-bg);color:var(--teal)', 'var(--teal)', `${angka(hal)} halaman disetor`);
+
+  const rows = tbSaring();
+  const pages = Math.max(1, Math.ceil(rows.length / stTb.size));
+  if (stTb.page > pages) stTb.page = pages;
+  const hal2 = rows.slice((stTb.page - 1) * stTb.size, stTb.page * stTb.size);
+  const n = (v) => Number(v || 0);
+  const redup = (v) => n(v) ? angka(v) : '<span style="color:var(--text-3)">0</span>';
+
+  $('tbSub').textContent = semua.length
+    ? `${angka(rows.length)} dari ${angka(semua.length)} santri · disusun ${tgl(semua[0]?.disusun_pada)}`
+    : 'Rekap bulan ini belum disusun.';
+  $('tbBody').innerHTML = hal2.map(r => `
+    <tr>
+      <td><b>${esc(r.nama_siswa)}</b><div class="secondary">${esc(r.nisn)} · ${esc(r.unit_gender || '-')}</div></td>
+      <td>${esc(r.kelas || '-')}</td>
+      <td class="right">${redup(r.plg_ringan)} / ${redup(r.plg_sedang)} / ${redup(r.plg_berat)}</td>
+      <td class="right">${redup(r.plg_poin)}</td>
+      <td class="right">${redup(r.pbn_selesai)} / ${redup(r.pbn_total)}</td>
+      <td class="right">${redup(r.izin_sakit)} / ${redup(r.izin_keperluan)} / ${redup(r.izin_pemberitahuan)}</td>
+      <td class="right">${redup(r.izin_hari)}</td>
+      <td class="right">${redup(r.izin_telat_balik)}</td>
+      <td class="right">${redup(r.prestasi_emas)} / ${redup(r.prestasi_perak)} / ${redup(r.prestasi_perunggu)}</td>
+      <td class="right">${redup(r.prestasi_poin)}</td>
+      <td class="right">${redup(r.tahfiz_setoran)}</td>
+      <td class="right">${redup(r.tahfiz_ziyadah_hal)} / ${redup(r.tahfiz_murajaah_hal)}</td>
+      <td class="right">${r.tahfiz_target_hal == null ? '—' : angka(r.tahfiz_target_hal)}</td>
+      <td>${esc(r.tahfiz_kelancaran_terakhir || '—')}</td>
+    </tr>`).join('') || barisKosong(14, semua.length ? 'Tidak ada santri yang cocok.' : 'Rekap belum disusun.',
+      semua.length ? '' : (isAdmin() ? 'Tekan Tutup Buku untuk menyusun rekap bulan ini.' : 'Rekap disusun otomatis tanggal 1.'));
+  $('tbPager').innerHTML = pager('tb', stTb.page, rows.length, stTb.size);
+}
+
+function tbEksporCsv() {
+  const rows = tbSaring();
+  if (!rows.length) return toast('error', 'Tidak ada data untuk diekspor.');
+  unduhCsv(`rekap-bulanan-${stTb.periode}.csv`, [
+    ['Periode','NISN','Nama','Kelas','Unit','Plg Ringan','Plg Sedang','Plg Berat','Plg Lain','Poin Pelanggaran',
+     'Pembinaan Total','Pembinaan Selesai','Izin Total','Izin Sakit','Izin Keperluan','Izin Pemberitahuan',
+     'Hari Izin','Izin Sesuai Waktu','Izin Telat Balik','Izin Pending','Prestasi Total','Emas','Perak','Perunggu',
+     'Poin Prestasi','Setoran Tahfiz','Halaman Ziyadah','Halaman Murajaah','Juz Terakhir','Kelancaran Terakhir','Target Halaman'],
+    ...rows.map(r => [stTb.periode, r.nisn, r.nama_siswa, r.kelas, r.unit_gender, r.plg_ringan, r.plg_sedang, r.plg_berat,
+      r.plg_lain, r.plg_poin, r.pbn_total, r.pbn_selesai, r.izin_total, r.izin_sakit, r.izin_keperluan,
+      r.izin_pemberitahuan, r.izin_hari, r.izin_sesuai_waktu, r.izin_telat_balik, r.izin_pending, r.prestasi_total,
+      r.prestasi_emas, r.prestasi_perak, r.prestasi_perunggu, r.prestasi_poin, r.tahfiz_setoran,
+      r.tahfiz_ziyadah_hal, r.tahfiz_murajaah_hal, r.tahfiz_juz_terakhir, r.tahfiz_kelancaran_terakhir, r.tahfiz_target_hal])
+  ]);
+}
+
+/* ---------- aksi Admin -------------------------------------------- */
+
+function tbProgres(judul) {
+  Swal.fire({ title: judul, html: '<p id="tbProg" style="margin:0">Menyiapkan…</p>',
+    allowOutsideClick: false, showConfirmButton: false, didOpen: () => Swal.showLoading() });
+  return (teks) => { const el = document.getElementById('tbProg'); if (el) el.textContent = teks; };
+}
+
+/** Kompres JSON dengan gzip bawaan peramban; tanpa pustaka tambahan. */
+async function tbKemas(obj) {
+  const teks = JSON.stringify(obj);
+  if (typeof CompressionStream === 'undefined') {
+    return { blob: new Blob([teks], { type: 'application/json' }), ext: 'json', tipe: 'application/json' };
+  }
+  const blob = await new Response(new Blob([teks]).stream().pipeThrough(new CompressionStream('gzip'))).blob();
+  return { blob, ext: 'json.gz', tipe: 'application/gzip' };
+}
+
+async function tbUnggah(path, kemasan) {
+  const { error } = await db.storage.from('arsip')
+    .upload(`${path}.${kemasan.ext}`, kemasan.blob, { upsert: true, contentType: kemasan.tipe });
+  if (error) throw error;
+  return kemasan.blob.size;
+}
+
+async function tbTutupBuku(bulan, opsi = {}) {
+  if (!isAdmin()) return;
+  if (!/^\d{4}-\d{2}$/.test(bulan || '')) return toast('error', 'Pilih bulan terlebih dahulu.');
+  const belumUsai = bulan >= bulanIni();
+  const r = await Swal.fire({
+    icon: belumUsai ? 'warning' : 'question',
+    title: `Tutup buku ${tbLabelBulan(bulan)}?`,
+    html: `<div style="text-align:left">
+      <ol style="margin:0 0 10px 18px;padding:0">
+        ${opsi.lewatiRekap ? '' : '<li>Menyusun rekap per santri (pelanggaran, pembinaan, izin, prestasi, tahfiz).</li>'}
+        <li>Mengarsipkan salinan lengkap bulan itu ke Storage <code>arsip/${esc(tbFolder(bulan))}</code>.</li>
+      </ol>
+      <p class="hint" style="margin:0">Data di database <b>tidak</b> dihapus. Jejak audit baru bisa ditandai hapus setelah arsip tersimpan.</p>
+      ${belumUsai ? '<p class="hint" style="margin:10px 0 0;color:var(--maroon)"><b>Bulan ini belum berakhir.</b> Catatan yang masuk sesudah ini tidak ikut terarsip; tutup buku ulang di awal bulan depan.</p>' : ''}
+    </div>`,
+    showCancelButton: true, confirmButtonText: 'Ya, tutup buku', cancelButtonText: 'Batal',
+    confirmButtonColor: '#14618B'
+  });
+  if (!r.isConfirmed) return;
+
+  const lapor = tbProgres(`Tutup buku ${tbLabelBulan(bulan)}`);
+  try {
+    const dari = tbTanggal(bulan), sampai = tbTanggal(tbBulanBerikut(bulan));
+    if (!opsi.lewatiRekap) {
+      lapor('Menyusun rekap per santri…');
+      await q(db.rpc('susun_rekap_bulanan', { p_periode: dari }), 'susun_rekap_bulanan');
+    }
+    lapor('Mengambil catatan pelanggaran…');
+    const pelanggaran = await ambilSemuaSaring('detail_data', '*',
+      k => k.gte('tanggal', dari).lt('tanggal', sampai), [['tanggal'], ['id_log']]);
+    lapor('Mengambil catatan pembinaan…');
+    const pembinaan = await ambilSemuaSaring('log_pembinaan', '*',
+      k => k.gte('tanggal_pembinaan', dari).lt('tanggal_pembinaan', sampai), [['tanggal_pembinaan'], ['id_pembinaan']]);
+    lapor('Mengambil perizinan, prestasi, dan tahfiz…');
+    const [izin, prestasi, tahfiz, rekap] = await Promise.all([
+      ambilSemuaSaring('log_perizinan', '*', k => k.gte('tanggal_mulai', dari).lt('tanggal_mulai', sampai), [['tanggal_mulai'], ['id_izin']]),
+      ambilSemuaSaring('log_prestasi', '*', k => k.gte('tanggal', dari).lt('tanggal', sampai), [['tanggal'], ['id']]),
+      ambilSemuaSaring('log_tahfiz', '*', k => k.gte('tanggal', dari).lt('tanggal', sampai), [['tanggal'], ['id']]),
+      ambilSemuaSaring('rekap_bulanan_santri', '*', k => k.eq('periode', dari), [['nisn']])
+    ]);
+    lapor('Mengambil jejak audit…');
+    const audit = await ambilSemuaSaring('audit_log', '*',
+      k => k.gte('waktu', `${dari}T00:00:00+07:00`).lt('waktu', `${sampai}T00:00:00+07:00`), [['waktu'], ['id']]);
+
+    const meta = { periode: bulan, dibuat: new Date().toISOString(), oleh: APP.profil?.nama || '',
+      versi: 'rq-v2.18', jumlah: { pelanggaran: pelanggaran.length, pembinaan: pembinaan.length,
+        izin: izin.length, prestasi: prestasi.length, tahfiz: tahfiz.length, rekap: rekap.length, audit: audit.length } };
+
+    const folder = tbFolder(bulan);
+    lapor(`Mengunggah arsip data (${angka(pelanggaran.length + pembinaan.length + izin.length + prestasi.length + tahfiz.length)} baris)…`);
+    const b1 = await tbUnggah(`${folder}data`, await tbKemas({ meta, rekap, pelanggaran, pembinaan, izin, prestasi, tahfiz }));
+    lapor(`Mengunggah arsip jejak audit (${angka(audit.length)} baris)…`);
+    const b2 = await tbUnggah(`${folder}audit_log`, await tbKemas({ meta, audit }));
+
+    await q(db.rpc('catat_arsip_bulanan', { p_periode: dari, p_path: folder }), 'catat_arsip_bulanan');
+    Swal.close();
+    await Swal.fire({ icon: 'success', title: 'Buku ditutup',
+      html: `Rekap ${angka(rekap.length)} santri tersimpan.<br>Arsip ${angka(Math.round((b1 + b2) / 1024))} KB di <code>arsip/${esc(folder)}</code>.`,
+      confirmButtonColor: '#14618B' });
+    stTb.periode = bulan; stTb.rekap = null;
+    if (APP.view === 'tutupbuku') { $('tbBulan').value = bulan; $('tbJudulBulan').textContent = tbLabelBulan(bulan); }
+    await Promise.all([tbMuatStatus(), tbMuatRekap()]);
+    tbGambar();
+  } catch (err) { Swal.close(); fireError(err); }
+}
+
+async function tbSusunUlang(bulan) {
+  if (!isAdmin()) return;
+  const r = await Swal.fire({ icon: 'question', title: `Susun ulang rekap ${tbLabelBulan(bulan)}?`,
+    text: 'Rekap bulan ini dihitung ulang dari catatan terkini. Arsip Storage tidak berubah; arsipkan ulang bila perlu.',
+    showCancelButton: true, confirmButtonText: 'Susun ulang', cancelButtonText: 'Batal', confirmButtonColor: '#14618B' });
+  if (!r.isConfirmed) return;
+  try {
+    loading(true);
+    const { data: n } = await q(db.rpc('susun_rekap_bulanan', { p_periode: tbTanggal(bulan) }), 'susun_rekap_bulanan');
+    toast('success', `Rekap disusun ulang: ${angka(n)} santri.`);
+    stTb.rekap = null;
+    await Promise.all([tbMuatStatus(), tbMuatRekap()]);
+    tbGambar();
+  } catch (err) { fireError(err); } finally { loading(false); }
+}
+
+async function tbTandaiAudit(bulan) {
+  if (!isAdmin()) return;
+  const r = await Swal.fire({ icon: 'warning', title: `Tandai hapus jejak audit ${tbLabelBulan(bulan)}?`,
+    html: `<p style="text-align:left;margin:0">Jejak audit bulan ini disembunyikan dari halaman Jejak Audit (soft delete).
+      Masih bisa <b>dipulihkan</b> kapan saja sebelum dihapus permanen. Hapus permanen paling cepat
+      30 hari setelah penandaan, dan salinannya sudah ada di arsip Storage.</p>`,
+    showCancelButton: true, confirmButtonText: 'Tandai hapus', cancelButtonText: 'Batal', confirmButtonColor: '#9F1239' });
+  if (!r.isConfirmed) return;
+  try {
+    loading(true);
+    const { data: n } = await q(db.rpc('arsip_audit_lunak', { p_periode: tbTanggal(bulan), p_alasan: 'tutup buku' }), 'arsip_audit_lunak');
+    toast('success', `${angka(n)} jejak ditandai hapus.`);
+    stAud.rows = null;
+    await tbMuatStatus(); tbGambar();
+  } catch (err) { fireError(err); } finally { loading(false); }
+}
+
+async function tbPulihkanAudit(bulan) {
+  if (!isAdmin()) return;
+  const r = await Swal.fire({ icon: 'question', title: `Pulihkan jejak audit ${tbLabelBulan(bulan)}?`,
+    text: 'Penandaan hapus dibatalkan; jejak kembali tampil di halaman Jejak Audit.',
+    showCancelButton: true, confirmButtonText: 'Pulihkan', cancelButtonText: 'Batal', confirmButtonColor: '#14618B' });
+  if (!r.isConfirmed) return;
+  try {
+    loading(true);
+    const { data: n } = await q(db.rpc('pulihkan_audit', { p_periode: tbTanggal(bulan) }), 'pulihkan_audit');
+    toast('success', `${angka(n)} jejak dipulihkan.`);
+    stAud.rows = null;
+    await tbMuatStatus(); tbGambar();
+  } catch (err) { fireError(err); } finally { loading(false); }
+}
+
+async function tbHapusPermanen() {
+  if (!isAdmin()) return;
+  const r = await Swal.fire({ icon: 'warning', title: 'Hapus permanen jejak audit?',
+    html: `<p style="text-align:left;margin:0 0 10px">Hanya jejak yang <b>sudah ditandai hapus minimal 30 hari</b>
+      dan bulannya <b>sudah diarsipkan</b> ke Storage yang dihapus. Tindakan ini tidak bisa dibatalkan.</p>
+      <p style="text-align:left;margin:0">Ketik <b>HAPUS</b> untuk melanjutkan.</p>`,
+    input: 'text', inputPlaceholder: 'HAPUS',
+    inputValidator: (v) => v === 'HAPUS' ? null : 'Ketik HAPUS dengan huruf kapital.',
+    showCancelButton: true, confirmButtonText: 'Hapus permanen', cancelButtonText: 'Batal', confirmButtonColor: '#9F1239' });
+  if (!r.isConfirmed) return;
+  try {
+    loading(true);
+    const { data: n } = await q(db.rpc('hapus_permanen_audit'), 'hapus_permanen_audit');
+    await Swal.fire({ icon: n ? 'success' : 'info',
+      title: n ? `${angka(n)} jejak dihapus permanen` : 'Belum ada yang memenuhi syarat',
+      text: n ? 'Ruang yang kosong dipakai ulang oleh database untuk jejak baru.'
+              : 'Jejak baru boleh dihapus permanen 30 hari setelah ditandai.',
+      confirmButtonColor: '#14618B' });
+    stAud.rows = null;
+    await tbMuatStatus(); tbGambar();
+  } catch (err) { fireError(err); } finally { loading(false); }
+}
+
+async function tbUnduhArsip(bulan) {
+  try {
+    loading(true);
+    const folder = tbFolder(bulan);
+    const { data: daftar, error } = await db.storage.from('arsip').list(folder.replace(/\/$/, ''));
+    if (error) throw error;
+    const berkas = (daftar || []).filter(f => f.name && !f.name.endsWith('/'));
+    if (!berkas.length) return toast('error', 'Arsip bulan ini tidak ditemukan.');
+    for (const f of berkas) {
+      const { data: blob, error: e2 } = await db.storage.from('arsip').download(`${folder}${f.name}`);
+      if (e2) throw e2;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `arsip-${bulan}-${f.name}`; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+    }
+    toast('success', `${berkas.length} berkas arsip diunduh.`);
+  } catch (err) { fireError(err); } finally { loading(false); }
 }
 
 // ---------------------------------------------------------------------
