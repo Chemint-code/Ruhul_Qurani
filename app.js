@@ -3006,6 +3006,9 @@ async function viewDashboard() {
 
     <div id="blokSebaran"></div>`;
 
+  // v2.25 — monster amanah: angka yang sama dengan butir pembinaan di atas.
+  pasangMonster(bolehLaporBina() ? binaBelumLapor : binaProses);
+
   onKlik(async (e) => {
     const n = e.target.closest('[data-nav]');
     if (n) return navigateTo(n.dataset.nav);
@@ -19536,6 +19539,163 @@ async function tbUnduhArsip(bulan) {
     toast('success', `${berkas.length} berkas arsip diunduh.`);
   } catch (err) { fireError(err); } finally { loading(false); }
 }
+
+/* =====================================================================
+ * v2.25 — MONSTER AMANAH (gerak ala "CSS Wrapped")
+ * ---------------------------------------------------------------------
+ * Pembinaan yang belum diselesaikan diwujudkan sebagai monster imut yang
+ * usil: bersembunyi di balik foto profil (bilah profil guru) dan
+ * nongkrong di atas butir amanah pembinaan (panel sapaan). Makin banyak
+ * yang tertunda, makin ramai monsternya; bila semuanya tuntas, mereka
+ * pergi sendiri. Jadi maknanya sederhana: selesaikan pembinaan.
+ *
+ * JS hanya menentukan TINGKAT (0–3) dan menyisipkan markup. Seluruh
+ * gerak dikerjakan CSS (lapisan `wrapped` di index.html).
+ * Angka yang dipakai sama persis dengan angka pada butir amanah dasbor.
+ * ===================================================================== */
+
+/** Ambang tingkat monster: [tingkat 1, tingkat 2, tingkat 3]. Ubah di sini. */
+const AMBANG_MONSTER = [1, 10, 50];
+
+function tingkatMonster(n) {
+  n = Number(n) || 0;
+  if (n >= AMBANG_MONSTER[2]) return 3;
+  if (n >= AMBANG_MONSTER[1]) return 2;
+  if (n >= AMBANG_MONSTER[0]) return 1;
+  return 0;
+}
+
+/** Monster orisinal: badan bulat bertanduk, dua mata, taring kecil, lidah. */
+function svgMonster() {
+  return `<svg class="mon-svg" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+    <path class="mon-tanduk" d="M17 17 13 4l11 8zM47 17l4-13-11 8z"/>
+    <path class="mon-badan" d="M32 9c17 0 26 12 26 28v23l-6-4-6 4-7-4-7 4-7-4-6 4-7-4-6 4V37C6 21 15 9 32 9z"/>
+    <ellipse class="mon-perut" cx="32" cy="45" rx="14" ry="9"/>
+    <ellipse class="mon-tangan kiri" cx="7" cy="41" rx="3.6" ry="6"/>
+    <ellipse class="mon-tangan kanan" cx="57" cy="41" rx="3.6" ry="6"/>
+    <circle class="mon-pipi" cx="15" cy="38" r="3"/><circle class="mon-pipi" cx="49" cy="38" r="3"/>
+    <g class="mon-mata">
+      <circle cx="23" cy="29" r="7.2" fill="#fff"/><circle cx="41" cy="29" r="7.2" fill="#fff"/>
+      <g class="mon-pupil">
+        <circle cx="24" cy="30" r="3.3" fill="#1B1030"/><circle cx="42" cy="30" r="3.3" fill="#1B1030"/>
+        <circle cx="25.2" cy="28.6" r="1.1" fill="#fff"/><circle cx="43.2" cy="28.6" r="1.1" fill="#fff"/>
+      </g>
+    </g>
+    <ellipse class="mon-lidah" cx="34.5" cy="44" rx="3.3" ry="4.2"/>
+    <path class="mon-mulut" d="M24 40q8 7 16 0"/>
+    <path class="mon-taring" d="m27.2 41.6 1.5 3 1.6-2.2zm6.8.7 1.5 2.3 1.6-3.1z"/>
+  </svg>`;
+}
+
+function kalimatMonster(t, n) {
+  const a = angka(n);
+  if (t >= 3) return [`Wah, ${a}! Kami makin ramai~`, 'Tumpukan pembinaan = rumah kami!', 'Ayo bina santrinya, biar kami bubar.'];
+  if (t === 2) return [`Hihi, ${a} pembinaan belum selesai!`, 'Aku betah lho di sini~', 'Bina dulu santrinya, baru aku pergi.'];
+  return [`Psst… masih ada ${a} pembinaan.`, 'Selesaikan ya, nanti aku pergi.'];
+}
+
+function bolehBukaPembinaan() {
+  try { return (MENU_ROLE.pembinaan || []).includes(role()); } catch { return false; }
+}
+
+/** Satu pintu: tetapkan jumlah tertunda → tingkat → monster di dua panel. */
+function pasangMonster(jumlah) {
+  const n = Math.max(0, Number(jumlah) || 0);
+  const t = tingkatMonster(n);
+  APP.monster = { jumlah: n, tingkat: t };
+  document.body.dataset.monster = String(t);
+  monsterBilahProfil(t, n);
+  monsterSapaan(t, n);
+}
+
+/** Bilah profil guru: monster mengintip dari balik foto profil. */
+function monsterBilahProfil(t, n) {
+  const bingkai = document.querySelector('.pbar-av-bingkai');
+  if (!bingkai) return;
+  let grup = $('pbarMon');
+  if (!grup) {
+    grup = document.createElement('button');
+    grup.type = 'button';
+    grup.id = 'pbarMon';
+    grup.className = 'pbar-mon';
+    grup.hidden = true;
+    grup.addEventListener('click', () => {
+      if (bolehBukaPembinaan()) navigateTo('pembinaan');
+      else { grup.classList.remove('kaget'); void grup.offsetWidth; grup.classList.add('kaget'); }
+    });
+    bingkai.appendChild(grup);
+  }
+  if (!t) { grup.hidden = true; return; }
+  const teks = `${angka(n)} pembinaan belum selesai — selesaikan agar monster pergi`;
+  grup.title = teks;
+  grup.setAttribute('aria-label', teks);
+  grup.dataset.tingkat = String(t);
+  grup.style.setProperty('--tingkat', t);
+  if (grup.childElementCount !== t) {
+    grup.innerHTML = Array.from({ length: t }, () => `<span class="mon">${svgMonster()}</span>`).join('');
+  }
+  grup.hidden = false;
+}
+
+/** Panel sapaan (pesan amanah): monster hinggap di butir pembinaan. */
+function monsterSapaan(t, n) {
+  const sapa = document.querySelector('#viewRoot .sapa');
+  if (!sapa) return;
+  sapa.dataset.monster = String(t);
+  sapa.style.setProperty('--tingkat', t);
+  sapa.querySelectorAll('.mon-hinggap, .sapa-mon-jalan').forEach(el => el.remove());
+  const ikon = sapa.querySelector('.amanah .fa-hands-holding-child, .amanah .fa-paper-plane');
+  const btn = ikon ? ikon.closest('.amanah') : null;
+  sapa.querySelectorAll('.amanah.digoda').forEach(b => { if (b !== btn || !t) b.classList.remove('digoda'); });
+  if (!t || !btn) return;
+
+  btn.classList.add('digoda');
+  btn.dataset.tingkat = String(t);
+  const kal = kalimatMonster(t, n);
+  btn.insertAdjacentHTML('beforeend', `
+    <span class="mon-hinggap" aria-hidden="true" style="--baris:${kal.length}">
+      <span class="mon-gelembung"><span class="mon-kalimat">${
+        [...kal, kal[0]].map(k => `<span>${esc(k)}</span>`).join('')}</span></span>
+      <span class="mon">${svgMonster()}</span>
+      ${t >= 2 ? `<span class="mon mon-gantung">${svgMonster()}</span>` : ''}
+    </span>`);
+  if (t >= 3) {
+    sapa.insertAdjacentHTML('beforeend',
+      `<div class="sapa-mon-jalan" aria-hidden="true"><span class="mon">${svgMonster()}</span></div>`);
+  }
+}
+
+/** Hitung ulang dari data tersimpan — rumus yang sama dengan butir amanah dasbor. */
+async function segarkanMonster() {
+  try {
+    if (!APP.profil) return;
+    const semua = await amanKosong(muatPembinaan, 'pembinaan');
+    const berkelas = (rows) => rows.map(p => ({ ...p, kelas: p.siswa?.kelas || '' }));
+    let n = 0;
+    if (bolehLaporBina()) {
+      const lap = await petaLaporanBina();
+      n = filterBinaanUnit(dedupBina(berkelas(semua.filter(aktifPembinaan))), 'kelas')
+        .filter(p => p.status_pembinaan !== 'Selesai' && !lap.has(String(p.id_pembinaan))).length;
+    } else {
+      n = filterBinaanUnit(berkelas(saringPeriode(semua.filter(aktifPembinaan), 'tanggal_pembinaan')), 'kelas')
+        .filter(p => p.status_pembinaan !== 'Selesai').length;
+    }
+    pasangMonster(n);
+  } catch (e) { console.warn('monster amanah tidak terhitung:', e.message); }
+}
+
+/* Pembungkus navigateTo (fungsi aslinya tidak diubah): setelah menu apa
+   pun selain dasbor selesai digambar, monster di bilah profil disegarkan
+   dari data yang sudah tersimpan — tanpa permintaan jaringan tambahan
+   selama cache masih hangat. Dasbor memasang monsternya sendiri. */
+(function () {
+  const navigasiAsli = navigateTo;
+  navigateTo = async function (view) {
+    const hasil = await navigasiAsli(view);
+    if (APP.view !== 'dashboard') segarkanMonster();
+    return hasil;
+  };
+})();
 
 // ---------------------------------------------------------------------
 hidupkanLayarLogin();

@@ -5017,6 +5017,372 @@
   }
   @media print { .lm { display:none !important; } }
 }
+
+/* ==================================================================
+   v2.25 · LAPISAN `wrapped` — GERAK ALA "CSS WRAPPED 2025"
+   ------------------------------------------------------------------
+   Fitur CSS terbaru yang dipakai (semuanya native, tanpa pustaka):
+     · sibling-index()   → jeda masuk bertingkat tanpa nth-child berderet
+     · @property <integer>→ indeks induk diwariskan ke anak (angka statistik)
+     · linear()          → pelonggaran "pegas" yang memantul
+     · corner-shape      → sudut squircle pada kartu statistik & ikon
+     · if() + style()    → warna monster ditentukan tingkat amanah
+     · @starting-style + transition-behavior: allow-discrete
+                         → monster muncul DAN pergi dengan animasi,
+                           termasuk saat [hidden] (display:none)
+     · animation-timeline: view() → kartu hadir saat digulir (sudah v2.12)
+     · container query units (cqi) → monster berjalan selebar panel
+   Setiap fitur dibungkus @supports: peramban lama tetap tampil rapi,
+   hanya tanpa geraknya. Semua gerak berhenti pada `prefers-reduced-
+   motion` dan mode `hemat`; monster tetap terlihat (diam) sebagai
+   penanda, karena ia informasi, bukan sekadar hiasan.
+   ================================================================== */
+@layer wrapped {
+
+  @property --wr-i     { syntax: '<integer>'; inherits: true;  initial-value: 1; }
+  @property --wr-putar { syntax: '<angle>';   inherits: false; initial-value: 0deg; }
+
+  :root {
+    --pegas: linear(0, .009, .035 2.1%, .141, .281 6.7%, .723 12.9%, .938 16.7%, 1.017,
+             1.077, 1.121, 1.149 24.3%, 1.159, 1.163, 1.161, 1.154 29.9%, 1.129 32.8%,
+             1.051 39.6%, 1.017 43.1%, .991, .977 51%, .974 53.8%, .975 57.1%, .997 69.8%,
+             1.003 76.9%, 1);
+    --wr-jeda: 70ms;
+    --wr-cincin: conic-gradient(from var(--wr-putar),
+                 var(--brass-hi), var(--sea-hi), #3CC6B0, #E0457B, var(--brass-hi));
+  }
+
+  /* ---------------- 1 · KOTAK SEKSI: masuk bertingkat ---------------- */
+  @keyframes wrMasuk {
+    from { opacity: 0; transform: translate3d(0, 26px, 0) scale(.86) rotate(-2.5deg); filter: blur(5px); }
+    60%  { filter: blur(0); }
+    to   { opacity: 1; transform: none; filter: none; }
+  }
+  @keyframes wrAngka {
+    from { clip-path: inset(0 0 100% 0); transform: translateY(.45em); }
+    to   { clip-path: inset(0 0 -10% 0); transform: none; }
+  }
+  @keyframes wrLetup {
+    0%   { transform: scale(0) rotate(-20deg); }
+    100% { transform: none; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    :is(.stats, .pgs-rail, .unit-grid, .sapa-amanah) > * {
+      animation: wrMasuk .75s var(--pegas) both;
+      animation-delay: calc(var(--wr-i) * var(--wr-jeda) + 90ms);
+    }
+    /* Cadangan untuk peramban tanpa sibling-index() */
+    :is(.stats, .pgs-rail, .unit-grid, .sapa-amanah) > :nth-child(2) { --wr-i: 1; }
+    :is(.stats, .pgs-rail, .unit-grid, .sapa-amanah) > :nth-child(3) { --wr-i: 2; }
+    :is(.stats, .pgs-rail, .unit-grid, .sapa-amanah) > :nth-child(4) { --wr-i: 3; }
+    :is(.stats, .pgs-rail, .unit-grid, .sapa-amanah) > :nth-child(n+5) { --wr-i: 4; }
+    :is(.stats, .pgs-rail, .unit-grid, .sapa-amanah) > :first-child { --wr-i: 0; }
+    @supports (order: sibling-index()) {
+      :is(.stats, .pgs-rail, .unit-grid, .sapa-amanah) > * { --wr-i: calc(sibling-index() - 1); }
+    }
+
+    /* angka statistik naik dari "slot", menyusul kartunya */
+    .stats > .stat .v {
+      animation: wrAngka .6s var(--pegas) both;
+      animation-delay: calc(var(--wr-i) * var(--wr-jeda) + 380ms);
+    }
+    .stats > .stat .ico, .pgs-portal .seal, .amanah .ikon {
+      animation: wrLetup .6s var(--pegas) both;
+      animation-delay: calc(var(--wr-i) * var(--wr-jeda) + 300ms);
+    }
+    .amanah .teks b {
+      animation: wrLetup .55s var(--pegas) both;
+      animation-delay: calc(var(--wr-i) * var(--wr-jeda) + 420ms);
+    }
+  }
+
+  /* ---------------- 2 · cincin pelangi berputar saat disorot -------- */
+  @keyframes wrPutar { to { --wr-putar: 360deg; } }
+  @media (hover: hover) {
+    .stat:hover::before, .unit-card:hover::after {
+      background: var(--wr-cincin);
+      animation: wrPutar 2.4s linear infinite;
+    }
+    .stat:hover::before { padding: 1.5px; }
+  }
+  .unit-card { position: relative; }
+  .unit-card::after {
+    content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 2px;
+    pointer-events: none; z-index: 3; background: transparent;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  }
+
+  /* Portal layanan Pengasuhan: bingkai lengkung berputar pada layanan
+     yang sedang dibuka & saat disorot; segel "bernapas". */
+  .pgs-portal { isolation: isolate; }
+  .pgs-portal::after {
+    content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    border-radius: inherit; padding: 1.5px; opacity: 0;
+    background: var(--wr-cincin);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+    transition: opacity .4s ease;
+  }
+  .pgs-portal.on::after, .pgs-portal:hover::after { opacity: 1; animation: wrPutar 4s linear infinite; }
+  @keyframes wrNapas {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--brass) 45%, transparent); }
+    50%      { box-shadow: 0 0 0 9px color-mix(in oklab, var(--brass) 0%, transparent); }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .pgs-portal.on .seal { animation: wrLetup .6s var(--pegas) both, wrNapas 2.6s ease-in-out 1s infinite; }
+    .pgs-portal:hover .seal i { animation: wrGoyang .6s ease; }
+    .pgs-portal .rum { animation: wrRum .9s var(--pegas) both; animation-delay: calc(var(--wr-i) * var(--wr-jeda) + 350ms); }
+  }
+  @keyframes wrRum { from { opacity: 0; transform: translate3d(24px, 0, 0) scale(1.4); } }
+  @keyframes wrGoyang {
+    0%, 100% { transform: rotate(0); } 25% { transform: rotate(-14deg); }
+    50% { transform: rotate(10deg); } 75% { transform: rotate(-6deg); }
+  }
+
+  /* ---------------- 3 · sudut squircle ---------------- */
+  @supports (corner-shape: squircle) {
+    .stat, .stat::before, .stat::after { corner-shape: squircle; }
+    .stat { border-radius: 30px; }
+    .stat .ico, .amanah .ikon, .pbar-logo, .pbar-korps { corner-shape: squircle; }
+    .stat .ico { border-radius: 18px; }
+    .amanah .ikon { border-radius: 14px; }
+    .amanah { corner-shape: squircle; border-radius: 20px; }
+    .stat::after { corner-shape: round; }
+  }
+
+  /* ================== 4 · BILAH PROFIL GURU ================== */
+  .pbar-av-bingkai { position: relative; flex: none; display: grid; isolation: isolate; }
+  .pbar-av-bingkai > .pbar-av { z-index: 2; flex: none; }
+  /* cincin pelangi menggantikan cincin kuningan statis */
+  .pbar-av-bingkai::before {
+    content: ''; position: absolute; inset: -5px; z-index: 1; border-radius: 50%;
+    padding: 2.5px; pointer-events: none;
+    background: var(--wr-cincin);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+    animation: wrPutar 7s linear infinite;
+  }
+  .pbar-av {
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--ink) 92%, transparent),
+                0 20px 38px -14px rgba(0,0,0,.85);
+  }
+
+  /* bentuk-bentuk ala Wrapped yang melayang pelan di belakang */
+  .pbar-bentuk { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
+  .pbar-bentuk i {
+    position: absolute; display: block; width: 26px; height: 26px; opacity: .3;
+    animation: wrApung 11s ease-in-out infinite alternate;
+    animation-delay: calc(var(--wr-i, 0) * -2.7s);
+  }
+  .pbar-bentuk i:nth-child(1) { --wr-i: 0; left: 38%; top: 18%; background: var(--brass-hi); border-radius: 50%; }
+  .pbar-bentuk i:nth-child(2) { --wr-i: 1; left: 52%; top: 58%; width: 20px; height: 20px; background: #3CC6B0; border-radius: 6px; }
+  .pbar-bentuk i:nth-child(3) { --wr-i: 2; left: 64%; top: 12%; width: 22px; height: 22px; background: #E0457B; border-radius: 14px 14px 0 14px; }
+  .pbar-bentuk i:nth-child(4) { --wr-i: 3; left: 75%; top: 50%; width: 30px; height: 30px; background: var(--sea-hi);
+    clip-path: polygon(50% 0,61% 35%,100% 50%,61% 65%,50% 100%,39% 65%,0 50%,39% 35%); }
+  @keyframes wrApung {
+    0%   { transform: translate3d(0, 0, 0) rotate(0) scale(1); }
+    50%  { transform: translate3d(34px, -10px, 0) rotate(120deg) scale(1.25); }
+    100% { transform: translate3d(-22px, 12px, 0) rotate(250deg) scale(.85); }
+  }
+  @media (max-width: 640px) { .pbar-bentuk i:nth-child(n+3) { display: none; } }
+
+  /* nama: kilau menyapu sekali saat masuk, lalu tiap 9 detik */
+  .pbar-id b { position: relative; }
+  .pbar-id b::after {
+    content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 38%;
+    background: linear-gradient(100deg, transparent, color-mix(in oklab, var(--brass-hi) 55%, transparent), transparent);
+    mix-blend-mode: overlay; transform: translateX(-120%) skewX(-18deg); pointer-events: none;
+  }
+  @keyframes wrSapu { 0%, 12% { transform: translateX(-120%) skewX(-18deg); } 30%, 100% { transform: translateX(320%) skewX(-18deg); } }
+  @media (prefers-reduced-motion: no-preference) {
+    .pbar-id b::after { animation: wrSapu 9s ease-in-out .8s infinite; }
+    .pbar-id .salam, .pbar-id b, .pbar-role { animation: wrMasuk .8s var(--pegas) both; }
+    .pbar-id b    { animation-delay: .08s; }
+    .pbar-role    { animation-delay: .16s; }
+  }
+
+  /* ================== 5 · MONSTER AMANAH ================== */
+  .mon {
+    --m-warna: #2BB3A3;
+    display: block; width: 44px; aspect-ratio: 1; pointer-events: auto;
+    filter: drop-shadow(0 6px 8px rgba(0,0,0,.35));
+  }
+  @supports not (color: if(else: red)) {
+    [data-tingkat="2"] .mon, [data-monster="2"] .mon { --m-warna: #8B6CF0; }
+    [data-tingkat="3"] .mon, [data-monster="3"] .mon { --m-warna: #E0457B; }
+  }
+  /* if(): tingkat (--tingkat, ditulis app.js) → warna langsung */
+  @supports (color: if(else: red)) {
+    .mon { --m-warna: if(style(--tingkat: 3): #E0457B; style(--tingkat: 2): #8B6CF0; else: #2BB3A3); }
+  }
+  .mon-svg { width: 100%; height: 100%; overflow: visible; display: block; }
+  .mon-badan  { fill: var(--m-warna); }
+  .mon-tanduk { fill: color-mix(in oklab, var(--m-warna) 55%, #FFE9A8); }
+  .mon-perut  { fill: color-mix(in oklab, var(--m-warna) 55%, white); }
+  .mon-tangan { fill: color-mix(in oklab, var(--m-warna) 82%, black); }
+  .mon-pipi   { fill: #FF9EC0; opacity: .7; }
+  .mon-mulut  { fill: none; stroke: #1B1030; stroke-width: 2.4; stroke-linecap: round; }
+  .mon-taring { fill: #fff; }
+  .mon-lidah  { fill: #FF6F9F; }
+  .mon-mata, .mon-pupil, .mon-lidah, .mon-tangan { transform-box: fill-box; transform-origin: center; }
+  .mon-lidah { transform-origin: 50% 0; transform: scaleY(0); }
+  .mon-tangan.kiri  { transform-origin: 80% 20%; }
+  .mon-tangan.kanan { transform-origin: 20% 20%; }
+
+  @keyframes monKedip { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.08); } }
+  @keyframes monLirik { 0%, 30% { transform: translateX(0); } 40%, 60% { transform: translateX(-2.2px); } 70%, 90% { transform: translateX(2.2px); } 100% { transform: translateX(0); } }
+  @keyframes monLidah { 0%, 55%, 100% { transform: scaleY(0); } 62%, 80% { transform: scaleY(1); } }
+  @keyframes monLambai { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-28deg); } 50% { transform: rotate(10deg); } 75% { transform: rotate(-22deg); } }
+  @keyframes monLoncat { 0%, 100% { transform: translateY(0) scale(1, 1); } 40% { transform: translateY(-4px) scale(.96, 1.05); } 55% { transform: translateY(0) scale(1.06, .94); } }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .mon .mon-mata   { animation: monKedip 3.8s infinite; }
+    .mon .mon-pupil  { animation: monLirik 5s ease-in-out infinite; }
+    .mon .mon-tangan.kanan { animation: monLambai 1.6s ease-in-out infinite; }
+    [data-tingkat="2"] .mon .mon-lidah, [data-tingkat="3"] .mon .mon-lidah { animation: monLidah 3.2s ease-in-out infinite; }
+    [data-tingkat="3"] .mon .mon-tangan.kiri { animation: monLambai 1.3s ease-in-out .3s infinite; }
+    .mon .mon-svg { animation: monLoncat 1.4s ease-in-out infinite; }
+    .mon:nth-child(2) .mon-svg { animation-delay: -.5s; }
+    .mon:nth-child(3) .mon-svg { animation-delay: -.9s; }
+  }
+
+  /* ---- 5a · di balik foto profil ---- */
+  .pbar-mon {
+    position: absolute; inset: 0; z-index: 1; padding: 0; border: 0; background: none;
+    pointer-events: none; cursor: pointer;
+    opacity: 1; scale: 1;
+    transition: opacity .5s ease, scale .6s var(--pegas), display .6s allow-discrete;
+  }
+  @starting-style { .pbar-mon { opacity: 0; scale: .3; } }
+  .pbar-mon[hidden] { display: none; opacity: 0; scale: .3; }
+  .pbar-mon .mon { position: absolute; width: 40px; }
+  .pbar-mon .mon:nth-child(1) { right: -30px; bottom: -6px; --arah: 1; }
+  .pbar-mon .mon:nth-child(2) { left: -30px;  bottom: -6px; --arah: -1; }
+  .pbar-mon .mon:nth-child(3) { right: -8px;  top: -30px; width: 34px; --arah: 1; }
+  .pbar-mon .mon:nth-child(2) .mon-svg { scale: -1 1; }
+  .pbar-mon .mon:nth-child(3) .mon-svg { rotate: 18deg; }
+  .pbar-mon:focus-visible { outline: 2px solid var(--brass-hi); outline-offset: 8px; border-radius: 50%; }
+
+  @keyframes monIntip {
+    0%, 8%    { transform: translate(calc(var(--arah) * -26px), 10px) rotate(calc(var(--arah) * -30deg)); }
+    18%, 48%  { transform: translate(0, 0) rotate(calc(var(--arah) * 10deg)); }
+    30%       { transform: translate(0, -3px) rotate(calc(var(--arah) * -4deg)); }
+    58%, 100% { transform: translate(calc(var(--arah) * -26px), 10px) rotate(calc(var(--arah) * -30deg)); }
+  }
+  @keyframes monIntipAtas {
+    0%, 10%   { transform: translateY(26px); }
+    22%, 50%  { transform: translateY(0) rotate(-6deg); }
+    36%       { transform: translateY(-3px) rotate(6deg); }
+    62%, 100% { transform: translateY(26px); }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .pbar-mon .mon { animation: monIntip 6.5s var(--lengkung) infinite; }
+    .pbar-mon[data-tingkat="1"] .mon { animation-duration: 9s; }
+    .pbar-mon[data-tingkat="3"] .mon { animation-duration: 4.8s; }
+    .pbar-mon .mon:nth-child(2) { animation-delay: -2.2s; }
+    .pbar-mon .mon:nth-child(3) { animation-name: monIntipAtas; animation-delay: -3.4s; }
+    .pbar-mon:hover .mon { animation-play-state: paused; }
+    .pbar-mon.kaget .mon .mon-svg { animation: wrGoyang .5s ease 2; }
+  }
+  @media (max-width: 640px) {
+    .pbar-mon .mon { width: 30px; }
+    .pbar-mon .mon:nth-child(1) { right: -22px; }
+    .pbar-mon .mon:nth-child(2) { left: -22px; }
+    .pbar-mon .mon:nth-child(3) { width: 26px; top: -24px; }
+  }
+
+  /* ---- 5b · di panel sapaan (pesan amanah) ---- */
+  .amanah.digoda { position: relative; overflow: visible; margin-top: 26px; }
+  .sapa-amanah > .amanah.digoda:first-child { margin-top: 20px; }
+  .mon-hinggap {
+    position: absolute; right: 34px; bottom: 100%; margin-bottom: -12px;
+    display: flex; align-items: flex-end; gap: 6px; pointer-events: none; z-index: 4;
+    transition: opacity .5s ease, translate .7s var(--pegas);
+  }
+  @starting-style { .mon-hinggap { opacity: 0; translate: 0 18px; } }
+  .mon-hinggap > .mon:not(.mon-gantung) { width: 38px; }
+  .mon-gantung {
+    position: absolute; right: -24px; top: calc(100% + 12px); width: 28px !important;
+    rotate: 180deg; transform-origin: 50% 0;
+  }
+  @keyframes monAyun { 0%, 100% { rotate: 168deg; } 50% { rotate: 192deg; } }
+
+  .mon-gelembung {
+    order: -1; position: relative; margin-bottom: 14px; display: block;
+    padding: 5px 10px; border-radius: 12px 12px 3px 12px;
+    background: #fff; color: #2A1640; font-size: 10.5px; font-weight: 700; line-height: 1.4;
+    box-shadow: 0 6px 14px -6px rgba(0,0,0,.5);
+    height: calc(1.4em + 10px); overflow: clip; overflow-clip-margin: content-box; white-space: nowrap;
+  }
+  .mon-kalimat { display: block; }
+  .mon-kalimat > span { display: block; height: 1.4em; }
+  @keyframes monTicker2 { 0%, 42% { transform: translateY(0); } 50%, 92% { transform: translateY(-1.4em); } 100% { transform: translateY(-2.8em); } }
+  @keyframes monTicker3 { 0%, 27% { transform: translateY(0); } 33%, 60% { transform: translateY(-1.4em); } 66%, 94% { transform: translateY(-2.8em); } 100% { transform: translateY(-4.2em); } }
+  @keyframes monGoyangKartu {
+    0%, 86%, 100% { transform: none; }
+    88% { transform: translateX(-3px) rotate(-.8deg); } 91% { transform: translateX(3px) rotate(.8deg); }
+    94% { transform: translateX(-2px) rotate(-.4deg); } 97% { transform: translateX(1px); }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .mon-hinggap[style*="--baris:2"] .mon-kalimat { animation: monTicker2 7s var(--lengkung) infinite; }
+    .mon-hinggap[style*="--baris:3"] .mon-kalimat { animation: monTicker3 10s var(--lengkung) infinite; }
+    .mon-gantung { animation: monAyun 2.4s ease-in-out infinite; }
+    .amanah.digoda[data-tingkat="3"] {
+      animation: wrMasuk .75s var(--pegas) both, monGoyangKartu 4.5s ease-in-out infinite;
+      animation-delay: calc(var(--wr-i) * var(--wr-jeda) + 90ms), 1.5s;
+    }
+  }
+
+  /* tingkat 3: satu monster lagi berlarian di dasar panel */
+  .sapa > .sapa-mon-jalan {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 26px; z-index: 2;
+    container-type: inline-size; pointer-events: none;
+  }
+  .sapa-mon-jalan .mon { width: 26px; position: absolute; left: 0; bottom: -7px; }
+  @keyframes monLari {
+    0%   { transform: translateX(8px) scaleX(1); }
+    48%  { transform: translateX(calc(100cqi - 34px)) scaleX(1); }
+    50%  { transform: translateX(calc(100cqi - 34px)) scaleX(-1); }
+    98%  { transform: translateX(8px) scaleX(-1); }
+    100% { transform: translateX(8px) scaleX(1); }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .sapa-mon-jalan .mon { animation: monLari 16s linear infinite; }
+    .sapa-mon-jalan .mon .mon-svg { animation-duration: .45s; }
+  }
+
+  /* lega: tidak ada yang tertunda → centang memantul & cahaya lembut */
+  @keyframes wrLega { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, #8FE3D2 40%, transparent); } 50% { box-shadow: 0 0 0 8px transparent; } }
+  @media (prefers-reduced-motion: no-preference) {
+    .sapa-lega { animation: wrMasuk .75s var(--pegas) .15s both, wrLega 3s ease-in-out 1s infinite; }
+    .sapa-lega i { animation: wrLetup .6s var(--pegas) .5s both; }
+    .sapa h2 { animation: wrTirai .9s var(--lengkung) .1s both; }
+    .sapa::after { animation: wrHanyut 12s ease-in-out infinite alternate; }
+  }
+  @keyframes wrTirai { from { clip-path: inset(0 100% 0 0); transform: translateX(-8px); } to { clip-path: inset(0 -5% 0 0); transform: none; } }
+  @keyframes wrHanyut { to { transform: translate3d(-40%, 30%, 0) scale(1.25); } }
+
+  /* ---------------- 6 · hemat daya & kurangi gerak ---------------- */
+  :root.hemat .pbar-bentuk, :root.hemat .pbar-id b::after, :root.hemat .sapa-mon-jalan { display: none; }
+  :root.hemat .pbar-av-bingkai::before, :root.hemat .pgs-portal::after,
+  :root.hemat .sapa::after { animation: none !important; }
+  /* monster tetap bergerak di mode hemat (transform saja, murah),
+     hanya bayangannya dilepas */
+  :root.hemat .mon { filter: none; }
+  :root.hemat :is(.stats, .pgs-rail, .unit-grid, .sapa-amanah) > * { animation-duration: .3s; animation-delay: 0s; }
+  @media (prefers-reduced-motion: reduce) {
+    .pbar-bentuk, .sapa-mon-jalan, .pbar-id b::after { display: none; }
+    .pbar-av-bingkai::before, .pgs-portal::after, .stat::before, .unit-card::after,
+    .mon, .mon *, .mon-kalimat, .amanah.digoda { animation-name: none !important; }
+    .mon-lidah { transform: scaleY(1); }
+  }
+  @media print { .pbar-mon, .mon-hinggap, .sapa-mon-jalan, .pbar-bentuk { display: none !important; } }
+}
 </style>
 </head>
 <body>
@@ -5219,12 +5585,16 @@
     <section class="pbar" id="profileBar">
       <div class="pbar-cover" id="pbarCover"></div>
       <div class="pbar-veil"></div>
+      <div class="pbar-bentuk" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
       <div class="pbar-inner">
+        <!-- v2.25: bingkai = cincin pelangi + tempat monster amanah bersembunyi -->
+        <span class="pbar-av-bingkai">
         <button type="button" class="pbar-av" id="pbarAvatar"
                 title="Klik untuk ganti foto profil" aria-label="Ganti foto profil">
           <img id="pbarAvatarImg" src="" alt="Foto profil">
           <span class="cam"><i class="fa-solid fa-camera"></i></span>
         </button>
+        </span>
         <div class="pbar-id">
           <span class="salam" id="pbarSalam">Selamat datang</span>
           <b id="pbarNama">Memuat…</b>
