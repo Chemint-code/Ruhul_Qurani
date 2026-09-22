@@ -5584,6 +5584,53 @@
   }
 }
 </style>
+<style id="gayaTandaNY">
+/* =====================================================================
+   v2.29 — TANDA PERANCANG "NY" DI LAYAR MUAT
+   Monogram N dan Y yang berbagi satu tiang, digambar dengan goresan
+   emas setiap kali layar muat tampil — bentuk, warna, dan letaknya
+   selalu sama, jadi mudah diingat karena berulang (bukan pesan
+   tersembunyi: tandanya terlihat jelas dan tertulis namanya).
+   ===================================================================== */
+.lm-tanda { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 6px; }
+.lm-ny { width: 58px; height: 58px; overflow: visible; }
+.lm-ny-cincin { fill: none; stroke: color-mix(in oklab, var(--brass-hi) 55%, transparent); stroke-width: 1.4;
+  stroke-dasharray: 182.2; stroke-dashoffset: 182.2; transform-origin: 32px 32px; transform: rotate(-90deg); }
+.lm-ny-huruf { fill: none; stroke: var(--brass-hi); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 100; stroke-dashoffset: 100; }
+.lm-tanda-teks { font-size: 10.5px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase;
+  color: color-mix(in oklab, #fff 58%, transparent); opacity: 0; }
+.lm-tanda-teks b { color: var(--brass-hi); font-family: 'Instrument Serif', Georgia, serif; font-style: italic;
+  font-weight: 400; font-size: 15px; letter-spacing: .04em; text-transform: none; }
+/* layar penuh: tanda menempel di dasar layar, seperti tanda tangan di kaki karya */
+.lm--penuh .lm-tanda { position: absolute; left: 0; right: 0; bottom: calc(22px + env(safe-area-inset-bottom)); margin: 0; }
+/* tirai konten: segel kecil saja, warna kuningan */
+.lm--tirai .lm-tanda { gap: 0; margin-top: 2px; }
+.lm--tirai .lm-ny { width: 30px; height: 30px; }
+.lm--tirai .lm-ny-huruf { stroke: var(--brass); stroke-width: 3.6; }
+.lm--tirai .lm-ny-cincin { stroke: color-mix(in oklab, var(--brass) 45%, transparent); }
+.lm--tirai .lm-tanda-teks { display: none; }
+
+@keyframes nyGores  { to { stroke-dashoffset: 0; } }
+@keyframes nyMuncul { from { opacity: 0; translate: 0 6px; } to { opacity: 1; translate: 0 0; } }
+@keyframes nyKilau  { 0%, 100% { filter: none; } 50% { filter: drop-shadow(0 0 6px color-mix(in oklab, var(--brass-hi) 70%, transparent)); } }
+/* .lm.tutup = display:none (v2.28), jadi goresan otomatis diulang setiap kali layar muat dibuka,
+   dan tetap utuh selama memudar keluar. */
+.lm .lm-ny-cincin { animation: nyGores 1.1s cubic-bezier(.6, 0, .2, 1) .15s forwards; }
+.lm .lm-ny-huruf  { animation: nyGores 1.3s cubic-bezier(.65, 0, .25, 1) .35s forwards; }
+.lm .lm-tanda-teks { animation: nyMuncul .6s ease-out 1.3s forwards; }
+.lm--penuh .lm-ny { animation: nyKilau 2.4s ease-in-out 1.7s 1; }
+@media (prefers-reduced-motion: reduce) {
+  .lm-ny-cincin, .lm-ny-huruf { stroke-dashoffset: 0; }
+  .lm-tanda-teks { opacity: 1; }
+}
+
+/* keluar lebih lembut: memudar sambil sedikit menjauh (0,6 dtk) */
+.lm--penuh { transition: opacity .6s var(--lengkung), visibility .6s, display .6s allow-discrete; }
+.lm--penuh > :not(.lm-tanda) { transition: scale .6s var(--lengkung), filter .6s; }
+.lm--penuh.tutup > :not(.lm-tanda) { scale: .96; }
+@media print { .lm-tanda { display: none !important; } }
+</style>
 </head>
 <body>
 
@@ -5604,6 +5651,11 @@
     </ul>
   </div>
   <div class="lm-bilah" aria-hidden="true"></div>
+  <!-- v2.29: tanda perancang (monogram NY) — sama di setiap layar muat -->
+  <div class="lm-tanda" aria-label="Dirancang oleh Nyak Al Azwansyah">
+    <svg class="lm-ny" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><circle class="lm-ny-cincin" cx="32" cy="32" r="29"/><path class="lm-ny-huruf" pathLength="100" d="M13 45V19l19 26V19l10 13 10-13M42 32v13"/></svg>
+    <span class="lm-tanda-teks">dirancang oleh <b>NY</b> · Nyak Al Azwansyah</span>
+  </div>
 </div>
 <script>
   /* Jaring pengaman: bila app.js gagal dimuat, layar muat tidak boleh

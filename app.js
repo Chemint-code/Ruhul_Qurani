@@ -20622,6 +20622,112 @@ function pasangGayaKm() {
   };
 })();
 
+/* =====================================================================
+ * v2.29 — LAYAR MUAT: DURASI CUKUP & TANDA PERANCANG "NY"
+ * ---------------------------------------------------------------------
+ *  · Layar muat awal tampil minimal 2,4 dtk (satu putaran penuh empat
+ *    bentuk), dan baru ditutup setelah halaman pertama benar-benar selesai
+ *    digambar (fon siap → dua bingkai → waktu senggang). Penutupan
+ *    diselaraskan dengan saat bentuk sedang diam, jadi tidak terpotong
+ *    di tengah gerak.
+ *  · Tirai konten (halaman > 0,35 dtk) tampil minimal 1,2 dtk dengan
+ *    aturan yang sama. Halaman cepat tetap tanpa tirai.
+ *  · Monogram NY digoreskan di setiap layar muat & tirai.
+ *  Semua lewat pembungkus properti LayarMuat — fungsi aslinya utuh.
+ * ===================================================================== */
+const MUAT_NY = {
+  MIN_AWAL: 2400, MIN_TIRAI: 1200, KUARTAL: 600, JEDA_GERAK: 120,
+  SEGEL: '<svg class="lm-ny" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><circle class="lm-ny-cincin" cx="32" cy="32" r="29"/><path class="lm-ny-huruf" pathLength="100" d="M13 45V19l19 26V19l10 13 10-13M42 32v13"/></svg>'
+};
+
+/** Tunggu dengan batas waktu — rAF berhenti saat tab tersembunyi, jadi setiap langkah dibatasi. */
+const berbatas = (janji, ms) => Promise.race([janji, tundaMs(ms)]);
+
+async function tungguHalamanSiap(sampai, el) {
+  if (MULUS.kurangGerak) return;
+  try { if (document.fonts && document.fonts.ready) await berbatas(document.fonts.ready, 800); } catch (e) {}
+  await berbatas(new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))), 500);
+  const senggang = window.requestIdleCallback || ((f) => setTimeout(f, 50));
+  await berbatas(new Promise(r => senggang(r, { timeout: 700 })), 800);
+  const sisa = sampai - performance.now();
+  if (sisa > 0) await tundaMs(sisa);
+  // Selaraskan: empat bentuk bergerak serempak pada 480–600 ms tiap kuartal
+  // 600 ms. Mulai memudar tepat setelah gerakan selesai.
+  try {
+    const a = el && el.querySelector('.lm-panggung i') && el.querySelector('.lm-panggung i').getAnimations()[0];
+    if (a && a.currentTime != null && !document.hidden) {
+      const f = a.currentTime % MUAT_NY.KUARTAL;
+      // currentTime = waktu bingkai terakhir (bisa tertinggal ±16 ms) → beri kelonggaran 30 ms
+      if (f >= MUAT_NY.JEDA_GERAK) await tundaMs(MUAT_NY.KUARTAL - f + 30);
+    }
+  } catch (e) {}
+}
+
+function pasangSegelNY(el) {
+  if (!el || el.querySelector('.lm-tanda')) return;
+  const d = document.createElement('div');
+  d.className = 'lm-tanda';
+  d.setAttribute('aria-hidden', 'true');
+  d.innerHTML = MUAT_NY.SEGEL;
+  el.appendChild(d);
+}
+
+/** Catat kapan sebuah layar muat mulai tampil (kelas `tutup` dilepas). */
+function pantauLayarMuat(el) {
+  if (!el || el._nyDipantau) return;
+  el._nyDipantau = true;
+  if (el.classList.contains('lm--tirai')) pasangSegelNY(el);
+  if (!el.classList.contains('tutup')) el._tampilSejak = el.id === 'layarMuat' ? 0 : performance.now();
+  new MutationObserver(() => {
+    const buka = !el.classList.contains('tutup');
+    if (buka && !el._terbuka) el._tampilSejak = performance.now();
+    el._terbuka = buka;
+  }).observe(el, { attributes: true, attributeFilter: ['class'] });
+  el._terbuka = !el.classList.contains('tutup');
+}
+
+(function pasangLayarMuatNY() {
+  pantauLayarMuat($('layarMuat'));
+  // Tirai dibuat LayarMuat saat pertama dibutuhkan, langsung di <body>.
+  new MutationObserver((c) => c.forEach(m => m.addedNodes.forEach(n => {
+    if (n.nodeType === 1 && n.classList.contains('lm')) pantauLayarMuat(n);
+  }))).observe(document.body, { childList: true });
+
+  const tutupAwalAsli = LayarMuat.tutupAwal;
+  let menunggu = false;
+  LayarMuat.tutupAwal = function () {
+    const l = $('layarMuat');
+    if (!l || l.classList.contains('tutup')) return tutupAwalAsli.apply(this, arguments);
+    if (menunggu) return;
+    menunggu = true;
+    const acuan = l._tampilSejak || 0;       // 0 = sejak halaman mulai dibaca
+    tungguHalamanSiap(acuan + MUAT_NY.MIN_AWAL, l)
+      .finally(() => { menunggu = false; tutupAwalAsli(); });
+  };
+
+  const tiraiAsli = LayarMuat.tiraiUntuk;
+  LayarMuat.tiraiUntuk = function (j) {
+    const tutup = tiraiAsli.apply(this, arguments);
+    return function () {
+      const el = document.querySelector('.lm--tirai:not(.tutup)');
+      if (!el) return tutup();                // halaman cepat: tirai tak pernah tampil
+      tungguHalamanSiap((el._tampilSejak || performance.now()) + MUAT_NY.MIN_TIRAI, el).finally(tutup);
+    };
+  };
+
+  // Pengukuran kelancaran (v2.28) baru dimulai setelah layar muat hilang.
+  const ujiAsli = ujiKelancaran;
+  ujiKelancaran = async function () {
+    for (let i = 0; i < 40; i++) {
+      const l = $('layarMuat');
+      if (!l || l.classList.contains('tutup')) break;
+      await tundaMs(150);
+    }
+    await tundaMs(700);
+    return ujiAsli.apply(this, arguments);
+  };
+})();
+
 // ---------------------------------------------------------------------
 hidupkanLayarLogin();
 
