@@ -20728,6 +20728,112 @@ function pantauLayarMuat(el) {
   };
 })();
 
+/* =====================================================================
+ * v2.30 — LAYAR MUAT DI SETIAP PERPINDAHAN HALAMAN
+ * ---------------------------------------------------------------------
+ *  · Setiap pindah halaman (bilah navigasi, tab bawah, tautan di dalam
+ *    halaman) langsung menampilkan tirai muat di atas area konten,
+ *    minimal 1,2 dtk, dan baru dibuka setelah data termuat dan halaman
+ *    selesai digambar (tungguHalamanSiap, v2.29). Penyegaran halaman
+ *    yang sama (realtime) tidak memunculkan tirai.
+ *  · Selama tirai/layar muat menutupi, animasi masuk isi halaman ditahan
+ *    (kelas html.muat-halaman) dan animasi grafik dimatikan. Saat tirai
+ *    memudar, semuanya dilepas bersamaan: kartu masuk, baris tabel hadir
+ *    berurutan, grafik tumbuh dari nol — data tampil mulus.
+ *  · Tirai lama (hanya untuk halaman > 0,35 dtk) tetap dipakai untuk
+ *    penyegaran dan bila pengguna memilih "kurangi gerak".
+ * ===================================================================== */
+const TIRAI_NY = { el: null, giliran: 0, MIN: 1200, dariView: null, tUngkap: 0 };
+
+function buatTiraiNY() {
+  const el = document.createElement('div');
+  el.id = 'tiraiNY';
+  el.className = 'lm lm--tirai tutup';
+  el.setAttribute('role', 'status');
+  el.setAttribute('aria-live', 'polite');
+  el.innerHTML = `
+    <div class="lm-panggung" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <div class="lm-alis" aria-hidden="true"><span class="ar"></span><span class="garis"></span><span class="lat"></span></div>
+    <h2 class="lm-judul" aria-hidden="true">${[...'Memuat…'].map(h => `<span>${h}</span>`).join('')}</h2>
+    <div class="lm-ticker"><ul><li class="teks"></li></ul></div>
+    <div class="lm-bilah" aria-hidden="true"></div>`;
+  document.body.appendChild(el);            // segel NY dipasang pemantau v2.29
+  return el;
+}
+
+function tahanHalaman() {
+  clearTimeout(TIRAI_NY.tUngkap);
+  document.documentElement.classList.remove('ungkap-halaman');
+  document.documentElement.classList.add('muat-halaman');
+  try { if (window.Chart && Chart.defaults.animation) Chart.defaults.animation.duration = 0; } catch (e) {}
+}
+
+/** Lepas animasi masuk + putar ulang animasi grafik yang sudah jadi. */
+function ungkapHalaman() {
+  const r = document.documentElement;
+  if (!r.classList.contains('muat-halaman')) return;
+  r.classList.remove('muat-halaman');
+  setelGrafikEfek();
+  if (!modeHemat() && !MULUS.kurangGerak) {
+    Object.values(APP.charts || {}).forEach(c => {
+      if (!c || c._tertunda || typeof c.reset !== 'function') return;
+      try { c.reset(); c.update(); } catch (e) {}
+    });
+  }
+  r.classList.add('ungkap-halaman');
+  clearTimeout(TIRAI_NY.tUngkap);
+  TIRAI_NY.tUngkap = setTimeout(() => r.classList.remove('ungkap-halaman'), 1300);
+}
+
+(function pasangTiraiSetiapHalaman() {
+  // Layar muat penuh (buka aplikasi / sesudah login) ikut menahan animasi halaman.
+  const penuh = $('layarMuat');
+  if (penuh) {
+    if (!penuh.classList.contains('tutup')) tahanHalaman();
+    new MutationObserver(() => {
+      if (penuh.classList.contains('tutup')) { if (!TIRAI_NY.el || TIRAI_NY.el.classList.contains('tutup')) ungkapHalaman(); }
+      else tahanHalaman();
+    }).observe(penuh, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  const tiraiSebelum = LayarMuat.tiraiUntuk;          // v2.29 (aslinya + tahan min 1,2 dtk)
+  LayarMuat.tiraiUntuk = function (j) {
+    const l = $('layarMuat');
+    const penuhTerbuka = l && !l.classList.contains('tutup');
+    const ganti = TIRAI_NY.dariView !== APP.view;
+    if (!ganti || penuhTerbuka || MULUS.kurangGerak) return tiraiSebelum.apply(this, arguments);
+
+    const id = ++TIRAI_NY.giliran;
+    const el = TIRAI_NY.el || (TIRAI_NY.el = buatTiraiNY());
+    el.querySelector('.ar').textContent  = j.ar || '';
+    el.querySelector('.lat').textContent = j.lat || '';
+    el.querySelector('.teks').textContent = `Membuka ${j.teks || 'halaman'}`;
+    el.setAttribute('aria-label', `Memuat ${j.teks || 'halaman'}`);
+    const r = $('viewRoot').getBoundingClientRect();
+    el.style.left   = Math.max(0, r.left) + 'px';
+    el.style.right  = Math.max(0, innerWidth - r.right) + 'px';
+    el.style.top    = Math.max(0, r.top) + 'px';
+    el.style.bottom = '0px';
+    tahanHalaman();
+    el.classList.remove('tutup');
+    const sejak = performance.now();
+
+    return function tutup() {
+      tungguHalamanSiap(sejak + TIRAI_NY.MIN, el).finally(() => {
+        if (id !== TIRAI_NY.giliran) return;          // sudah ada perpindahan baru
+        el.classList.add('tutup');
+        ungkapHalaman();
+      });
+    };
+  };
+
+  const navigasiSebelum = navigateTo;
+  navigateTo = async function (view) {
+    TIRAI_NY.dariView = APP.viewTampil;
+    return navigasiSebelum.apply(this, arguments);
+  };
+})();
+
 // ---------------------------------------------------------------------
 hidupkanLayarLogin();
 

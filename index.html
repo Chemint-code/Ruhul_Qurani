@@ -5631,6 +5631,42 @@
 .lm--penuh.tutup > :not(.lm-tanda) { scale: .96; }
 @media print { .lm-tanda { display: none !important; } }
 </style>
+<style id="gayaMuatHalaman">
+/* =====================================================================
+   v2.30 — MONOGRAM NY LEBIH SAMAR & LAYAR MUAT DI SETIAP HALAMAN
+   ===================================================================== */
+/* monogram: tanpa nama lengkap, lebih samar, tanpa kilau */
+.lm-tanda-teks { display: none !important; }
+.lm--penuh .lm-tanda { opacity: .38; }
+.lm--tirai .lm-tanda { opacity: .34; }
+.lm .lm-ny { animation: none !important; }
+.lm-ny-huruf { stroke-width: 2.6; }
+.lm--penuh .lm-ny { width: 46px; height: 46px; }
+
+/* Selama layar muat menutupi halaman: animasi masuk isi halaman ditahan
+   di bingkai pertamanya, lalu dilepas bersamaan saat layar muat memudar. */
+:root.muat-halaman #viewRoot, :root.muat-halaman #viewRoot *,
+:root.muat-halaman #viewRoot *::before, :root.muat-halaman #viewRoot *::after { animation-play-state: paused !important; }
+
+/* Baris tabel hadir berurutan saat halaman diungkap (kartu statistik sudah
+   punya animasi masuk sendiri — wrMasuk — yang ikut ditahan lalu dilepas) */
+@keyframes ungkapBaris { from { opacity: 0; transform: translate3d(0, 10px, 0); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: no-preference) {
+  :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(-n+12) { animation: ungkapBaris .5s cubic-bezier(.2, .7, .2, 1) both; }
+  :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(2)  { animation-delay: .03s; }
+  :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(3)  { animation-delay: .06s; }
+  :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(4)  { animation-delay: .09s; }
+  :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(5)  { animation-delay: .12s; }
+  :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(6)  { animation-delay: .15s; }
+  :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(7)  { animation-delay: .18s; }
+  :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(8)  { animation-delay: .21s; }
+  :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(9)  { animation-delay: .24s; }
+  :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(10) { animation-delay: .27s; }
+  :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(11) { animation-delay: .30s; }
+  :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(12) { animation-delay: .33s; }
+}
+:root.hemat.ungkap-halaman #viewRoot .tbl tbody tr { animation-duration: .3s; }
+</style>
 </head>
 <body>
 
@@ -5651,10 +5687,9 @@
     </ul>
   </div>
   <div class="lm-bilah" aria-hidden="true"></div>
-  <!-- v2.29: tanda perancang (monogram NY) — sama di setiap layar muat -->
-  <div class="lm-tanda" aria-label="Dirancang oleh Nyak Al Azwansyah">
+  <!-- v2.29/v2.30: monogram NY — sama di setiap layar muat, samar -->
+  <div class="lm-tanda" aria-hidden="true">
     <svg class="lm-ny" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><circle class="lm-ny-cincin" cx="32" cy="32" r="29"/><path class="lm-ny-huruf" pathLength="100" d="M13 45V19l19 26V19l10 13 10-13M42 32v13"/></svg>
-    <span class="lm-tanda-teks">dirancang oleh <b>NY</b> · Nyak Al Azwansyah</span>
   </div>
 </div>
 <script>
