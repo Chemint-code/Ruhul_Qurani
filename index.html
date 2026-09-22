@@ -16,10 +16,13 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Amiri:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<!-- v2.24: pustaka dimuat `defer` (tidak menahan layar muat & login digambar);
+     urutan eksekusi tetap: supabase → sweetalert2 → chart.js → app.js.
+     html2pdf (±900 KB) tidak lagi dimuat di awal — app.js memuatnya saat
+     tombol Unduh PDF pertama kali ditekan (muatHtml2pdf). -->
+<script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
 /* ============================================================
    SISTEM DESAIN — Dayah Ruhul Qurani  ·  v2 (2026)
@@ -5323,7 +5326,7 @@
   </div>
 </div>
 
-<script src="app.js"></script>
+<script defer src="app.js"></script>
 <script>
 /* v2.12 — Sorot kursor pada kartu (desktop saja).
    Hanya menulis dua angka (--sx, --sy) sekali per bingkai; seluruh
