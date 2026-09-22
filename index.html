@@ -5382,6 +5382,53 @@
     .mon-lidah { transform: scaleY(1); }
   }
   @media print { .pbar-mon, .mon-hinggap, .sapa-mon-jalan, .pbar-bentuk { display: none !important; } }
+
+  /* ================== 7 · v2.26 NAMA 10 BESAR DIKERUBUNGI ================== */
+  .nama-dikerubungi { position: relative; isolation: isolate; }
+  .kerubung { position: absolute; inset: 0; pointer-events: none; }
+  .km {
+    position: absolute; width: 1.5em; height: 1.5em; overflow: visible;
+    filter: drop-shadow(0 2px 2px rgba(0,0,0,.28));
+  }
+  .km1 { --m-warna: #2BB3A3; --m-jilbab: #FFE3EE; left: -1.1em; top: -.6em; z-index: -1; rotate: -16deg; }
+  .km2 { --m-warna: #8B6CF0; --m-jilbab: #F3ECFA; right: -.2em; top: -1.2em; width: 1.3em; height: 1.3em; }
+  .km3 { --m-warna: #E0457B; --m-jilbab: #E1F5F0; right: -1.35em; bottom: -.55em; rotate: 12deg; }
+  .nama-dikerubungi[data-varian="jilbab"] .km1 { --m-warna: #F29E38; }
+
+  @keyframes kmIntip  { 0%, 100% { translate: .35em .45em; } 35%, 70% { translate: 0 0; } 50% { translate: 0 -.12em; } }
+  @keyframes kmLoncat { 0%, 100% { translate: 0 0; scale: 1; } 30% { translate: 0 -.35em; scale: .95 1.06; } 55% { translate: 0 0; scale: 1.08 .92; } }
+  @keyframes kmGoyang { 0%, 100% { rotate: 12deg; } 25% { rotate: -14deg; } 50% { rotate: 18deg; } 75% { rotate: -6deg; } }
+  @media (prefers-reduced-motion: no-preference) {
+    .km1 { animation: kmIntip 3.1s ease-in-out infinite; }
+    .km2 { animation: kmLoncat 1.25s ease-in-out infinite; }
+    .km3 { animation: kmGoyang 2.3s ease-in-out infinite; }
+    .nama-dikerubungi:nth-of-type(2n) .km { animation-delay: -.7s; }
+    .nama-dikerubungi:hover .km2 { animation-duration: .5s; }
+  }
+  :root.hemat .km { filter: none; }
+  :root.hemat .km1, :root.hemat .km3 { animation: none; }
+  /* Di tabel/kartu padat, monster jangan menambah tinggi baris atau menggeser teks. */
+  td .nama-dikerubungi, th .nama-dikerubungi { white-space: inherit; }
+
+  /* ================== 8 · v2.26 HUJAN MONSTER DI RINGKASAN ================== */
+  #viewRoot { position: relative; }
+  /* lantai tempat monster menumpuk di dasar Ringkasan */
+  #viewRoot:has(> .hujan-mon) { padding-bottom: 64px; }
+  .hujan-mon {
+    position: absolute; inset: 0; z-index: 6; pointer-events: none;
+    overflow: clip; animation: none !important;
+  }
+  .hujan-mon .mon-jatuh {
+    position: absolute; left: 0; top: 0; width: 46px; will-change: transform;
+    pointer-events: none;
+  }
+  @keyframes monPenyet { 0% { scale: 1.25 .7; } 60% { scale: .92 1.1; } 100% { scale: 1; } }
+  @media (prefers-reduced-motion: no-preference) {
+    .hujan-mon .mon-jatuh.mendarat > .mon-svg { animation: monPenyet .38s ease-out, monLoncat 1.4s ease-in-out .38s infinite; transform-origin: 50% 100%; }
+    .hujan-mon .mon-jatuh:nth-child(3n) .mon-svg { animation-duration: .38s, 1.7s; }
+  }
+  :root.hemat .hujan-mon .mon-jatuh { filter: none; }
+  @media print { .hujan-mon, .kerubung { display: none !important; } }
 }
 </style>
 </head>

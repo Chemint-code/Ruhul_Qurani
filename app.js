@@ -19565,26 +19565,70 @@ function tingkatMonster(n) {
   return 0;
 }
 
-/** Monster orisinal: badan bulat bertanduk, dua mata, taring kecil, lidah. */
-function svgMonster() {
-  return `<svg class="mon-svg" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
-    <path class="mon-tanduk" d="M17 17 13 4l11 8zM47 17l4-13-11 8z"/>
-    <path class="mon-badan" d="M32 9c17 0 26 12 26 28v23l-6-4-6 4-7-4-7 4-7-4-6 4-7-4-6 4V37C6 21 15 9 32 9z"/>
-    <ellipse class="mon-perut" cx="32" cy="45" rx="14" ry="9"/>
-    <ellipse class="mon-tangan kiri" cx="7" cy="41" rx="3.6" ry="6"/>
-    <ellipse class="mon-tangan kanan" cx="57" cy="41" rx="3.6" ry="6"/>
-    <circle class="mon-pipi" cx="15" cy="38" r="3"/><circle class="mon-pipi" cx="49" cy="38" r="3"/>
-    <g class="mon-mata">
-      <circle cx="23" cy="29" r="7.2" fill="#fff"/><circle cx="41" cy="29" r="7.2" fill="#fff"/>
+/**
+ * Monster orisinal dalam dua busana (v2.26):
+ *  · 'peci'   — berpeci hitam, tanduk kecil menyembul di sisi kepala
+ *  · 'jilbab' — berjilbab (warna --m-jilbab) dengan bros kuningan
+ * Warna diisi lewat atribut style + var(), sehingga markup yang sama bisa
+ * dipakai sebagai <symbol> sprite (via <use>) maupun SVG sebaris.
+ */
+function isiMonster(varian) {
+  const kulit = 'fill:var(--m-warna,#2BB3A3)';
+  const tangan = 'fill:color-mix(in oklab,var(--m-warna,#2BB3A3) 80%,black)';
+  const pipi = '<circle class="mon-pipi" style="fill:#FF9EC0;opacity:.7"';
+  const mulut = (d) => `<path class="mon-mulut" d="${d}" style="fill:none;stroke:#1B1030;stroke-width:2.4;stroke-linecap:round"/>`;
+  const mata = (xa, xb, y, r) => `<g class="mon-mata">
+      <circle cx="${xa}" cy="${y}" r="${r}" fill="#fff"/><circle cx="${xb}" cy="${y}" r="${r}" fill="#fff"/>
       <g class="mon-pupil">
-        <circle cx="24" cy="30" r="3.3" fill="#1B1030"/><circle cx="42" cy="30" r="3.3" fill="#1B1030"/>
-        <circle cx="25.2" cy="28.6" r="1.1" fill="#fff"/><circle cx="43.2" cy="28.6" r="1.1" fill="#fff"/>
-      </g>
-    </g>
-    <ellipse class="mon-lidah" cx="34.5" cy="44" rx="3.3" ry="4.2"/>
-    <path class="mon-mulut" d="M24 40q8 7 16 0"/>
-    <path class="mon-taring" d="m27.2 41.6 1.5 3 1.6-2.2zm6.8.7 1.5 2.3 1.6-3.1z"/>
-  </svg>`;
+        <circle cx="${xa + 1}" cy="${y + 1}" r="${r * .46}" fill="#1B1030"/><circle cx="${xb + 1}" cy="${y + 1}" r="${r * .46}" fill="#1B1030"/>
+        <circle cx="${xa + 2.2}" cy="${y - .4}" r="1.1" fill="#fff"/><circle cx="${xb + 2.2}" cy="${y - .4}" r="1.1" fill="#fff"/>
+      </g></g>`;
+  if (varian === 'jilbab') {
+    const kain = 'fill:var(--m-jilbab,#F3ECFA)';
+    const lipit = 'fill:none;stroke:color-mix(in oklab,var(--m-jilbab,#F3ECFA) 78%,#5B3A78);stroke-width:2';
+    return `
+      <path style="${kain}" d="M32 4c18 0 27 13 27 29 0 12 2 20 4 27H1c2-7 4-15 4-27C5 17 14 4 32 4z"/>
+      <ellipse style="${kulit}" cx="32" cy="33" rx="17.5" ry="16.5"/>
+      <ellipse style="${lipit}" cx="32" cy="33" rx="18.6" ry="17.6"/>
+      ${pipi} cx="18.5" cy="37.5" r="2.8"/>${pipi} cx="45.5" cy="37.5" r="2.8"/>
+      ${mata(24, 40, 30, 6.4)}
+      <ellipse class="mon-lidah" cx="34" cy="43.2" rx="3" ry="3.8" style="fill:#FF6F9F"/>
+      ${mulut('M25 39.5q7 6 14 0')}
+      <path class="mon-taring" d="m27.6 41 1.4 2.7 1.4-2zm6 .6 1.4 2.1 1.4-2.8z" style="fill:#fff"/>
+      <path style="${kain}" d="M12 45q20 14 40 0l7 15H5z"/>
+      <path style="${lipit};stroke-width:1.4" d="M18 50q14 7 28 0"/>
+      <circle cx="32" cy="52.3" r="2.2" style="fill:#E8CC6B;stroke:#A07F14;stroke-width:.8"/>
+      <ellipse class="mon-tangan kiri" cx="8.5" cy="52" rx="3.6" ry="5.2" style="${tangan}"/>
+      <ellipse class="mon-tangan kanan" cx="55.5" cy="52" rx="3.6" ry="5.2" style="${tangan}"/>`;
+  }
+  return `
+    <path class="mon-tanduk" d="M10 23 4.5 13.5 15 18zM54 23l5.5-9.5L49 18z"
+          style="fill:color-mix(in oklab,var(--m-warna,#2BB3A3) 55%,#FFE9A8)"/>
+    <path style="${kulit}" d="M32 9c17 0 26 12 26 28v23l-6-4-6 4-7-4-7 4-7-4-6 4-7-4-6 4V37C6 21 15 9 32 9z"/>
+    <ellipse cx="32" cy="45" rx="14" ry="9" style="fill:color-mix(in oklab,var(--m-warna,#2BB3A3) 55%,white)"/>
+    <ellipse class="mon-tangan kiri" cx="7" cy="41" rx="3.6" ry="6" style="${tangan}"/>
+    <ellipse class="mon-tangan kanan" cx="57" cy="41" rx="3.6" ry="6" style="${tangan}"/>
+    ${pipi} cx="15" cy="38" r="3"/>${pipi} cx="49" cy="38" r="3"/>
+    ${mata(23, 41, 29, 7.2)}
+    <ellipse class="mon-lidah" cx="34.5" cy="44" rx="3.3" ry="4.2" style="fill:#FF6F9F"/>
+    ${mulut('M24 40q8 7 16 0')}
+    <path class="mon-taring" d="m27.2 41.6 1.5 3 1.6-2.2zm6.8.7 1.5 2.3 1.6-3.1z" style="fill:#fff"/>
+    <path d="M16.2 18.2 18.4 7.3Q32 3.4 45.6 7.3l2.2 10.9Q32 21.4 16.2 18.2z" style="fill:#1E1B2E"/>
+    <path d="M19.6 9.6Q32 6.4 44.4 9.6" style="fill:none;stroke:#4A4560;stroke-width:1.2"/>`;
+}
+
+function svgMonster(varian = 'peci') {
+  return `<svg class="mon-svg" data-varian="${varian === 'jilbab' ? 'jilbab' : 'peci'}" viewBox="0 0 64 64"
+    aria-hidden="true" focusable="false">${isiMonster(varian)}</svg>`;
+}
+
+/** Busana monster pendamping akun: unit putri → berjilbab, putra → berpeci, dua unit → berselang. */
+function varianMonster(i = 0) {
+  let u = null;
+  try { u = unitAktif(); } catch (e) {}
+  if (u === 'putri') return 'jilbab';
+  if (u === 'putra') return 'peci';
+  return i % 2 ? 'jilbab' : 'peci';
 }
 
 function kalimatMonster(t, n) {
@@ -19606,6 +19650,7 @@ function pasangMonster(jumlah) {
   document.body.dataset.monster = String(t);
   monsterBilahProfil(t, n);
   monsterSapaan(t, n);
+  if (APP.view === 'dashboard') requestAnimationFrame(() => hujanMonster(t));
 }
 
 /** Bilah profil guru: monster mengintip dari balik foto profil. */
@@ -19631,8 +19676,10 @@ function monsterBilahProfil(t, n) {
   grup.setAttribute('aria-label', teks);
   grup.dataset.tingkat = String(t);
   grup.style.setProperty('--tingkat', t);
-  if (grup.childElementCount !== t) {
-    grup.innerHTML = Array.from({ length: t }, () => `<span class="mon">${svgMonster()}</span>`).join('');
+  const kunciBusana = t + ':' + varianMonster(0) + varianMonster(1);
+  if (grup.dataset.busana !== kunciBusana) {
+    grup.dataset.busana = kunciBusana;
+    grup.innerHTML = Array.from({ length: t }, (_, i) => `<span class="mon">${svgMonster(varianMonster(i))}</span>`).join('');
   }
   grup.hidden = false;
 }
@@ -19656,12 +19703,12 @@ function monsterSapaan(t, n) {
     <span class="mon-hinggap" aria-hidden="true" style="--baris:${kal.length}">
       <span class="mon-gelembung"><span class="mon-kalimat">${
         [...kal, kal[0]].map(k => `<span>${esc(k)}</span>`).join('')}</span></span>
-      <span class="mon">${svgMonster()}</span>
-      ${t >= 2 ? `<span class="mon mon-gantung">${svgMonster()}</span>` : ''}
+      <span class="mon">${svgMonster(varianMonster(0))}</span>
+      ${t >= 2 ? `<span class="mon mon-gantung">${svgMonster(varianMonster(1))}</span>` : ''}
     </span>`);
   if (t >= 3) {
     sapa.insertAdjacentHTML('beforeend',
-      `<div class="sapa-mon-jalan" aria-hidden="true"><span class="mon">${svgMonster()}</span></div>`);
+      `<div class="sapa-mon-jalan" aria-hidden="true"><span class="mon">${svgMonster(varianMonster(2))}</span></div>`);
   }
 }
 
@@ -19684,6 +19731,322 @@ async function segarkanMonster() {
   } catch (e) { console.warn('monster amanah tidak terhitung:', e.message); }
 }
 
+/* =====================================================================
+ * v2.26 — (A) NAMA 10 BESAR DIKERUBUNGI MONSTER
+ * ---------------------------------------------------------------------
+ * Sepuluh santri aktif dengan total_poin_pelanggaran tertinggi (dalam
+ * lingkup kelas & unit yang dilihat akun ini) dikerubungi tiga monster
+ * kecil DI MANA PUN namanya tampil: tabel, kartu, jendela detail, dsb.
+ *
+ * Caranya tanpa menyentuh satu pun fungsi render: pengamat DOM mencari
+ * simpul teks yang memuat nama itu, lalu membungkusnya. Monster berupa
+ * <svg><use> ke satu sprite, jadi ratusan kemunculan tetap ringan, dan
+ * textContent sel tidak berubah (pencarian/ekspor tetap benar).
+ * Tidak pernah masuk ke lembar cetak/PDF, kolom isian, atau pilihan.
+ * ===================================================================== */
+const TOP_MONSTER = { peta: new Map(), pola: null, kunci: '' };
+const JANGAN_KERUBUNG = [
+  'input', 'textarea', 'select', 'option', 'script', 'style', 'noscript', 'svg', 'canvas',
+  'title', '[contenteditable]', '.nama-dikerubungi', '.laporan', '#printArea', '#pdfStage',
+  '#pdfMask', '.html2pdf__overlay', '.html2pdf__container', '[data-tanpa-monster]'
+].join(',');
+
+function pasangSpriteMonster() {
+  if (document.getElementById('rqMonSprite')) return;
+  const wadah = document.createElement('div');
+  wadah.innerHTML = `<svg id="rqMonSprite" width="0" height="0" aria-hidden="true"
+      style="position:absolute;width:0;height:0;overflow:hidden">
+    <symbol id="rqMonPeci" viewBox="0 0 64 64" overflow="visible">${isiMonster('peci')}</symbol>
+    <symbol id="rqMonJilbab" viewBox="0 0 64 64" overflow="visible">${isiMonster('jilbab')}</symbol></svg>`;
+  document.body.appendChild(wadah.firstElementChild);
+}
+
+const escRegex = (t) => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const normNama = (t) => String(t || '').replace(/\s+/g, ' ').trim().toLocaleUpperCase('id-ID');
+
+/** Hitung ulang 10 besar dari data santri tersimpan; pindai ulang bila berubah. */
+async function segarkanTopMonster() {
+  try {
+    if (!APP.profil) return;
+    const semua = await amanKosong(muatSiswa, 'santri');
+    const urut = filterBinaanUnit(semua.filter(aktifSantri), 'kelas')
+      .filter(s => Number(s.total_poin_pelanggaran) > 0 && String(s.nama_siswa || '').trim().length > 2)
+      .sort((a, b) => (Number(b.total_poin_pelanggaran) || 0) - (Number(a.total_poin_pelanggaran) || 0)
+                      || String(a.nisn).localeCompare(String(b.nisn)))
+      .slice(0, 10);
+    const peta = new Map();
+    urut.forEach(s => {
+      const k = normNama(s.nama_siswa);
+      if (!peta.has(k)) peta.set(k, String(s.unit_gender || '').toLowerCase() === 'putri' ? 'jilbab' : 'peci');
+    });
+    const kunci = [...peta].map(x => x.join(':')).join('|');
+    if (kunci === TOP_MONSTER.kunci) return;
+    TOP_MONSTER.kunci = kunci;
+    TOP_MONSTER.peta = peta;
+    TOP_MONSTER.pola = peta.size
+      ? new RegExp(`(?<![\\p{L}\\p{N}])(${[...peta.keys()].sort((a, b) => b.length - a.length)
+          .map(n => escRegex(n).replace(/ /g, '\\s+')).join('|')})(?![\\p{L}\\p{N}])`, 'giu')
+      : null;
+    // Lepas bungkus lama yang tidak lagi termasuk, lalu pindai ulang semuanya.
+    document.querySelectorAll('.nama-dikerubungi').forEach(w => {
+      if (!peta.has(normNama(w.dataset.nama))) w.replaceWith(document.createTextNode(w.dataset.nama || w.textContent));
+    });
+    kerubungiDi(document.body);
+  } catch (e) { console.warn('10 besar monster tidak terhitung:', e.message); }
+}
+
+function bungkusKerubung(teks, varian) {
+  const w = document.createElement('span');
+  w.className = 'nama-dikerubungi';
+  w.dataset.nama = teks;
+  w.dataset.varian = varian;
+  const ref = varian === 'jilbab' ? '#rqMonJilbab' : '#rqMonPeci';
+  w.append(document.createTextNode(teks));
+  w.insertAdjacentHTML('beforeend', `<span class="kerubung" aria-hidden="true">${
+    [1, 2, 3].map(i => `<svg class="km km${i}" viewBox="0 0 64 64"><use href="${ref}"/></svg>`).join('')}</span>`);
+  return w;
+}
+
+function kerubungiTeks(node) {
+  const pola = TOP_MONSTER.pola;
+  const s = node.nodeValue;
+  pola.lastIndex = 0;
+  if (!pola.test(s)) return;
+  pola.lastIndex = 0;
+  const frag = document.createDocumentFragment();
+  let akhir = 0, m;
+  while ((m = pola.exec(s))) {
+    if (m.index > akhir) frag.append(s.slice(akhir, m.index));
+    frag.append(bungkusKerubung(m[0], TOP_MONSTER.peta.get(normNama(m[0])) || 'peci'));
+    akhir = m.index + m[0].length;
+  }
+  if (akhir < s.length) frag.append(s.slice(akhir));
+  node.replaceWith(frag);
+}
+
+function kerubungiDi(akar) {
+  if (!TOP_MONSTER.pola || !akar) return;
+  if (akar.nodeType === 3) {
+    const induk = akar.parentElement;
+    if (induk && !induk.closest(JANGAN_KERUBUNG)) kerubungiTeks(akar);
+    return;
+  }
+  if (akar.nodeType !== 1 || !akar.isConnected) return;
+  if (akar !== document.body && akar.closest(JANGAN_KERUBUNG)) return;
+  pasangSpriteMonster();
+  const cocok = [];
+  const jalan = document.createTreeWalker(akar, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    acceptNode(n) {
+      if (n.nodeType === 1) return n.matches(JANGAN_KERUBUNG) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP;
+      if (n.nodeValue.length < 3) return NodeFilter.FILTER_SKIP;
+      TOP_MONSTER.pola.lastIndex = 0;
+      return TOP_MONSTER.pola.test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+    }
+  });
+  while (jalan.nextNode()) cocok.push(jalan.currentNode);
+  cocok.forEach(kerubungiTeks);
+}
+
+/* Pengamat: hanya simpul yang BARU ditambahkan yang diperiksa, dikumpulkan
+   lalu dikerjakan sekali per bingkai senggang. */
+(function pantauNamaTop() {
+  if (typeof MutationObserver !== 'function') return;
+  const santai = window.requestIdleCallback || ((f) => setTimeout(f, 60));
+  let antre = new Set(), terjadwal = false;
+  const kerjakan = () => {
+    terjadwal = false;
+    const daftar = antre; antre = new Set();
+    if (!TOP_MONSTER.pola) return;
+    if (daftar.size > 400) return kerubungiDi(document.body);
+    daftar.forEach(n => { try { kerubungiDi(n); } catch (e) {} });
+  };
+  new MutationObserver((catatan) => {
+    if (!TOP_MONSTER.pola) return;
+    for (const c of catatan) for (const n of c.addedNodes) {
+      if (n.nodeType === 1 && (n.classList.contains('nama-dikerubungi') || n.classList.contains('kerubung'))) continue;
+      if (n.nodeType === 1 || n.nodeType === 3) antre.add(n);
+    }
+    if (antre.size && !terjadwal) { terjadwal = true; santai(kerjakan, { timeout: 250 }); }
+  }).observe(document.body, { childList: true, subtree: true });
+})();
+
+/* =====================================================================
+ * v2.26 — (B) HUJAN MONSTER DI HALAMAN RINGKASAN
+ * ---------------------------------------------------------------------
+ * Monster jatuh dari atas (ala CSS Wrapped). Sebagian tersangkut di atas
+ * kartu Santri Aktif, Pelanggaran, Izin Menunggu, dan kartu unit
+ * Pengasuhan; sisanya menumpuk di dasar halaman. Saat halaman digulir,
+ * mereka melambung lalu jatuh lagi — terus begitu. Fisika kecil
+ * (gravitasi + pantulan) berjalan dengan requestAnimationFrame dan
+ * BERHENTI sendiri begitu semua monster diam, jadi tidak membebani.
+ * ===================================================================== */
+const HUJAN = { lapis: null, mon: [], raf: 0, ro: null, terakhir: 0, gulir: 0, dorong: 0 };
+
+function hentikanHujan() {
+  cancelAnimationFrame(HUJAN.raf); HUJAN.raf = 0;
+  if (HUJAN.ro) { HUJAN.ro.disconnect(); HUJAN.ro = null; }
+  window.removeEventListener('scroll', gulirHujan);
+  if (HUJAN.lapis) HUJAN.lapis.remove();
+  HUJAN.lapis = null; HUJAN.mon = [];
+}
+
+function tempatHinggap() {
+  const stat = [...document.querySelectorAll('#viewRoot .stats .stat')];
+  const cari = (re) => stat.find(s => re.test((s.querySelector('.k')?.textContent || '').trim()));
+  return [
+    cari(/^santri aktif$/i),
+    cari(/^pelanggaran$/i),
+    cari(/^izin menunggu$/i),
+    document.querySelector('#viewRoot .unit-card[data-ctx^="Pengasuhan"]')
+  ].filter(Boolean);
+}
+
+function hujanMonster(tingkat) {
+  hentikanHujan();
+  const root = $('viewRoot');
+  if (!tingkat || !root || APP.view !== 'dashboard') return;
+  const hemat = document.documentElement.classList.contains('hemat');
+  const diam = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let jumlah = { 1: 6, 2: 10, 3: 16 }[tingkat] || 0;
+  if (hemat) jumlah = Math.ceil(jumlah / 2);
+  const ukuran = innerWidth < 640 ? 34 : 46;
+
+  const lapis = document.createElement('div');
+  lapis.className = 'hujan-mon';
+  lapis.setAttribute('aria-hidden', 'true');
+  lapis.dataset.tingkat = String(tingkat);
+  root.appendChild(lapis);
+  HUJAN.lapis = lapis;
+
+  const hinggap = tempatHinggap();
+  const perHinggap = tingkat >= 3 ? 2 : 1;
+  const warna = ['#2BB3A3', '#8B6CF0', '#E0457B', '#F29E38'];
+  const jilbab = ['#F3ECFA', '#FFE3EE', '#E1F5F0', '#FFF1D6'];
+  // Jatuh ulang dari langit hanya bila hujan terakhir sudah > 60 dtk lalu
+  // (penyegaran realtime dasbor tidak memutar ulang pertunjukannya).
+  const jatuh = !diam && (Date.now() - HUJAN.terakhir > 60000);
+  HUJAN.terakhir = Date.now();
+
+  let lantai = 0;
+  const nLantai = Math.max(0, jumlah - Math.min(jumlah, hinggap.length * perHinggap));
+  for (let i = 0; i < jumlah; i++) {
+    const el = document.createElement('span');
+    el.className = 'mon mon-jatuh';
+    el.style.setProperty('--m-warna', warna[i % 4]);
+    el.style.setProperty('--m-jilbab', jilbab[(i + 1) % 4]);
+    el.style.width = el.style.height = ukuran + 'px';
+    el.innerHTML = svgMonster(varianMonster(i));
+    lapis.appendChild(el);
+    const idxH = Math.floor(i / perHinggap);
+    const target = idxH < hinggap.length
+      ? { jenis: 'hinggap', el: hinggap[idxH], frac: perHinggap === 2 ? (i % 2 ? .7 : .38) : .62 }
+      : { jenis: 'lantai', slot: lantai++, dari: nLantai };
+    HUJAN.mon.push({ el, target, x: 0, y: 0, vy: 0, rot: 0, vr: 0, diam: false, mulai: 0, ukuran });
+  }
+
+  const t0 = performance.now();
+  const titik = sasaranHujan();
+  HUJAN.mon.forEach((m, i) => {
+    const s = titik[i];
+    m.x = s.x;
+    if (jatuh) {
+      m.y = -ukuran - 40 - Math.random() * 260;
+      m.mulai = t0 + i * 110 + Math.random() * 90;
+      m.vr = (Math.random() - .5) * 8;
+    } else { m.y = s.y; m.diam = true; }
+    tulisMon(m);
+  });
+
+  HUJAN.ro = new ResizeObserver(() => bangunkanHujan());
+  HUJAN.ro.observe(root);
+  if (!diam) window.addEventListener('scroll', gulirHujan, { passive: true });
+  HUJAN.gulir = scrollY;
+  if (jatuh) bangunkanHujan();
+}
+
+/** Titik diam setiap monster, dalam koordinat lapisan. */
+function sasaranHujan() {
+  const lapis = HUJAN.lapis;
+  const r0 = lapis.getBoundingClientRect();
+  const lebar = lapis.clientWidth, tinggi = lapis.clientHeight;
+  return HUJAN.mon.map(m => {
+    const u = m.ukuran;
+    if (m.target.jenis === 'hinggap' && m.target.el.isConnected) {
+      const r = m.target.el.getBoundingClientRect();
+      return { x: r.left - r0.left + r.width * m.target.frac - u / 2, y: r.top - r0.top - u * .8 };
+    }
+    // lantai: disebar rata; bila berdesakan, baris kedua naik sedikit
+    const n = Math.max(1, m.target.dari), kolom = Math.max(1, Math.floor(lebar / (u * .9)));
+    const baris = Math.floor((m.target.slot || 0) / kolom);
+    const posisi = n <= kolom ? m.target.slot : (m.target.slot % kolom);
+    const bagi = Math.min(n, kolom);
+    const x = (posisi + .5) / bagi * lebar - u / 2 + ((m.target.slot * 37) % 13 - 6);
+    return { x: Math.max(0, Math.min(lebar - u, x)), y: tinggi - u - 2 - baris * u * .62 };
+  });
+}
+
+function tulisMon(m) {
+  m.el.style.transform = `translate3d(${m.x.toFixed(1)}px, ${m.y.toFixed(1)}px, 0) rotate(${m.rot.toFixed(1)}deg)`;
+}
+
+function bangunkanHujan() {
+  if (!HUJAN.lapis) return;
+  HUJAN.mon.forEach(m => { m.diam = false; });
+  if (!HUJAN.raf) { HUJAN.akhir = performance.now(); HUJAN.raf = requestAnimationFrame(langkahHujan); }
+}
+
+function langkahHujan(kini) {
+  HUJAN.raf = 0;
+  if (!HUJAN.lapis || !HUJAN.lapis.isConnected) return hentikanHujan();
+  const dt = Math.min(2.5, (kini - (HUJAN.akhir || kini)) / 16.667) || 1;
+  HUJAN.akhir = kini;
+  const titik = sasaranHujan();
+  let bergerak = false;
+  HUJAN.mon.forEach((m, i) => {
+    if (m.diam) {
+      const s = titik[i];
+      if (Math.abs(m.y - s.y) < .5 && Math.abs(m.x - s.x) < .5) return;
+      m.diam = false;
+    }
+    bergerak = true;
+    if (kini < m.mulai) return;
+    const s = titik[i];
+    m.vy = Math.min(24, m.vy + .62 * dt);
+    m.y += m.vy * dt;
+    m.x += (s.x - m.x) * Math.min(1, .08 * dt);
+    m.rot += m.vr * dt;
+    if (m.y >= s.y) {
+      m.y = s.y;
+      if (m.vy > 3) { m.vy = -m.vy * .42; m.vr = -m.vr * .5 + (Math.random() - .5) * 4; }
+      else { m.vy = 0; m.vr = 0; }
+    }
+    if (m.vy === 0 && m.y === s.y) {
+      m.rot *= Math.pow(.75, dt);
+      if (Math.abs(m.rot) < .5 && Math.abs(m.x - s.x) < .5) { m.rot = 0; m.x = s.x; m.diam = true; m.el.classList.add('mendarat'); }
+    } else m.el.classList.remove('mendarat');
+    tulisMon(m);
+  });
+  if (bergerak) HUJAN.raf = requestAnimationFrame(langkahHujan);
+}
+
+/** Digulir → monster melambung lalu jatuh lagi. Yang tersangkut hanya meloncat di tempat. */
+function gulirHujan() {
+  const d = scrollY - HUJAN.gulir;
+  HUJAN.gulir = scrollY;
+  const kini = performance.now();
+  if (Math.abs(d) < 4 || kini - HUJAN.dorong < 320) return;
+  HUJAN.dorong = kini;
+  const kuat = Math.min(1.7, .6 + Math.abs(d) / 40);
+  HUJAN.mon.forEach(m => {
+    if (m.vy < -2) return;               // masih melambung
+    const lantai = m.target.jenis === 'lantai';
+    m.vy = -(lantai ? 9 + Math.random() * 9 : 4 + Math.random() * 3) * kuat;
+    m.vr = (Math.random() - .5) * (lantai ? 16 : 6);
+    m.mulai = 0; m.diam = false;
+  });
+  bangunkanHujan();
+}
+
 /* Pembungkus navigateTo (fungsi aslinya tidak diubah): setelah menu apa
    pun selain dasbor selesai digambar, monster di bilah profil disegarkan
    dari data yang sudah tersimpan — tanpa permintaan jaringan tambahan
@@ -19692,7 +20055,8 @@ async function segarkanMonster() {
   const navigasiAsli = navigateTo;
   navigateTo = async function (view) {
     const hasil = await navigasiAsli(view);
-    if (APP.view !== 'dashboard') segarkanMonster();
+    if (APP.view !== 'dashboard') { hentikanHujan(); segarkanMonster(); }
+    segarkanTopMonster();
     return hasil;
   };
 })();
