@@ -4849,9 +4849,198 @@
   @keyframes rq-putar { to { transform:rotate(360deg); } }
   @media (min-width:900px) { .rq-progres { bottom:24px; } }
   @media (prefers-reduced-motion: reduce) { .rq-sk, .rq-putar { animation:none; } }
+
+/* =====================================================================
+   v2.23 — LAYAR MUAT (gaya "Wrapped", palet dayah)
+   Dua wujud dari satu komponen:
+   · .lm--penuh : menutup seluruh layar saat aplikasi dibuka / sesudah
+                  login, sampai halaman pertama selesai dimuat.
+   · .lm--tirai : menutup area konten saja (#viewRoot) bila sebuah
+                  halaman butuh > 350 ms untuk dimuat.
+   Warna diambil dari token :root (navy, sea, brass, teal) — tidak ada
+   warna baru selain rose #E9A7B6 yang sudah dipakai tombol Keluar.
+   ===================================================================== */
+@layer komponen {
+  .lm {
+    --lm-s: 46px;                         /* ukuran satu bentuk   */
+    --lm-g: 18px;                         /* jarak antar-bentuk   */
+    --lm-d: calc(var(--lm-s) + var(--lm-g));
+    --lm-1: var(--brass);
+    --lm-2: #5DB3E0;
+    --lm-3: #2BB5A6;
+    --lm-4: #E9A7B6;
+    display:grid; place-items:center; align-content:center; gap:22px;
+    overflow:hidden; isolation:isolate; text-align:center;
+    transition: opacity .42s var(--lengkung), visibility .42s;
+  }
+  .lm.tutup { opacity:0; visibility:hidden; pointer-events:none; }
+
+  /* ---------- wujud layar penuh ---------- */
+  .lm--penuh {
+    position:fixed; inset:0; z-index:10000;
+    background: var(--girih), var(--g-navy);
+    color:#fff;
+    padding: env(safe-area-inset-top) 20px env(safe-area-inset-bottom);
+  }
+  .lm--penuh::before, .lm--penuh::after {
+    content:''; position:absolute; z-index:-1; border-radius:50%;
+    width:62vmax; height:62vmax; filter:blur(90px); opacity:.30;
+    animation: lmHanyut 10s ease-in-out infinite alternate;
+  }
+  .lm--penuh::before { background:var(--brass); top:-34vmax; left:-26vmax; }
+  .lm--penuh::after  { background:var(--sea-hi); bottom:-36vmax; right:-24vmax; animation-delay:-5s; }
+  @keyframes lmHanyut { to { transform: translate(10vmax, 7vmax) scale(1.14); } }
+
+  /* ---------- wujud tirai konten ---------- */
+  .lm--tirai {
+    position:fixed; z-index:25;          /* di bawah topbar & tabbar */
+    --lm-s: 30px; --lm-g: 12px; gap:14px;
+    --lm-2: var(--sea); --lm-3: var(--teal); --lm-4: var(--maroon);
+    background: color-mix(in oklab, var(--paper) 86%, transparent);
+    -webkit-backdrop-filter: var(--kaca-tipis, none);
+            backdrop-filter: var(--kaca-tipis, none);
+    color: var(--navy);
+  }
+
+  /* ---------- panggung: empat bentuk bertukar pojok ---------- */
+  .lm-panggung {
+    position:relative;
+    width:  calc(var(--lm-s) * 2 + var(--lm-g));
+    height: calc(var(--lm-s) * 2 + var(--lm-g));
+  }
+  .lm-panggung i {
+    position:absolute; top:0; left:0;
+    width:var(--lm-s); height:var(--lm-s);
+    animation: lmTukar 2.4s cubic-bezier(.7,-.4,.3,1.4) infinite;
+    will-change: transform;
+  }
+  .lm-panggung i:nth-child(1) { background:var(--lm-1); border-radius:50%; }
+  .lm-panggung i:nth-child(2) { background:var(--lm-2); border-radius:28%; animation-delay:-.6s; }
+  .lm-panggung i:nth-child(3) { background:var(--lm-3); border-radius:50% 50% 0 50%; animation-delay:-1.2s; }
+  .lm-panggung i:nth-child(4) {                    /* bintang delapan — rub' el-hizb */
+    background:var(--lm-4); animation-delay:-1.8s;
+    clip-path: polygon(50% 0,64.6% 14.6%,85.4% 14.6%,85.4% 35.4%,100% 50%,85.4% 64.6%,
+                       85.4% 85.4%,64.6% 85.4%,50% 100%,35.4% 85.4%,14.6% 85.4%,
+                       14.6% 64.6%,0 50%,14.6% 35.4%,14.6% 14.6%,35.4% 14.6%);
+  }
+  @keyframes lmTukar {
+    0%, 20%  { transform: translate(0, 0)                      rotate(0)      scale(1); }
+    25%, 45% { transform: translate(var(--lm-d), 0)            rotate(90deg)  scale(.8); }
+    50%, 70% { transform: translate(var(--lm-d), var(--lm-d))  rotate(180deg) scale(1); }
+    75%, 95% { transform: translate(0, var(--lm-d))            rotate(270deg) scale(.8); }
+    100%     { transform: translate(0, 0)                      rotate(360deg) scale(1); }
+  }
+
+  /* ---------- alis: Arab + Latin, sama dengan eyebrow topbar ---------- */
+  .lm-alis {
+    display:flex; align-items:center; gap:10px;
+    font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase;
+    color: color-mix(in oklab, #fff 62%, transparent);
+  }
+  .lm-alis .ar { font-size:17px; letter-spacing:0; text-transform:none; color:var(--brass-hi); }
+  .lm-alis .garis { width:26px; height:1px; background: color-mix(in oklab, var(--brass) 60%, transparent); }
+
+  /* ---------- judul besar, huruf melompat ---------- */
+  .lm-judul {
+    margin:0; display:flex; justify-content:center;
+    font-family:'Inter Tight', system-ui, sans-serif;
+    font-size: clamp(44px, 12vw, 92px); font-weight:800;
+    letter-spacing:-.045em; line-height:.9; text-transform:uppercase;
+  }
+  .lm-judul span { display:inline-block; animation: lmLompat 1.6s cubic-bezier(.5,0,.3,1.5) infinite; }
+  .lm-judul span:nth-child(odd) { color:var(--brass-hi); }
+  .lm-judul span:nth-child(2) { animation-delay:.08s; }
+  .lm-judul span:nth-child(3) { animation-delay:.16s; }
+  .lm-judul span:nth-child(4) { animation-delay:.24s; }
+  .lm-judul span:nth-child(5) { animation-delay:.32s; }
+  .lm-judul span:nth-child(6) { animation-delay:.40s; }
+  .lm-judul span:nth-child(7) { animation-delay:.48s; }
+  @keyframes lmLompat {
+    0%, 60%, 100% { transform: translateY(0) rotate(0); }
+    25%           { transform: translateY(-22%) rotate(-6deg); }
+    40%           { transform: translateY(4%) rotate(3deg); }
+  }
+  .lm--tirai .lm-judul { font-size: clamp(22px, 4vw, 30px); letter-spacing:-.03em; }
+  .lm--tirai .lm-judul span:nth-child(odd) { color:var(--sea); }
+
+  /* ---------- teks berganti (ticker) ---------- */
+  .lm-ticker {
+    height:1.5em; overflow:hidden; line-height:1.5em;
+    font-size:14.5px; font-weight:600;
+    color: color-mix(in oklab, #fff 84%, transparent);
+  }
+  .lm-ticker ul { list-style:none; margin:0; padding:0; animation: lmGanti 8s cubic-bezier(.8,0,.2,1) infinite; }
+  @keyframes lmGanti {
+    0%, 20%  { transform: translateY(0); }
+    25%, 45% { transform: translateY(-1.5em); }
+    50%, 70% { transform: translateY(-3em); }
+    75%, 95% { transform: translateY(-4.5em); }
+    100%     { transform: translateY(-6em); }     /* baris ke-5 = salinan baris 1 */
+  }
+  .lm--tirai .lm-alis { color:var(--text-3); font-size:10px; }
+  .lm--tirai .lm-alis .ar { color:var(--brass); font-size:15px; }
+  .lm--tirai .lm-ticker { color:var(--text-2, var(--text)); font-size:13px; font-weight:500; }
+  .lm--tirai .lm-ticker ul { animation:none; }
+
+  /* ---------- bilah kemajuan bergaris ---------- */
+  .lm-bilah {
+    position:relative; overflow:hidden;
+    width: min(240px, 64vw); height:8px; border-radius:99px;
+    background: color-mix(in oklab, #fff 14%, transparent);
+  }
+  .lm--tirai .lm-bilah { width:min(160px, 50vw); height:6px; background:var(--line); }
+  .lm-bilah::after {
+    content:''; position:absolute; top:0; bottom:0; left:0; width:40%;
+    border-radius:inherit;
+    background: repeating-linear-gradient(-45deg,
+      var(--lm-1) 0 7px, var(--lm-2) 7px 14px, var(--lm-3) 14px 21px, var(--lm-4) 21px 28px);
+    background-size: 39.6px 100%;
+    animation: lmGeser 1.4s ease-in-out infinite, lmGaris .6s linear infinite;
+  }
+  @keyframes lmGeser { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+  @keyframes lmGaris { to { background-position: 39.6px 0; } }
+
+  /* ---------- hemat daya & kurangi gerak ---------- */
+  :root.hemat .lm--penuh::before, :root.hemat .lm--penuh::after { display:none; }
+  /* Aturan global di lapisan `dasar` memendekkan durasi animasi dengan
+     !important; animasi tak berujung lalu berkedip. Di sini namanya yang
+     dimatikan, supaya tampilan diam dan rapi. */
+  @media (prefers-reduced-motion: reduce) {
+    .lm *, .lm::before, .lm::after { animation-name: none !important; }
+    .lm-panggung i:nth-child(2) { transform: translate(var(--lm-d), 0); }
+    .lm-panggung i:nth-child(3) { transform: translate(var(--lm-d), var(--lm-d)); }
+    .lm-panggung i:nth-child(4) { transform: translate(0, var(--lm-d)); }
+    .lm-bilah::after { width:100%; }
+  }
+  @media print { .lm { display:none !important; } }
+}
 </style>
 </head>
 <body>
+
+<!-- ======= LAYAR MUAT AWAL (v2.23) — ditutup app.js setelah halaman pertama siap ======= -->
+<div class="lm lm--penuh" id="layarMuat" role="status" aria-live="polite" aria-label="Memuat aplikasi">
+  <div class="lm-panggung" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <div class="lm-alis" aria-hidden="true">
+    <span class="ar">جَارٍ التَّحْمِيل</span><span class="garis"></span><span>Pengembangan Santri</span>
+  </div>
+  <h2 class="lm-judul" aria-hidden="true"><span>M</span><span>e</span><span>m</span><span>u</span><span>a</span><span>t</span><span>…</span></h2>
+  <div class="lm-ticker">
+    <ul id="layarMuatTeks">
+      <li>Memeriksa sesi masuk</li>
+      <li>Menghubungi server dayah</li>
+      <li>Menyiapkan catatan santri</li>
+      <li>Hampir selesai</li>
+      <li>Memeriksa sesi masuk</li>
+    </ul>
+  </div>
+  <div class="lm-bilah" aria-hidden="true"></div>
+</div>
+<script>
+  /* Jaring pengaman: bila app.js gagal dimuat, layar muat tidak boleh
+     menutupi layar login selamanya. */
+  setTimeout(function () { var l = document.getElementById('layarMuat'); if (l) l.classList.add('tutup'); }, 20000);
+</script>
 
 <!-- ======================= LOGIN ======================= -->
 <div id="loginScreen">

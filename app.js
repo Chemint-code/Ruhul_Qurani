@@ -130,6 +130,81 @@ function labelPekan(kunci) {
 
 function loading(on) { $('bar').classList.toggle('hidden', !on); }
 
+// ---------------------------------------------------------------------
+// v2.23 — LAYAR MUAT (gaya "Wrapped", palet dayah)
+// · Layar penuh #layarMuat: tampil sejak HTML dibaca, ditutup setelah
+//   halaman pertama selesai (navigateTo → finally), atau segera bila
+//   tidak ada sesi. Dibuka lagi sesudah login berhasil.
+// · Tirai konten: menutup #viewRoot saja bila sebuah halaman butuh
+//   lebih dari 350 ms. Halaman cepat tidak berkedip; sekali tampil,
+//   tirai bertahan minimal 450 ms agar tidak "kilat".
+// Bilah tipis #bar (loading()) tetap berjalan seperti biasa.
+// ---------------------------------------------------------------------
+const LayarMuat = (() => {
+  const JEDA_TAMPIL = 350, MIN_TAMPIL = 450;
+  let tirai = null, giliran = 0;
+
+  function bukaAwal(baris) {
+    const l = $('layarMuat'); if (!l) return;
+    if (Array.isArray(baris) && baris.length) {
+      const ul = $('layarMuatTeks');
+      if (ul) ul.innerHTML = [...baris, baris[0]].slice(0, 5).map(t => `<li>${esc(t)}</li>`).join('');
+    }
+    l.classList.remove('tutup');
+  }
+  function tutupAwal() { $('layarMuat')?.classList.add('tutup'); }
+
+  function buatTirai() {
+    const el = document.createElement('div');
+    el.className = 'lm lm--tirai tutup';
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    el.innerHTML = `
+      <div class="lm-panggung" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div class="lm-alis" aria-hidden="true"><span class="ar"></span><span class="garis"></span><span class="lat"></span></div>
+      <h2 class="lm-judul" aria-hidden="true">${[...'Memuat…'].map(h => `<span>${h}</span>`).join('')}</h2>
+      <div class="lm-ticker"><ul><li class="teks"></li></ul></div>
+      <div class="lm-bilah" aria-hidden="true"></div>`;
+    document.body.appendChild(el);
+    return el;
+  }
+  function letakkan(el) {
+    const r = $('viewRoot').getBoundingClientRect();
+    el.style.left   = Math.max(0, r.left) + 'px';
+    el.style.right  = Math.max(0, innerWidth - r.right) + 'px';
+    el.style.top    = Math.max(0, r.top) + 'px';
+    el.style.bottom = '0px';
+  }
+
+  /** Mulai tirai untuk satu navigasi. Mengembalikan fungsi penutupnya. */
+  function tiraiUntuk(j) {
+    const id = ++giliran;
+    let tampilSejak = 0;
+    // Layar penuh masih terbuka → tirai tidak perlu.
+    const penuhTerbuka = () => { const l = $('layarMuat'); return l && !l.classList.contains('tutup'); };
+    const t = setTimeout(() => {
+      if (id !== giliran || penuhTerbuka()) return;
+      tirai = tirai || buatTirai();
+      tirai.querySelector('.ar').textContent  = j.ar || '';
+      tirai.querySelector('.lat').textContent = j.lat || '';
+      tirai.querySelector('.teks').textContent = `Membuka ${j.teks || 'halaman'}`;
+      tirai.setAttribute('aria-label', `Memuat ${j.teks || 'halaman'}`);
+      letakkan(tirai);
+      tirai.classList.remove('tutup');
+      tampilSejak = performance.now();
+    }, JEDA_TAMPIL);
+
+    return function tutup() {
+      clearTimeout(t);
+      if (id !== giliran || !tampilSejak || !tirai) return;
+      const sisa = Math.max(0, MIN_TAMPIL - (performance.now() - tampilSejak));
+      setTimeout(() => { if (id === giliran) tirai.classList.add('tutup'); }, sisa);
+    };
+  }
+
+  return { bukaAwal, tutupAwal, tiraiUntuk };
+})();
+
 function toast(icon, title) {
   Swal.mixin({ toast:true, position:'top-end', showConfirmButton:false,
                timer:2600, timerProgressBar:true }).fire({ icon, title });
@@ -1900,8 +1975,11 @@ $('formLogin').addEventListener('submit', async (e) => {
   try {
     const { error } = await db.auth.signInWithPassword({ email, password: p });
     if (error) throw new Error('Username atau password salah.');
+    LayarMuat.bukaAwal(['Menyiapkan akun', 'Mengambil catatan santri', 'Menyusun ringkasan', 'Hampir selesai']);
     await masukAplikasi();
+    if (!APP.profil) LayarMuat.tutupAwal();   // profil ditolak → kembali ke login
   } catch (err) {
+    LayarMuat.tutupAwal();
     toast('error', err.message);
   } finally {
     btn.disabled = asli.disabled;
@@ -2071,6 +2149,7 @@ async function navigateTo(view) {
   window.scrollTo({ top: 0, behavior: 'auto' });
 
   loading(true);
+  const tutupTirai = LayarMuat.tiraiUntuk(j);
   try {
     if (view === 'dashboard')        await viewDashboard();
     else if (view === 'pimpinan')    await viewPimpinan();
@@ -2093,7 +2172,7 @@ async function navigateTo(view) {
     else if (view === 'pengguna')    await viewPengguna();
     tandaiTabelBisaGeser();
   } catch (err) { fireError(err); }
-  finally { loading(false); }
+  finally { loading(false); tutupTirai(); LayarMuat.tutupAwal(); }
 }
 
 /** Petunjuk geser untuk tabel lebar di layar kecil. */
@@ -18375,6 +18454,12 @@ function labAksi(aksi, el) {
 hidupkanLayarLogin();
 
 (async function start() {
-  const { data: { session } } = await db.auth.getSession();
-  if (session) await masukAplikasi();
+  try {
+    const { data: { session } } = await db.auth.getSession();
+    if (session) await masukAplikasi();
+  } finally {
+    // Tanpa sesi / profil ditolak → tampilkan login. Bila profil sah,
+    // layar muat ditutup oleh navigateTo() setelah halaman pertama siap.
+    if (!APP.profil) LayarMuat.tutupAwal();
+  }
 })();
