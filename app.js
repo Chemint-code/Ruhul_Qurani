@@ -2637,18 +2637,8 @@ function siapkanTabelKartu(akar) {
    dalam jendela SweetAlert) ikut diberi label. Pengamat ini hanya
    menjadwalkan satu pekerjaan saat peramban sedang senggang, jadi tidak
    menambah beban saat pengguna sedang berinteraksi. */
-(function pantauTabelBaru() {
-  if (typeof MutationObserver !== 'function') return;
-  const santai = window.requestIdleCallback || ((f) => setTimeout(f, 120));
-  let terjadwal = false;
-  const jadwalkan = () => {
-    if (terjadwal) return;
-    terjadwal = true;
-    santai(() => { terjadwal = false; try { siapkanTabelKartu(); } catch (e) {} });
-  };
-  new MutationObserver(jadwalkan)
-    .observe(document.documentElement, { childList: true, subtree: true });
-})();
+/* v2.28 (R8): pemantau tabel baru digabung ke pemantau DOM tunggal
+   `pantauDomBersama` (lihat bagian v2.26 · nama 10 besar). */
 
 /* Perangkat kelas bawah / mode hemat data: matikan efek hias yang mahal
    (kaca buram, paralaks, kilau) lewat kelas `hemat` di elemen <html>.
@@ -19859,24 +19849,35 @@ function kerubungiDi(akar) {
 
 /* Pengamat: hanya simpul yang BARU ditambahkan yang diperiksa, dikumpulkan
    lalu dikerjakan sekali per bingkai senggang. */
-(function pantauNamaTop() {
+(function pantauDomBersama() {
+  /* v2.28 (R8): satu MutationObserver menggantikan dua (tabel-kartu dan
+     nama 10 besar). Mutasi di lapisan animasi (hujan, penghuni, monster
+     pada nama, layar muat) diabaikan; kerja dikumpulkan lalu dikerjakan
+     sekali di waktu senggang. */
   if (typeof MutationObserver !== 'function') return;
   const santai = window.requestIdleCallback || ((f) => setTimeout(f, 60));
-  let antre = new Set(), terjadwal = false;
+  const ABAI = '.hujan-mon, .penghuni, .kerubung, .lm, #rqProgres, .swal2-timer-progress-bar';
+  let antre = new Set(), adaBaru = false, terjadwal = false;
   const kerjakan = () => {
     terjadwal = false;
     const daftar = antre; antre = new Set();
-    if (!TOP_MONSTER.pola) return;
-    if (daftar.size > 400) return kerubungiDi(document.body);
-    daftar.forEach(n => { try { kerubungiDi(n); } catch (e) {} });
+    if (adaBaru) { adaBaru = false; try { siapkanTabelKartu(); } catch (e) {} }
+    if (TOP_MONSTER.pola && daftar.size) {
+      if (daftar.size > 400) kerubungiDi(document.body);
+      else daftar.forEach(n => { try { kerubungiDi(n); } catch (e) {} });
+    }
+    try { amatiHias(document.body); } catch (e) {}
   };
   new MutationObserver((catatan) => {
-    if (!TOP_MONSTER.pola) return;
-    for (const c of catatan) for (const n of c.addedNodes) {
-      if (n.nodeType === 1 && (n.classList.contains('nama-dikerubungi') || n.classList.contains('kerubung'))) continue;
-      if (n.nodeType === 1 || n.nodeType === 3) antre.add(n);
+    for (const c of catatan) {
+      const t = c.target;
+      if (t.nodeType === 1 && t.closest(ABAI)) continue;
+      for (const n of c.addedNodes) {
+        if (n.nodeType === 1 && (n.classList.contains('nama-dikerubungi') || n.matches(ABAI))) continue;
+        if (n.nodeType === 1 || n.nodeType === 3) { antre.add(n); adaBaru = true; }
+      }
     }
-    if (antre.size && !terjadwal) { terjadwal = true; santai(kerjakan, { timeout: 250 }); }
+    if (adaBaru && !terjadwal) { terjadwal = true; santai(kerjakan, { timeout: 250 }); }
   }).observe(document.body, { childList: true, subtree: true });
 })();
 
@@ -20247,6 +20248,376 @@ function pasangPenghuniGrafik(canvasId) {
     const hasil = await navigasiAsli(view);
     if (APP.view !== 'dashboard') { hentikanHujan(); segarkanMonster(); }
     segarkanTopMonster();
+    return hasil;
+  };
+})();
+
+/* =====================================================================
+ * v2.28 — KELANCARAN ANIMASI & RENDERING
+ * ---------------------------------------------------------------------
+ * Dasar: evaluasi-kemulusan-2026-09-22 (dasbor diam 24 fps di laptop,
+ * 18 fps di HP; pindah menu membeku 0,3–1 dtk). Semua perubahan di sini
+ * berupa PEMBUNGKUS — fungsi lama tidak ditimpa:
+ *  R1 anggaran gerak  : monster diam dalam satu pose, beranimasi hanya
+ *                       dalam "semburan" singkat / saat disentuh; hiasan
+ *                       di luar layar dijeda; 10 dtk tanpa interaksi →
+ *                       mode tenang (hiasan dijeda).
+ *  R2 hemat adaptif   : kelancaran diukur, bukan ditebak dari jumlah
+ *                       core; tombol "Efek" di bilah profil.
+ *  R4 loop hujan      : rAF berhenti bila semua monster diam; guguran
+ *                       berikutnya dibangunkan setTimeout; pengukuran
+ *                       kartu ≤ 1×/dtk dan tidak saat menggulir.
+ *  R5 grafik          : dibuat bersama dalam satu bingkai, yang di luar
+ *                       layar ditunda sampai terlihat; animasi 450 ms.
+ *  R7 monster pada nama: gambar tunggal (bukan <svg><use>) — 1 elemen,
+ *                       bukan ±30 elemen bayangan per monster.
+ *  (R3, R6, sebagian R7 ada di CSS index.html bagian "v2.28";
+ *   R8 = pemantau DOM tunggal, menggantikan dua IIFE lama.)
+ * ===================================================================== */
+const MULUS = {
+  io: null, diamati: new WeakSet(), tampak: new Set(),
+  tenang: false, inputTerakhir: performance.now(), gulirTerakhir: -1e9,
+  ukurTerakhir: -1e9, tGugur: 0, tGulir: 0,
+  kurangGerak: matchMedia('(prefers-reduced-motion: reduce)').matches
+};
+const tundaMs = (ms) => new Promise(r => setTimeout(r, ms));
+
+/* ---------- R2 · Mode efek: otomatis (diukur) / penuh / hemat ---------- */
+const EFEK = {
+  kunciPilih: 'rq-efek-pilih', kunciUkur: 'rq-efek-ukur',
+  tebakan: false, sebab: 'tebak', mengukur: false, sudahUkur: false
+};
+function bacaLS(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function tulisLS(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} }
+function pilihanEfek() { const p = bacaLS(EFEK.kunciPilih); return p === 'penuh' || p === 'hemat' ? p : 'otomatis'; }
+function hasilUkurEfek() {
+  try {
+    const v = JSON.parse(bacaLS(EFEK.kunciUkur) || 'null');
+    return v && (v.mode === 'hemat' || v.mode === 'penuh') && Date.now() - v.t < 14 * 864e5 ? v : null;
+  } catch (e) { return null; }
+}
+function simpanUkurEfek(mode, sebab) { EFEK.sebab = sebab; tulisLS(EFEK.kunciUkur, JSON.stringify({ mode, sebab, t: Date.now() })); }
+function modeHemat() { return document.documentElement.classList.contains('hemat'); }
+
+function setelGrafikEfek() {
+  try { if (window.Chart && Chart.defaults.animation) Chart.defaults.animation.duration = modeHemat() ? 0 : 450; } catch (e) {}
+}
+
+/** Pasang / lepas kelas hemat. Hujan di dasbor dibangun ulang agar jumlahnya sesuai. */
+function terapkanHemat(on) {
+  const r = document.documentElement;
+  const lama = r.classList.contains('hemat');
+  r.classList.toggle('hemat', !!on);
+  r.dataset.efek = on ? 'hemat' : 'penuh';
+  setelGrafikEfek();
+  perbaruiTombolEfek();
+  if (lama !== !!on && typeof APP !== 'undefined' && APP.view === 'dashboard' && HUJAN.lapis && APP.monster) {
+    try { hujanMonster(APP.monster.tingkat); } catch (e) {}
+  }
+}
+
+(function modeEfekAwal() {
+  // Tebakan lama (≤ 4 core / ≤ 3 GB / hemat data) + layar sentuh sebagai titik awal saja.
+  EFEK.tebakan = modeHemat() || matchMedia('(pointer: coarse)').matches;
+  const p = pilihanEfek();
+  if (p !== 'otomatis') return terapkanHemat(p === 'hemat');
+  const v = hasilUkurEfek();
+  if (v) { EFEK.sebab = v.sebab; return terapkanHemat(v.mode === 'hemat'); }
+  terapkanHemat(EFEK.tebakan);
+})();
+
+/** Rekam interval bingkai selama `ms`. */
+function rekamBingkai(ms) {
+  return new Promise(res => {
+    const fr = []; let akhir = 0; const t0 = performance.now();
+    const tik = (t) => {
+      if (akhir) fr.push(t - akhir);
+      akhir = t;
+      if (t - t0 < ms && !document.hidden) requestAnimationFrame(tik); else res(fr);
+    };
+    requestAnimationFrame(tik);
+  });
+}
+function nilaiBingkai(fr) {
+  if (fr.length < 20) return null;
+  const s = [...fr].sort((a, b) => a - b);
+  return { median: s[s.length >> 1], lambat: fr.filter(x => x > 33).length / fr.length };
+}
+
+/** Ukur kelancaran dasbor lalu tetapkan mode (hanya pada pilihan "otomatis"). */
+async function ujiKelancaran() {
+  if (EFEK.mengukur || EFEK.sudahUkur || pilihanEfek() !== 'otomatis' || MULUS.kurangGerak) return;
+  EFEK.mengukur = true;
+  try {
+    await tundaMs(1600);
+    if (document.hidden || APP.navSibuk || APP.view !== 'dashboard') return;
+    const n = nilaiBingkai(await rekamBingkai(2000));
+    if (!n) return;
+    EFEK.sudahUkur = true;
+    const patah = n.median > 20 || n.lambat > .15;
+    const mulus = n.median <= 17.6 && n.lambat <= .05;
+    if (!modeHemat() && patah) { terapkanHemat(true); simpanUkurEfek('hemat', 'ukur'); return; }
+    if (modeHemat() && mulus && EFEK.sebab !== 'ukur') {
+      // Hemat hanya tebakan dan ternyata lancar → coba mode penuh, lalu ukur sekali lagi.
+      terapkanHemat(false);
+      await tundaMs(1200);
+      const n2 = nilaiBingkai(await rekamBingkai(2000));
+      if (n2 && (n2.median > 20 || n2.lambat > .15)) { terapkanHemat(true); simpanUkurEfek('hemat', 'ukur'); }
+      else simpanUkurEfek('penuh', 'ukur');
+      return;
+    }
+    simpanUkurEfek(modeHemat() ? 'hemat' : 'penuh', 'ukur');
+  } finally { EFEK.mengukur = false; }
+}
+
+const LABEL_EFEK = { otomatis: 'Otomatis', penuh: 'Penuh', hemat: 'Hemat' };
+function perbaruiTombolEfek() {
+  const b = document.getElementById('btnEfek'); if (!b) return;
+  const p = pilihanEfek();
+  const teks = p === 'otomatis' ? `Otomatis (${modeHemat() ? 'hemat' : 'penuh'})` : LABEL_EFEK[p];
+  b.title = `Efek tampilan: ${teks} — klik untuk mengganti`;
+  b.setAttribute('aria-label', b.title);
+  b.dataset.efek = p;
+  const s = b.querySelector('span'); if (s) s.textContent = 'Efek';
+}
+function pasangTombolEfek() {
+  if (document.getElementById('btnEfek')) return;
+  const acuan = document.getElementById('btnSegarkan'); if (!acuan) return;
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'pbar-btn'; b.id = 'btnEfek';
+  b.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i><span>Efek</span>';
+  b.addEventListener('click', () => {
+    const urut = ['otomatis', 'penuh', 'hemat'];
+    const p = urut[(urut.indexOf(pilihanEfek()) + 1) % urut.length];
+    tulisLS(EFEK.kunciPilih, p === 'otomatis' ? null : p);
+    if (p === 'otomatis') {
+      tulisLS(EFEK.kunciUkur, null); EFEK.sebab = 'tebak'; EFEK.sudahUkur = false;
+      terapkanHemat(EFEK.tebakan); ujiKelancaran();
+    } else terapkanHemat(p === 'hemat');
+    try { toast('info', `Efek tampilan: ${LABEL_EFEK[p]}`); } catch (e) {}
+  });
+  acuan.parentElement.insertBefore(b, acuan);
+  perbaruiTombolEfek();
+}
+
+/* ---------- R1 · Anggaran gerak: luar layar, semburan, tenang ---------- */
+const SEL_HIAS_WADAH = '.pbar, .sapa, .pgs-portal, .penghuni';
+const SEL_SEMBURAN = '.mon, .nama-dikerubungi';
+
+function pengamatHias() {
+  if (MULUS.io || typeof IntersectionObserver !== 'function') return MULUS.io;
+  MULUS.io = new IntersectionObserver((entri) => {
+    for (const e of entri) {
+      const el = e.target;
+      if (el.matches(SEL_HIAS_WADAH)) el.classList.toggle('luar-layar', !e.isIntersecting);
+      if (e.isIntersecting) MULUS.tampak.add(el); else MULUS.tampak.delete(el);
+    }
+  }, { rootMargin: '80px 0px' });
+  return MULUS.io;
+}
+
+/** Daftarkan hiasan baru ke pengamat (dipanggil dari pemantau DOM & navigasi). */
+function amatiHias(akar) {
+  const io = pengamatHias(); if (!io) return;
+  const r = akar && akar.nodeType === 1 ? akar : document.body;
+  const daftar = [...r.querySelectorAll(`${SEL_HIAS_WADAH}, ${SEL_SEMBURAN}`)];
+  if (r.matches && r.matches(`${SEL_HIAS_WADAH}, ${SEL_SEMBURAN}`)) daftar.push(r);
+  for (const el of daftar) {
+    if (MULUS.diamati.has(el) || el.closest('.laporan, #printArea, #pdfStage')) continue;
+    MULUS.diamati.add(el); io.observe(el);
+  }
+}
+
+function acak(arr, n) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; }
+  return a.slice(0, n);
+}
+
+/** Semburan: 1–2 monster yang sedang tampak bergerak ±2,4 dtk, lalu diam lagi. */
+function tikSemburan() {
+  setTimeout(tikSemburan, modeHemat() ? 5200 : 3400);
+  if (document.hidden || MULUS.tenang || MULUS.kurangGerak) return;
+  const calon = [];
+  for (const el of MULUS.tampak) {
+    if (!el.isConnected) { MULUS.tampak.delete(el); continue; }
+    if (!el.matches(SEL_SEMBURAN) || el.classList.contains('semburan') || el.closest('.penghuni, .terbang')) continue;
+    calon.push(el);
+  }
+  acak(calon, modeHemat() ? 1 : 2).forEach(el => {
+    el.classList.add('semburan');
+    setTimeout(() => el.classList.remove('semburan'), 2400);
+  });
+}
+
+/** Penghuni grafik berjalan bergiliran: paling banyak 2 sekaligus, ±9 dtk. */
+function tikPenghuni() {
+  setTimeout(tikPenghuni, 4800);
+  if (document.hidden || MULUS.tenang || MULUS.kurangGerak || modeHemat()) return;
+  const semua = [...MULUS.tampak].filter(el => el.isConnected && el.classList.contains('penghuni'));
+  const jalan = semua.filter(el => el.classList.contains('jalan')).length;
+  acak(semua.filter(el => !el.classList.contains('jalan') && !el.classList.contains('bahagia')), Math.max(0, 2 - jalan))
+    .forEach(el => {
+      el.classList.add('jalan');
+      setTimeout(() => el.classList.remove('jalan'), 8000 + Math.random() * 3000);
+    });
+}
+
+/** Mode tenang: 10 dtk tanpa sentuhan/gulir/ketik → hiasan tak henti dijeda. */
+function aktifLagi() {
+  MULUS.inputTerakhir = performance.now();
+  if (MULUS.tenang) { MULUS.tenang = false; document.documentElement.classList.remove('tenang'); }
+}
+function periksaTenang() {
+  if (!MULUS.tenang && performance.now() - MULUS.inputTerakhir > 10000) {
+    MULUS.tenang = true; document.documentElement.classList.add('tenang');
+  }
+}
+
+(function pasangAnggaranGerak() {
+  let gerakAkhir = 0;
+  ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(ev =>
+    window.addEventListener(ev, aktifLagi, { passive: true, capture: true }));
+  window.addEventListener('pointermove', () => {
+    const k = performance.now(); if (k - gerakAkhir > 400) { gerakAkhir = k; aktifLagi(); }
+  }, { passive: true });
+  window.addEventListener('scroll', () => {
+    MULUS.gulirTerakhir = performance.now();
+    aktifLagi();
+    const r = document.documentElement;
+    if (!r.classList.contains('menggulir')) r.classList.add('menggulir');
+    clearTimeout(MULUS.tGulir);
+    MULUS.tGulir = setTimeout(() => r.classList.remove('menggulir'), 180);
+  }, { passive: true });
+  setInterval(periksaTenang, 2000);
+  setTimeout(tikSemburan, 2500);
+  setTimeout(tikPenghuni, 3000);
+})();
+
+/* ---------- R4 · Loop hujan berhenti saat semua diam ---------- */
+function hujanAdaGerak(kini) {
+  if (Math.abs(HUJAN.miring) > .02) return true;
+  return HUJAN.mon.some(m => !m.diDarat || m.daun || Math.abs(m.vx) >= .02 || kini < m.mulai || Math.abs(m.rot) > .3);
+}
+function jadwalkanGugur() {
+  clearTimeout(MULUS.tGugur); MULUS.tGugur = 0;
+  if (!HUJAN.lapis || HUJAN.diam) return;
+  MULUS.tGugur = setTimeout(() => { MULUS.tGugur = 0; bangunkanHujan(); },
+    Math.max(30, HUJAN.gugurBerikut - performance.now() + 5));
+}
+(function () {
+  const langkahSebelum = langkahHujan;
+  langkahHujan = function (kini) {
+    // Ukur kartu hinggap paling sering 1×/dtk dan tidak selama menggulir
+    // (aslinya tiap 250 ms → memaksa layout sinkron saat DOM sedang berubah).
+    if (kini - MULUS.ukurTerakhir >= 1000 && kini - MULUS.gulirTerakhir > 400) {
+      MULUS.ukurTerakhir = kini; HUJAN.cacheWaktu = -1e9;
+    } else HUJAN.cacheWaktu = kini;
+    const hasil = langkahSebelum(kini);
+    if (HUJAN.raf && !hujanAdaGerak(kini)) {
+      cancelAnimationFrame(HUJAN.raf); HUJAN.raf = 0;
+      jadwalkanGugur();
+    }
+    return hasil;
+  };
+  const hentikanSebelum = hentikanHujan;
+  hentikanHujan = function () {
+    clearTimeout(MULUS.tGugur); MULUS.tGugur = 0;
+    return hentikanSebelum.apply(this, arguments);
+  };
+})();
+
+/* ---------- R5 · Grafik: satu bingkai, tunda yang di luar layar ---------- */
+(function () {
+  const buatSebelum = buatChart;           // v2.27: asli + penghuni
+  const antre = [];
+  let jadwal = 0, io = null;
+
+  function buat(job) {
+    if (job.batal || job.selesai) return;
+    const el = $(job.canvasId);
+    if (!el || el !== job.el || !el.isConnected) return;
+    if (APP.charts[job.key] !== job.wakil) return;   // sudah diganti panggilan lain
+    job.selesai = true;
+    if (io) io.unobserve(el);
+    buatSebelum(job.key, job.canvasId, job.config);
+  }
+  function dekatLayar(el) {
+    const r = el.getBoundingClientRect();
+    return r.bottom > -200 && r.top < innerHeight + 200 && (r.width > 0 || r.height > 0);
+  }
+  function kerjakan() {
+    jadwal = 0;
+    const kerja = antre.splice(0);
+    // Baca semua posisi dulu (satu layout), baru buat grafik.
+    const ukur = kerja.map(j => ({ j, dekat: j.el.isConnected && dekatLayar(j.el) }));
+    ukur.forEach(({ j, dekat }) => {
+      if (j.batal) return;
+      if (dekat || typeof IntersectionObserver !== 'function') return buat(j);
+      io = io || new IntersectionObserver((entri) => entri.forEach(e => {
+        if (e.isIntersecting && e.target._grafikTunda) { const jj = e.target._grafikTunda; e.target._grafikTunda = null; buat(jj); }
+      }), { rootMargin: '250px 0px' });
+      j.el._grafikTunda = j;
+      io.observe(j.el);
+    });
+  }
+
+  buatChart = function (key, canvasId, config) {
+    const el = $(canvasId);
+    // Lembar cetak/PDF dan elemen tak ada: jalur lama, langsung.
+    if (!el || el.closest('.laporan, #printArea, #pdfStage')) return buatSebelum(key, canvasId, config);
+    try { APP.charts[key]?.destroy(); } catch (e) {}
+    const job = { key, canvasId, config, el, batal: false, selesai: false };
+    job.wakil = { _tertunda: true, destroy() { job.batal = true; if (io) io.unobserve(el); el._grafikTunda = null; } };
+    APP.charts[key] = job.wakil;
+    antre.push(job);
+    if (!jadwal) jadwal = requestAnimationFrame(kerjakan);
+    return job.wakil;
+  };
+  setelGrafikEfek();
+})();
+
+/* ---------- R7 · Monster pada nama: gambar tunggal ---------- */
+const KM_WARNA = {
+  peci:   [['#2BB3A3', '#FFE3EE'], ['#8B6CF0', '#F3ECFA'], ['#E0457B', '#E1F5F0']],
+  jilbab: [['#F29E38', '#FFE3EE'], ['#8B6CF0', '#F3ECFA'], ['#E0457B', '#E1F5F0']]
+};
+function pasangGayaKm() {
+  if (document.getElementById('gayaKm')) return;
+  const aturan = [];
+  for (const varian of ['peci', 'jilbab']) {
+    KM_WARNA[varian].forEach(([warna, kain], i) => {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${isiMonster(varian)
+        .replace(/var\(--m-warna,[^)]*\)/g, warna).replace(/var\(--m-jilbab,[^)]*\)/g, kain)}</svg>`;
+      aturan.push(`.nama-dikerubungi[data-varian="${varian}"] .km${i + 1}.km-gambar{background-image:url("data:image/svg+xml,${encodeURIComponent(svg)}")}`);
+    });
+  }
+  const st = document.createElement('style');
+  st.id = 'gayaKm';
+  st.textContent = aturan.join('\n');
+  document.head.appendChild(st);
+}
+(function () {
+  const bungkusSebelum = bungkusKerubung;
+  bungkusKerubung = function (teks, varian) {
+    const w = bungkusSebelum(teks, varian);
+    const k = w.querySelector('.kerubung');
+    if (k) {
+      pasangGayaKm();
+      k.innerHTML = '<i class="km km1 km-gambar"></i><i class="km km2 km-gambar"></i><i class="km km3 km-gambar"></i>';
+    }
+    return w;
+  };
+})();
+
+/* ---------- Pemasangan pada navigasi ---------- */
+(function () {
+  const navigasiSebelum = navigateTo;
+  navigateTo = async function (view) {
+    const hasil = await navigasiSebelum(view);
+    pasangTombolEfek();
+    requestAnimationFrame(() => amatiHias(document.body));
+    if (APP.view === 'dashboard') ujiKelancaran();
     return hasil;
   };
 })();

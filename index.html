@@ -5519,6 +5519,71 @@
   @media print { .penghuni { display: none !important; } }
 }
 </style>
+<style id="gayaMulus">
+/* =====================================================================
+   v2.28 — KELANCARAN ANIMASI & RENDERING
+   Sengaja TIDAK di dalam @layer: gaya tanpa lapisan mengalahkan semua
+   lapisan (dasar…wrapped), jadi tidak perlu !important kecuali untuk
+   menjeda. `revert-layer` mengembalikan animasi aslinya dari lapisan.
+   ===================================================================== */
+
+/* ---------- R1 · anggaran gerak: monster diam dalam satu pose ---------- */
+.mon :is(.mon-mata, .mon-pupil, .mon-tangan, .mon-lidah), .mon .mon-svg { animation-name: none; }
+:is(.mon.semburan, .mon:hover, .pbar-mon:hover .mon, .pbar-mon.kaget .mon, .penghuni.bahagia .mon)
+  :is(.mon-mata, .mon-pupil, .mon-tangan, .mon-lidah, .mon-svg) { animation-name: revert-layer; }
+/* hujan: mendarat cukup "penyet" sekali; loncat hanya saat semburan */
+.hujan-mon .mon-jatuh.mendarat > .mon-svg { animation: monPenyet .38s ease-out; transform-origin: 50% 100%; }
+.hujan-mon .mon-jatuh.mendarat.semburan > .mon-svg { animation: monLoncat 1.4s ease-in-out 2; transform-origin: 50% 100%; }
+/* monster pada nama (10 besar): diam, bergerak saat semburan / disentuh */
+.km { animation-name: none; }
+:is(.nama-dikerubungi.semburan, .nama-dikerubungi:hover) .km { animation-name: revert-layer; }
+.km-gambar { display: block; background: center / contain no-repeat; font-style: normal; }
+/* penghuni grafik: berjalan bergiliran (kelas .jalan dari app.js) */
+.penghuni { animation-play-state: paused; }
+.penghuni.jalan:not(.bahagia) { animation-play-state: running; }
+.penghuni.bingung:not(.jalan) .mon { animation-name: none; }
+.penghuni:not(.jalan):not(.bahagia) .penghuni-tanya { animation-name: none; opacity: 1; translate: -50% 0; }
+.penghuni.jalan .penghuni-tanya { animation-name: none; opacity: 0; }
+:root.hemat .penghuni.bingung .penghuni-tanya { opacity: 1; }
+
+/* di luar layar → jeda */
+.luar-layar, .luar-layar *, .luar-layar::before, .luar-layar::after,
+.luar-layar *::before, .luar-layar *::after { animation-play-state: paused !important; }
+
+/* 10 dtk tanpa interaksi → tenang: hiasan tak henti dijeda */
+:root.tenang :is(.pbar-bentuk i, .pbar-mon .mon, .mon-gantung, .amanah.digoda, .sapa-lega,
+  .sapa-mon-jalan .mon, .mon-kalimat, .pgs-portal .seal, .live .dot, .penghuni, .penghuni *, .mon, .mon *, .km),
+:root.tenang :is(#appShell, .pbar-av-bingkai, .pbar-id b, .sapa, .pgs-portal, .tag-sah, .stat, .unit-card)::before,
+:root.tenang :is(#appShell, .pbar-id b, .sapa, .pgs-portal, .unit-card)::after { animation-play-state: paused !important; }
+
+/* aurora berhenti selagi digulir (desktop) */
+:root.menggulir #appShell::before { animation-play-state: paused; }
+
+/* ---------- R3 · layar muat benar-benar hilang setelah tertutup ---------- */
+.lm { transition: opacity .42s var(--lengkung), visibility .42s, display .42s allow-discrete; }
+.lm.tutup { display: none; }
+@starting-style { .lm--tirai:not(.tutup) { opacity: 0; } }
+
+/* ---------- R6 · biaya dasar compositing ---------- */
+/* cincin pelangi foto profil: putar elemennya (compositor), bukan
+   @property --wr-putar (lukis ulang tiap bingkai) */
+@keyframes mulusCincin { to { rotate: 360deg; } }
+.pbar-av-bingkai::before { animation-name: mulusCincin; }
+@media (max-width: 1024px), (pointer: coarse) {
+  #appShell::before { animation: none; will-change: auto; }
+  .sapa::after, .pbar-bentuk i { animation: none; }
+  .mon { filter: none; }
+}
+
+/* ---------- R7 · render tabel ---------- */
+/* animasi masuk hanya untuk 12 anak pertama #viewRoot */
+#viewRoot > :nth-child(n+13) { animation: none; }
+@media (max-width: 760px) {
+  .tbl[data-kartu] > table > tbody > tr:nth-child(n+13) {
+    content-visibility: auto; contain-intrinsic-size: auto 150px;
+  }
+}
+</style>
 </head>
 <body>
 
