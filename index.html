@@ -5388,7 +5388,6 @@
   .kerubung { position: absolute; inset: 0; pointer-events: none; }
   .km {
     position: absolute; width: 1.5em; height: 1.5em; overflow: visible;
-    filter: drop-shadow(0 2px 2px rgba(0,0,0,.28));
   }
   .km1 { --m-warna: #2BB3A3; --m-jilbab: #FFE3EE; left: -1.1em; top: -.6em; z-index: -1; rotate: -16deg; }
   .km2 { --m-warna: #8B6CF0; --m-jilbab: #F3ECFA; right: -.2em; top: -1.2em; width: 1.3em; height: 1.3em; }
@@ -5429,6 +5428,95 @@
   }
   :root.hemat .hujan-mon .mon-jatuh { filter: none; }
   @media print { .hujan-mon, .kerubung { display: none !important; } }
+
+  /* ================== 9 · v2.27 HUJAN: KELANCARAN ================== */
+  .hujan-mon { contain: strict; }
+  .hujan-mon .mon-jatuh { backface-visibility: hidden; }
+  .hujan-mon .mon-jatuh.terbang { filter: none; }
+  /* Diukur (Chromium, 1280 px): drop-shadow + animasi bagian dalam SVG
+     pada 16 monster sekaligus membuat bingkai >33 ms hampir dua kali
+     lipat. Monster hujan cukup memakai gerak seluruh badan (compositor). */
+  .hujan-mon .mon-jatuh { filter: none; }
+  .hujan-mon .mon-jatuh :is(.mon-mata, .mon-pupil, .mon-tangan, .mon-lidah) { animation: none !important; }
+  .hujan-mon .mon-jatuh.terbang * { animation: none !important; }
+
+  /* ================== 10 · v2.27 MONSTER PENGHUNI GRAFIK ================== */
+  .ada-penghuni { position: relative; }
+  .penghuni {
+    position: absolute; left: 0; top: 0; z-index: 4;
+    width: 36px; height: 36px; padding: 0; border: 0; background: none;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    /* Motion Path: berkeliling tepi grafik, kaki selalu menapak ke dalam */
+    offset-path: inset(3px round 14px);
+    offset-anchor: 50% 100%;
+    offset-rotate: reverse;
+    offset-distance: 58%;
+    will-change: transform;
+  }
+  .penghuni .mon { width: 100%; height: 100%; filter: none; pointer-events: none; }
+  .penghuni .mon-tangan { animation: none !important; }
+  .penghuni:focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; border-radius: 50%; }
+  .penghuni-tanya, .penghuni-hati {
+    position: absolute; left: 50%; top: -15px; translate: -50% 0; pointer-events: none;
+    font: 800 15px/1 'Instrument Serif', Georgia, serif; opacity: 0;
+  }
+  .penghuni-tanya { color: var(--m-warna); text-shadow: 0 1px 0 #fff, 0 0 6px #fff; }
+  .penghuni-hati  { color: #E0457B; font-size: 14px; }
+
+  /* wajah: bingung → alis miring; bahagia → mata ^^, mulut terbuka, pipi merona */
+  .penghuni.bingung .mon-alis { display: inline; }
+  .penghuni.bahagia .mon-senang { display: inline; }
+  .penghuni.bahagia :is(.mon-mata, .mon-mulut, .mon-taring, .mon-lidah) { display: none; }
+  .penghuni.bahagia .mon-pipi { opacity: 1 !important; }
+
+  @keyframes pengKeliling {
+    0%       { offset-distance: 0%; }
+    16%, 22% { offset-distance: 17%; }
+    41%, 47% { offset-distance: 38%; }
+    66%, 72% { offset-distance: 61%; }
+    91%, 96% { offset-distance: 86%; }
+    100%     { offset-distance: 100%; }
+  }
+  @keyframes pengTanya {
+    0%, 16%, 22.5%, 41%, 47.5%, 66%, 72.5%, 91%, 96.5%, 100% { opacity: 0; translate: -50% 4px; }
+    17.5%, 21%, 42.5%, 46%, 67.5%, 71%, 92.5%, 95.5% { opacity: 1; translate: -50% 0; }
+  }
+  @keyframes pengJalan { 0%, 100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-3px) rotate(4deg); } }
+  @keyframes pengLoncat {
+    0%, 100% { transform: translateY(0) scale(1.08, .92); }
+    15%      { transform: translateY(-4px) scale(.94, 1.08); }
+    50%      { transform: translateY(-22px) scale(1) rotate(8deg); }
+    85%      { transform: translateY(-3px) scale(.96, 1.05); }
+  }
+  @keyframes pengHati {
+    0%   { opacity: 0; translate: -50% 6px; scale: .4; }
+    25%  { opacity: 1; translate: -50% -6px; scale: 1.2; }
+    100% { opacity: 0; translate: calc(-50% + 10px) -34px; scale: .9; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (offset-path: inset(0)) {
+      .penghuni {
+        animation: pengKeliling 30s linear infinite;
+        animation-delay: var(--tunda, 0s);
+      }
+      .penghuni .penghuni-tanya { animation: pengTanya 30s linear infinite; animation-delay: var(--tunda, 0s); }
+      .penghuni.bahagia .penghuni-tanya { animation-play-state: paused; visibility: hidden; }
+    }
+    .penghuni.bingung .mon { animation: pengJalan .55s ease-in-out infinite; }
+    .penghuni.bahagia { animation-play-state: paused; }
+    .penghuni.bahagia .mon { animation: pengLoncat .6s cubic-bezier(.3, 1.5, .5, 1) infinite; }
+    .penghuni.bahagia .penghuni-hati { animation: pengHati 1.2s ease-out infinite; }
+  }
+  @supports not (offset-path: inset(0)) {
+    .penghuni { top: auto; left: auto; right: 10px; bottom: 6px; }
+  }
+  /* diam (kurangi gerak) / hemat: berdiri di dasar grafik, "?" tetap tampak */
+  @media (prefers-reduced-motion: reduce) { .penghuni.bingung .penghuni-tanya { opacity: 1; } }
+  :root.hemat .penghuni { animation: none; }
+  :root.hemat .penghuni.bingung .penghuni-tanya { animation: none; opacity: 1; }
+  :root.hemat .penghuni .mon { filter: none; }
+  @media print { .penghuni { display: none !important; } }
 }
 </style>
 </head>

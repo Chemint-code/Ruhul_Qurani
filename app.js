@@ -19583,6 +19583,14 @@ function isiMonster(varian) {
         <circle cx="${xa + 1}" cy="${y + 1}" r="${r * .46}" fill="#1B1030"/><circle cx="${xb + 1}" cy="${y + 1}" r="${r * .46}" fill="#1B1030"/>
         <circle cx="${xa + 2.2}" cy="${y - .4}" r="1.1" fill="#fff"/><circle cx="${xb + 2.2}" cy="${y - .4}" r="1.1" fill="#fff"/>
       </g></g>`;
+  const garis = 'fill:none;stroke:#1B1030;stroke-width:2.4;stroke-linecap:round';
+  // ekspresi tambahan (v2.27), tersembunyi kecuali diaktifkan kelas CSS:
+  // alis bingung (.bingung) dan wajah bahagia (.bahagia) untuk penghuni grafik
+  const ekspresi = (alis, senangMata, mulutSenang, lidah) => `
+    <g class="mon-alis" display="none"><path d="${alis}" style="${garis}"/></g>
+    <g class="mon-senang" display="none"><path d="${senangMata}" style="${garis};stroke-width:2.8"/>
+      <path d="${mulutSenang}" style="fill:#7A1235"/>
+      <ellipse cx="${lidah[0]}" cy="${lidah[1]}" rx="4" ry="2.4" style="fill:#FF6F9F"/></g>`;
   if (varian === 'jilbab') {
     const kain = 'fill:var(--m-jilbab,#F3ECFA)';
     const lipit = 'fill:none;stroke:color-mix(in oklab,var(--m-jilbab,#F3ECFA) 78%,#5B3A78);stroke-width:2';
@@ -19599,7 +19607,8 @@ function isiMonster(varian) {
       <path style="${lipit};stroke-width:1.4" d="M18 50q14 7 28 0"/>
       <circle cx="32" cy="52.3" r="2.2" style="fill:#E8CC6B;stroke:#A07F14;stroke-width:.8"/>
       <ellipse class="mon-tangan kiri" cx="8.5" cy="52" rx="3.6" ry="5.2" style="${tangan}"/>
-      <ellipse class="mon-tangan kanan" cx="55.5" cy="52" rx="3.6" ry="5.2" style="${tangan}"/>`;
+      <ellipse class="mon-tangan kanan" cx="55.5" cy="52" rx="3.6" ry="5.2" style="${tangan}"/>
+      ${ekspresi('M18.5 22.5l8-2M37.5 20.5l8 2.8', 'M19 31q5-6 10 0M35 31q5-6 10 0', 'M25 37.5q7 10 14 0z', [32, 42.3])}`;
   }
   return `
     <path class="mon-tanduk" d="M10 23 4.5 13.5 15 18zM54 23l5.5-9.5L49 18z"
@@ -19614,7 +19623,8 @@ function isiMonster(varian) {
     ${mulut('M24 40q8 7 16 0')}
     <path class="mon-taring" d="m27.2 41.6 1.5 3 1.6-2.2zm6.8.7 1.5 2.3 1.6-3.1z" style="fill:#fff"/>
     <path d="M16.2 18.2 18.4 7.3Q32 3.4 45.6 7.3l2.2 10.9Q32 21.4 16.2 18.2z" style="fill:#1E1B2E"/>
-    <path d="M19.6 9.6Q32 6.4 44.4 9.6" style="fill:none;stroke:#4A4560;stroke-width:1.2"/>`;
+    <path d="M19.6 9.6Q32 6.4 44.4 9.6" style="fill:none;stroke:#4A4560;stroke-width:1.2"/>
+    ${ekspresi('M16 20.5l9-2.4M39 18l9 3', 'M17 30q6-7 12 0M35 30q6-7 12 0', 'M23 37.5q9 12 18 0z', [32, 43.4])}`;
 }
 
 function svgMonster(varian = 'peci') {
@@ -19871,23 +19881,39 @@ function kerubungiDi(akar) {
 })();
 
 /* =====================================================================
- * v2.26 — (B) HUJAN MONSTER DI HALAMAN RINGKASAN
+ * v2.26 / v2.27 — (B) HUJAN MONSTER DI HALAMAN RINGKASAN
  * ---------------------------------------------------------------------
  * Monster jatuh dari atas (ala CSS Wrapped). Sebagian tersangkut di atas
  * kartu Santri Aktif, Pelanggaran, Izin Menunggu, dan kartu unit
- * Pengasuhan; sisanya menumpuk di dasar halaman. Saat halaman digulir,
- * mereka melambung lalu jatuh lagi — terus begitu. Fisika kecil
- * (gravitasi + pantulan) berjalan dengan requestAnimationFrame dan
- * BERHENTI sendiri begitu semua monster diam, jadi tidak membebani.
+ * Pengasuhan; sisanya menumpuk di dasar halaman.
+ *  · digulir      → melambung lalu jatuh lagi
+ *  · terus-menerus→ monster di dasar "berguguran" lagi dari tepi atas
+ *                   layar, melayang bergoyang seperti daun (v2.27)
+ *  · HP dimiringkan→ monster terseret ke arah miring, menumpuk di sisi
+ *                   bawah; yang tersangkut bisa tergelincir jatuh (v2.27)
+ *
+ * v2.27 — kelancaran di desktop:
+ *  · posisi kartu hinggap dibaca dari cache (disegarkan ResizeObserver &
+ *    tiap ±250 ms), bukan getBoundingClientRect setiap bingkai
+ *  · monster yang sedang melayang tidak memakai drop-shadow dan animasi
+ *    dalam (kedip, lambai) — hanya satu transform di compositor
+ *  · lapisan hujan diberi `contain: strict`
  * ===================================================================== */
-const HUJAN = { lapis: null, mon: [], raf: 0, ro: null, terakhir: 0, gulir: 0, dorong: 0 };
+const HUJAN = {
+  lapis: null, mon: [], raf: 0, ro: null, terakhir: 0, gulir: 0, dorong: 0,
+  cacheHinggap: new Map(), cacheWaktu: 0, lebar: 0, tinggi: 0, top: 0,
+  gugurBerikut: 0, gugurIdx: 0, miring: 0, miringAktif: false, diam: false, hemat: false
+};
+const GRAV = .6;
 
 function hentikanHujan() {
   cancelAnimationFrame(HUJAN.raf); HUJAN.raf = 0;
   if (HUJAN.ro) { HUJAN.ro.disconnect(); HUJAN.ro = null; }
   window.removeEventListener('scroll', gulirHujan);
+  window.removeEventListener('deviceorientation', sensorMiring);
+  document.removeEventListener('visibilitychange', bangunkanHujan);
   if (HUJAN.lapis) HUJAN.lapis.remove();
-  HUJAN.lapis = null; HUJAN.mon = [];
+  HUJAN.lapis = null; HUJAN.mon = []; HUJAN.miring = 0; HUJAN.cacheHinggap = new Map();
 }
 
 function tempatHinggap() {
@@ -19901,15 +19927,32 @@ function tempatHinggap() {
   ].filter(Boolean);
 }
 
+/** Ukur ulang lapisan & kartu hinggap (koordinat lapisan). */
+function ukurHujan() {
+  const lapis = HUJAN.lapis; if (!lapis) return;
+  const r0 = lapis.getBoundingClientRect();
+  HUJAN.top = r0.top + scrollY;
+  HUJAN.lebar = lapis.clientWidth; HUJAN.tinggi = lapis.clientHeight;
+  HUJAN.cacheHinggap = new Map();
+  HUJAN.mon.forEach(m => {
+    if (!m.hinggap || HUJAN.cacheHinggap.has(m.hinggap)) return;
+    if (!m.hinggap.isConnected) { HUJAN.cacheHinggap.set(m.hinggap, null); return; }
+    const r = m.hinggap.getBoundingClientRect();
+    HUJAN.cacheHinggap.set(m.hinggap, { kiri: r.left - r0.left, atas: r.top - r0.top, lebar: r.width });
+  });
+  HUJAN.cacheWaktu = performance.now();
+}
+
 function hujanMonster(tingkat) {
   hentikanHujan();
   const root = $('viewRoot');
   if (!tingkat || !root || APP.view !== 'dashboard') return;
   const hemat = document.documentElement.classList.contains('hemat');
   const diam = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  HUJAN.hemat = hemat; HUJAN.diam = diam;
   let jumlah = { 1: 6, 2: 10, 3: 16 }[tingkat] || 0;
   if (hemat) jumlah = Math.ceil(jumlah / 2);
-  const ukuran = innerWidth < 640 ? 34 : 46;
+  const u = innerWidth < 640 ? 34 : 46;
 
   const lapis = document.createElement('div');
   lapis.className = 'hujan-mon';
@@ -19922,111 +19965,171 @@ function hujanMonster(tingkat) {
   const perHinggap = tingkat >= 3 ? 2 : 1;
   const warna = ['#2BB3A3', '#8B6CF0', '#E0457B', '#F29E38'];
   const jilbab = ['#F3ECFA', '#FFE3EE', '#E1F5F0', '#FFF1D6'];
-  // Jatuh ulang dari langit hanya bila hujan terakhir sudah > 60 dtk lalu
-  // (penyegaran realtime dasbor tidak memutar ulang pertunjukannya).
   const jatuh = !diam && (Date.now() - HUJAN.terakhir > 60000);
   HUJAN.terakhir = Date.now();
 
-  let lantai = 0;
-  const nLantai = Math.max(0, jumlah - Math.min(jumlah, hinggap.length * perHinggap));
   for (let i = 0; i < jumlah; i++) {
     const el = document.createElement('span');
     el.className = 'mon mon-jatuh';
     el.style.setProperty('--m-warna', warna[i % 4]);
     el.style.setProperty('--m-jilbab', jilbab[(i + 1) % 4]);
-    el.style.width = el.style.height = ukuran + 'px';
+    el.style.width = el.style.height = u + 'px';
     el.innerHTML = svgMonster(varianMonster(i));
     lapis.appendChild(el);
     const idxH = Math.floor(i / perHinggap);
-    const target = idxH < hinggap.length
-      ? { jenis: 'hinggap', el: hinggap[idxH], frac: perHinggap === 2 ? (i % 2 ? .7 : .38) : .62 }
-      : { jenis: 'lantai', slot: lantai++, dari: nLantai };
-    HUJAN.mon.push({ el, target, x: 0, y: 0, vy: 0, rot: 0, vr: 0, diam: false, mulai: 0, ukuran });
+    const h = idxH < hinggap.length ? hinggap[idxH] : null;
+    HUJAN.mon.push({ el, u, hinggap: h, frac: perHinggap === 2 ? (i % 2 ? .7 : .38) : .62, dx: 0,
+      x: 0, y: 0, vx: 0, vy: 0, rot: 0, vr: 0, diDarat: false, mulai: 0, daun: 0, fase: Math.random() * 6.28,
+      lantaiIdx: 0, tulis: '' });
   }
-
+  ukurHujan();
+  // posisi awal
+  const lantai = HUJAN.mon.filter(m => !m.hinggap);
+  lantai.forEach((m, k) => {
+    m.lantaiIdx = k;
+    const kolom = Math.max(1, Math.floor(HUJAN.lebar / (u * .9))), bagi = Math.min(lantai.length, kolom);
+    m.x = Math.max(0, Math.min(HUJAN.lebar - u, ((k % kolom) + .5) / bagi * HUJAN.lebar - u / 2 + ((k * 37) % 13 - 6)));
+  });
   const t0 = performance.now();
-  const titik = sasaranHujan();
   HUJAN.mon.forEach((m, i) => {
-    const s = titik[i];
-    m.x = s.x;
+    if (m.hinggap) {
+      const c = HUJAN.cacheHinggap.get(m.hinggap);
+      m.dx = c ? c.lebar * m.frac - u / 2 : 0;
+      m.x = c ? c.kiri + m.dx : 0;
+    }
     if (jatuh) {
-      m.y = -ukuran - 40 - Math.random() * 260;
+      m.y = -u - 40 - Math.random() * 260;
       m.mulai = t0 + i * 110 + Math.random() * 90;
       m.vr = (Math.random() - .5) * 8;
-    } else { m.y = s.y; m.diam = true; }
+    } else { m.y = tanahDi(m); m.diDarat = true; }
     tulisMon(m);
   });
 
-  HUJAN.ro = new ResizeObserver(() => bangunkanHujan());
+  HUJAN.ro = new ResizeObserver(() => { ukurHujan(); bangunkanHujan(); });
   HUJAN.ro.observe(root);
-  if (!diam) window.addEventListener('scroll', gulirHujan, { passive: true });
   HUJAN.gulir = scrollY;
-  if (jatuh) bangunkanHujan();
+  HUJAN.gugurBerikut = t0 + (jatuh ? 5200 : 1500);
+  if (!diam) {
+    window.addEventListener('scroll', gulirHujan, { passive: true });
+    window.addEventListener('deviceorientation', sensorMiring);
+    document.addEventListener('visibilitychange', bangunkanHujan);
+    mintaIzinSensor();
+  }
+  bangunkanHujan();
 }
 
-/** Titik diam setiap monster, dalam koordinat lapisan. */
-function sasaranHujan() {
-  const lapis = HUJAN.lapis;
-  const r0 = lapis.getBoundingClientRect();
-  const lebar = lapis.clientWidth, tinggi = lapis.clientHeight;
-  return HUJAN.mon.map(m => {
-    const u = m.ukuran;
-    if (m.target.jenis === 'hinggap' && m.target.el.isConnected) {
-      const r = m.target.el.getBoundingClientRect();
-      return { x: r.left - r0.left + r.width * m.target.frac - u / 2, y: r.top - r0.top - u * .8 };
-    }
-    // lantai: disebar rata; bila berdesakan, baris kedua naik sedikit
-    const n = Math.max(1, m.target.dari), kolom = Math.max(1, Math.floor(lebar / (u * .9)));
-    const baris = Math.floor((m.target.slot || 0) / kolom);
-    const posisi = n <= kolom ? m.target.slot : (m.target.slot % kolom);
-    const bagi = Math.min(n, kolom);
-    const x = (posisi + .5) / bagi * lebar - u / 2 + ((m.target.slot * 37) % 13 - 6);
-    return { x: Math.max(0, Math.min(lebar - u, x)), y: tinggi - u - 2 - baris * u * .62 };
-  });
+/** Tinggi tanah di bawah monster: atas kartu hinggap, atau dasar halaman (bertumpuk). */
+function tanahDi(m) {
+  if (m.hinggap) {
+    const c = HUJAN.cacheHinggap.get(m.hinggap);
+    if (c) return c.atas - m.u * .8;
+  }
+  // tumpukan di lantai: monster lantai lain yang sudah mendarat di kolom yang sama
+  let susun = 0;
+  for (const o of HUJAN.mon) {
+    if (o === m || o.hinggap || !o.diDarat || o.lantaiIdx > m.lantaiIdx) continue;
+    if (Math.abs(o.x - m.x) < m.u * .62) susun++;
+  }
+  return HUJAN.tinggi - m.u - 2 - susun * m.u * .62;
 }
 
 function tulisMon(m) {
-  m.el.style.transform = `translate3d(${m.x.toFixed(1)}px, ${m.y.toFixed(1)}px, 0) rotate(${m.rot.toFixed(1)}deg)`;
+  const t = `translate3d(${m.x.toFixed(1)}px,${m.y.toFixed(1)}px,0) rotate(${m.rot.toFixed(1)}deg)`;
+  if (t !== m.tulis) { m.el.style.transform = t; m.tulis = t; }
 }
 
 function bangunkanHujan() {
-  if (!HUJAN.lapis) return;
-  HUJAN.mon.forEach(m => { m.diam = false; });
-  if (!HUJAN.raf) { HUJAN.akhir = performance.now(); HUJAN.raf = requestAnimationFrame(langkahHujan); }
+  if (!HUJAN.lapis || HUJAN.raf || document.hidden) return;
+  HUJAN.akhir = performance.now();
+  HUJAN.raf = requestAnimationFrame(langkahHujan);
 }
 
 function langkahHujan(kini) {
   HUJAN.raf = 0;
   if (!HUJAN.lapis || !HUJAN.lapis.isConnected) return hentikanHujan();
-  const dt = Math.min(2.5, (kini - (HUJAN.akhir || kini)) / 16.667) || 1;
+  if (document.hidden) return;
+  const dt = Math.min(2.2, Math.max(.25, (kini - (HUJAN.akhir || kini)) / 16.667));
   HUJAN.akhir = kini;
-  const titik = sasaranHujan();
+  if (kini - HUJAN.cacheWaktu > 250) ukurHujan();
+  const ax = HUJAN.miring;                // percepatan samping dari sensor
+  const lebar = HUJAN.lebar;
   let bergerak = false;
-  HUJAN.mon.forEach((m, i) => {
-    if (m.diam) {
-      const s = titik[i];
-      if (Math.abs(m.y - s.y) < .5 && Math.abs(m.x - s.x) < .5) return;
-      m.diam = false;
+
+  // --- berguguran terus-menerus: satu monster lantai terbang lagi dari atas layar
+  if (!HUJAN.diam && kini >= HUJAN.gugurBerikut) {
+    HUJAN.gugurBerikut = kini + (HUJAN.hemat ? 4200 : innerWidth < 640 ? 2600 : 1500) + Math.random() * 900;
+    const calon = HUJAN.mon.filter(m => !m.hinggap && m.diDarat);
+    if (calon.length) {
+      const m = calon[HUJAN.gugurIdx++ % calon.length];
+      m.y = Math.max(-m.u, scrollY - HUJAN.top) - m.u - 8;
+      m.x = Math.random() * Math.max(1, lebar - m.u);
+      m.vy = .5; m.vx = 0; m.rot = (Math.random() - .5) * 40; m.vr = 0;
+      m.daun = 1; m.diDarat = false; m.mulai = 0;
+      m.lantaiIdx = Math.max(...HUJAN.mon.map(o => o.lantaiIdx)) + 1;   // mendarat paling atas
+    }
+  }
+
+  for (const m of HUJAN.mon) {
+    if (kini < m.mulai) { bergerak = true; continue; }
+    const diTanah = m.diDarat;
+    if (diTanah && Math.abs(ax) < .02 && Math.abs(m.vx) < .02) {
+      // diam: cukup ikuti kartu yang mungkin masih bergeser
+      const g = tanahDi(m);
+      if (m.hinggap) { const c = HUJAN.cacheHinggap.get(m.hinggap); if (c) m.x = c.kiri + m.dx; }
+      if (Math.abs(g - m.y) > .5) { m.diDarat = false; bergerak = true; }
+      else { m.y = g; if (Math.abs(m.rot) > .3) { m.rot *= .8; bergerak = true; } else m.rot = 0; tulisMon(m); continue; }
     }
     bergerak = true;
-    if (kini < m.mulai) return;
-    const s = titik[i];
-    m.vy = Math.min(24, m.vy + .62 * dt);
-    m.y += m.vy * dt;
-    m.x += (s.x - m.x) * Math.min(1, .08 * dt);
-    m.rot += m.vr * dt;
-    if (m.y >= s.y) {
-      m.y = s.y;
-      if (m.vy > 3) { m.vy = -m.vy * .42; m.vr = -m.vr * .5 + (Math.random() - .5) * 4; }
-      else { m.vy = 0; m.vr = 0; }
+    m.el.classList.add('terbang');
+
+    // gaya
+    if (m.daun) {
+      // jatuh seperti daun: lambat, bergoyang ke kiri-kanan
+      m.fase += .055 * dt;
+      m.vy = Math.min(3.2 + (m.y > scrollY - HUJAN.top + innerHeight ? 14 : 0), m.vy + .08 * dt);
+      m.vx = Math.sin(m.fase) * 1.6 + ax * 6;
+      m.rot = Math.sin(m.fase + .8) * 22;
+    } else {
+      m.vy = Math.min(24, m.vy + GRAV * dt);
+      m.vx = (m.vx + ax * dt) * Math.pow(.992, dt);
+      m.rot += m.vr * dt;
     }
-    if (m.vy === 0 && m.y === s.y) {
-      m.rot *= Math.pow(.75, dt);
-      if (Math.abs(m.rot) < .5 && Math.abs(m.x - s.x) < .5) { m.rot = 0; m.x = s.x; m.diam = true; m.el.classList.add('mendarat'); }
-    } else m.el.classList.remove('mendarat');
+    if (m.hinggap) { m.dx += m.vx * dt; const c = HUJAN.cacheHinggap.get(m.hinggap); m.x = c ? c.kiri + m.dx : m.x + m.vx * dt; }
+    else m.x += m.vx * dt;
+    m.y += m.vy * dt;
+
+    // dinding kiri/kanan
+    if (m.x < 0) { m.x = 0; m.vx = Math.abs(m.vx) * .3; if (m.hinggap) m.hinggap = null; }
+    if (m.x > lebar - m.u) { m.x = lebar - m.u; m.vx = -Math.abs(m.vx) * .3; if (m.hinggap) m.hinggap = null; }
+
+    // tergelincir dari tepi kartu hinggap → jatuh ke dasar
+    if (m.hinggap) {
+      const c = HUJAN.cacheHinggap.get(m.hinggap);
+      const tengah = m.x + m.u / 2;
+      if (!c || tengah < c.kiri - 2 || tengah > c.kiri + c.lebar + 2) {
+        m.hinggap = null; m.diDarat = false;
+        m.lantaiIdx = Math.max(...HUJAN.mon.map(o => o.lantaiIdx)) + 1;
+      }
+    }
+
+    const tanah = tanahDi(m);
+    if (m.y >= tanah) {
+      m.y = tanah;
+      if (m.vy > 3 && !m.daun) { m.vy = -m.vy * .42; m.vr = -m.vr * .5 + (Math.random() - .5) * 4; }
+      else {
+        if (!m.diDarat) { m.el.classList.remove('mendarat'); void m.el.offsetWidth; m.el.classList.add('mendarat'); }
+        m.vy = 0; m.vr = 0; m.daun = 0; m.diDarat = true;
+        // gesekan tanah; kemiringan tetap menyeret
+        m.vx = (m.vx + ax * 1.4 * dt) * Math.pow(.86, dt);
+        m.rot = m.rot * Math.pow(.75, dt) + m.vx * 1.5;
+        if (Math.abs(m.vx) < .02) m.vx = 0;
+        if (Math.abs(m.vx) < .05 && Math.abs(ax) < .02) m.el.classList.remove('terbang');
+      }
+    } else m.diDarat = false;
     tulisMon(m);
-  });
-  if (bergerak) HUJAN.raf = requestAnimationFrame(langkahHujan);
+  }
+  // Loop terus selama ada yang bergerak, ada kemiringan, atau guguran berikutnya dijadwalkan.
+  if (bergerak || Math.abs(ax) > .02 || !HUJAN.diam) HUJAN.raf = requestAnimationFrame(langkahHujan);
 }
 
 /** Digulir → monster melambung lalu jatuh lagi. Yang tersangkut hanya meloncat di tempat. */
@@ -20038,14 +20141,101 @@ function gulirHujan() {
   HUJAN.dorong = kini;
   const kuat = Math.min(1.7, .6 + Math.abs(d) / 40);
   HUJAN.mon.forEach(m => {
-    if (m.vy < -2) return;               // masih melambung
-    const lantai = m.target.jenis === 'lantai';
+    if (!m.diDarat || m.daun) return;
+    const lantai = !m.hinggap;
     m.vy = -(lantai ? 9 + Math.random() * 9 : 4 + Math.random() * 3) * kuat;
     m.vr = (Math.random() - .5) * (lantai ? 16 : 6);
-    m.mulai = 0; m.diam = false;
+    m.diDarat = false; m.mulai = 0;
   });
   bangunkanHujan();
 }
+
+/* ---- Sensor kemiringan HP (v2.27) ----
+   gamma = miring kiri/kanan (potret). Pada lanskap dipakai beta.
+   Diredam (low-pass) dan diberi zona mati ±4° supaya HP yang dipegang
+   biasa tidak membuat monster bergeser sendiri. */
+function sensorMiring(e) {
+  if (e.gamma == null && e.beta == null) return;
+  const sudut = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+  let deg = Number(e.gamma) || 0;
+  if (sudut === 90) deg = Number(e.beta) || 0;
+  else if (sudut === 270 || sudut === -90) deg = -(Number(e.beta) || 0);
+  deg = Math.max(-60, Math.min(60, deg));
+  const efektif = Math.abs(deg) < 4 ? 0 : deg - Math.sign(deg) * 4;
+  const target = GRAV * .9 * Math.sin(efektif * Math.PI / 180);
+  HUJAN.miring = HUJAN.miring * .8 + target * .2;
+  if (Math.abs(HUJAN.miring) < .004) HUJAN.miring = 0;
+  HUJAN.miringAktif = true;
+  if (HUJAN.miring) bangunkanHujan();
+}
+
+/** iOS 13+ meminta izin sensor lewat sentuhan pengguna; Android tidak perlu. */
+function mintaIzinSensor() {
+  const DOE = window.DeviceOrientationEvent;
+  if (!DOE || typeof DOE.requestPermission !== 'function' || HUJAN.izinDiminta) return;
+  const minta = () => {
+    HUJAN.izinDiminta = true;
+    DOE.requestPermission().catch(() => {});
+    document.removeEventListener('pointerdown', minta, true);
+  };
+  document.addEventListener('pointerdown', minta, true);
+}
+
+/* =====================================================================
+ * v2.27 — (C) MONSTER PENGHUNI GRAFIK
+ * ---------------------------------------------------------------------
+ * Setiap grafik (semua lewat buatChart) mendapat satu monster penghuni
+ * yang berkeliling di tepi grafik, sesekali berhenti kebingungan ("?")
+ * menanti diklik. Diklik → wajahnya berubah bahagia, pipi merona, dan ia
+ * meloncat-loncat; lima detik kemudian kembali berkeliling.
+ * Jalurnya memakai CSS Motion Path `offset-path: inset(...)`; gerak
+ * sepenuhnya CSS. JS hanya menyisipkan tombol & mengganti kelas.
+ * ===================================================================== */
+let penghuniKe = 0;
+function pasangPenghuniGrafik(canvasId) {
+  const kanvas = $(canvasId);
+  const wadah = kanvas && kanvas.parentElement;
+  if (!wadah || wadah.querySelector(':scope > .penghuni')) return;
+  if (wadah.closest('.laporan, #printArea, #pdfStage, [data-tanpa-monster]')) return;
+  wadah.classList.add('ada-penghuni');
+  const i = penghuniKe++;
+  const warna = ['#8B6CF0', '#2BB3A3', '#E0457B', '#F29E38'][i % 4];
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'penghuni bingung';
+  b.style.setProperty('--m-warna', warna);
+  b.style.setProperty('--m-jilbab', ['#FFE3EE', '#F3ECFA', '#E1F5F0', '#FFF1D6'][i % 4]);
+  b.style.setProperty('--tunda', `${-(i * 3.7) % 22}s`);
+  b.setAttribute('aria-label', 'Monster penghuni grafik sedang bingung — klik untuk menyapanya');
+  b.title = 'Hmm? Sapa aku dong…';
+  b.innerHTML = `<span class="penghuni-tanya" aria-hidden="true">?</span>
+    <span class="penghuni-hati" aria-hidden="true">♥</span>
+    <span class="mon">${svgMonster(varianMonster(i))}</span>`;
+  b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    clearTimeout(b._kembali);
+    b.classList.remove('bingung', 'bahagia'); void b.offsetWidth;
+    b.classList.add('bahagia');
+    b.title = 'Yeay! Terima kasih sudah menyapa';
+    b.setAttribute('aria-label', 'Monster penghuni grafik sedang bahagia');
+    b._kembali = setTimeout(() => {
+      b.classList.remove('bahagia'); b.classList.add('bingung');
+      b.title = 'Hmm? Sapa aku dong…';
+      b.setAttribute('aria-label', 'Monster penghuni grafik sedang bingung — klik untuk menyapanya');
+    }, 5200);
+  });
+  wadah.appendChild(b);
+}
+
+/* Pembungkus buatChart (fungsi aslinya tidak diubah). */
+(function () {
+  const buatAsli = buatChart;
+  buatChart = function (key, canvasId, config) {
+    const hasil = buatAsli(key, canvasId, config);
+    try { pasangPenghuniGrafik(canvasId); } catch (e) {}
+    return hasil;
+  };
+})();
 
 /* Pembungkus navigateTo (fungsi aslinya tidak diubah): setelah menu apa
    pun selain dasbor selesai digambar, monster di bilah profil disegarkan
