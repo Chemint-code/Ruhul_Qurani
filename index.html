@@ -5938,6 +5938,88 @@
   .empty.kosong-khatam p { font-family:'Instrument Serif', Georgia, serif; font-weight:400; font-size:18px; color:var(--text); }
   #turBalon.berornamen::after { opacity:.06; }
 </style>
+<style id="gayaTarik">
+  /* =================================================================
+     v2.35 — Monster penarik grafik. Tanpa @layer: mengalahkan gaya
+     penghuni v2.27 (berlapis) & v2.28 tanpa perlu banyak !important.
+     ================================================================= */
+  .penghuni.meminta, .penghuni.menarik {
+    offset-path:none !important; animation:none !important;
+    left:0; top:0; z-index:6;
+  }
+  .penghuni.meminta .penghuni-tanya, .penghuni.menarik .penghuni-tanya { display:none; }
+  .penghuni.menarik:not(.bahagia) .mon { animation:none !important; transform-origin:50% 100%; will-change:transform; }
+  .penghuni.meminta .mon { animation:tarikMinta 1.6s var(--lengkung) infinite !important; transform-origin:50% 100%; }
+  .penghuni.meminta::after {                 /* cincin denyut: "aku bisa diklik" */
+    content:''; position:absolute; inset:-5px; border-radius:50%; pointer-events:none;
+    border:2px solid var(--m-warna, var(--brass)); opacity:0;
+    animation:tarikDenyut 1.6s ease-out infinite;
+  }
+  .penghuni.meminta:hover .mon, .penghuni.meminta:focus-visible .mon { animation-duration:.8s !important; }
+
+  .penghuni-pinta {
+    position:absolute; left:50%; bottom:calc(100% + 9px);
+    translate:calc(-50% + var(--geser-pinta, 0px)) 0;
+    white-space:nowrap; pointer-events:none;
+    font:700 11.5px/1 'Inter Tight', system-ui, sans-serif; letter-spacing:.01em;
+    color:#fff; background:var(--navy); padding:6px 10px; border-radius:999px;
+    box-shadow:0 6px 16px -8px color-mix(in oklab, var(--ink) 70%, transparent);
+    animation:pintaMuncul .45s var(--lengkung) both, pintaMengambang 2.4s ease-in-out .45s infinite;
+  }
+  .penghuni-pinta::after {
+    content:''; position:absolute; left:calc(50% - var(--geser-pinta, 0px)); top:100%;
+    translate:-50% -1px; border:5px solid transparent; border-top-color:var(--navy);
+  }
+
+  .penghuni-pinta.bawah { bottom:auto; top:calc(100% + 9px); }
+  .penghuni-pinta.bawah::after { top:auto; bottom:100%; translate:-50% 1px; border-top-color:transparent; border-bottom-color:var(--navy); }
+
+  .tarik-tali {
+    position:absolute; left:0; top:0; height:2.5px; z-index:5; pointer-events:none;
+    transform-origin:0 50%; border-radius:2px;
+    background:repeating-linear-gradient(90deg, #8A6D0B 0 3px, #E8CC6B 3px 6px);
+    box-shadow:0 1px 1px color-mix(in oklab, var(--ink) 25%, transparent);
+  }
+  .tarik-debu {
+    position:absolute; width:6px; height:6px; margin:-3px 0 0 -3px; border-radius:50%;
+    background:color-mix(in oklab, var(--text-3) 45%, transparent); pointer-events:none; z-index:4;
+    animation:tarikDebu .5s ease-out forwards;
+  }
+  .tarik-percik { position:absolute; width:0; height:0; pointer-events:none; z-index:6; }
+  .tarik-percik i {
+    position:absolute; left:-3px; top:-3px; width:6px; height:6px; border-radius:50%;
+    background:var(--brass); opacity:0; animation:tarikPercik .75s var(--lengkung) forwards;
+  }
+  .tarik-percik i:nth-child(3n) { background:var(--brass-hi); width:4px; height:4px; }
+  .tarik-percik i:nth-child(4n) { background:var(--m-warna, var(--sea)); }
+
+  .penghuni.pulang { opacity:0; scale:.6; transition:opacity .2s ease, scale .2s ease; }
+  .penghuni.datang { animation-name:none; }
+  .penghuni.datang .mon { animation:tarikDatang .32s var(--lengkung) both !important; }
+
+  @keyframes tarikMinta {
+    0%, 55%, 100% { transform:translateY(0) scale(1); }
+    12% { transform:translateY(0) scale(1.1, .9); }
+    26% { transform:translateY(-9px) scale(.94, 1.08) rotate(-6deg); }
+    40% { transform:translateY(0) scale(1.06, .94) rotate(4deg); }
+  }
+  @keyframes tarikDenyut { 0% { opacity:.55; scale:.8; } 100% { opacity:0; scale:1.45; } }
+  @keyframes pintaMuncul { from { opacity:0; transform:translateY(6px) scale(.85); } }
+  @keyframes pintaMengambang { 50% { transform:translateY(-3px); } }
+  @keyframes tarikDebu { to { opacity:0; transform:translate(var(--dx, 0px), -7px) scale(1.8); } }
+  @keyframes tarikPercik {
+    0%   { opacity:1; transform:rotate(var(--a)) translateY(0) scale(1.2); }
+    100% { opacity:0; transform:rotate(var(--a)) translateY(calc(var(--r, 26px) * -1)) scale(.6); }
+  }
+  @keyframes tarikDatang { from { opacity:0; transform:scale(.5) translateY(6px); } }
+
+  /* Mode hemat / kurangi gerak: tidak ada penahanan dari JS; hiasan statis bila tersisa. */
+  html.hemat .penghuni.meminta .mon, html.hemat .penghuni.meminta::after,
+  html.hemat .penghuni-pinta { animation:none !important; }
+  @media (prefers-reduced-motion: reduce) {
+    .penghuni.meminta .mon, .penghuni.meminta::after, .penghuni-pinta, .tarik-debu, .tarik-percik i { animation:none !important; }
+  }
+</style>
 </head>
 <body>
 

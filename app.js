@@ -21713,6 +21713,397 @@ const KOSONG_CERITA = [
   };
 })();
 
+/* =====================================================================
+ * v2.35 — MONSTER PENARIK GRAFIK
+ * ---------------------------------------------------------------------
+ *  Grafik yang punya monster penghuni (v2.27) muncul "tertahan": sumbu
+ *  sudah jadi, datanya masih di dasar. Monster berdiri di pangkal data
+ *  terbesar sambil meminta: "Tarik datanya? Klik aku!". Diklik → ia
+ *  menarik ujung data itu dengan tali dalam tiga hentakan (ancang-ancang
+ *  → sentak), grafik tumbuh mengikuti tarikannya, lalu ia bersorak.
+ *
+ *   · Batang tegak & garis : ditarik ke atas dari ujung titik/batang terbesar
+ *   · Batang mendatar      : ditarik ke kanan dari ujung batang terbesar
+ *   · Donat / pai          : busur ditarik memutar di tepi luarnya
+ *
+ *  Pengaman kegunaan:
+ *   · Bila tidak diklik, monster menarik sendiri 5 dtk setelah grafik
+ *     terlihat — data tidak pernah tersembunyi lama.
+ *   · Sekali ditarik, grafik yang sama (per sesi) langsung utuh saat
+ *     digambar ulang (realtime / kembali ke halaman). Monster tetap bisa
+ *     diklik untuk menarik ulang.
+ *   · Sumbu dikunci sejak awal (suggestedMax = nilai akhir) → skala tidak
+ *     melompat. Tooltip mati selama tertahan.
+ *   · Mode hemat & "kurangi gerak": tidak ada penahanan; perilaku v2.27.
+ *  Satu loop rAF per tarikan; setiap bingkai: chart.update('none').
+ * ===================================================================== */
+APP.versi = 'rq-v2.35';
+const TARIK_G = {
+  sudah: new Set(),            // `${view}:${key}` yang sudah ditarik sesi ini
+  peta: new WeakMap(),         // config.data → keadaan
+  HENTAK: [0.34, 0.7, 1],      // target tiap hentakan
+  SEG: 620,                    // ms per hentakan
+  ANCANG: 0.42,                // porsi ancang-ancang dalam satu hentakan
+  TUNGGU_OTOMATIS: 5000,
+  TALI: 12
+};
+const TIPE_TARIK = { bar: 1, line: 1, doughnut: 1, pie: 1 };
+
+const pelanMasuk = (k) => k * k * (3 - 2 * k);
+
+function modeTarik(config) {
+  if (config.type === 'doughnut' || config.type === 'pie') return 'putar';
+  return config.options && config.options.indexAxis === 'y' ? 'kanan' : 'naik';
+}
+
+/** Kunci sumbu nilai pada nilai akhir supaya skala tidak berubah selama ditarik. */
+function kunciSumbu(config, mode) {
+  if (mode === 'putar') return;
+  const sumbu = mode === 'kanan' ? 'x' : 'y';
+  config.options.scales = config.options.scales || {};
+  const s = config.options.scales[sumbu] = config.options.scales[sumbu] || {};
+  if (s.max != null) return;
+  const ds = config.data.datasets;
+  const bertumpuk = !!s.stacked;
+  const n = Math.max(...ds.map(d => d.data.length));
+  let maks = 0;
+  for (let i = 0; i < n; i++) {
+    const nilai = ds.map(d => Number(d.data[i]) || 0);
+    maks = Math.max(maks, bertumpuk ? nilai.reduce((a, b) => a + Math.max(0, b), 0) : Math.max(...nilai));
+  }
+  s.suggestedMax = Math.max(Number(s.suggestedMax) || 0, maks);
+}
+
+/** Tahan grafik di dasar sebelum dibuat. Mengembalikan true bila ditahan. */
+function tahanGrafik(key, canvasId, config) {
+  if (!config || !config.data || !TIPE_TARIK[config.type] || !bolehGerak()) return false;
+  const kanvas = $(canvasId);
+  if (!kanvas || kanvas.closest('.laporan, #printArea, #pdfStage, [data-tanpa-monster]')) return false;
+  const ds = config.data.datasets || [];
+  if (!ds.length || ds.some(d => !Array.isArray(d.data) || d.data.some(v => v != null && typeof v === 'object'))) return false;
+  const maks = Math.max(0, ...ds.flatMap(d => d.data.map(v => Number(v) || 0)));
+  const id = `${APP.view}:${key}`;
+  const mode = modeTarik(config);
+  config.options = config.options || {};
+  const st = { id, key, mode, asli: ds.map(d => d.data.slice()), tertahan: maks > 0 && !TARIK_G.sudah.has(id),
+    lingkar: config.options.circumference ?? 360, jalan: false };
+  if (maks <= 0) return false;
+  kunciSumbu(config, mode);
+  if (st.tertahan) {
+    if (mode === 'putar') config.options.circumference = 0.001;
+    else ds.forEach(d => { d.data = d.data.map(v => (v == null ? v : 0)); });
+    config.options.plugins = config.options.plugins || {};
+    st.tooltip = config.options.plugins.tooltip ? config.options.plugins.tooltip.enabled : undefined;
+    config.options.plugins.tooltip = { ...(config.options.plugins.tooltip || {}), enabled: false };
+  }
+  TARIK_G.peta.set(config.data, st);
+  return true;
+}
+
+/* Plugin global: menghubungkan grafik yang sudah jadi dengan monsternya. */
+const PLUGIN_TARIK = {
+  id: 'tarikMonster',
+  afterInit(chart) {
+    const st = TARIK_G.peta.get(chart.config.data);
+    if (!st || st.chart) return;
+    st.chart = chart;
+    // Monster disisipkan v2.27 SETELAH konstruktor selesai → tunggu satu bingkai.
+    requestAnimationFrame(() => requestAnimationFrame(() => siapkanMonsterTarik(st)));
+  },
+  // Ukuran grafik berubah (responsif, kartu bergeser) → monster yang menunggu ikut pindah.
+  afterDraw(chart) {
+    const st = TARIK_G.peta.get(chart.config.data);
+    if (!st || !st.b) return;
+    if (st.jalan && st.pose) return letakkanMonster(st, jangkarTarik(st), st.pose);   // sebingkai dengan gambar
+    if (!st.tertahan || st.jalan) return;
+    letakkanMonster(st, jangkarTarik(st), {});
+    rapikanPinta(st);
+  },
+  afterDestroy(chart) {
+    const st = TARIK_G.peta.get(chart.config.data);
+    if (st) { st.mati = true; if (st.io) st.io.disconnect(); clearTimeout(st.tOto); }
+  }
+};
+try { Chart.register(PLUGIN_TARIK); } catch (e) { console.warn('plugin tarik:', e.message); }
+
+function wadahGrafik(st) { return st.chart && st.chart.canvas && st.chart.canvas.parentElement; }
+
+/** Titik jangkar: ujung elemen terbesar (dataset & indeks) pada keadaan sekarang. */
+function jangkarTarik(st) {
+  const ch = st.chart, kanvas = ch.canvas;
+  const ox = kanvas.offsetLeft, oy = kanvas.offsetTop;
+  if (st.mode === 'putar') {
+    const busur = ch.getDatasetMeta(0).data.filter(Boolean);
+    if (!busur.length) return null;
+    const a = busur.reduce((m, e) => (e.endAngle > m.endAngle ? e : m), busur[0]);
+    const r = a.outerRadius, th = a.endAngle;
+    return { x: ox + a.x + Math.cos(th) * r, y: oy + a.y + Math.sin(th) * r, th, cx: ox + a.x, cy: oy + a.y };
+  }
+  if (st.di == null) {
+    let terbaik = { d: 0, i: 0, v: -Infinity };
+    st.asli.forEach((arr, d) => arr.forEach((v, i) => { const n = Number(v) || 0; if (n > terbaik.v && !ch.getDatasetMeta(d).hidden) terbaik = { d, i, v: n }; }));
+    st.di = terbaik;
+  }
+  const el = ch.getDatasetMeta(st.di.d).data[st.di.i];
+  if (!el) return null;
+  return { x: ox + el.x, y: oy + el.y };
+}
+
+/** Letakkan monster + tali menurut jangkar dan pose. */
+function letakkanMonster(st, j, pose) {
+  const b = st.b; if (!b || !j) return;
+  const U = 36, L = TARIK_G.TALI;
+  let mx, my, rot = pose.rot || 0;
+  if (st.mode === 'naik') { mx = j.x - U / 2; my = j.y - L - U; }
+  else if (st.mode === 'kanan') { mx = j.x + L; my = j.y - U / 2 - 4; }
+  else {
+    const ux = Math.cos(j.th), uy = Math.sin(j.th);
+    mx = j.x + ux * (L + U / 2) - U / 2; my = j.y + uy * (L + U / 2) - U / 2;
+    rot += (j.th * 180 / Math.PI) + 90;          // kaki menghadap pusat donat
+  }
+  st.mx = mx; st.my = my;
+  b.style.translate = `${mx.toFixed(1)}px ${my.toFixed(1)}px`;
+  const mon = b.querySelector('.mon');
+  if (mon) mon.style.transform = `rotate(${rot.toFixed(2)}deg) scale(${(pose.sx || 1).toFixed(3)}, ${(pose.sy || 1).toFixed(3)})`;
+  const t = st.tali;
+  if (t) {
+    let x1 = j.x, y1 = j.y, x2, y2;
+    if (st.mode === 'naik') { x2 = j.x; y2 = j.y - L; }
+    else if (st.mode === 'kanan') { x2 = j.x + L; y2 = j.y; }
+    else { x2 = j.x + Math.cos(j.th) * L; y2 = j.y + Math.sin(j.th) * L; }
+    const pj = Math.hypot(x2 - x1, y2 - y1), sudut = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+    t.style.width = pj + 'px';
+    t.style.translate = `${x1}px ${y1 - 1}px`;
+    t.style.rotate = sudut + 'deg';
+  }
+}
+
+/** Gelembung permintaan tidak boleh terpotong tepi grafik. Dihitung dari
+ *  geometri tata letak (bukan getBoundingClientRect) agar tidak terkecoh
+ *  animasi skala saat gelembung muncul. */
+function rapikanPinta(st) {
+  const p = st.b && st.b.querySelector('.penghuni-pinta'), w = wadahGrafik(st);
+  if (!p || !w || st.mx == null) return;
+  const lebar = p.offsetWidth, tepi = 4;
+  // Donat: monster di tepi atas cincin → gelembung di BAWAHNYA, di atas cincin yang
+  // masih kosong, supaya tidak menutupi judul kartu.
+  p.classList.toggle('bawah', st.mode === 'putar');
+  const kiri = st.mx + 18 - lebar / 2, kanan = kiri + lebar;
+  const geser = kiri < tepi ? tepi - kiri : kanan > w.clientWidth - tepi ? w.clientWidth - tepi - kanan : 0;
+  p.style.setProperty('--geser-pinta', Math.round(geser) + 'px');
+}
+
+function siapkanMonsterTarik(st) {
+  if (st.mati || !st.chart || !st.chart.canvas || !st.chart.canvas.isConnected) return;
+  const wadah = wadahGrafik(st);
+  const b = wadah && wadah.querySelector(':scope > .penghuni');
+  if (!b) {
+    // Tanpa monster (mis. dikecualikan): jangan tahan data.
+    if (st.tertahan) setelProgres(st, 1, true);
+    return;
+  }
+  st.b = b;
+  if (!b._tarik) {
+    b._tarik = true;
+    b.addEventListener('click', (e) => {
+      const s = b._st;
+      if (!s || s.mati) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      jalankanTarik(s);
+    }, true);                                       // capture: sebelum sapaan v2.27
+  }
+  b._st = st;
+  if (!st.tertahan) return;
+  b.classList.remove('bingung', 'bahagia', 'jalan');
+  b.classList.add('meminta');
+  b.title = 'Tarik datanya? Klik aku!';
+  b.setAttribute('aria-label', 'Monster siap menarik data grafik — tekan untuk menarik');
+  if (!b.querySelector('.penghuni-pinta')) {
+    const p = document.createElement('span');
+    p.className = 'penghuni-pinta'; p.setAttribute('aria-hidden', 'true');
+    p.textContent = st.mode === 'putar' ? 'Putar datanya? Klik aku!' : 'Tarik datanya? Klik aku!';
+    b.appendChild(p);
+  }
+  letakkanMonster(st, jangkarTarik(st), {});
+  rapikanPinta(st);
+  // Tarik sendiri bila dibiarkan: 5 dtk setelah grafik benar-benar terlihat.
+  if (typeof IntersectionObserver === 'function') {
+    st.io = new IntersectionObserver((entri) => {
+      const tampak = entri.some(e => e.isIntersecting);
+      clearTimeout(st.tOto);
+      if (tampak && st.tertahan && !st.jalan) st.tOto = setTimeout(() => {
+        if (!document.hidden && st.tertahan && !st.jalan) jalankanTarik(st, true);
+      }, TARIK_G.TUNGGU_OTOMATIS);
+    }, { threshold: 0.5 });
+    st.io.observe(st.chart.canvas);
+  }
+}
+
+/** Terapkan progres p (0..1) ke grafik. */
+function setelProgres(st, p, akhir) {
+  const ch = st.chart; if (!ch) return;
+  if (st.mode === 'putar') ch.options.circumference = akhir ? st.lingkar : Math.max(0.001, st.lingkar * p);
+  else ch.data.datasets.forEach((d, i) => {
+    const a = st.asli[i]; if (!a) return;
+    if (akhir) d.data = a.slice();
+    else { const arr = d.data; for (let k = 0; k < a.length; k++) arr[k] = a[k] == null ? a[k] : (Number(a[k]) || 0) * p; }
+  });
+  if (akhir) {
+    st.tertahan = false;
+    TARIK_G.sudah.add(st.id);
+    if (ch.options.plugins && ch.options.plugins.tooltip) ch.options.plugins.tooltip.enabled = st.tooltip !== false;
+  }
+  ch.update('none');
+}
+
+function debuKaki(st, j) {
+  const wadah = wadahGrafik(st); if (!wadah || !j) return;
+  for (let k = 0; k < 3; k++) {
+    const d = document.createElement('i');
+    d.className = 'tarik-debu';
+    d.style.left = (j.x + (k - 1) * 9) + 'px';
+    d.style.top = j.y + 'px';
+    d.style.setProperty('--dx', ((k - 1) * 14) + 'px');
+    wadah.appendChild(d);
+    setTimeout(() => d.remove(), 520);
+  }
+}
+
+function percikUjung(st, j) {
+  const wadah = wadahGrafik(st); if (!wadah || !j) return;
+  const w = document.createElement('span');
+  w.className = 'tarik-percik';
+  w.style.left = j.x + 'px'; w.style.top = j.y + 'px';
+  w.innerHTML = Array.from({ length: 10 }, (_, i) => `<i style="--a:${i * 36}deg;--r:${22 + (i % 3) * 7}px"></i>`).join('');
+  wadah.appendChild(w);
+  setTimeout(() => w.remove(), 900);
+}
+
+function jalankanTarik(st, otomatis) {
+  if (st.jalan || st.mati || !st.chart) return;
+  const b = st.b, wadah = wadahGrafik(st);
+  if (!b || !wadah) return;
+  st.jalan = true;
+  clearTimeout(st.tOto); clearTimeout(b._kembali); clearTimeout(st.tPulang);
+  if (!otomatis) getar(10);
+  b.classList.remove('bingung', 'bahagia', 'jalan', 'meminta', 'pulang');
+  b.classList.add('menarik');
+  b.title = 'Hup… hup… hup!';
+  b.setAttribute('aria-label', 'Monster sedang menarik data grafik');
+  const pinta = b.querySelector('.penghuni-pinta'); if (pinta) pinta.remove();
+  st.tali = document.createElement('i');
+  st.tali.className = 'tarik-tali';
+  wadah.appendChild(st.tali);
+
+  // Grafik digerakkan animator Chart.js sendiri (hanya menggambar ulang, tanpa
+  // hitung tata letak) — satu update() per sentakan. Loop rAF di sini hanya
+  // mengatur pose monster; posisinya juga disegarkan di afterDraw grafik,
+  // jadi monster & tali selalu sebingkai dengan ujung data.
+  const ch = st.chart;
+  const cfg = ch.config.options;
+  st.animAsli = Object.prototype.hasOwnProperty.call(cfg, 'animation') ? cfg.animation : undefined;
+  const LEPAS = st.tertahan ? 0 : 340;              // tarik ulang: lepas dulu ke dasar
+  const SNAP = Math.round(TARIK_G.SEG * (1 - TARIK_G.ANCANG));
+  const D = TARIK_G.SEG * TARIK_G.HENTAK.length;
+  const t0 = performance.now();
+  let tahapLalu = -1;
+  if (LEPAS) terapkanTahap(st, 0, LEPAS, 'easeInQuad');
+
+  const langkah = (kini) => {
+    if (st.mati || !ch.canvas.isConnected) { st.jalan = false; return; }
+    const t = kini - t0;
+    let pose = {};
+    if (t < LEPAS) {                                   // monster bersiap selagi data jatuh
+      const k = pelanMasuk(t / LEPAS);
+      pose = { sx: 1 + .08 * k, sy: 1 - .1 * k };
+    } else if (t - LEPAS < D) {
+      const tt = t - LEPAS;
+      const seg = Math.min(TARIK_G.HENTAK.length - 1, Math.floor(tt / TARIK_G.SEG));
+      const u = (tt - seg * TARIK_G.SEG) / TARIK_G.SEG;
+      if (u < TARIK_G.ANCANG) {                        // ancang-ancang: menunduk, tali menegang
+        const k = pelanMasuk(u / TARIK_G.ANCANG);
+        pose = { sx: 1 + .12 * k, sy: 1 - .15 * k, rot: st.mode === 'naik' ? 0 : 14 * k };
+      } else {                                         // sentak!
+        if (seg !== tahapLalu) {
+          tahapLalu = seg;
+          terapkanTahap(st, TARIK_G.HENTAK[seg], SNAP, 'easeOutBack');
+          debuKaki(st, jangkarTarik(st));
+        }
+        const k = (u - TARIK_G.ANCANG) / (1 - TARIK_G.ANCANG);
+        const pegas = Math.max(0, 1 - k * 1.6);
+        pose = { sx: 1 - .1 * pegas, sy: 1 + .17 * pegas, rot: st.mode === 'naik' ? 0 : -8 * pegas };
+      }
+    } else {
+      selesaiTarik(st, otomatis);
+      return;
+    }
+    st.pose = pose;
+    letakkanMonster(st, jangkarTarik(st), pose);
+    st.raf = requestAnimationFrame(langkah);
+  };
+  st.raf = requestAnimationFrame(langkah);
+}
+
+/** Satu tahap tarikan: data ke p × nilai asli, dianimasikan animator Chart.js. */
+function terapkanTahap(st, p, durasi, easing) {
+  const ch = st.chart;
+  ch.config.options.animation = { duration: durasi, easing };
+  if (st.mode === 'putar') ch.options.circumference = Math.max(0.001, st.lingkar * p);
+  else ch.data.datasets.forEach((d, i) => {
+    const a = st.asli[i]; if (!a) return;
+    for (let k = 0; k < a.length; k++) d.data[k] = a[k] == null ? a[k] : p === 1 ? a[k] : (Number(a[k]) || 0) * p;
+  });
+  ch.update();
+}
+
+function selesaiTarik(st, otomatis) {
+  const ch = st.chart, b = st.b;
+  if (st.animAsli === undefined) delete ch.config.options.animation; else ch.config.options.animation = st.animAsli;
+  setelProgres(st, 1, true);                        // data persis seperti aslinya
+  st.pose = null;
+  const j = jangkarTarik(st);
+  letakkanMonster(st, j, {});
+  percikUjung(st, j);
+  if (st.tali) { st.tali.remove(); st.tali = null; }
+  const mon = b.querySelector('.mon'); if (mon) mon.style.transform = '';
+  b.classList.add('bahagia');
+  b.title = otomatis ? 'Sudah kutarik — klik aku untuk menarik lagi' : 'Yeay! Klik lagi untuk menarik ulang';
+  b.setAttribute('aria-label', 'Monster selesai menarik data grafik — tekan untuk menarik ulang');
+  if (!otomatis) getar([8, 40, 8]);
+  st.tPulang = setTimeout(() => pulangkanMonster(st), 1700);
+}
+
+/** Kembali berkeliling tepi grafik (v2.27) dengan memudar, tanpa melompat. */
+function pulangkanMonster(st) {
+  const b = st.b; if (!b || !b.isConnected) { st.jalan = false; return; }
+  b.classList.add('pulang');
+  setTimeout(() => {
+    b.classList.remove('menarik', 'bahagia', 'pulang');
+    b.style.translate = '';
+    const mon = b.querySelector('.mon'); if (mon) mon.style.transform = '';
+    b.classList.add('bingung', 'datang');
+    b.title = 'Hmm? Klik aku untuk menarik datanya lagi';
+    b.setAttribute('aria-label', 'Monster penghuni grafik — tekan untuk menarik ulang data');
+    setTimeout(() => b.classList.remove('datang'), 320);
+    st.jalan = false;
+  }, 220);
+}
+
+/* Pembungkus buatChart paling luar: tahan data SETELAH pembungkus lain
+   (v2.32 kalimat utama) membaca angka aslinya. v2.28 selalu membangun
+   grafik di bingkai berikutnya, jadi config masih boleh diubah di sini. */
+(function bungkusGrafikTarik() {
+  const asli = buatChart;
+  buatChart = function (key, canvasId, config) {
+    const hasil = asli.apply(this, arguments);
+    try {
+      const wakil = APP.charts[key];
+      if (wakil && wakil._tertunda) tahanGrafik(key, canvasId, config);
+    } catch (e) { console.warn('tahan grafik:', key, e.message); }
+    return hasil;
+  };
+})();
+
 // ---------------------------------------------------------------------
 hidupkanLayarLogin();
 
