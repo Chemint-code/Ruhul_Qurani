@@ -316,6 +316,9 @@ const HAK = {
   // berhubungan dengan orang tua, walaupun tidak berwenang mengubah
   // status pembinaan.
   'wali.kabar'      : ['Admin','Guru','Walas','Guru BK','Pimpinan'],
+  // v2.37 — pengingat verifikasi data ke seluruh musyrif (WA bot). Admin
+  // saja: presensi mentah, wa_kontak, dan wa_log hanya terbaca Admin (RLS).
+  'binaan.ingatkan' : ['Admin'],
   'master.lihat'    : ['Admin','Guru','Walas','Guru BK','Guru Piket'],
   'master.kelola'   : ['Admin'],
 
@@ -23140,6 +23143,618 @@ function morfDari(popup, dari) {
 
 // Sapuan pertama setelah halaman awal siap.
 setTimeout(() => jadwalSapu(0), 2500);
+
+/* =====================================================================
+ * v2.37 — INGATKAN MUSYRIF: VERIFIKASI DATA SEBELUM CETAK LAPORAN
+ * ---------------------------------------------------------------------
+ *  Satu tombol di Ringkasan (Admin) → pratinjau pesan personal untuk
+ *  setiap musyrif kelas binaan → konfirmasi → pesawat kertas terbang →
+ *  ringkasan hasil kirim per musyrif.
+ *
+ *  1. ANGKA PESAN = ANGKA DASBOR. Pesan disusun di klien dengan fungsi
+ *     yang SAMA dengan dasbor musyrif (lingkupDetail, filterBinaanUnit,
+ *     saringPeriode, saringPeriodeIzin, lingkupTahfiz, hitungKehadiran,
+ *     panelTarget) — dijalankan "sebagai musyrif" oleh sebagaiProfil(),
+ *     yang menukar APP.profil/APP.ctx secara SINKRON lalu memulihkannya.
+ *  2. Kirim lewat RPC ingatkan_musyrif_kirim() (Admin saja, divalidasi
+ *     server) → wa_panggil → Edge Function wa-bot aksi "ingatkan".
+ *     Nomor tidak dikirim klien; wa-bot mengambilnya dari wa_kontak.
+ *  3. Hasil per musyrif dibaca dari wa_log (jenis 'ingatkan', ref_id =
+ *     batch). Yang gagal / tanpa nomor mendapat tombol kirim manual wa.me.
+ *  4. Animasi: preset Gerak `kirimTerbang` — hanya transform + opacity,
+ *     sekali jalan, tunduk pada bolehGerak(), dibatalkan saat pindah
+ *     halaman (Gerak.halaman). Tanpa library baru.
+ * ===================================================================== */
+APP.versi = 'rq-v2.37';
+
+const bolehIngatkanMusyrif = () => bisa('binaan.ingatkan') && !hanyaBaca();
+
+/* ---------- 1 · Hitung "sebagai musyrif" ---------------------------- */
+
+/** Konteks bawaan akun yang baru masuk — sama dengan yang dilihat musyrif. */
+const CTX_BAWAAN = Object.freeze({ unit: 'Semua', jenjang: 'Semua', gender: 'Semua' });
+
+/**
+ * Jalankan fn() seakan-akan `profil` yang sedang masuk. HARUS sinkron:
+ * tidak boleh ada `await` di dalam fn, supaya tidak ada kode lain yang
+ * sempat berjalan dengan profil pinjaman. Profil & konteks asli selalu
+ * dipulihkan, termasuk bila fn melempar galat.
+ */
+function sebagaiProfil(profil, fn) {
+  const profilAsli = APP.profil, ctxAsli = APP.ctx;
+  APP.profil = { ...profil };
+  APP.ctx = { ...CTX_BAWAAN };
+  try {
+    const hasil = fn();
+    if (hasil && typeof hasil.then === 'function') throw new Error('sebagaiProfil: fn tidak boleh async');
+    return hasil;
+  } finally {
+    APP.profil = profilAsli;
+    APP.ctx = ctxAsli;
+  }
+}
+
+/**
+ * Angka ringkasan untuk SATU musyrif. Ekspresinya disalin dari
+ * viewDashboard() / thfGambarPanel() / blokSebaran() apa adanya — uji
+ * v2.37 membandingkannya dengan kartu dasbor yang dilihat musyrif itu.
+ */
+function hitungAngkaMusyrif(profil, b) {
+  return sebagaiProfil(profil, () => {
+    // --- viewDashboard(): kartu Pelanggaran, Izin Menunggu, Pembinaan Proses
+    const siswa  = filterBinaanUnit((b.siswaAll || []).filter(aktifSantri), 'kelas');
+    const detail = lingkupDetail(b.detailAll || []);
+    const nisnBoleh = new Set(siswa.map(s => String(s.nisn)));
+    const izinSemua = perluFilterKelas() ? (b.izinAll || []).filter(z => nisnBoleh.has(String(z.nisn))) : (b.izinAll || []);
+    const izin = saringPeriodeIzin(izinSemua);
+    const pembinaan = filterBinaanUnit(
+      saringPeriode((b.pembinaanAll || []).filter(aktifPembinaan), 'tanggal_pembinaan')
+        .map(p => ({ ...p, kelas: p.siswa?.kelas || '' })), 'kelas');
+    const izinPending = izin.filter(z => z.status_persetujuan === 'Pending').length;
+    const binaProses  = pembinaan.filter(p => p.status_pembinaan !== 'Selesai').length;
+
+    // --- thfGambarPanel(): kartu halaman Tahfiz
+    const thf = lingkupTahfiz(b.tahfizAll || []);
+    const thfHalaman = thf.reduce((a, r) => a + (Number(r.capaian_halaman) || 0), 0);
+    const thfSantri = new Set(thf.map(r => String(r.nisn))).size;
+
+    // --- blokSebaran(): Target Pembinaan, Target Hafalan, Kehadiran (6 bulan)
+    const saring = (rows) => (rows || []).filter(r => nisnBoleh.has(String(r.nisn)));
+    const jendela = new Set(b.bulanKunci || []);
+    const tahfiz6 = saring((b.tahfizAll || []).filter(aktifTahfiz))
+      .filter(r => jendela.has(bulanDari(kunciTgl(r.tanggal))));
+    const tgt = panelTarget({ siswa, goals: saring(b.goals), targetTahfiz: saring(b.targetThf), tahfiz: tahfiz6 });
+    const periodeTarget = (typeof batasPeriode === 'function' && batasPeriode()?.bulan) || bulanIni();
+
+    let kh = { santri: 0, amati: 0, tidak: 0, alpa: 0 };
+    const pres = b.presensiAll || {};
+    if (!pres.terkunci && (b.bulanKunci || []).length) {
+      const [thA, blA] = b.bulanKunci[0].split('-').map(Number);
+      const khMulai = new Date(thA, blA - 1, 1);
+      const khAkhir = new Date(); khAkhir.setHours(23, 59, 59, 999);
+      const peta = hitungKehadiran({ siswa, presensi: { rows: saring(pres.rows), pekan: pres.pekan || [] }, mulai: khMulai, akhir: khAkhir });
+      Object.values(peta).forEach(v => { kh.santri++; kh.amati += v.jpAmati; kh.tidak += v.tidakHadir; kh.alpa += v.alpa; });
+    }
+
+    return {
+      santri: siswa.length,
+      pelanggaran: detail.length,
+      binaProses, binaTotal: pembinaan.length,
+      izinPending,
+      tahfiz: { setoran: thf.length, halaman: Math.round(thfHalaman * 10) / 10, santri: thfSantri },
+      target: { periode: periodeTarget, ada: tgt.adaGoal, tercapai: tgt.tercapai, sebagian: tgt.sebagian,
+                belum: tgt.meleset, berjalan: tgt.berjalan,
+                hafalanAda: tgt.adaTarget, hafalanCapai: tgt.thfCapai, hafalanKurang: tgt.thfKurang },
+      presensi: { santri: kh.santri, jpAmati: kh.amati, alpa: kh.alpa,
+                  hadirPct: kh.amati ? Math.round((1 - kh.tidak / kh.amati) * 1000) / 10 : null }
+    };
+  });
+}
+
+/* ---------- 2 · Susun pesan ----------------------------------------- */
+
+/** "Ustz. Jelita" → Ustazah; selain itu Ustaz. */
+const sapaanMusyrif = (nama) => /^\s*(ustz|ustazah|ustadzah)\b/i.test(String(nama || '')) ? 'Ustazah' : 'Ustaz';
+/** Nama yang sudah bergelar "Ust." / "Ustz." tidak diberi sapaan dua kali. */
+const namaBersapa = (nama) => /^\s*(ust|ustz|ustaz|ustadz|ustazah|ustadzah)\b\.?/i.test(String(nama || ''))
+  ? String(nama).trim() : `${sapaanMusyrif(nama)} ${String(nama || '-').trim()}`;
+
+const persenId = (x) => String(x).replace('.', ',');
+
+function barisPresensi(p) {
+  if (!p.santri) return 'belum ada pekan presensi yang ditandai selesai (6 bulan terakhir)';
+  return `hadir ${persenId(p.hadirPct)}% · alpa ${angka(p.alpa)} JP · ${angka(p.santri)} santri teramati (6 bulan terakhir)`;
+}
+function barisTarget(t) {
+  if (!t.ada) return `belum ada target pembinaan untuk periode ${t.periode}`;
+  const n = t.tercapai + t.sebagian + t.belum + t.berjalan;
+  return `${angka(n)} target (${t.periode}): ${t.tercapai} tercapai · ${t.sebagian} sebagian · ${t.belum} belum · ${t.berjalan} berjalan`;
+}
+function barisTahfiz(h, t) {
+  const hafalan = t.hafalanAda
+    ? `target hafalan: ${t.hafalanCapai} memenuhi, ${t.hafalanKurang} belum`
+    : 'target hafalan belum ditetapkan';
+  if (!h.setoran) return `belum ada setoran tercatat · ${hafalan}`;
+  return `${angka(h.setoran)} setoran · ${persenId(h.halaman)} halaman · ${angka(h.santri)} santri menyetor · ${hafalan}`;
+}
+
+/**
+ * Isi pesan satu musyrif. Urutan dan nada mengikuti draf permintaan
+ * v2.37 §2.3; tanggal cetak & tenggat diisi Admin di dialog.
+ */
+function pesanIngatkanMusyrif(m, a, o) {
+  const sapa = sapaanMusyrif(m.nama);
+  const kelas = (m.kelas_binaan || []).join(', ') || '-';
+  const waktu = (o.sekarang || new Date()).toLocaleString('id-ID',
+    { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return [
+    '*PENGINGAT VERIFIKASI DATA PEMBINAAN*',
+    'Dayah Ruhul Qurani',
+    '',
+    'Assalamualaikum warahmatullahi wabarakatuh.',
+    `Kepada ${namaBersapa(m.nama)} — pembina kelas ${kelas}.`,
+    '',
+    `Laporan Perkembangan Santri akan dicetak ${o.tanggalCetak}. Mohon kesediaan ${sapa} untuk memeriksa catatan, memverifikasi, dan menuntaskan pembinaan sesuai prosedur, sehingga catatan yang akan dikirimkan kepada wali santri benar-benar dapat dipertanggungjawabkan.`,
+    '',
+    'Ini adalah amanah — laporan tersebut menjadi bukti nyata progres pembinaan karakter santri kepada wali santri.',
+    '',
+    `*RINGKASAN KELAS BINAAN ${kelas}*`,
+    `_Periode: ${o.periode} · ${angka(a.santri)} santri aktif_`,
+    `Total pelanggaran terinput : ${angka(a.pelanggaran)}`,
+    `Pembinaan belum selesai    : ${angka(a.binaProses)}`,
+    `Catatan izin berjalan      : ${angka(a.izinPending)}`,
+    `Presensi : ${barisPresensi(a.presensi)}`,
+    `Target   : ${barisTarget(a.target)}`,
+    `Tahfiz   : ${barisTahfiz(a.tahfiz, a.target)}`,
+    '',
+    `Mohon dituntaskan sebelum ${o.tenggat}. Terima kasih atas amanah yang ${sapa} jalankan.`,
+    '',
+    `Pengirim : ${o.pengirim}`,
+    `_Dikirim melalui Sistem Informasi Pengembangan Santri pada ${waktu}._`
+  ].join('\n');
+}
+
+/* ---------- 3 · Bahan data (sekali muat, sama dengan dasbor) --------- */
+
+async function bahanIngatkan() {
+  const bulanKunci = bulanTerakhir(6);
+  const [siswaAll, detailAll, izinAll, pembinaanAll, tahfizAll, goals, targetThf, presensiAll, profil, kontak] = await Promise.all([
+    amanKosong(muatSiswa, 'santri'),
+    amanKosong(muatDetail, 'pelanggaran'),
+    amanKosong(muatIzin, 'perizinan'),
+    amanKosong(muatPembinaan, 'pembinaan'),
+    amanKosong(muatTahfiz, 'tahfiz'),
+    amanKosong(muatGoalSemua, 'target pembinaan'),
+    amanKosong(muatTargetTahfiz, 'target tahfiz'),
+    muatPresensiJendela(bulanKunci).catch(() => ({ rows: [], pekan: [] })),
+    q(db.from('profiles').select('id,nama,role,kelas_binaan,korps,aktif').eq('aktif', true).order('nama'), 'profiles_musyrif'),
+    q(db.from('wa_kontak').select('profile_id,no_wa'), 'wa_kontak')
+  ]);
+  const nomor = new Map((kontak.data || []).filter(k => k.no_wa).map(k => [String(k.profile_id), String(k.no_wa)]));
+  const musyrif = (profil.data || [])
+    .filter(p => p.role === 'Guru' && p.aktif !== false && (p.kelas_binaan || []).length)
+    .map(p => ({ ...p, no_wa: nomor.get(String(p.id)) || '' }));
+  return { siswaAll, detailAll, izinAll, pembinaanAll, tahfizAll, goals, targetThf, presensiAll, bulanKunci, musyrif };
+}
+
+/* ---------- 4 · Animasi: preset kirimTerbang ------------------------ */
+
+/**
+ * Preset yang lintasannya bergantung pada posisi tombol & ukuran layar:
+ * `k` berbentuk fungsi (el, arah) → keyframes. Pembungkus di bawah
+ * menyelesaikannya lalu MENYERAHKAN ke Gerak.main asli, jadi aturan
+ * bolehGerak(), kurva, durasi, dan pendaftaran di Gerak.halaman tetap
+ * satu pintu. Preset lama (array) lewat tanpa perubahan.
+ */
+Gerak.PRESET.kirimTerbang = {
+  k: (el, a) => {
+    const dx = a.dx || 0, dy = a.dy || 0;
+    const jarak = Math.hypot(dx, dy) || 1;
+    const sudut = Math.atan2(dy, dx) * 180 / Math.PI;           // pesawat SVG menghadap kanan (0°)
+    const ux = dx / jarak, uy = dy / jarak;                       // arah terbang
+    const nx = uy, ny = -ux;                                      // normal (sisi "atas" lintasan)
+    const ancang = Math.min(innerWidth, innerHeight) * 0.03;      // tarik mundur sebelum melesat
+    const lengkung = jarak * 0.18;                                // lengkung naik 18 % jarak
+    const tegas = Gerak.kurva('tegas');
+    return [
+      { transform: 'translate(0px, 0px) rotate(' + sudut + 'deg) scale(.6)', opacity: 0, easing: Gerak.kurva('lenting') },
+      { offset: .2, transform: `translate(${-ux * ancang}px, ${-uy * ancang}px) rotate(${sudut - 10}deg) scale(1.12)`, opacity: 1, easing: tegas },
+      { offset: .6, transform: `translate(${dx * .55 + nx * lengkung}px, ${dy * .55 + ny * lengkung}px) rotate(${sudut - 14}deg) scale(.85)`, opacity: 1 },
+      { offset: .88, transform: `translate(${dx * .94}px, ${dy * .94}px) rotate(${sudut + 4}deg) scale(.55)`, opacity: .9 },
+      { transform: `translate(${dx}px, ${dy}px) rotate(${sudut + 8}deg) scale(.45)`, opacity: 0 }
+    ];
+  },
+  d: 'lambat', e: 'datar'      // kurva per ruas ada di keyframes (lenting → tegas)
+};
+
+(function pasangGerakDinamis() {
+  const mainAsli = Gerak.main;
+  const kurvaAsli = Gerak.kurva;
+  // Kurva "tegas" (token --kurva-tegas v2.36) belum terdaftar di Gerak.kurva().
+  Gerak.kurva = function (nama) {
+    if (nama === 'datar') return 'linear';
+    if (nama === 'tegas') {
+      const v = (getComputedStyle(document.documentElement).getPropertyValue('--kurva-tegas') || '').trim();
+      return v || 'ease-in-out';
+    }
+    return kurvaAsli.call(this, nama);
+  };
+  Gerak.main = function (el, nama, o = {}) {
+    const p = this.PRESET[nama];
+    if (!p || typeof p.k !== 'function') return mainAsli.call(this, el, nama, o);
+    if (!el || !bolehGerak() || typeof el.animate !== 'function') return { finished: Promise.resolve(), cancel() {} };
+    const { arah, ...sisa } = o;
+    const kunci = '__dinamis_' + nama;
+    this.PRESET[kunci] = { ...p, k: p.k(el, arah || {}) };
+    try { return mainAsli.call(this, el, kunci, sisa); }
+    finally { delete this.PRESET[kunci]; }
+  };
+})();
+
+const SVG_PESAWAT = `<svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true">
+  <path d="M4 22.5 44 5 35.5 42 24.5 31.5z" fill="#fff" stroke="#0B2B45" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M44 5 24.5 31.5 22 41.5l-2.8-12.6z" fill="#C9A227" stroke="#0B2B45" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M4 22.5 19.2 28.9 44 5" fill="none" stroke="#0B2B45" stroke-width="2.2" stroke-linejoin="round"/>
+</svg>`;
+
+/**
+ * Pesawat kertas dari titik tengah `dari` (DOMRect) ke sudut kanan-atas.
+ * Posisi awal dipasang SEKALI (bukan dianimasikan); yang bergerak hanya
+ * transform + opacity. Selalu selesai (resolve) — juga saat dibatalkan.
+ */
+function terbangkanPesawat(dari) {
+  if (!bolehGerak() || !dari) return Promise.resolve(false);
+  const x0 = dari.left + dari.width / 2, y0 = dari.top + dari.height / 2;
+  const tepi = Math.max(28, Math.min(56, innerWidth * 0.08));
+  const lapis = document.createElement('div');
+  lapis.className = 'pesawat-lapis';
+  lapis.style.left = x0 + 'px';
+  lapis.style.top = y0 + 'px';
+  lapis.innerHTML = `<span class="pesawat">${SVG_PESAWAT}</span>`;
+  document.body.appendChild(lapis);
+  const el = lapis.firstElementChild;
+  getar([12, 40, 18]);                                   // "lepas landas"
+  const a = Gerak.main(el, 'kirimTerbang', {
+    arah: { dx: (innerWidth - tepi) - x0, dy: tepi - y0 },
+    duration: Gerak.DUR.lambat + Gerak.DUR.sedang,
+    fill: 'forwards'
+  });
+  return a.finished.then(() => true, () => false).finally(() => lapis.remove());
+}
+
+/* ---------- 5 · Dialog pratinjau → kirim → hasil -------------------- */
+
+const ING = { tanggalCetak: 'Sabtu, 26 September 2026', tenggat: 'Sabtu, 26 September 2026 pukul 17.00 WIB' };
+
+function susunDaftarIngatkan(b, o) {
+  return b.musyrif.map(m => {
+    const a = hitungAngkaMusyrif(m, b);
+    return { m, a, pesan: pesanIngatkanMusyrif(m, a, o), bisaKirim: !!m.no_wa };
+  });
+}
+
+function htmlBarisIngatkan(d, i) {
+  const { m, a } = d;
+  return `<li class="ing-baris ${d.bisaKirim ? '' : 'ing-tanpa'}" data-i="${i}">
+    <label class="ing-kepala">
+      <input type="checkbox" class="ing-cek" data-i="${i}" ${d.bisaKirim ? 'checked' : 'disabled'}>
+      <span class="ing-nama"><b>${esc(m.nama)}</b><small>Kelas ${esc((m.kelas_binaan || []).join(', '))}${
+        d.bisaKirim ? '' : ' · <span class="ing-merah">nomor WA belum terdaftar — kirim manual</span>'}</small></span>
+      <span class="ing-angka" title="Pelanggaran · Pembinaan belum selesai · Izin berjalan">
+        <span>${angka(a.pelanggaran)}<i>plg</i></span><span class="${a.binaProses ? 'ing-buka' : ''}">${angka(a.binaProses)}<i>bina</i></span><span>${angka(a.izinPending)}<i>izin</i></span></span>
+    </label>
+    <details class="ing-rinci"><summary>Lihat isi pesan</summary>
+      <textarea readonly class="ing-teks" data-i="${i}">${esc(d.pesan)}</textarea></details>
+  </li>`;
+}
+
+async function bukaIngatkanMusyrif(btn) {
+  if (!bolehIngatkanMusyrif()) return toast('error', 'Akun Anda tidak berwenang mengingatkan musyrif.');
+  const asli = btn ? mulaiSimpan(btn, 'Menyusun…') : null;
+  let b;
+  try {
+    b = await bahanIngatkan();
+    if (btn) selesaiSimpan(btn, asli, true, 'Pesan siap');
+  } catch (err) {
+    if (btn) selesaiSimpan(btn, asli, false);
+    throw err;
+  }
+  if (!b.musyrif.length) return Swal.fire({ icon: 'info', title: 'Tidak ada musyrif', text: 'Belum ada akun Guru aktif yang memiliki kelas binaan.' });
+
+  const opsi = () => ({ tanggalCetak: ING.tanggalCetak, tenggat: ING.tenggat, periode: labelPeriode(),
+    pengirim: `${APP.profil?.nama || '-'} (${role() || '-'})` });
+  let daftar = susunDaftarIngatkan(b, opsi());
+  const tanpaNomor = daftar.filter(d => !d.bisaKirim).length;
+  let titikKirim = null;
+
+  const konf = await Swal.fire({
+    width: 760,
+    title: 'Ingatkan musyrif kelas binaan?',
+    customClass: { popup: 'ing-popup' },
+    html: `<div class="ing">
+      <p class="ing-ket">Setiap musyrif menerima pesan pribadi berisi angka kelas binaannya sendiri —
+        dihitung dengan cara yang sama seperti dasbor mereka (periode <b>${esc(labelPeriode())}</b>).
+        Pesan belum terkirim sampai Anda menekan tombol kirim.</p>
+      <div class="ing-isian">
+        <label>Tanggal cetak laporan<input id="ingCetak" class="input" value="${esc(ING.tanggalCetak)}"></label>
+        <label>Mohon dituntaskan sebelum<input id="ingTenggat" class="input" value="${esc(ING.tenggat)}"></label>
+      </div>
+      <div class="ing-alat"><label><input type="checkbox" id="ingSemua" checked> Pilih semua</label>
+        <span id="ingHitung"></span></div>
+      ${tanpaNomor ? `<p class="ing-peringatan"><i class="fa-solid fa-triangle-exclamation"></i>
+        ${tanpaNomor} musyrif belum punya nomor WA di sistem; setelah pengiriman tersedia tombol kirim manual untuknya.</p>` : ''}
+      <ul class="ing-daftar">${daftar.map(htmlBarisIngatkan).join('')}</ul>
+    </div>`,
+    showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-paper-plane"></i> Kirim',
+    cancelButtonText: 'Batal',
+    confirmButtonColor: '#128C7E',
+    didOpen: (popup) => {
+      const hitung = () => {
+        const n = popup.querySelectorAll('.ing-cek:checked').length;
+        popup.querySelector('#ingHitung').textContent = `${n} dari ${daftar.filter(d => d.bisaKirim).length} musyrif dipilih`;
+        const k = Swal.getConfirmButton();
+        if (k) { k.innerHTML = `<i class="fa-solid fa-paper-plane"></i> Kirim ke ${n} musyrif`; k.disabled = !n; }
+      };
+      const susunUlang = () => {
+        ING.tanggalCetak = popup.querySelector('#ingCetak').value.trim() || ING.tanggalCetak;
+        ING.tenggat = popup.querySelector('#ingTenggat').value.trim() || ING.tenggat;
+        const o = opsi();
+        daftar.forEach((d, i) => {
+          d.pesan = pesanIngatkanMusyrif(d.m, d.a, o);
+          const t = popup.querySelector(`.ing-teks[data-i="${i}"]`); if (t) t.value = d.pesan;
+        });
+      };
+      popup.querySelector('#ingCetak').addEventListener('input', debounce(susunUlang, 250));
+      popup.querySelector('#ingTenggat').addEventListener('input', debounce(susunUlang, 250));
+      popup.querySelector('#ingSemua').addEventListener('change', (e) => {
+        popup.querySelectorAll('.ing-cek:not(:disabled)').forEach(c => { c.checked = e.target.checked; }); hitung();
+      });
+      popup.addEventListener('change', (e) => { if (e.target.classList.contains('ing-cek')) hitung(); });
+      hitung();
+    },
+    preConfirm: async () => {
+      // izin dicek ulang saat klik — bukan hanya saat tombol digambar
+      if (!bolehIngatkanMusyrif()) { Swal.showValidationMessage('Akun Anda tidak berwenang.'); return false; }
+      const popup = Swal.getPopup();
+      ING.tanggalCetak = popup.querySelector('#ingCetak').value.trim() || ING.tanggalCetak;
+      ING.tenggat = popup.querySelector('#ingTenggat').value.trim() || ING.tenggat;
+      const o = opsi();
+      daftar.forEach(d => { d.pesan = pesanIngatkanMusyrif(d.m, d.a, o); });
+      const pilih = [...popup.querySelectorAll('.ing-cek:checked')].map(c => Number(c.dataset.i));
+      if (!pilih.length) { Swal.showValidationMessage('Pilih minimal satu musyrif.'); return false; }
+      const k = Swal.getConfirmButton();
+      await Gerak.main(k, 'tekan', { milikHalaman: false }).finished.catch(() => {});
+      titikKirim = k ? k.getBoundingClientRect() : null;
+      return pilih;
+    }
+  });
+  if (!konf.isConfirmed) return;
+  return kirimIngatkanMusyrif(daftar, konf.value, titikKirim);
+}
+
+/**
+ * Kirim ke server sambil pesawat terbang; ringkasan tampil SESUDAH
+ * pesawat mendarat (jeda-antisipasi), lalu status diperbarui dari wa_log.
+ */
+async function kirimIngatkanMusyrif(daftar, pilih, titik) {
+  if (!bolehIngatkanMusyrif()) return toast('error', 'Akun Anda tidak berwenang mengingatkan musyrif.');
+  const dipilih = pilih.map(i => daftar[i]).filter(Boolean);
+  const kiriman = dipilih.filter(d => d.bisaKirim).map(d => ({ profile_id: d.m.id, isi: d.pesan }));
+  const tanpaNomor = daftar.filter(d => !d.bisaKirim);
+
+  const [hasil] = await Promise.all([
+    (async () => {
+      try {
+        const { data, error } = await db.rpc('ingatkan_musyrif_kirim', { p_kiriman: kiriman });
+        if (error) throw error;
+        return { ok: true, data: data || {} };
+      } catch (e) { return { ok: false, galat: e?.message || String(e) }; }
+    })(),
+    terbangkanPesawat(titik)
+  ]);
+
+  // Status awal per baris.
+  const baris = [
+    ...dipilih.filter(d => d.bisaKirim).map(d => ({ d, status: hasil.ok ? 'antri' : 'gagal', alasan: hasil.ok ? '' : hasil.galat })),
+    ...tanpaNomor.map(d => ({ d, status: 'tanpa', alasan: 'nomor WA belum terdaftar' }))
+  ];
+  if (hasil.ok) (hasil.data.ditolak || []).forEach(t => {
+    const r = baris.find(x => String(x.d.m.id) === String(t.profile_id));
+    if (r) { r.status = 'gagal'; r.alasan = t.alasan; }
+  });
+  return tampilkanHasilIngatkan(baris, hasil);
+}
+
+const LABEL_STATUS_ING = {
+  antri: ['fa-clock', 'Diproses…'], terkirim: ['fa-circle-check', 'Terkirim'], gagal: ['fa-circle-xmark', 'Gagal'],
+  dilewati: ['fa-forward', 'Dilewati'], tanpa: ['fa-phone-slash', 'Tidak dikirim']
+};
+const statusIngFinal = (s) => s !== 'antri';
+
+function htmlHasilIngatkan(baris) {
+  const selesai = baris.filter(r => statusIngFinal(r.status)).length;
+  return `<div class="ing-kemajuan"><span style="transform:scaleX(${baris.length ? selesai / baris.length : 1})"></span></div>
+    <p class="ing-ket">${selesai} dari ${baris.length} selesai · terkirim ${baris.filter(r => r.status === 'terkirim').length}
+      · gagal ${baris.filter(r => r.status === 'gagal' || r.status === 'tanpa').length}</p>
+    <ul class="ing-daftar ing-hasil">${baris.map((r, i) => {
+      const [ikon, label] = LABEL_STATUS_ING[r.status] || LABEL_STATUS_ING.gagal;
+      const manual = r.status === 'gagal' || r.status === 'tanpa';
+      return `<li class="ing-baris st-${r.status}" data-status="${r.status}" data-profil="${esc(r.d.m.id)}">
+        <span class="ing-nama"><b>${esc(r.d.m.nama)}</b><small>Kelas ${esc((r.d.m.kelas_binaan || []).join(', '))}${r.alasan ? ' · ' + esc(r.alasan) : ''}</small></span>
+        <span class="ing-status"><i class="fa-solid ${ikon}${r.status === 'antri' ? ' fa-spin-pulse' : ''}"></i>${label}</span>
+        ${manual ? `<button type="button" class="btn btn-ghost btn-sm" data-ing-manual="${i}"><i class="fa-brands fa-whatsapp"></i>Kirim manual</button>` : ''}
+      </li>`;
+    }).join('')}</ul>`;
+}
+
+async function tampilkanHasilIngatkan(baris, hasil) {
+  let t = 0, tBatas = 0;
+  const batch = hasil.ok ? hasil.data.batch : null;
+  const perbarui = () => {
+    const c = document.querySelector('.ing-hasil-wadah'); if (c) c.innerHTML = htmlHasilIngatkan(baris);
+    const j = c && c.closest('.swal2-popup')?.querySelector('.swal2-title');
+    if (j && hasil.ok && baris.every(r => statusIngFinal(r.status))) j.textContent = 'Hasil pengiriman pengingat';
+  };
+  const periksa = async () => {
+    if (!batch) return;
+    try {
+      const { data, error } = await db.from('wa_log').select('profile_id,status,respons')
+        .eq('jenis', 'ingatkan').eq('ref_id', batch);
+      if (error) throw error;
+      (data || []).forEach(w => {
+        const r = baris.find(x => String(x.d.m.id) === String(w.profile_id));
+        if (!r || r.status === 'tanpa') return;
+        r.status = w.status;
+        const f = w.respons?.fonnte;
+        r.alasan = w.status === 'terkirim' ? '' : (w.respons?.alasan || f?.reason || f?.detail || r.alasan || '');
+      });
+      perbarui();
+    } catch (e) { console.warn('hasil kirim belum terbaca:', e.message); }
+    if (baris.every(r => statusIngFinal(r.status))) berhenti();
+  };
+  const berhenti = () => { clearInterval(t); clearTimeout(tBatas); t = 0; };
+
+  await Swal.fire({
+    width: 720,
+    icon: hasil.ok ? undefined : 'error',
+    title: hasil.ok ? (hasil.data.kering ? 'Uji kering selesai' : 'Pengingat sedang dikirim') : 'Pengiriman otomatis gagal',
+    customClass: { popup: 'ing-popup' },
+    html: `<div class="ing">
+      ${hasil.ok ? `<p class="ing-ket">Pesan dikirim satu per satu berjeda ±4 detik agar nomor tidak ditandai spam.
+          Status di bawah diperbarui otomatis.</p>`
+        : `<p class="ing-peringatan">${esc(hasil.galat)}<br>Gunakan tombol <b>Kirim manual</b> pada setiap musyrif.</p>`}
+      <div class="ing-hasil-wadah">${htmlHasilIngatkan(baris)}</div></div>`,
+    confirmButtonText: 'Tutup',
+    confirmButtonColor: '#14618B',
+    didOpen: (popup) => {
+      popup.addEventListener('click', (e) => {
+        const m = e.target.closest('[data-ing-manual]'); if (!m) return;
+        const r = baris[Number(m.dataset.ingManual)]; if (!r) return;
+        const nomor = String(r.d.m.no_wa || '').replace(/\D/g, '');
+        window.open(`https://wa.me/${nomor}?text=${encodeURIComponent(r.d.pesan)}`, '_blank', 'noopener');
+      });
+      if (batch && !baris.every(r => statusIngFinal(r.status))) {
+        t = setInterval(periksa, 3000);
+        tBatas = setTimeout(() => {
+          berhenti();
+          baris.filter(r => r.status === 'antri').forEach(r => { r.alasan = 'belum ada kabar dari server — periksa lagi nanti di log WA'; });
+          perbarui();
+        }, 120000);
+        periksa();
+      }
+    },
+    willClose: berhenti
+  });
+  return baris;
+}
+
+/* ---------- 6 · Tombol di Ringkasan (Admin) -------------------------- */
+
+function kartuIngatkanMusyrif() {
+  if (!bolehIngatkanMusyrif()) return '';
+  return `<section class="card ing-kartu" id="ingKartu">
+    <div class="ing-kartu-isi">
+      <span class="ing-kartu-ikon" aria-hidden="true"><i class="fa-solid fa-paper-plane"></i></span>
+      <div><h3>Verifikasi data sebelum cetak laporan</h3>
+        <p class="sub">Kirim pengingat personal via WhatsApp kepada setiap musyrif, berisi ringkasan
+          kelas binaannya: pelanggaran, pembinaan belum selesai, izin, presensi, target, dan tahfiz.</p></div>
+      <button type="button" class="btn btn-primary ing-tombol" data-ingatkan-musyrif>
+        <i class="fa-solid fa-paper-plane"></i><span>Ingatkan Musyrif Kelas Binaan</span></button>
+    </div></section>`;
+}
+
+(function pasangIngatkanMusyrif() {
+  const asli = viewDashboard;
+  viewDashboard = async function () {
+    const hasil = await asli.apply(this, arguments);
+    try {
+      const html = kartuIngatkanMusyrif();          // izin dicek saat render
+      const root = $('viewRoot');
+      if (html && root && APP.viewTampil === 'dashboard' && !document.getElementById('ingKartu')) {   // navigasi cepat: jangan menyusup ke halaman lain
+        const jangkar = root.querySelector('#langkahPertama') || root.querySelector('.sapa');
+        jangkar ? jangkar.insertAdjacentHTML('afterend', html) : root.insertAdjacentHTML('afterbegin', html);
+      }
+    } catch (e) { console.warn('Ingatkan musyrif:', e.message); }
+    return hasil;
+  };
+  document.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-ingatkan-musyrif]'); if (!b) return;
+    e.preventDefault();
+    if (!bolehIngatkanMusyrif()) return toast('error', 'Akun Anda tidak berwenang mengingatkan musyrif.');   // dan saat klik
+    try { await bukaIngatkanMusyrif(b); } catch (err) { fireError(err); }
+  });
+})();
+
+
+/* ---------- 7 · Perbaikan gerak ganda (laporan Chemint, 25 Sep) -----
+ *  Dua efek yang terasa "diputar dua kali" pada mode animasi PENUH:
+ *
+ *  A. Detail santri: morf v2.36 (dialog memekar dari baris yang diketuk)
+ *     menahan animasi masuk SweetAlert lewat kelas .morf. Saat morf
+ *     selesai, kelas itu dilepas — dan karena popup masih ber-.swal2-show,
+ *     animasi masuk bawaan (swal2-show / lembarNaik di HP) MULAI LAGI dari
+ *     nol. Kini .morf diganti .morf-usai, yang terus menahan animasi MASUK
+ *     tetapi membiarkan animasi KELUAR (swal2-hide / lembarTurun) berjalan.
+ *
+ *  B. Arsip (dan setiap penyegaran di halaman yang sama): muatTabelPlg()
+ *     dipanggil langsung sesudah arsip, lalu ±700 ms kemudian SEKALI LAGI
+ *     oleh realtime (log_pelanggaran berubah). Setiap gambar ulang
+ *     memutar ulang animasi masuk halaman (kartu angka "rise", baris
+ *     tabel, hitung angka). Kini animasi MASUK hanya berlaku saat
+ *     BERPINDAH halaman (dan 1,2 dtk sesudahnya untuk isi yang datang
+ *     belakangan). Isi yang digambar ulang di halaman yang sama langsung
+ *     tampil di keadaan akhirnya. Animasi tak berujung (hiasan) dan
+ *     animasi yang digerakkan scroll tidak disentuh.
+ * ===================================================================== */
+const DIAM = { navBeda: 0, bebasSampai: 0, JENDELA_MS: 1200, dihentikan: 0 };
+const masukDiizinkan = () => DIAM.navBeda > 0 || performance.now() < DIAM.bebasSampai;
+
+(function pasangSegarDiam() {
+  const navSebelum = navigateTo;
+  navigateTo = async function (view) {
+    const beda = view !== APP.viewTampil;
+    if (beda) DIAM.navBeda++;
+    try { return await navSebelum.apply(this, arguments); }
+    finally { if (beda) { DIAM.navBeda = Math.max(0, DIAM.navBeda - 1); DIAM.bebasSampai = performance.now() + DIAM.JENDELA_MS; } }
+  };
+
+  /** Tuntaskan animasi masuk (berhingga, berbasis waktu dokumen) pada simpul baru. */
+  function tuntaskanMasuk(akar) {
+    if (typeof akar.getAnimations !== 'function') return;
+    for (const a of akar.getAnimations({ subtree: true })) {
+      if (a.timeline !== document.timeline) continue;                 // scroll-driven: biarkan
+      let tak = false; try { tak = a.effect.getComputedTiming().iterations === Infinity; } catch (e) {}
+      if (tak) continue;                                                // hiasan tak berujung: biarkan
+      const t = a.effect && a.effect.target;
+      if (t && t.closest && t.closest('.hujan-mon, .hujan-kanvas, .penghuni')) continue;
+      try { a.finish(); DIAM.dihentikan++; } catch (e) {}
+    }
+  }
+  const pasang = () => {
+    const root = $('viewRoot'); if (!root) return;
+    new MutationObserver((ms) => {
+      if (masukDiizinkan() || !bolehGerak()) return;                   // hemat: animasinya memang sudah dipangkas
+      for (const m of ms) for (const n of m.addedNodes) {
+        if (n.nodeType !== 1 || n.closest('.hujan-mon, .hujan-kanvas, .penghuni')) continue;   // hujan & penghuni punya aturan geraknya sendiri
+        tuntaskanMasuk(n);
+      }
+    }).observe(root, { childList: true, subtree: true });
+  };
+  document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', pasang) : pasang();
+})();
+
+(function perbaikiMorf() {
+  // morfDari() (v2.36) tidak diubah: kelasnya saja yang dijaga sesudah selesai.
+  new MutationObserver((ms) => {
+    for (const m of ms) {
+      const p = m.target;
+      if (!p.classList || !p.classList.contains('swal2-popup')) continue;
+      const tadi = String(m.oldValue || '').split(/\s+/).includes('morf');
+      if (tadi && !p.classList.contains('morf') && p.classList.contains('swal2-show')) p.classList.add('morf-usai');
+    }
+  }).observe(document.body, { attributes: true, attributeFilter: ['class'], attributeOldValue: true, subtree: true });
+})();
 
 // ---------------------------------------------------------------------
 hidupkanLayarLogin();
