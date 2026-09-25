@@ -23165,7 +23165,7 @@ setTimeout(() => jadwalSapu(0), 2500);
  *     sekali jalan, tunduk pada bolehGerak(), dibatalkan saat pindah
  *     halaman (Gerak.halaman). Tanpa library baru.
  * ===================================================================== */
-APP.versi = 'rq-v2.37';
+APP.versi = 'rq-v2.37.1';   // v2.37.1: tanpa tanda % di pesan pengingat
 
 const bolehIngatkanMusyrif = () => bisa('binaan.ingatkan') && !hanyaBaca();
 
@@ -23263,7 +23263,7 @@ const persenId = (x) => String(x).replace('.', ',');
 
 function barisPresensi(p) {
   if (!p.santri) return 'belum ada pekan presensi yang ditandai selesai (6 bulan terakhir)';
-  return `hadir ${persenId(p.hadirPct)}% · alpa ${angka(p.alpa)} JP · ${angka(p.santri)} santri teramati (6 bulan terakhir)`;
+  return `hadir ${persenId(p.hadirPct)} persen · alpa ${angka(p.alpa)} JP · ${angka(p.santri)} santri teramati (6 bulan terakhir)`;
 }
 function barisTarget(t) {
   if (!t.ada) return `belum ada target pembinaan untuk periode ${t.periode}`;
@@ -23311,7 +23311,11 @@ function pesanIngatkanMusyrif(m, a, o) {
     '',
     `Pengirim : ${o.pengirim}`,
     `_Dikirim melalui Sistem Informasi Pengembangan Santri pada ${waktu}._`
-  ].join('\n');
+  ].join('\n')
+    // v2.37.1 — Fonnte paket gratis menolak pesan yang memuat tanda "%"
+    // ("invalid message request on free package"; 7 dari 7 kegagalan
+    // 25 Sep memuatnya, 6 yang terkirim tidak). Jaring pengaman umum.
+    .replace(/\s?%/g, ' persen');
 }
 
 /* ---------- 3 · Bahan data (sekali muat, sama dengan dasbor) --------- */
