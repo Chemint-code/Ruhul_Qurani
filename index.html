@@ -783,54 +783,10 @@
     border-radius:inherit; transition:opacity .35s ease;
   }
 
-  /* Desktop: rel ikon ramping yang melebar saat disentuh tetikus */
-  @media (min-width:1025px) {
-    .sidebar {
-      position:fixed; top:0; left:0; bottom:0; z-index:50;
-      width:70px; flex:none; overflow:hidden;
-      transition:width var(--sedang), box-shadow var(--sedang);
-    }
-    .sidebar:hover, .sidebar:focus-within {
-      width:266px;
-      box-shadow:8px 0 44px -12px color-mix(in oklab, var(--ink) 60%, transparent);
-    }
-    .main { margin-left:70px; }
-
-    .sidebar:not(:hover):not(:focus-within) {
-      .sb-head { padding:16px 0 13px; display:flex; flex-direction:column; align-items:center; }
-      .sb-head .ar, .sb-head b, .sb-head .sub { display:none; }
-      .sb-head::after {
-        content:'ر'; display:grid; place-items:center;
-        width:38px; height:38px; border-radius:12px;
-        background: color-mix(in oklab, white 8%, transparent);
-        border:1px solid color-mix(in oklab, var(--brass) 42%, transparent);
-        color:var(--brass); font-family:'Amiri', serif; font-size:18px; line-height:1;
-      }
-      .sb-nav { padding:10px 8px; }
-      .nav-grup > summary.sb-group {
-        justify-content:center; padding:8px 0; gap:0; font-size:0; letter-spacing:0;
-      }
-      .nav-grup > summary.sb-group > span,
-      .nav-grup > summary.sb-group .tanda { display:none; }
-      .nav-grup > summary.sb-group > i:first-child { font-size:11px; opacity:.85; }
-      .nav-grup::details-content { block-size:auto; opacity:1; }
-      .nav-isi { padding:2px 0 6px; }
-      .nav-item { justify-content:center; padding:11px 0; gap:0; font-size:0; letter-spacing:0; }
-      .nav-item i { width:auto; font-size:15px; opacity:.85; }
-      .nav-item:hover { transform:none; }
-      .nav-item.active::before { left:0; }
-      .nav-count {
-        position:absolute; top:3px; right:5px; min-width:16px; padding:0 4px;
-        font-size:9px; line-height:16px;
-      }
-      .sb-foot { padding:10px 8px calc(10px + env(safe-area-inset-bottom)); }
-      .sb-user { justify-content:center; padding:4px 0 10px; gap:0; }
-      .sb-user .who { display:none; }
-      .sb-user .avatar { width:42px; height:42px; border-radius:13px; }
-      #btnLogout { justify-content:center; padding:11px 0; font-size:0; gap:0; }
-      #btnLogout i { font-size:15px; width:auto; }
-    }
-  }
+  /* Desktop: rel ikon ramping — v2.39 dipindah ke <style id="gayaNavKaca">.
+     Rel lama melebarkan `width` (tata letak dihitung ulang tiap bingkai)
+     dan menyusun ulang isi saat melebar. Penggantinya berlebar tetap dan
+     dibuka dengan clip-path: tanpa tata letak, hanya lukis/komposit. */
 
   @media (max-width:1024px) {
     .sidebar {
@@ -6174,6 +6130,310 @@
   .pesawat { position:absolute; left:-22px; top:-22px; width:44px; height:44px; display:block;
     opacity:0; will-change:transform, opacity; filter:drop-shadow(0 4px 6px rgba(11,43,69,.25)); }
   @media (prefers-reduced-motion: reduce) { .pesawat-lapis { display:none; } }
+</style>
+<style id="gayaNavKaca">
+  /* =====================================================================
+   * v2.39 — BILAH SISI KACA + KOTAK UNIT YANG HIDUP
+   * ---------------------------------------------------------------------
+   *  1. Desktop: bilah sisi BERLEBAR TETAP 266 px, dibuka/ditutup dengan
+   *     clip-path (bukan `width`) → nol perhitungan tata letak saat melebar;
+   *     yang bekerja hanya lukis + komposit di lapisan yang dikurung
+   *     `contain: strict`.
+   *  2. Bagian yang melebar menutupi isi halaman dibuat TEMBUS PANDANG
+   *     (tanpa blur — blur justru membuat angka di belakangnya tak terbaca
+   *     dan mahal dihitung ulang). Rel ikon 70 px tetap pekat.
+   *  3. Keterbacaan label dijaga oleh "lensa": sorotan tetikus yang
+   *     meluncur (satu elemen, hanya transform) + pil halaman aktif yang
+   *     pekat. Yang disorot selalu jelas; sisanya membiarkan isi terlihat.
+   *  4. Pindah halaman: pil aktif MELUNCUR dari menu lama ke menu baru
+   *     lewat View Transition yang sudah ada (tanpa JS tambahan).
+   *  5. Kotak unit (#unitBox) & lencana unit (#ctxBadge): terangkat
+   *     dengan pegas, cahaya kuningan, kilau menyapu, ikon bergoyang;
+   *     berdenyut saat unit diganti. Semua di transform/opacity.
+   *  Status melebar = kelas .lebar (dipasang app.js v2.39 dengan jeda niat).
+   *  Tanpa JS (.nk tidak terpasang), :hover biasa tetap bekerja.
+   * ===================================================================== */
+
+  :root {
+    --rel: 70px;              /* lebar rel ikon */
+    --panel: 266px;           /* lebar panel penuh */
+    --kaca-pekat: color-mix(in oklab, var(--ink) 95%, transparent);
+    --kaca-tengah: color-mix(in oklab, var(--ink) 78%, transparent);
+    --kaca-tembus: color-mix(in oklab, var(--ink) 60%, transparent);
+    --nav-buka: .34s var(--pegas-mantap, cubic-bezier(.22,1,.36,1));
+    --nav-tutup: .22s cubic-bezier(.4, 0, .6, 1);
+  }
+
+  /* ═══════════════ A · DESKTOP: REL → PANEL KACA ═══════════════ */
+  @media (min-width:1025px) {
+    .sidebar {
+      position:fixed; top:0; left:0; bottom:0; z-index:50;
+      width:var(--panel); flex:none; overflow:hidden;
+      contain:strict;                        /* ukuran tetap → aman */
+      border-right:0;
+      background:
+        radial-gradient(140% 34% at 0% 0%, color-mix(in oklab, var(--sea) 30%, transparent), transparent 70%),
+        radial-gradient(110% 26% at 100% 100%, color-mix(in oklab, var(--brass) 11%, transparent), transparent 70%),
+        linear-gradient(90deg,
+          var(--kaca-pekat) 0 calc(var(--rel) - 6px),
+          var(--kaca-tengah) calc(var(--rel) + 44px),
+          var(--kaca-tembus) 100%);
+      /* Rel: hanya 70 px pertama yang terlihat & bisa diklik. */
+      clip-path:inset(0 calc(var(--panel) - var(--rel)) 0 0 round 0 0 0 0);
+      transition:clip-path var(--nav-tutup);
+    }
+    .main { margin-left:var(--rel); }
+
+    /* Pola girih hanya di rel — area tembus pandang dibiarkan bersih. */
+    .sidebar::before {
+      -webkit-mask-image:linear-gradient(90deg, #000 calc(var(--rel) - 10px), transparent calc(var(--rel) + 80px));
+              mask-image:linear-gradient(90deg, #000 calc(var(--rel) - 10px), transparent calc(var(--rel) + 80px));
+    }
+    /* Garis tepi kuningan: ikut meluncur bersama tepi bukaan (transform). */
+    .sidebar::after {
+      content:''; position:absolute; top:0; bottom:0; left:calc(var(--rel) - 1px); width:1px; z-index:3;
+      background:linear-gradient(180deg,
+        transparent, color-mix(in oklab, var(--brass) 55%, transparent) 30%,
+        color-mix(in oklab, var(--brass) 30%, transparent) 70%, transparent);
+      pointer-events:none;
+      transform:translateX(0);
+      transition:transform var(--nav-tutup);
+    }
+
+    /* ---------- Kepala: segel ر di rel, judul penuh di panel ---------- */
+    .sb-head .ar, .sb-head b, .sb-head .sub { opacity:0; transition:opacity .12s ease; }
+    .sb-head::after {
+      content:'ر'; position:absolute; top:16px; left:calc((var(--rel) - 38px) / 2);
+      display:grid; place-items:center; width:38px; height:38px; border-radius:12px;
+      background:color-mix(in oklab, white 8%, transparent);
+      border:1px solid color-mix(in oklab, var(--brass) 42%, transparent);
+      color:var(--brass); font-family:'Amiri', serif; font-size:18px; line-height:1;
+      transition:opacity .18s ease, transform .3s var(--pegas-lembut, ease);
+    }
+
+    /* ---------- Menu: ikon berpusat di rel, label menunggu ---------- */
+    .sb-nav {
+      padding:12px 10px; scrollbar-width:thin;
+      scrollbar-color:color-mix(in oklab, white 16%, transparent) transparent;
+    }
+    .nav-grup > summary.sb-group { padding:9px 11px 9px calc((var(--rel) - 17px) / 2 - 10px); }
+    .nav-grup > summary.sb-group > span,
+    .nav-grup > summary.sb-group .tanda { opacity:0; transition:opacity .12s ease, transform var(--sedang); }
+
+    .sidebar .nav-item {
+      padding:9px 11px 9px calc((var(--rel) - 17px) / 2 - 10px);
+      color:transparent;                      /* label tersembunyi di rel */
+      transition:color .12s ease, background var(--cepat), transform .1s var(--lengkung);
+    }
+    .sidebar .nav-item > i {
+      color:color-mix(in oklab, white 76%, transparent); opacity:1;
+      transition:color var(--cepat), transform .38s var(--pegas-lenting, ease);
+    }
+    .sidebar .nav-item:hover { transform:none; color:transparent; }
+    .sidebar .nav-item:hover > i { color:#fff; transform:scale(1.12); }
+    .sidebar .nav-item.active { color:transparent; }
+    .sidebar .nav-item.active > i { color:#A7D6F0; }
+    .sidebar .nav-item:active { transform:scale(.975); }
+
+    /* Pil aktif di rel = kapsul di sekitar ikon; di panel = selebar menu.
+       Dipotong clip-path supaya peralihannya ikut beranimasi. */
+    .sidebar .nav-item.active {
+      clip-path:inset(0 calc(100% - 52px) 0 0 round 12px);
+      transition:color .12s ease, clip-path var(--nav-tutup), transform .1s var(--lengkung);
+    }
+
+    /* Lencana hitungan: titik kecil di pojok ikon saat di rel. */
+    .sidebar .nav-count {
+      position:absolute; top:3px; left:calc((var(--rel) - 17px) / 2 - 10px + 11px);
+      min-width:16px; padding:0 4px; font-size:9px; line-height:16px;
+    }
+
+    /* Kaki: avatar berpusat di rel. */
+    .sb-foot { padding:12px 10px calc(12px + env(safe-area-inset-bottom)); }
+    .sb-user { padding:4px 8px 12px calc((var(--rel) - 46px) / 2 - 10px); }
+    .sb-user .who { opacity:0; transition:opacity .12s ease; }
+    .sidebar #btnLogout { color:transparent !important; }
+    .sidebar #btnLogout > i { color:#E9A7B6; }
+
+    /* ═════════ STATUS MELEBAR ═════════ */
+    :is(.sidebar.lebar, .sidebar:not(.nk):hover, .sidebar:not(.nk):has(:focus-visible)) {
+      clip-path:inset(0 0 0 0 round 0 22px 22px 0);
+      transition:clip-path var(--nav-buka);
+      &::after { transform:translateX(calc(var(--panel) - var(--rel))); transition:transform var(--nav-buka); }
+
+      .sb-head .ar, .sb-head b, .sb-head .sub { opacity:1; transition:opacity .22s ease .06s; }
+      .sb-head::after { opacity:0; transform:scale(.7) rotate(-12deg); }
+
+      .nav-grup > summary.sb-group { color:color-mix(in oklab, white 66%, transparent); }
+      .nav-grup > summary.sb-group > span,
+      .nav-grup > summary.sb-group .tanda { opacity:1; transition:opacity .2s ease .05s, transform var(--sedang); }
+      .nav-grup[open] > summary.sb-group .tanda { opacity:.6; }
+
+      .nav-item {
+        color:color-mix(in oklab, white 84%, transparent);
+        /* Keterbacaan di atas kaca tembus pandang: bayangan huruf, bukan blur latar. */
+        text-shadow:0 1px 2px color-mix(in oklab, var(--ink) 90%, transparent),
+                    0 0 14px color-mix(in oklab, var(--ink) 60%, transparent);
+        transition:color .2s ease .04s, background var(--cepat), transform .1s var(--lengkung);
+      }
+      .nav-item:hover { color:#fff; }
+      .nav-item.active {
+        color:#fff; clip-path:inset(0 0 0 0 round 11px);
+        transition:color .2s ease .04s, clip-path var(--nav-buka), transform .1s var(--lengkung);
+      }
+      .nav-count { position:static; top:auto; left:auto; min-width:20px; padding:1px 6px; font-size:10.5px; line-height:normal; }
+      .sb-user .who { opacity:1; transition:opacity .22s ease .06s; }
+      #btnLogout { color:#E9A7B6 !important; }
+    }
+  }
+
+  /* ═══════════════ B · LENSA: PIL AKTIF & SOROTAN ═══════════════ */
+  .nav-item.active {
+    background:
+      linear-gradient(90deg in oklab,
+        color-mix(in oklab, var(--sea-hi) 78%, var(--ink)),
+        color-mix(in oklab, var(--sea) 62%, var(--ink)) 92%);
+    box-shadow:inset 0 1px 0 color-mix(in oklab, white 16%, transparent),
+               inset 0 0 0 1px color-mix(in oklab, #A7D6F0 16%, transparent),
+               0 10px 22px -12px color-mix(in oklab, var(--sea-hi) 95%, transparent);
+  }
+  .nav-item.active::before { left:0; }
+
+  /* Sorotan meluncur (dipasang app.js; satu elemen, hanya transform/opacity). */
+  .sb-nav { position:relative; }
+  .nav-sorot {
+    position:absolute; top:0; left:10px; right:10px; height:38px; z-index:-1;
+    border-radius:11px; pointer-events:none; opacity:0;
+    background:
+      linear-gradient(90deg, color-mix(in oklab, white 13%, transparent), color-mix(in oklab, white 5%, transparent)),
+      color-mix(in oklab, var(--ink) 62%, transparent);
+    box-shadow:inset 0 1px 0 color-mix(in oklab, white 10%, transparent),
+               inset 0 0 0 1px color-mix(in oklab, white 7%, transparent);
+    transform:translateY(var(--sorot-y, 0px));
+    transition:transform .36s var(--pegas-lembut, cubic-bezier(.22,1,.36,1)), opacity .16s ease;
+    will-change:transform;
+  }
+  .nav-sorot.on { opacity:1; }
+  .nav-sorot.lompat { transition:opacity .16s ease; }
+  .sb-nav.ada-sorot .nav-item:not(.active):hover { background:transparent; }
+  @media (min-width:1025px) {
+    .nav-sorot { clip-path:inset(0 calc(100% - 52px) 0 0 round 12px); transition:transform .36s var(--pegas-lembut, ease), opacity .16s ease, clip-path var(--nav-tutup); }
+    :is(.sidebar.lebar, .sidebar:not(.nk):hover) .nav-sorot { clip-path:inset(0 0 0 0 round 11px); transition:transform .36s var(--pegas-lembut, ease), opacity .16s ease, clip-path var(--nav-buka); }
+    .nav-sorot.lompat { transition:opacity .16s ease, clip-path var(--nav-tutup); }
+  }
+
+  /* Pindah halaman: pil aktif meluncur ke menu baru (View Transition bawaan v2.36). */
+  @media (min-width:1025px) {
+    #navMenu .nav-item.active { view-transition-name:rq-navaktif; }
+  }
+  ::view-transition-group(rq-navaktif) {
+    animation-duration:.42s;
+    animation-timing-function:var(--pegas-lembut, cubic-bezier(.22,1,.36,1));
+    z-index:5;
+  }
+  ::view-transition-old(rq-navaktif), ::view-transition-new(rq-navaktif) { height:100%; }
+  /* Bilah sisi TIDAK dilebur-silang: citra lama langsung dilepas, citra baru
+     (tampilan hidup) langsung tampil — jadi lipatan panel & laci ponsel
+     tetap beranimasi di dalam transisi, tanpa bayangan label ganda. */
+  ::view-transition-old(rq-samping) { animation:none; opacity:0; }
+  ::view-transition-new(rq-samping) { animation:none; opacity:1; }
+
+  /* ═══════════════ C · PONSEL / TABLET: LACI ═══════════════ */
+  @media (max-width:1024px) {
+    .sidebar { transition:transform .3s var(--pegas-mantap, cubic-bezier(.22,1,.36,1)); }
+    .sidebar:not(.open) { transition-duration:.2s; transition-timing-function:cubic-bezier(.4,0,1,1); }
+    .sidebar.open .nav-grup:not(.hidden), .sidebar.open .sb-foot {
+      animation:lacIsi .36s var(--pegas-lembut, ease) both;
+    }
+    .sidebar.open .nav-grup:nth-of-type(2) { animation-delay:.03s; }
+    .sidebar.open .nav-grup:nth-of-type(3) { animation-delay:.06s; }
+    .sidebar.open .nav-grup:nth-of-type(4) { animation-delay:.09s; }
+    .sidebar.open .nav-grup:nth-of-type(5) { animation-delay:.12s; }
+    .sidebar.open .nav-grup:nth-of-type(6) { animation-delay:.15s; }
+    .sidebar.open .sb-foot { animation-delay:.12s; }
+  }
+  @keyframes lacIsi { from { opacity:0; transform:translateX(-14px); } }
+
+  /* ═══════════════ D · KOTAK UNIT & LENCANA UNIT ═══════════════ */
+  .unit-box, .ctx-badge {
+    position:relative; isolation:isolate; cursor:pointer;
+    transition:transform .5s var(--pegas-lenting, cubic-bezier(.3,1.5,.5,1)),
+               background-color .2s ease, border-color .2s ease, color .2s ease;
+  }
+  .ctx-badge { cursor:default; }
+  /* Cahaya luar (opacity saja) */
+  .unit-box::before, .ctx-badge::before {
+    content:''; position:absolute; inset:-1px; z-index:-1; border-radius:inherit; pointer-events:none;
+    opacity:0; transition:opacity .22s ease, transform .5s var(--pegas-lembut, ease);
+  }
+  .unit-box::before {
+    box-shadow:0 0 0 3px color-mix(in oklab, var(--brass) 20%, transparent),
+               0 8px 20px -8px color-mix(in oklab, var(--brass) 75%, transparent);
+  }
+  .ctx-badge::before {
+    box-shadow:0 0 0 3px color-mix(in oklab, var(--sea) 16%, transparent),
+               0 8px 20px -8px color-mix(in oklab, var(--sea) 70%, transparent);
+  }
+  /* Kilau menyapu sekali per sentuhan */
+  .unit-box::after, .ctx-badge::after {
+    content:''; position:absolute; inset:0; z-index:-1; border-radius:inherit; pointer-events:none;
+    background:linear-gradient(110deg, transparent 32%, color-mix(in oklab, white 85%, transparent) 50%, transparent 68%)
+               no-repeat 135% 0 / 250% 100%;
+    opacity:0; transition:opacity .2s ease;
+  }
+  .unit-box > i, .ctx-badge > i {
+    display:inline-block; transform-origin:50% 80%; pointer-events:none;
+    transition:transform .55s var(--pegas-lenting, cubic-bezier(.3,1.5,.5,1));
+  }
+
+  @media (hover:hover) and (pointer:fine) {
+    .unit-box:hover, .unit-box:focus-within {
+      transform:translateY(-2px);
+      background-color:color-mix(in oklab, var(--brass) 15%, white);
+      border-color:color-mix(in oklab, var(--brass) 55%, white);
+      color:#8C6D0A;
+    }
+    .ctx-badge:hover {
+      transform:translateY(-2px);
+      background-color:color-mix(in oklab, var(--sea) 14%, white);
+      border-color:color-mix(in oklab, var(--sea) 42%, white);
+    }
+    :is(.unit-box, .ctx-badge):is(:hover, :focus-within)::before { opacity:1; }
+    :is(.unit-box, .ctx-badge):hover::after {
+      opacity:1; background-position:-35% 0;
+      transition:background-position .75s cubic-bezier(.4,0,.2,1), opacity .1s ease;
+    }
+    .unit-box:hover > i { transform:translateY(-1px) rotate(-10deg) scale(1.2); }
+    .ctx-badge:hover > i { transform:translateY(-1px) scale(1.18); }
+  }
+  .unit-box:active { transform:translateY(0) scale(.97); transition-duration:.1s; }
+
+  /* Seluruh kotak = area klik pemilih (bukan hanya teksnya). */
+  @media (min-width:721px) {
+    .unit-box:has(select) { padding-right:0; }
+    .unit-box select.per-in {
+      margin:-4px 0 -4px -27px; padding:4px 24px 4px 27px;
+      background-position:right 11px center; border-radius:999px;
+    }
+    .unit-box select.per-in:focus { box-shadow:none; }
+  }
+
+  /* Unit diganti: denyut cincin + ikon melompat */
+  .unit-box.unit-ganti::before { animation:unitDenyut .7s cubic-bezier(.2,.7,.3,1) both; }
+  .unit-box.unit-ganti > i { animation:unitLompat .6s var(--pegas-lenting, ease) both; }
+  @keyframes unitDenyut { 0% { opacity:1; transform:scale(1); } 100% { opacity:0; transform:scale(1.35, 1.8); } }
+  @keyframes unitLompat { 0% { transform:none; } 35% { transform:translateY(-4px) rotate(-14deg) scale(1.25); } 100% { transform:none; } }
+
+  /* ═══════════════ E · PENGHEMAT & AKSESIBILITAS ═══════════════ */
+  :root.hemat .nav-sorot { transition:opacity .12s ease; }
+  :root.hemat :is(.unit-box, .ctx-badge)::after { display:none; }
+  :root.hemat ::view-transition-group(rq-navaktif) { animation-duration:.2s; }
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar, .sidebar::after, .sidebar *, .nav-sorot,
+    .unit-box, .ctx-badge, .unit-box > i, .ctx-badge > i { transition-duration:.01s !important; animation:none !important; }
+    :is(.unit-box, .ctx-badge)::after { display:none; }
+  }
+  @media print { .nav-sorot { display:none; } }
 </style>
 </head>
 <body>

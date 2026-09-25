@@ -24527,6 +24527,149 @@ async function optSegarSenyap(tabel) {
   selesaikanUtas      = bungkus(selesaikanUtas, optSelesaikanUtas);
 })();
 
+/* =====================================================================
+ * v2.39 — BILAH SISI KACA: NIAT TETIKUS, SOROTAN MELUNCUR, TUTUP SETELAH PILIH
+ * ---------------------------------------------------------------------
+ *  Pasangan <style id="gayaNavKaca"> di index.html.
+ *
+ *  1. Jeda niat (hover intent): panel melebar setelah tetikus diam
+ *     ±90 ms di rel, dan menyempit ±140 ms setelah keluar. Tetikus yang
+ *     sekadar melintas ke tepi layar tidak lagi membuka panel.
+ *  2. Setelah memilih menu, panel melipat kembali ke rel SAMBIL pil
+ *     aktif meluncur ke menu baru, supaya isi halaman baru tidak
+ *     tertutup. Panel baru bisa melebar lagi setelah tetikus keluar
+ *     dari rel lalu masuk kembali.
+ *  3. Sorotan meluncur: SATU elemen yang digeser dengan transform
+ *     mengikuti menu di bawah tetikus. Tidak ada perhitungan tata letak
+ *     per bingkai; offsetTop dibaca sekali per menu yang disentuh.
+ *  4. Fokus papan ketik (:focus-visible) membuka panel; fokus karena
+ *     klik tetikus TIDAK (dulu :focus-within membuat panel tertahan
+ *     terbuka menutupi isi setelah menu diklik).
+ *  5. Kotak unit berdenyut saat unit asrama diganti.
+ *
+ *  Tidak ada perubahan skema, RPC, trigger, maupun RLS. Fungsi lama tidak
+ *  disentuh. NAVK.aktif = false → perilaku :hover CSS murni (tanpa niat).
+ * ===================================================================== */
+APP.versi = 'rq-v2.39';
+
+const NAVK = {
+  aktif: true,
+  MASUK_MS: 90,          // jeda niat sebelum melebar
+  KELUAR_MS: 140,        // toleransi tetikus keluar sesaat
+  tMasuk: 0, tKeluar: 0,
+  kunci: false,          // true = baru memilih menu; tunggu tetikus keluar
+  sorot: null, sorotItem: null
+};
+
+(function pasangNavKaca() {
+  if (!NAVK.aktif) return;
+  const sb = $('sidebar'), nav = $('navMenu');
+  if (!sb || !nav) return;
+  sb.classList.add('nk');
+
+  const desktop = window.matchMedia('(min-width:1025px)');
+  const lebar = (on) => sb.classList.toggle('lebar', !!on);
+  const adaFokusPapan = () => { try { return !!sb.querySelector(':focus-visible'); } catch (e) { return false; } };
+  const batal = () => { clearTimeout(NAVK.tMasuk); clearTimeout(NAVK.tKeluar); };
+
+  /* ---------- 1 · Niat tetikus ---------- */
+  sb.addEventListener('pointerenter', (e) => {
+    if (e.pointerType !== 'mouse' || !desktop.matches) return;
+    batal();
+    if (NAVK.kunci || sb.classList.contains('lebar')) return;
+    NAVK.tMasuk = setTimeout(() => lebar(true), NAVK.MASUK_MS);
+  });
+  sb.addEventListener('pointerleave', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    batal();
+    NAVK.tKeluar = setTimeout(() => { if (!adaFokusPapan()) lebar(false); }, NAVK.KELUAR_MS);
+    sembunyikanSorot();
+  });
+
+  /* ---------- 4 · Papan ketik ---------- */
+  sb.addEventListener('focusin', () => {
+    if (desktop.matches && adaFokusPapan()) { batal(); lebar(true); }
+  });
+  sb.addEventListener('focusout', () => {
+    setTimeout(() => {
+      if (!sb.contains(document.activeElement) && !sb.matches(':hover')) lebar(false);
+    }, 0);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sb.classList.contains('lebar')) {
+      lebar(false); NAVK.kunci = true;
+      if (sb.contains(document.activeElement)) document.activeElement.blur();
+    }
+  });
+  // Kunci dilepas begitu tetikus benar-benar berada di luar rel. (pointerleave
+  // tidak bisa dipakai: selama View Transition, lapisan transisi menutupi
+  // halaman sehingga peramban mengirim pointerleave palsu.)
+  document.addEventListener('pointermove', (e) => {
+    if (NAVK.kunci && e.pointerType === 'mouse' && e.clientX > sb.getBoundingClientRect().left + 74) NAVK.kunci = false;
+  }, { passive: true });
+  desktop.addEventListener?.('change', () => { batal(); lebar(false); NAVK.kunci = false; sembunyikanSorot(); });
+
+  /* ---------- 2 · Ramping lagi setelah memilih ---------- */
+  // Didaftarkan SESUDAH pendengar klik lama: navigateTo() sudah dimulai.
+  const rampingkan = () => {
+    batal(); lebar(false); sembunyikanSorot();
+    const a = document.activeElement;
+    if (a && sb.contains(a) && !adaFokusPapan()) a.blur();
+  };
+  nav.addEventListener('click', (e) => {
+    const btn = e.target.closest('.nav-item[data-view]');
+    if (!btn || !desktop.matches || adaFokusPapan()) return;
+    // Panel melipat SAMBIL pil aktif meluncur ke menu baru (sisi-baru
+    // View Transition adalah tampilan hidup, jadi transisi clip-path ikut
+    // terlihat). Tanpa View Transition: lipat setelah jeda singkat.
+    NAVK.kunci = true;
+    setTimeout(rampingkan, 90);
+  });
+
+  /* ---------- 3 · Sorotan meluncur ---------- */
+  const s = document.createElement('span');
+  s.className = 'nav-sorot lompat';
+  s.setAttribute('aria-hidden', 'true');
+  nav.prepend(s);
+  nav.classList.add('ada-sorot');
+  NAVK.sorot = s;
+
+  function sembunyikanSorot() {
+    s.classList.remove('on');
+    NAVK.sorotItem = null;
+  }
+  function sorotKe(item) {
+    if (item === NAVK.sorotItem) return;
+    const muncul = !s.classList.contains('on');
+    const y = item.offsetTop, h = item.offsetHeight;
+    if (muncul) s.classList.add('lompat');        // muncul di tempat, tidak meluncur dari jauh
+    s.style.height = h + 'px';
+    s.style.setProperty('--sorot-y', y + 'px');
+    s.classList.add('on');
+    if (muncul) requestAnimationFrame(() => requestAnimationFrame(() => s.classList.remove('lompat')));
+    NAVK.sorotItem = item;
+  }
+  nav.addEventListener('pointerover', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    const item = e.target.closest('.nav-item[data-view]');
+    if (item && !item.classList.contains('hidden')) sorotKe(item);
+    else if (e.target.closest('summary')) sembunyikanSorot();
+  });
+  nav.addEventListener('pointerleave', sembunyikanSorot);
+  // Kelompok dibuka/ditutup → posisi menu bergeser; sorotan disegarkan saat tetikus bergerak lagi.
+  nav.addEventListener('toggle', sembunyikanSorot, true);
+})();
+
+/* ---------- 5 · Kotak unit berdenyut saat unit diganti ---------- */
+document.addEventListener('change', (e) => {
+  if (!e.target || e.target.id !== 'unitPilih') return;
+  const box = $('unitBox'); if (!box) return;
+  box.classList.remove('unit-ganti');
+  void box.offsetWidth;                            // mulai ulang animasi
+  box.classList.add('unit-ganti');
+  setTimeout(() => box.classList.remove('unit-ganti'), 750);
+});
+
 // ---------------------------------------------------------------------
 hidupkanLayarLogin();
 
