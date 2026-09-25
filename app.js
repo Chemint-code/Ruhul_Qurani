@@ -23760,6 +23760,773 @@ const masukDiizinkan = () => DIAM.navBeda > 0 || performance.now() < DIAM.bebasS
   }).observe(document.body, { attributes: true, attributeFilter: ['class'], attributeOldValue: true, subtree: true });
 })();
 
+/* =====================================================================
+ * v2.38 — AKSI SATU BARIS OPTIMISTIK (tanpa muat ulang tampilan)
+ * ---------------------------------------------------------------------
+ *  Laporan Chemint (25 Sep): tombol Selesaikan/Sahkan/Buka Lagi, Arsip,
+ *  Telat Balik/Sesuai Waktu, Kembalikan ke Hadir, dan "Sudah diantar ke
+ *  BK" membuat seluruh tampilan tersegarkan. Penyebabnya tiga lapis:
+ *
+ *   1. Setiap aksi MENUNGGU server, lalu cacheHapus() dan menggambar
+ *      ulang seluruh daftar.
+ *   2. cacheHapus() pada tabel yang disimpan di perangkat (izin, detail,
+ *      pembinaan, siswa) membuat muatTersimpan() mengembalikan salinan
+ *      IndexedDB yang BELUM berubah — baris lama sempat tampil lagi —
+ *      lalu sinkron-delta menemukan perubahan dan kabarDataBaru()
+ *      memanggil navigateTo() untuk SELURUH halaman.
+ *   3. ±700 ms kemudian gema realtime dari perubahan milik sendiri
+ *      menggambar ulang sekali lagi (di Pengasuhan/Dasbor berupa
+ *      navigateTo penuh, yang juga menggulir layar ke atas).
+ *
+ *  Pola baru — optJalankan():
+ *   · Baris/kartu, angka ringkasan, dan cache diubah SEKETIKA.
+ *   · Server dipanggil di belakang; tampilan tidak menunggu.
+ *   · Berhasil → satu baris itu dicocokkan dengan server lewat satu
+ *     permintaan by-ID (bukan muat ulang tabel). Kilat 260 ms di baris.
+ *   · Gagal → server ditanya sekali apakah perubahan sebenarnya sudah
+ *     masuk (jaringan putus sesudah tulis). Bila belum, baris, angka, dan
+ *     cache dikembalikan persis seperti semula + toast galat.
+ *   · Gema realtime milik sendiri dikenali lewat kanal pengintai
+ *     'rq-gema' (payload ber-ID) dan tidak menggambar ulang apa pun.
+ *     Perubahan dari perangkat lain tetap memakai jalur lama.
+ *
+ *  Tidak ada perubahan skema, RPC, trigger, maupun RLS. Isi fungsi lama
+ *  tidak disentuh: nama globalnya dibungkus, dan OPT.aktif = false
+ *  mengembalikan seluruh perilaku v2.37.1.
+ * ===================================================================== */
+APP.versi = 'rq-v2.38';
+
+const OPT = {
+  aktif: true,             // sakelar darurat → false = alur lama v2.37.1
+  sibuk: new Set(),        // "jenis:id" yang masih menunggu server (cegah klik ganda)
+  milik: {},               // tabel -> Map(id -> kedaluwarsa) : perubahan milik sendiri
+  gema: {},                // tabel -> [{ id, t }] event dari kanal pengintai
+  kanal: null,
+  kanalOk: false,
+  JENDELA_MS: 8000,        // gema realtime dianggap milik sendiri selama ini
+  KILAT_MS: 260,
+  KELUAR_MS: 220
+};
+
+(function pasangGayaOptimistik() {
+  const st = document.createElement('style');
+  st.id = 'rqOptimistik';
+  // Hanya opacity & transform (lihat evaluasi-kemulusan): tidak ada
+  // animasi tinggi/lebar/bayangan, dan tidak ada yang menutupi layar.
+  st.textContent = `
+    .opt-kilat{position:relative}
+    .opt-kilat::after{content:'';position:absolute;inset:0;pointer-events:none;border-radius:inherit;
+      background:rgba(201,162,39,.20);opacity:0;animation:optKilat ${OPT.KILAT_MS}ms ease-out}
+    @keyframes optKilat{0%{opacity:1}100%{opacity:0}}
+    .opt-keluar{animation:optKeluar ${OPT.KELUAR_MS}ms ease-in forwards;pointer-events:none}
+    @keyframes optKeluar{to{opacity:0;transform:translateX(-10px)}}
+    .opt-gagal{animation:optGagal 340ms ease-in-out}
+    @keyframes optGagal{20%,60%{transform:translateX(-4px)}40%,80%{transform:translateX(4px)}}
+    @media (prefers-reduced-motion:reduce){.opt-kilat::after,.opt-keluar,.opt-gagal{animation:none}}`;
+  document.head.appendChild(st);
+})();
+
+/* ---------- 1 · Utilitas tampilan ---------- */
+const optCss = (v) => (window.CSS && CSS.escape) ? CSS.escape(String(v)) : String(v).replace(/["\\]/g, '\\$&');
+const optBacaAngka = (t) => Number(String(t || '').replace(/[^\d-]/g, '')) || 0;
+const pesanGalat = (e) => String(e?.message || e || 'kesalahan tidak dikenal').slice(0, 160);
+
+function optKilat(el) {
+  if (!el || !el.isConnected || !bolehGerak()) return;
+  el.classList.remove('opt-kilat'); void el.offsetWidth; el.classList.add('opt-kilat');
+  clearTimeout(el._optKilat);
+  el._optKilat = setTimeout(() => el.classList.remove('opt-kilat'), OPT.KILAT_MS + 60);
+}
+function optGetarGagal(el) {
+  if (!el || !el.isConnected || !bolehGerak()) return;
+  el.classList.remove('opt-gagal'); void el.offsetWidth; el.classList.add('opt-gagal');
+  setTimeout(() => el.classList.remove('opt-gagal'), 400);
+}
+
+/** Simpan isi elemen apa adanya; pemulihan = kembalikan HTML, kelas, dan gaya. */
+function optSimpanDom(ctx, el) {
+  if (!el) return;
+  const html = el.innerHTML, kelas = el.className, gaya = el.getAttribute('style');
+  ctx.pulih.push(() => {
+    el.innerHTML = html; el.className = kelas;
+    gaya == null ? el.removeAttribute('style') : el.setAttribute('style', gaya);
+  });
+}
+
+/**
+ * Keluarkan baris/kartu dari tampilan. Disembunyikan dulu (bukan
+ * dihapus) supaya bisa dipulihkan; dibuang dari DOM setelah server setuju.
+ */
+function optKeluarkan(ctx, el) {
+  if (!el) return;
+  let t = null;
+  const sembunyi = () => { el.style.display = 'none'; el.classList.remove('opt-keluar'); };
+  if (bolehGerak()) { el.classList.add('opt-keluar'); t = setTimeout(sembunyi, OPT.KELUAR_MS); }
+  else sembunyi();
+  ctx.pulih.push(() => { clearTimeout(t); el.classList.remove('opt-keluar'); el.style.display = ''; });
+  ctx.tuntas.push(() => setTimeout(() => el.remove(), OPT.KELUAR_MS + 20));
+}
+
+/** Bila halaman daftar kosong setelah baris keluar, gambar dari cache (tanpa jaringan). */
+function optCekKosong(wadah, sel, gambar) {
+  setTimeout(() => {
+    if (!wadah || !wadah.isConnected) return;
+    const tampak = [...wadah.querySelectorAll(sel)].some(e => e.style.display !== 'none');
+    if (!tampak) { try { gambar(); } catch (e) { console.warn('[optimistik] gambar kosong', e); } }
+  }, OPT.KELUAR_MS + 40);
+}
+
+/** Geser angka PERTAMA dalam teks elemen (mis. "12 belum dilaporkan", "+340", "5 kartu"). */
+function optGeserAngka(ctx, el, delta) {
+  if (!el || !delta) return;
+  const asli = el.textContent;
+  el.textContent = asli.replace(/-?\d[\d.]*/, m => angka(Math.max(0, optBacaAngka(m) + delta)));
+  ctx.pulih.push(() => { el.textContent = asli; });
+}
+
+/** Elemen angka (.v) atau kaki (.f) sebuah kartu stat() berdasarkan labelnya. */
+function optStat(box, label, bagian = 'v') {
+  if (!box) return null;
+  const s = [...box.querySelectorAll('.stat')].find(x => x.querySelector('.k')?.textContent.trim() === label);
+  return s ? s.querySelector('.' + bagian) : null;
+}
+function optMini(box, label) {
+  if (!box) return null;
+  const m = [...box.querySelectorAll('.mini')].find(x => x.querySelector('span')?.textContent.trim() === label);
+  return m ? m.querySelector('b') : null;
+}
+function optGeserBadge(ctx, id, delta) {
+  const b = $(id); if (!b || !delta) return;
+  const asli = { t: b.textContent, h: b.classList.contains('hidden') };
+  if (asli.t.includes('+') || (asli.h && delta < 0)) return;          // "99+" / sudah kosong
+  const n = Math.max(0, optBacaAngka(asli.t) + delta);
+  b.textContent = String(n); b.classList.toggle('hidden', !n);
+  ctx.pulih.push(() => { b.textContent = asli.t; b.classList.toggle('hidden', asli.h); });
+}
+
+/* ---------- 2 · Utilitas cache ---------- */
+function optBaris(kunci, pk, id) {
+  const rows = CACHE[kunci]?.v;
+  return Array.isArray(rows) ? rows.find(r => String(r?.[pk]) === String(id)) || null : null;
+}
+
+/** Ubah objek DI TEMPAT, catat nilai lama untuk pemulihan. */
+function optUbahObjek(ctx, obj, ubah) {
+  if (!obj) return;
+  const asli = Object.keys(ubah).map(k => [k, Object.prototype.hasOwnProperty.call(obj, k), obj[k]]);
+  Object.assign(obj, ubah);
+  ctx.pulih.push(() => asli.forEach(([k, ada, v]) => { if (ada) obj[k] = v; else delete obj[k]; }));
+}
+
+/**
+ * Ubah satu baris cache di tempat — objek yang sama juga dipakai
+ * petaSiswa, PGS.izinData, dsb. `daftarLain` = larik lain yang mungkin
+ * memegang salinan objek berbeda (mis. PGS.izinData sesudah sinkron-latar).
+ * Salinan perangkat (IndexedDB) ikut diperbarui lewat simpanLokalNanti.
+ */
+function optUbahCache(ctx, kunci, pk, id, ubah, ...daftarLain) {
+  const objs = new Set();
+  const r = optBaris(kunci, pk, id); if (r) objs.add(r);
+  daftarLain.forEach(arr => (Array.isArray(arr) ? arr : []).forEach(x => {
+    if (x && String(x[pk]) === String(id)) objs.add(x);
+  }));
+  objs.forEach(o => optUbahObjek(ctx, o, ubah));
+  if (objs.size && SPEK_LOKAL[kunci]) {
+    simpanLokalNanti(kunci);
+    ctx.pulih.unshift(() => simpanLokalNanti(kunci));   // dijalankan paling akhir saat pemulihan
+  }
+  return r;
+}
+
+/** Buang baris dari larik cache; pemulihan menyisipkannya kembali di posisi semula. */
+function optBuangDariCache(ctx, kunci, saring) {
+  const arr = CACHE[kunci]?.v; if (!Array.isArray(arr)) return [];
+  const buang = [];
+  for (let i = arr.length - 1; i >= 0; i--) if (saring(arr[i])) buang.push([i, arr.splice(i, 1)[0]]);
+  if (!buang.length) return [];
+  simpanLokalNanti(kunci);
+  ctx.pulih.push(() => {
+    if (CACHE[kunci]?.v !== arr) return;          // cache sudah diganti data server: biarkan
+    buang.slice().reverse().forEach(([i, r]) => arr.splice(i, 0, r));
+    simpanLokalNanti(kunci);
+  });
+  return buang.map(b => b[1]);
+}
+
+async function optAmbilSatu(tabel, kolom, pk, id) {
+  const { data, error } = await db.from(tabel).select(kolom).eq(pk, id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Cocokkan SATU baris cache dengan server (updated_at, pemroses, dst.).
+ * Objek lama diisi ulang di tempat, jadi semua pemegang rujukan ikut benar.
+ */
+async function optRekonsiliasi(kunci, id) {
+  const s = SPEK_LOKAL[kunci]; if (!s) return;
+  try {
+    let rows = await ambilMenurutId(s.tabel, s.select, s.pk, [id]);
+    if (s.relasi) rows = await lengkapiSiswaRingan(rows);
+    const baru = rows[0], lama = optBaris(kunci, s.pk, id);
+    if (baru && lama) { Object.assign(lama, baru); simpanLokalNanti(kunci); }
+  } catch (e) { console.warn('[optimistik] rekonsiliasi', kunci, e?.message || e); }
+}
+
+/* ---------- 3 · Mesin optimistik ---------- */
+function optTandaiMilik(tabel, id) {
+  if (id == null || id === '') return;
+  (OPT.milik[tabel] ||= new Map()).set(String(id), Date.now() + OPT.JENDELA_MS);
+}
+function optMilikSaya(tabel, id) {
+  const m = OPT.milik[tabel]; if (!m || id == null) return false;
+  const t = m.get(String(id)); if (!t) return false;
+  if (t < Date.now()) { m.delete(String(id)); return false; }
+  return true;
+}
+
+/** Toast galat tidak boleh menutup dialog konfirmasi baris lain yang sedang terbuka. */
+function optToastGalat(teks) {
+  const sibukModal = () => window.Swal && Swal.isVisible() && !document.querySelector('.swal2-container .swal2-toast');
+  if (!sibukModal()) return toast('error', teks);
+  const t = setInterval(() => { if (!sibukModal()) { clearInterval(t); toast('error', teks); } }, 300);
+}
+
+/**
+ * Jalankan satu aksi optimistik.
+ *   kunci     "jenis:id" — satu baris hanya boleh punya satu tulisan berjalan
+ *   gema      [[tabel, id], …] — event realtime yang akan dianggap milik sendiri
+ *   terapkan  (ctx) => void — ubah cache & DOM SEKARANG; daftarkan pemulihan
+ *             di ctx.pulih, pekerjaan pasca-sukses di ctx.tuntas, baris
+ *             utama di ctx.el, dan penggambar-cadangan di ctx.gambarUlang
+ *   kirim     async () => hasil — panggilan server
+ *   sudah     async () => bool — periksa ulang bila kirim melempar galat
+ *   berhasil  (hasil) => void — rekonsiliasi senyap
+ */
+async function optJalankan(o) {
+  if (OPT.sibuk.has(o.kunci)) { toast('info', 'Perubahan sebelumnya pada baris ini masih disimpan…'); return false; }
+  OPT.sibuk.add(o.kunci);
+  (o.gema || []).forEach(([t, id]) => optTandaiMilik(t, id));
+
+  const ctx = { pulih: [], tuntas: [], el: null, gambarUlang: null };
+  try { o.terapkan(ctx); } catch (e) { console.warn('[optimistik] gagal menerapkan tampilan:', e); }
+  optKilat(ctx.el);
+  mulaiSimpan(null, o.label || 'Menyimpan…');
+
+  let hasil = null, ok = false, galat = null;
+  try { hasil = await o.kirim(); ok = true; }
+  catch (err) {
+    galat = err;
+    if (o.sudah) { try { ok = !!(await o.sudah()); } catch (e) { /* luring: anggap belum */ } }
+  }
+  OPT.sibuk.delete(o.kunci);
+
+  if (ok) {
+    ctx.tuntas.forEach(f => { try { f(); } catch (e) { console.warn('[optimistik] tuntas', e); } });
+    try { await o.berhasil?.(hasil); } catch (e) { console.warn('[optimistik] berhasil', e); }
+    selesaiSimpan(null, null, true, typeof o.teksOk === 'function' ? o.teksOk(hasil) : (o.teksOk || 'Tersimpan'));
+    return true;
+  }
+
+  (o.gema || []).forEach(([t, id]) => OPT.milik[t]?.delete(String(id)));
+  for (let i = ctx.pulih.length - 1; i >= 0; i--) {
+    try { ctx.pulih[i](); } catch (e) { console.warn('[optimistik] pemulihan', e); }
+  }
+  // Daftar sempat digambar ulang dari cache optimistik (mis. oleh realtime
+  // perangkat lain): elemen lama sudah lepas, jadi gambar lagi dari cache pulih.
+  if (ctx.el && !ctx.el.isConnected && ctx.gambarUlang) { try { ctx.gambarUlang(); } catch (e) {} }
+  else optGetarGagal(ctx.el);
+  selesaiSimpan(null, null, false, 'Gagal menyimpan');
+  console.error('[optimistik]', o.kunci, galat);
+  optToastGalat(`${o.teksGagal || 'Perubahan tidak tersimpan'} — ${pesanGalat(galat)}`);
+  return false;
+}
+
+/* ---------- 4 · Perizinan: Telat Balik / Sesuai Waktu ---------- */
+const OPT_STATUS_IZIN = { Sakit: 'Sakit', Keperluan: 'Izin Keluar', Pemberitahuan: 'Pemberitahuan' };  // cermin proses_perizinan()
+
+function optKartuIzin(id) {
+  const s = optCss(id);
+  return [...new Set([...document.querySelectorAll(`[data-izin^="${s}|"], [data-pgizin^="${s}|"]`)]
+    .map(b => b.closest('.izin')).filter(Boolean))];
+}
+
+function optTerapkanIzin(ctx, id, keputusan) {
+  const baris = optBaris('izin', 'id_izin', id)
+    || (PGS.izinData || []).find(z => String(z.id_izin) === String(id)) || null;
+  optUbahCache(ctx, 'izin', 'id_izin', id, {
+    status_persetujuan: keputusan, pemroses: APP.profil?.nama || null,
+    pemroses_id: idSaya() || null, diproses_pada: new Date().toISOString()
+  }, PGS.izinData);
+  if (keputusan === 'Sesuai Waktu' && baris) {
+    optUbahCache(ctx, 'siswa', 'nisn', baris.nisn, { status_keberadaan: OPT_STATUS_IZIN[baris.jenis_izin] || 'Izin' });
+  }
+  optGeserBadge(ctx, 'badgePending', -1);
+
+  optKartuIzin(id).forEach(k => {
+    optSimpanDom(ctx, k);
+    const tag = k.querySelector('.top > .tag');
+    if (tag) { tag.className = `tag ${tagIzin(keputusan)}`; tag.textContent = keputusan; }
+    k.querySelectorAll('[data-izin],[data-pgizin],[data-perpanjang],[data-pgperpanjang]').forEach(b => b.remove());
+    const acts = k.querySelector('.acts'); if (acts && !acts.children.length) acts.remove();
+
+    const pgs = !!k.closest('#pgIzGrid');
+    const grid = k.closest('#izinGrid, #pgIzGrid');
+    if (pgs && baris && saringPeriodeIzin([baris]).length) {
+      optGeserAngka(ctx, optMini($('pgIzMini'), 'Menunggu'), -1);
+      optGeserAngka(ctx, optMini($('pgIzMini'), keputusan), +1);
+    }
+    const filter = pgs ? PGS.iz.filter : stIzin.filter;
+    if (filter !== 'Semua' && filter !== keputusan) {
+      optKeluarkan(ctx, k);
+      if (pgs) optGeserAngka(ctx, $('pgIzCount'), -1);
+      optCekKosong(grid, '.izin', pgs ? pgsGambarIzin : () => { if (cacheGet('izin')) gambarIzin(); });
+    }
+    if (!ctx.el) { ctx.el = k; ctx.gambarUlang = pgs ? pgsGambarIzin : () => { if (APP.view === 'perizinan') gambarIzin(); }; }
+  });
+}
+
+async function optProsesIzin(idIzin, keputusan) {
+  const r = await Swal.fire({ icon:'question', title:`Tandai "${keputusan}"?`,
+    showCancelButton:true, confirmButtonText:'Ya, simpan', cancelButtonText:'Batal',
+    confirmButtonColor: keputusan === 'Sesuai Waktu' ? '#0F766E' : '#9F1239' });
+  if (!r.isConfirmed) return;
+  return optJalankan({
+    kunci: 'izin:' + idIzin,
+    gema: [['log_perizinan', idIzin]],
+    label: 'Memproses izin…',
+    terapkan: (ctx) => optTerapkanIzin(ctx, idIzin, keputusan),
+    kirim: () => q(db.rpc('proses_perizinan', { p_id_izin: idIzin, p_keputusan: keputusan }), 'proses_izin'),
+    sudah: async () => (await optAmbilSatu('log_perizinan', 'status_persetujuan', 'id_izin', idIzin))?.status_persetujuan === keputusan,
+    berhasil: async () => {
+      const z = optBaris('izin', 'id_izin', idIzin);
+      await optRekonsiliasi('izin', idIzin);
+      if (keputusan === 'Sesuai Waktu' && z) await optRekonsiliasi('siswa', z.nisn);
+      refreshBadgePending();
+    },
+    teksOk: 'Izin: ' + keputusan,
+    teksGagal: 'Status izin gagal disimpan'
+  });
+}
+
+/* ---------- 5 · Pembinaan: Selesaikan / Sahkan / Buka Lagi ---------- */
+// Tiga penggal HTML di bawah SAMA PERSIS dengan gambarBina(). Bila markup
+// baris di gambarBina() diubah, ubah juga di sini (diuji uji-v238.js · E1).
+function optHtmlStatusBina(r, L) {
+  const selesai = String(r.status_pembinaan) === 'Selesai';
+  const tunggu = L && !selesai;
+  return `
+        <span class="tag ${selesai ? 'tag-ok' : tunggu ? 'tag-sah' : 'tag-wait'}">${
+          selesai ? 'Selesai' : tunggu ? 'Menunggu Pengesahan' : esc(r.status_pembinaan || 'Dalam Proses')}</span>
+        ${L ? `<div class="jejak-sah"><i class="fa-solid fa-user-shield"></i>Dilaksanakan ${esc(L.pelapor)}${
+            L.tglLaksana ? ' · ' + esc(tgl(L.tglLaksana)) : ''}</div>` : ''}
+        ${tunggu ? `<div class="jejak-sah"><i class="fa-solid fa-hourglass-half"></i>Menunggu ${esc(L.penerima.join(', ') || 'guru')}</div>` : ''}
+        ${selesai && r.pembina ? `<div class="jejak-sah ok"><i class="fa-solid fa-signature"></i>Disahkan ${esc(r.pembina)}${
+            r.diselesaikan_pada ? ' · ' + esc(tgl(r.diselesaikan_pada)) : ''}</div>` : ''}`;
+}
+function optHtmlTombolBina(id, selesai, tunggu) {
+  return `<button class="btn ${selesai ? 'btn-ghost' : tunggu ? 'btn-sah' : 'btn-ok'} btn-sm"
+         data-pbn="${esc(id)}|${selesai ? 'Dalam Proses' : 'Selesai'}">
+         <i class="fa-solid ${selesai ? 'fa-arrow-rotate-left' : tunggu ? 'fa-file-signature' : 'fa-circle-check'}"></i>${
+           selesai ? 'Buka Lagi' : tunggu ? 'Sahkan Selesai' : 'Selesaikan'}</button>`;
+}
+function optHtmlLaporBina(id) {
+  return `<button class="btn btn-lapor btn-sm" data-lapor="${esc(id)}"
+         title="Kirim laporan pelaksanaan ke guru kelas binaan"><i class="fa-solid fa-paper-plane"></i>Laporkan ke Guru</button>`;
+}
+
+function optTerapkanBina(ctx, id, status, L) {
+  const selesai = status === 'Selesai';
+  const nama = APP.profil?.nama || null, kini = new Date().toISOString();
+  // Cermin ubah_status_pembinaan(): pembina = pengubah, juga saat dibuka lagi.
+  const ubah = { status_pembinaan: status, pembina: nama, pembina_id: idSaya() || null,
+                 diselesaikan_pada: selesai ? kini : null };
+  optUbahCache(ctx, 'pembinaan', 'id_pembinaan', id, ubah);
+
+  const b = document.querySelector(`#tbBina [data-pbn^="${optCss(id)}|"]`);
+  const tr = b && b.closest('tr');
+  if (tr) {
+    const lapor = bolehLaporBina();
+    const tunggu = !!L && !selesai;
+    const bisaDipilih = lapor && !selesai && !L;
+    const tadiDipilih = stBina.pilih.has(String(id));
+    if (lapor) ctx.pulih.push(() => { if (tadiDipilih) stBina.pilih.add(String(id)); segarkanPilihanBina(); });
+    optSimpanDom(ctx, tr);
+
+    const aksi = tr.querySelector('.aksi-bina');
+    const selStatus = aksi && aksi.closest('td')?.previousElementSibling;
+    if (selStatus) selStatus.innerHTML = optHtmlStatusBina({ ...ubah }, L);
+    tr.classList.toggle('menunggu', tunggu);
+
+    const kolPilih = tr.querySelector('td.pilih-kol');
+    if (!bisaDipilih) {
+      stBina.pilih.delete(String(id));
+      tr.classList.remove('dipilih');
+      if (kolPilih) kolPilih.innerHTML = '';
+      aksi?.querySelector('[data-lapor]')?.remove();
+    } else {
+      if (kolPilih && !kolPilih.querySelector('[data-pilih]')) {
+        const nm = tr.querySelector('.primary')?.textContent.trim() || '';
+        kolPilih.innerHTML = `<input type="checkbox" class="cek" data-pilih="${esc(id)}"
+             aria-label="Pilih pembinaan ${esc(nm)}">`;
+      }
+      if (aksi && !aksi.querySelector('[data-lapor]')) {
+        const wa = aksi.querySelector('[data-wa-wali]');
+        wa ? wa.insertAdjacentHTML('afterend', optHtmlLaporBina(id)) : aksi.insertAdjacentHTML('afterbegin', optHtmlLaporBina(id));
+      }
+    }
+    aksi?.querySelector('.tag.tag-off')?.remove();
+    const tombol = tr.querySelector(`[data-pbn^="${optCss(id)}|"]`);
+    if (tombol) tombol.outerHTML = optHtmlTombolBina(id, selesai, tunggu);
+    if (lapor) segarkanPilihanBina();
+
+    // Angka ringkasan — baris ini memang termasuk cakupan kartu (ia tampil di tabel).
+    const kpi = $('binaKpi');
+    optGeserAngka(ctx, optStat(kpi, 'Dalam Proses'), selesai ? -1 : +1);
+    optGeserAngka(ctx, optStat(kpi, 'Selesai'), selesai ? +1 : -1);
+    if (L) optGeserAngka(ctx, optStat(kpi, 'Menunggu Pengesahan'), selesai ? -1 : +1);
+    if (lapor && !L) optGeserAngka(ctx, optStat(kpi, 'Dalam Proses', 'f'), selesai ? -1 : +1);
+
+    const lolos = stBina.status === 'Menunggu Pengesahan' ? tunggu
+      : !stBina.status || status === stBina.status;
+    if (!lolos) {
+      optKeluarkan(ctx, tr);
+      optGeserAngka(ctx, $('pbCount'), -1);
+      optCekKosong($('tbBina'), 'tr', () => { if (cacheGet('pembinaan')) gambarBina(); });
+    }
+    ctx.el = tr;
+    ctx.gambarUlang = () => { if (APP.view === 'pembinaan') gambarBina(); };
+  }
+  if (selesai) optTerapkanUtasSah(ctx, id);
+}
+
+/** Halaman Pesan: utas laporan pembinaan ikut tampil "Disahkan". */
+function optTerapkanUtasSah(ctx, idPembinaan) {
+  const u = stPesan.utas.find(x => x.jenis === 'pembinaan' && String(x.id_pembinaan) === String(idPembinaan) && !x.selesai);
+  if (!u) return;
+  optUbahObjek(ctx, u, { selesai: true, status: 'Selesai' });
+  if (APP.view !== 'pesan') return;
+  optTerapkanDaftarUtas(ctx, u, '<span class="tag tag-ok">Disahkan</span>', ['Pengesahan', 'Berjalan']);
+  const s = $('msgSahkan');
+  if (s && stPesan.aktif === u.utas) {
+    const wadah = s.closest('.msg-acts');
+    optSimpanDom(ctx, wadah);
+    s.outerHTML = `<button class="btn btn-ghost btn-sm" disabled><i class="fa-solid fa-signature"></i>Disahkan</button>`;
+    ctx.el ||= wadah?.closest('.msg-head') || wadah;
+  }
+}
+
+/** Patok satu butir daftar utas + tombol "Sahkan semua" tanpa menggambar ulang daftar. */
+function optTerapkanDaftarUtas(ctx, u, tagBaru, filterKeluar) {
+  const it = document.querySelector(`#msgList .msg-item[data-utas="${optCss(u.utas)}"]`);
+  if (it) {
+    optSimpanDom(ctx, it);
+    const tag = it.querySelector('.msg-tags .tag');
+    if (tag) tag.outerHTML = tagBaru;
+    if (filterKeluar.includes(stPesan.filter)) optKeluarkan(ctx, it);
+    ctx.el ||= it;
+  }
+  const massal = $('msgMassal');
+  if (massal) {
+    optSimpanDom(ctx, massal);
+    const n = utasMenungguSaya().length, b = $('msgSahkanSemua');
+    if (!n) massal.innerHTML = '';
+    else if (b) b.innerHTML = `<i class="fa-solid fa-file-signature"></i>Sahkan semua laporan (${angka(n)})`;
+  }
+}
+
+async function optUbahStatusPembinaan(id, status, btn) {
+  const selesai = status === 'Selesai';
+  const L = (await petaLaporanBina()).get(String(id));
+  const konf = await Swal.fire({
+    icon: selesai ? 'question' : 'warning',
+    title: selesai ? (L ? 'Sahkan pembinaan ini?' : 'Tandai pembinaan selesai?') : 'Buka kembali pembinaan?',
+    html: selesai && L
+      ? `Pembinaan dilaksanakan oleh <b>${esc(L.pelapor)}</b>${L.tglLaksana ? ' pada ' + esc(tgl(L.tglLaksana)) : ''}.
+         <br>Dengan mengesahkan, status menjadi <b>Selesai</b> atas nama Anda dan pelapor menerima konfirmasi otomatis.`
+      : `Status akan menjadi "${esc(status)}".`,
+    showCancelButton:true, confirmButtonText: selesai ? (L ? 'Ya, sahkan' : 'Ya, selesai') : 'Ya, buka lagi',
+    cancelButtonText:'Batal', confirmButtonColor: selesai ? '#0F766E' : '#B45309' });
+  if (!konf.isConfirmed) return;
+
+  return optJalankan({
+    kunci: 'bina:' + id,
+    // trg_pbn_tutup_laporan menulis ke pesan_bk pada utas laporan yang sama.
+    gema: [['log_pembinaan', id], ...(L?.utas || []).map(u => [PESAN_TABEL, u])],
+    label: 'Menyimpan status pembinaan…',
+    terapkan: (ctx) => optTerapkanBina(ctx, id, status, L),
+    kirim: () => q(db.rpc('ubah_status_pembinaan', { p_id: id, p_status: status }), 'pembinaan'),
+    sudah: async () => (await optAmbilSatu('log_pembinaan', 'status_pembinaan', 'id_pembinaan', id))?.status_pembinaan === status,
+    berhasil: async () => {
+      await optRekonsiliasi('pembinaan', id);
+      refreshBadgePesan();
+      if (APP.view === 'pesan') optSegarPesan();     // konfirmasi otomatis untuk pelapor ikut tampil
+    },
+    teksOk: selesai && L ? 'Pembinaan disahkan selesai' : 'Status pembinaan: ' + status,
+    teksGagal: 'Status pembinaan gagal disimpan'
+  });
+}
+
+/* ---------- 6 · Arsip catatan pelanggaran ---------- */
+function optStatPlg(ctx, baris) {
+  const box = $('plgStats'); if (!box || !baris || !CACHE.detail?.v) return;
+  optGeserAngka(ctx, optStat(box, 'Catatan Tersaring'), -1);
+  optGeserAngka(ctx, optStat(box, 'Akumulasi Poin'), -(Number(baris.bobot_pelanggaran) || 0));
+  if (baris.kategori === 'Berat') optGeserAngka(ctx, optStat(box, 'Kategori Berat'), -1);
+  if (baris.kategori === 'Sedang') optGeserAngka(ctx, optStat(box, 'Akumulasi Poin', 'f'), -1);
+  const masih = saringPlg(CACHE.detail.v).some(r => String(r.nisn) === String(baris.nisn));
+  if (!masih) optGeserAngka(ctx, optStat(box, 'Santri Terlibat'), -1);
+  const c = $('admCount');
+  if (c) { optSimpanDom(ctx, c); c.innerHTML = `<i class="fa-solid fa-database"></i>${angka(saringPlg(CACHE.detail.v).length)} catatan aktif`; }
+}
+
+async function optArsipPelanggaran(idLog) {
+  const r = await Swal.fire({ icon:'warning', title:'Arsipkan catatan ini?',
+    text:'Poin santri akan dikurangi kembali secara otomatis.',
+    showCancelButton:true, confirmButtonText:'Ya, arsipkan', cancelButtonText:'Batal',
+    confirmButtonColor:'#9F1239' });
+  if (!r.isConfirmed) return;
+
+  const baris = optBaris('detail', 'id_log', idLog);
+  // Cermin trg_pembinaan_arsip: pembinaan Otomatis yang belum Selesai ikut terhapus.
+  const idBina = (CACHE.pembinaan?.v || [])
+    .filter(p => String(p.id_log_pelanggaran) === String(idLog) && String(p.mode_pembinaan) === 'Otomatis'
+              && String(p.status_pembinaan) !== 'Selesai')
+    .map(p => p.id_pembinaan);
+
+  return optJalankan({
+    kunci: 'plg:' + idLog,
+    gema: [['log_pelanggaran', idLog], ...idBina.map(i => ['log_pembinaan', i])],
+    label: 'Mengarsipkan…',
+    terapkan: (ctx) => {
+      optUbahCache(ctx, 'detail', 'id_log', idLog, { status: 'Archived' });
+      optBuangDariCache(ctx, 'pembinaan', p => idBina.includes(p.id_pembinaan));
+      const tr = document.querySelector(`#tbPlg [data-arsip="${optCss(idLog)}"]`)?.closest('tr');
+      if (tr) {
+        optStatPlg(ctx, baris);
+        optKeluarkan(ctx, tr);
+        optCekKosong($('tbPlg'), 'tr', () => { if (cacheGet('detail')) muatTabelPlg(); });
+        ctx.el = tr;
+        ctx.gambarUlang = () => { if (APP.view === 'pelanggaran') muatTabelPlg(); };
+      }
+    },
+    kirim: () => q(db.rpc('arsipkan_pelanggaran', { p_id_log: idLog }), 'arsip'),
+    sudah: async () => String((await optAmbilSatu('log_pelanggaran', 'status', 'id_log', idLog))?.status || '').toLowerCase() === 'archived',
+    berhasil: async (res) => {
+      const nisn = baris?.nisn ?? res?.data?.nisn;
+      const poin = res?.data?.poin_baru;
+      const s = nisn != null ? optBaris('siswa', 'nisn', nisn) : null;
+      if (s && poin != null) { s.total_poin_pelanggaran = poin; simpanLokalNanti('siswa'); }
+      else if (nisn != null) await optRekonsiliasi('siswa', nisn);
+      await optRekonsiliasi('detail', idLog);
+    },
+    teksOk: (res) => `Diarsipkan · poin kini ${res?.data?.poin_baru ?? '-'}`,
+    teksGagal: 'Catatan gagal diarsipkan'
+  });
+}
+
+/* ---------- 7 · Arsip catatan prestasi ---------- */
+async function optArsipPrestasi(id) {
+  const konf = await Swal.fire({
+    icon:'warning', title:'Arsipkan catatan ini?',
+    text:'Catatan tidak dihapus, hanya dikeluarkan dari perhitungan poin.',
+    showCancelButton:true, confirmButtonText:'Ya, arsipkan',
+    cancelButtonText:'Batal', confirmButtonColor:'#9F1239'
+  });
+  if (!konf.isConfirmed) return;
+  const baris = optBaris('prestasi', 'id', id);
+
+  return optJalankan({
+    kunci: 'prs:' + id,
+    gema: [['log_prestasi', id]],
+    label: 'Mengarsipkan…',
+    terapkan: (ctx) => {
+      optUbahCache(ctx, 'prestasi', 'id', id, { status: 'archived' });
+      const tr = document.querySelector(`#prsBody [data-prs-arsip="${optCss(id)}"]`)?.closest('tr');
+      if (!tr) return;
+      if (baris) {
+        const box = $('prsStat');
+        optGeserAngka(ctx, optStat(box, 'Catatan Apresiasi'), -1);
+        optGeserAngka(ctx, optStat(box, 'Total Poin Positif'), -(Number(baris.poin) || 0));
+        if ((baris.kategori || 'Perunggu') === 'Emas') optGeserAngka(ctx, optStat(box, 'Apresiasi Emas'), -1);
+        const masih = lingkupPrestasi(CACHE.prestasi?.v || []).some(r => String(r.nisn) === String(baris.nisn));
+        if (!masih) optGeserAngka(ctx, optStat(box, 'Santri Terapresiasi'), -1);
+        optGeserAngka(ctx, $('prsSub'), -1);
+      }
+      optKeluarkan(ctx, tr);
+      optCekKosong($('prsBody'), 'tr', () => { if (cacheGet('prestasi')) gambarPrestasi(); });
+      ctx.el = tr;
+      ctx.gambarUlang = () => { if (APP.view === 'prestasi') gambarPrestasi(); };
+    },
+    kirim: async () => {
+      const { error } = await db.from('log_prestasi').update({ status:'archived' }).eq('id', id);
+      if (error) throw error;
+    },
+    sudah: async () => String((await optAmbilSatu('log_prestasi', 'status', 'id', id))?.status || '').toLowerCase() === 'archived',
+    teksOk: 'Catatan apresiasi diarsipkan',
+    teksGagal: 'Catatan gagal diarsipkan'
+  });
+}
+
+/* ---------- 8 · Kembalikan status santri ke Hadir ---------- */
+async function optResetStatus(nisn) {
+  const s = optBaris('siswa', 'nisn', nisn);
+  const lama = s?.status_keberadaan || 'Hadir';
+  Swal.close();
+  return optJalankan({
+    kunci: 'siswa:' + nisn,
+    label: 'Mengembalikan status…',
+    terapkan: (ctx) => {
+      optUbahCache(ctx, 'siswa', 'nisn', nisn, { status_keberadaan: 'Hadir' });
+      const tr = document.querySelector(`#tbSiswa [data-detail="${optCss(nisn)}"]`)?.closest('tr');
+      if (!tr) return;
+      const tag = [...tr.querySelectorAll('td > span.tag')].find(t => t.textContent.trim() === lama);
+      if (tag) {
+        optSimpanDom(ctx, tag.parentElement);
+        tag.className = 'tag tag-ok'; tag.textContent = 'Hadir';
+      }
+      ctx.el = tr;
+      ctx.gambarUlang = () => { if (APP.view === 'siswa') muatTabelSiswa(); };
+    },
+    kirim: () => q(db.rpc('reset_status_keberadaan', { p_nisn: nisn }), 'reset_status'),
+    sudah: async () => (await optAmbilSatu('siswa', 'status_keberadaan', 'nisn', nisn))?.status_keberadaan === 'Hadir',
+    berhasil: () => optRekonsiliasi('siswa', nisn),
+    teksOk: 'Status dikembalikan ke Hadir',
+    teksGagal: 'Status santri gagal dikembalikan'
+  });
+}
+
+/* ---------- 9 · Pesan BK: "Sudah diantar ke BK" ---------- */
+async function optSelesaikanUtas() {
+  const u = stPesan.utas.find(x => x.utas === stPesan.aktif); if (!u || u.selesai) return;
+  return optJalankan({
+    kunci: 'utas:' + u.utas,
+    gema: [[PESAN_TABEL, u.utas]],
+    label: 'Menyimpan…',
+    terapkan: (ctx) => {
+      optUbahObjek(ctx, u, { selesai: true, status: 'Selesai' });
+      u.pesan.forEach(p => optUbahObjek(ctx, p, { status: 'Selesai' }));
+      optTerapkanDaftarUtas(ctx, u, '<span class="tag tag-ok">Sudah diantar</span>', ['Berjalan']);
+      const b = $('msgSelesai');
+      if (b) {
+        const wadah = b.closest('.msg-acts');
+        optSimpanDom(ctx, wadah);
+        b.className = 'btn btn-ghost btn-sm'; b.disabled = true;
+        b.innerHTML = '<i class="fa-solid fa-circle-check"></i>Sudah diantar';
+        ctx.el = wadah?.closest('.msg-head') || wadah;
+      }
+      ctx.gambarUlang = () => { if (APP.view === 'pesan') { gambarDaftarUtas(); gambarUtas(); } };
+    },
+    kirim: () => tandaiUtasSelesai(u.utas),
+    sudah: async () => {
+      const { data, error } = await db.from(PESAN_TABEL).select('status').eq('utas', u.utas);
+      if (error) throw error;
+      return !!data?.length && data.every(r => r.status === 'Selesai');
+    },
+    teksOk: 'Ditandai: sudah diantar ke BK',
+    teksGagal: 'Utas gagal ditandai'
+  });
+}
+
+/**
+ * Segarkan halaman Pesan TANPA "Memuat percakapan…": daftar ditukar
+ * seketika, gelembung baru di utas terbuka DITAMBAHKAN (bukan digambar
+ * ulang), jadi balasan yang sedang diketik dan posisi gulir aman.
+ */
+async function optSegarPesan() {
+  if (APP.view !== 'pesan' || !$('msgList')) return;
+  const nLama = stPesan.utas.find(x => x.utas === stPesan.aktif)?.pesan.length || 0;
+  let rows;
+  try { rows = await muatPesanSaya(); } catch (e) { return console.warn('[optimistik] pesan', e); }
+  if (APP.view !== 'pesan') return;
+  stPesan.rows = rows;
+  stPesan.utas = kelompokUtas(rows);
+  if (stPesan.aktif && !stPesan.utas.some(u => u.utas === stPesan.aktif)) stPesan.aktif = null;
+  gambarDaftarUtas();
+  const u = stPesan.utas.find(x => x.utas === stPesan.aktif);
+  const t = $('msgThread');
+  if (!u || !t || u.pesan.length <= nLama) return;
+  const uid = idSaya();
+  t.insertAdjacentHTML('beforeend', u.pesan.slice(nLama).map(r => `<article class="bub ${r.pengirim_id === uid ? 'saya' : 'dia'}">
+        <div class="bub-who">${esc(r.pengirim_nama)} · ${esc(r.pengirim_role)}</div>
+        <div class="bub-isi">${esc(r.isi).replace(/\n/g, '<br>')}</div>
+        <div class="bub-kaki">${esc(waktuPesan(r.created_at))}${
+          r.pengirim_id === uid ? (r.dibaca_pada ? ' · dibaca' : ' · terkirim') : ''}</div>
+      </article>`).join(''));
+  t.scrollTop = t.scrollHeight;
+}
+
+/* ---------- 10 · Gema realtime milik sendiri tidak menggambar ulang ---------- */
+function optPasangPengintai() {
+  if (OPT.kanal || !window.db) return;
+  const catat = (tabel, kolom) => (p) => {
+    const r = p?.eventType === 'DELETE' ? p.old : p.new;
+    const id = r?.[kolom];
+    (OPT.gema[tabel] ||= []).push({ id: id == null ? null : String(id), t: Date.now() });
+  };
+  const ch = db.channel('rq-gema');
+  [['log_perizinan', 'id_izin'], ['log_pembinaan', 'id_pembinaan'], ['log_pelanggaran', 'id_log'],
+   ['log_prestasi', 'id'], [PESAN_TABEL, 'utas']].forEach(([t, k]) =>
+    ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, catat(t, k)));
+  OPT.kanal = ch.subscribe((status) => { OPT.kanalOk = status === 'SUBSCRIBED'; });
+}
+
+/** Gema yang sudah dipastikan milik sendiri: hanya lencana & data kecil, tanpa menggambar ulang. */
+async function optSegarSenyap(tabel) {
+  if (antreanRT[tabel]) ambilAntreanRT(tabel);      // baris milik sendiri sudah direkonsiliasi
+  if (tabel === 'log_perizinan') refreshBadgePending();
+  else if (tabel === PESAN_TABEL) {
+    refreshBadgePesan();
+    if (APP.view === 'pesan') await optSegarPesan();
+  }
+}
+
+(function pasangGemaSenyap() {
+  const aktifkanAsli = aktifkanRealtime;
+  aktifkanRealtime = function () {
+    const h = aktifkanAsli.apply(this, arguments);
+    try { optPasangPengintai(); } catch (e) { console.warn('[optimistik] kanal pengintai', e); }
+    return h;
+  };
+
+  const segarkanAsli = segarkan;
+  const tunda = {}, hitung = {};
+  segarkan = function (tabel) {
+    if (!OPT.aktif || !OPT.kanalOk) return segarkanAsli.apply(this, arguments);
+    hitung[tabel] = (hitung[tabel] || 0) + 1;
+    (tunda[tabel] ||= debounce(putuskan, 750))(tabel);
+  };
+
+  async function putuskan(tabel) {
+    const n = hitung[tabel] || 0; hitung[tabel] = 0;
+    const kini = Date.now();
+    const ev = (OPT.gema[tabel] || []).filter(e => kini - e.t < 15000);
+    OPT.gema[tabel] = [];
+    const a = antreanRT[tabel];
+    const antreMilik = !a || [...a.naik, ...a.hapus].every(id => optMilikSaya(tabel, id));
+    // Semua event harus tertangkap pengintai DAN semuanya milik sendiri.
+    // Ragu sedikit saja → jalur lama (data perangkat lain tidak pernah terlewat).
+    const milik = n > 0 && ev.length >= n && antreMilik && ev.every(e => optMilikSaya(tabel, e.id));
+    if (!milik) return segarkanInti(tabel);
+    try { await optSegarSenyap(tabel); }
+    catch (e) { console.warn('[optimistik] segar senyap gagal, jalur lama:', e); segarkanInti(tabel); }
+  }
+})();
+
+/* ---------- 11 · Pasang pada nama global lama ---------- */
+(function pasangAksiOptimistik() {
+  const bungkus = (asli, baru) => function () {
+    return OPT.aktif ? baru.apply(this, arguments) : asli.apply(this, arguments);
+  };
+  prosesIzin          = bungkus(prosesIzin, optProsesIzin);
+  pgsProsesIzin       = bungkus(pgsProsesIzin, optProsesIzin);
+  ubahStatusPembinaan = bungkus(ubahStatusPembinaan, optUbahStatusPembinaan);
+  arsipkanPelanggaran = bungkus(arsipkanPelanggaran, optArsipPelanggaran);
+  prsArsipkan         = bungkus(prsArsipkan, optArsipPrestasi);
+  resetStatus         = bungkus(resetStatus, optResetStatus);
+  selesaikanUtas      = bungkus(selesaikanUtas, optSelesaikanUtas);
+})();
+
 // ---------------------------------------------------------------------
 hidupkanLayarLogin();
 
