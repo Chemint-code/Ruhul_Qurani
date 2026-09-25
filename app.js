@@ -24670,6 +24670,894 @@ document.addEventListener('change', (e) => {
   setTimeout(() => box.classList.remove('unit-ganti'), 750);
 });
 
+/* =====================================================================
+ * v2.40 — KONTEKS PUTRI: MASTER BERSAMA, PERAN WAKASIS, SAKURA, MASKOT LOGIN
+ * ---------------------------------------------------------------------
+ *  Pasangan <style id="gayaSakura"> di index.html dan berkas
+ *  migrasi/20260926_v2_40_peran_wakasis.sql.
+ *
+ *  1. MASTER BERSAMA. Unit putri memakai katalog pelanggaran putra
+ *     DITAMBAH katalog khusus putri. Bila nama butir kembar (6 butir
+ *     per 26-09-2026, mis. PI-001 ≈ "Telat keluar dari asrama"), versi
+ *     putri yang tampil dan versi putra disembunyikan agar pencarian
+ *     tidak dobel. Unit putra tidak berubah. Master prestasi memang sudah
+ *     bersama (25 baris, unit 'Semua', tidak disaring unit) — tidak
+ *     diubah. Master PEMBINAAN tetap terpisah: trigger
+ *     trg_pembinaan_otomatis memilih tangga dari siswa.unit_gender, jadi
+ *     santriwati yang dicatat dengan kode putra tetap mendapat pembinaan
+ *     versi putri. Tanpa migration untuk bagian ini.
+ *  2. PERAN WAKASIS. Seperti Guru BK, tetapi melihat SEMUA kelas di dua
+ *     unit dan boleh mencatat pelanggaran & prestasi. Sisi database ada
+ *     di berkas migration; sebelum migration dijalankan, peran ini tidak
+ *     bisa disimpan (constraint chk_profile_role menolak).
+ *  3. SAKURA. Kelopak sakura berguguran SEKALI saat Ringkasan (dan
+ *     Dasbor BK) dibuka, lalu kanvasnya dilepas — mengikuti sistem gerak
+ *     dingin v2.36. Untuk: akun unit putri (musyrifah), Guru BK, Wakasis,
+ *     Guru Piket, Osis putra & putri, serta akun dua unit yang sedang
+ *     memilih Asrama Putri. Bila tidak ada pembinaan tertunda, peran ini
+ *     mendapat "sambutan": hujan monster tingkat 1 (6 ekor, 3 di mode
+ *     hemat) yang jatuh sekali lalu diam. Busana monster tetap mengikuti
+ *     unit aktif (varianMonster v2.26).
+ *  4. MASKOT LOGIN. Si Peci (berpeci, bersarung) dan Si Payung
+ *     (berjilbab, payung putih bermotif sakura) berdiri di atas kartu
+ *     masuk. Adegan diputar sekali: Si Peci berjalan, terpeleset, jatuh;
+ *     Si Payung datang, memayungi, mengulurkan tangan; keduanya bangkit
+ *     dan senang. Setelah itu diam, hanya berkedip. Ketuk untuk memutar
+ *     ulang. "Kurangi gerak" → langsung pose akhir.
+ *  5. WARNA. Kontras teks alis (eyebrow) di permukaan terang dinaikkan
+ *     ke ≥ 4,5 : 1, dan arah cahaya kartu unit diselaraskan dengan sumber
+ *     cahaya tunggal kanan atas milik panel sapaan.
+ *
+ *  Sakelar darurat: SAKURA.aktif = false (tanpa kelopak & tema),
+ *  PANGGUNG.aktif = false (tanpa maskot), MASTER_BERSAMA.aktif = false
+ *  (katalog putri kembali terpisah seperti v2.10).
+ * ===================================================================== */
+APP.versi = 'rq-v2.40';
+
+/* ---------- 1 · Master pelanggaran bersama untuk unit putri ---------- */
+const MASTER_BERSAMA = { aktif: true };
+
+/** Kunci pembanding nama butir: huruf kecil, tanpa tanda baca, spasi tunggal. */
+function kunciNamaMaster(nama) {
+  return String(nama ?? '').toLowerCase().normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/**
+ * Katalog untuk unit putri = semua butir putri + butir putra yang namanya
+ * tidak dimiliki versi putri. Urutan baris asal dipertahankan.
+ */
+function gabungMasterPutri(rows) {
+  const semua = rows || [];
+  const namaPutri = new Set(semua.filter(r => unitMaster(r) === UNIT_PUTRI)
+    .map(r => kunciNamaMaster(r.nama_pelanggaran)).filter(Boolean));
+  return semua.filter(r => unitMaster(r) === UNIT_PUTRI
+    || !namaPutri.has(kunciNamaMaster(r.nama_pelanggaran)));
+}
+
+(function pasangMasterBersama() {
+  const sebelum = lingkupUnitMaster;
+  lingkupUnitMaster = function (rows) {
+    if (!MASTER_BERSAMA.aktif) return sebelum.apply(this, arguments);
+    let u = null;
+    try { u = unitAktif(); } catch (e) {}
+    if (u !== UNIT_PUTRI) return sebelum.apply(this, arguments);
+    return gabungMasterPutri(rows);
+  };
+})();
+
+/* ---------- 2 · Peran Wakasis ---------- */
+/*
+ * Wakasis = Wakil Kepala bidang Kesiswaan. Hak klien disalin dari Guru BK,
+ * dengan tiga beda yang disengaja:
+ *   · TIDAK dibatasi kelas binaan ('lingkup.kelas') — melihat semua kelas,
+ *     sejalan dengan lihat_semua_kelas() yang memuat 'Wakasis' di migration;
+ *   · dua unit (ROLE_DUA_UNIT) — memilih unit lewat #unitBox;
+ *   · tidak memulai utas pesan BK, tidak mengarsipkan prestasi, dan tidak
+ *     membaca presensi mentah (policy RLS-nya tetap Admin/Guru/Walas/BK).
+ */
+const PERAN_WAKASIS = 'Wakasis';
+(function pasangPeranWakasis() {
+  const tambah = (arr) => { if (Array.isArray(arr) && !arr.includes(PERAN_WAKASIS)) arr.push(PERAN_WAKASIS); };
+  if (!SEMUA_ROLE.includes(PERAN_WAKASIS)) SEMUA_ROLE.splice(SEMUA_ROLE.indexOf('Guru BK') + 1, 0, PERAN_WAKASIS);
+  const KECUALI = new Set(['lingkup.kelas', 'pesan.mulai', 'prestasi.arsip', 'presensi.lihat']);
+  Object.keys(HAK).forEach(k => { if (!KECUALI.has(k) && HAK[k].includes('Guru BK')) tambah(HAK[k]); });
+  Object.keys(MENU_ROLE).forEach(k => { if (MENU_ROLE[k].includes('Guru BK')) tambah(MENU_ROLE[k]); });
+  tambah(ROLE_DUA_UNIT);
+
+  const warnaSebelum = getRoleColor;
+  getRoleColor = function (r) { return r === PERAN_WAKASIS ? '#B83280' : warnaSebelum.apply(this, arguments); };
+})();
+/* ---------- 3 · Seni maskot login: Si Peci (bersarung) & Si Payung (berjilbab) ----------
+   Dua SVG orisinal. Pencahayaan mengikuti satu sumber: kanan atas (sama
+   dengan semburat kuningan .sapa). Tiap maskot punya:
+     · gradasi badan radial (terang kanan atas → gelap kiri bawah),
+     · kilap spekular, cahaya pantul (rim) di sisi bayangan,
+     · oklusi di bawah peci/jilbab, bayangan kontak terpisah (.lp-bayang).
+   Ekspresi dipilih lewat atribut data-ekspresi pada .lp-aktor; kedip lewat
+   kelas .kedip. Tidak ada animasi di dalam SVG selain kaki (.jalan). */
+function svgSiPeci() {
+  const P = 'lpP';
+  const tinta = '#1B1030';
+  const garis = `fill:none;stroke:${tinta};stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round`;
+  return `<svg class="lp-svg" viewBox="0 0 120 132" aria-hidden="true" focusable="false">
+  <defs>
+    <radialGradient id="${P}Kulit" cx="68%" cy="26%" r="78%">
+      <stop offset="0" stop-color="#B9E6FB"/><stop offset=".38" stop-color="#58B4E6"/>
+      <stop offset=".8" stop-color="#2A7DB8"/><stop offset="1" stop-color="#1A5C8F"/>
+    </radialGradient>
+    <radialGradient id="${P}Perut" cx="60%" cy="30%" r="70%">
+      <stop offset="0" stop-color="#F2FAFF"/><stop offset="1" stop-color="#BFE2F6"/>
+    </radialGradient>
+    <linearGradient id="${P}Peci" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3B3656"/><stop offset=".55" stop-color="#1D1A2E"/><stop offset="1" stop-color="#0D0B17"/>
+    </linearGradient>
+    <linearGradient id="${P}PeciKilap" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".62" stop-color="#fff" stop-opacity="0"/>
+      <stop offset=".74" stop-color="#fff" stop-opacity=".22"/><stop offset=".86" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="${P}Kotak" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform="rotate(-4)">
+      <rect width="14" height="14" fill="#7E1F33"/>
+      <rect width="6" height="14" fill="#A33049" opacity=".75"/>
+      <rect width="14" height="6" fill="#A33049" opacity=".55"/>
+      <rect x="9" width="1.3" height="14" fill="#E8CC6B" opacity=".85"/>
+      <rect y="9" width="14" height="1.3" fill="#E8CC6B" opacity=".7"/>
+      <rect x="2.4" width="1" height="14" fill="#1E4A3A" opacity=".8"/>
+      <rect y="2.4" width="14" height="1" fill="#1E4A3A" opacity=".6"/>
+    </pattern>
+    <linearGradient id="${P}SarungBayang" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1A0710" stop-opacity=".55"/><stop offset=".3" stop-color="#1A0710" stop-opacity=".12"/>
+      <stop offset=".72" stop-color="#fff" stop-opacity=".07"/><stop offset="1" stop-color="#1A0710" stop-opacity=".38"/>
+    </linearGradient>
+    <linearGradient id="${P}SarungAtas" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1A0710" stop-opacity=".35"/><stop offset=".3" stop-color="#1A0710" stop-opacity="0"/>
+      <stop offset="1" stop-color="#1A0710" stop-opacity=".3"/>
+    </linearGradient>
+    <radialGradient id="${P}Pupil" cx="42%" cy="38%" r="70%">
+      <stop offset="0" stop-color="#5A4AA0"/><stop offset=".55" stop-color="#241646"/><stop offset="1" stop-color="#120A24"/>
+    </radialGradient>
+    <linearGradient id="${P}Putih" x1="0" y1="0" x2="0" y2="1">
+      <stop offset=".55" stop-color="#fff"/><stop offset="1" stop-color="#DCE8F3"/>
+    </linearGradient>
+  </defs>
+  <!-- kaki -->
+  <g class="lp-kaki kiri"><ellipse cx="44" cy="124" rx="11.5" ry="6.5" fill="#1F6A9E"/><ellipse cx="42" cy="122" rx="6" ry="2.4" fill="#fff" opacity=".22"/></g>
+  <g class="lp-kaki kanan"><ellipse cx="76" cy="124" rx="11.5" ry="6.5" fill="#1F6A9E"/><ellipse cx="78" cy="122" rx="6" ry="2.4" fill="#fff" opacity=".22"/></g>
+  <!-- lengan -->
+  <g class="lp-lengan kiri"><ellipse cx="15" cy="78" rx="7" ry="10.5" transform="rotate(22 15 78)" fill="#2F84BF"/></g>
+  <g class="lp-lengan kanan"><ellipse cx="105" cy="78" rx="7" ry="10.5" transform="rotate(-22 105 78)" fill="#3E97CE"/></g>
+  <!-- badan -->
+  <path d="M60 16C86 16 102 36 104 64C106 92 101 116 60 118C19 116 14 92 16 64C18 36 34 16 60 16Z" fill="url(#${P}Kulit)"/>
+  <path d="M22 88C26 104 38 113 56 115" style="fill:none;stroke:#9ADCFB;stroke-width:2.2;stroke-linecap:round;opacity:.55"/>
+  <ellipse cx="60" cy="81" rx="26" ry="16" fill="url(#${P}Perut)" opacity=".62"/>
+  <!-- tanduk -->
+  <path d="M37 27 27.5 14.5 41 21Z" fill="#FFE9B0"/><path d="M83 27 92.5 14.5 79 21Z" fill="#F6D98E"/>
+  <!-- sarung: kain kotak-kotak, lipatan, gulungan pinggang -->
+  <g class="lp-sarung">
+    <path d="M16.6 82Q60 91 103.4 82L106.5 117Q60 127 13.5 117Z" fill="url(#${P}Kotak)"/>
+    <path d="M16.6 82Q60 91 103.4 82L106.5 117Q60 127 13.5 117Z" fill="url(#${P}SarungBayang)"/>
+    <path d="M16.6 82Q60 91 103.4 82L106.5 117Q60 127 13.5 117Z" fill="url(#${P}SarungAtas)"/>
+    <path d="M58 88 64 119" style="fill:none;stroke:#3A0C18;stroke-width:1.6;opacity:.45"/>
+    <path d="M60 88 52 118" style="fill:none;stroke:#fff;stroke-width:1;opacity:.12"/>
+    <path d="M16 81.5Q60 90.5 104 81.5L104.4 87Q60 96 15.6 87Z" fill="#5E1424"/>
+    <path d="M17 82.6Q60 91.4 103 82.6" style="fill:none;stroke:#D0546D;stroke-width:1.1;opacity:.8"/>
+    <path d="M13.5 117Q60 127 106.5 117" style="fill:none;stroke:#3A0C18;stroke-width:1.4;opacity:.6"/>
+  </g>
+  <!-- oklusi di bawah peci + peci beludru -->
+  <ellipse cx="60" cy="29" rx="25" ry="4.5" fill="#0B3A5E" opacity=".3"/>
+  <g class="lp-peci-badan">
+    <path d="M35.5 28C35.5 20 36.5 12 38.8 7.8Q60 2.6 81.2 7.8C83.5 12 84.5 20 84.5 28Q60 33.5 35.5 28Z" fill="url(#${P}Peci)"/>
+    <path d="M35.5 28C35.5 20 36.5 12 38.8 7.8Q60 2.6 81.2 7.8C83.5 12 84.5 20 84.5 28Q60 33.5 35.5 28Z" fill="url(#${P}PeciKilap)"/>
+    <ellipse cx="60" cy="7.4" rx="21" ry="3" fill="#403A5E"/>
+    <path d="M36 25.5Q60 31 84 25.5" style="fill:none;stroke:#57507A;stroke-width:1;opacity:.7"/>
+  </g>
+  <!-- kilap spekular (sumber cahaya kanan atas) -->
+  <ellipse cx="85" cy="40" rx="7" ry="11" transform="rotate(28 85 40)" fill="#fff" opacity=".42"/>
+  <circle cx="92" cy="54" r="2.2" fill="#fff" opacity=".55"/>
+  <!-- pipi -->
+  <ellipse cx="32" cy="72" rx="7" ry="4" fill="#FF7FAA" opacity=".5"/><ellipse cx="88" cy="72" rx="7" ry="4" fill="#FF7FAA" opacity=".5"/>
+  <!-- ekspresi: mata -->
+  <g class="e e-mata-normal">
+    <ellipse cx="46" cy="57" rx="11" ry="12.2" fill="url(#${P}Putih)"/><ellipse cx="74" cy="57" rx="11" ry="12.2" fill="url(#${P}Putih)"/>
+    <g class="lp-pupil"><ellipse cx="47.5" cy="59" rx="7.2" ry="8.2" fill="url(#${P}Pupil)"/><ellipse cx="75.5" cy="59" rx="7.2" ry="8.2" fill="url(#${P}Pupil)"/>
+    <circle cx="50.6" cy="55" r="3.2" fill="#fff"/><circle cx="78.6" cy="55" r="3.2" fill="#fff"/>
+    <circle cx="44.6" cy="63" r="1.5" fill="#fff" opacity=".9"/><circle cx="72.6" cy="63" r="1.5" fill="#fff" opacity=".9"/></g>
+  </g>
+  <g class="e e-kedip"><path d="M36 58Q46 64 56 58M64 58Q74 64 84 58" style="${garis}"/></g>
+  <g class="e e-mata-senang"><path d="M37 60Q46 49 55 60M65 60Q74 49 83 60" style="${garis};stroke-width:3"/></g>
+  <g class="e e-mata-kaget">
+    <ellipse cx="46" cy="57" rx="11" ry="12.2" fill="#fff"/><ellipse cx="74" cy="57" rx="11" ry="12.2" fill="#fff"/>
+    <circle cx="46" cy="57" r="3.6" fill="${tinta}"/><circle cx="74" cy="57" r="3.6" fill="${tinta}"/>
+  </g>
+  <g class="e e-mata-pusing" style="${garis};stroke-width:2">
+    <path d="M46 57m-8 0a8 8 0 1 0 8-8a6 6 0 1 0-6 6a4 4 0 1 0 4-4a2 2 0 1 0-2 2"/>
+    <path d="M74 57m-8 0a8 8 0 1 0 8-8a6 6 0 1 0-6 6a4 4 0 1 0 4-4a2 2 0 1 0-2 2"/>
+  </g>
+  <!-- ekspresi: mulut -->
+  <g class="e e-mulut-normal">
+    <path d="M52 73Q56 77 60 73Q64 77 68 73" style="${garis}"/>
+    <path d="M55.6 75.2 57 78.2 58.4 75.6Z" fill="#fff"/>
+  </g>
+  <g class="e e-mulut-o"><ellipse cx="60" cy="76" rx="4.2" ry="5" fill="#6A1030"/><ellipse cx="60" cy="78.4" rx="2.6" ry="1.8" fill="#FF6F9F"/></g>
+  <g class="e e-mulut-senang">
+    <path d="M49 71Q60 88 71 71Z" fill="#7A1235" stroke="${tinta}" stroke-width="2.2" stroke-linejoin="round"/>
+    <ellipse cx="60" cy="79" rx="5.2" ry="3" fill="#FF6F9F"/>
+    <path d="M52.5 71.6 54 75 55.6 72Z" fill="#fff"/>
+  </g>
+  <g class="e e-mulut-sedih"><path d="M51 77Q55 73 60 76Q65 73 69 77" style="${garis}"/></g>
+  <g class="e e-air-mata"><path d="M34 66Q31 72 34 74Q37 72 34 66Z" fill="#9FE0FF" stroke="#4AA8DA" stroke-width=".8"/></g>
+</svg>`;
+}
+
+/* Peci lepas: dipakai saat peci terlempar ketika Si Peci jatuh. */
+function svgPeciLepas() {
+  return `<svg class="lp-peci-lepas-svg" viewBox="34 2 52 32" aria-hidden="true" focusable="false">
+    <defs><linearGradient id="lpPL" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3B3656"/><stop offset=".55" stop-color="#1D1A2E"/><stop offset="1" stop-color="#0D0B17"/></linearGradient></defs>
+    <path d="M35.5 28C35.5 20 36.5 12 38.8 7.8Q60 2.6 81.2 7.8C83.5 12 84.5 20 84.5 28Q60 33.5 35.5 28Z" fill="url(#lpPL)"/>
+    <ellipse cx="60" cy="7.4" rx="21" ry="3" fill="#403A5E"/>
+    <path d="M70 9 72 27" style="stroke:#fff;stroke-width:3;opacity:.12"/>
+  </svg>`;
+}
+
+function svgSiPayung() {
+  const P = 'lpJ';
+  const tinta = '#1B1030';
+  const garis = `fill:none;stroke:${tinta};stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round`;
+  // Bunga sakura lima kelopak (satu simbol, dipakai berulang di kanopi).
+  const bunga = (x, y, s, r) => `<use href="#${P}Bunga" transform="translate(${x} ${y}) rotate(${r}) scale(${s})"/>`;
+  // Titik-titik tepi kanopi (tegak, pusat di 0,-86; rim y=-84)
+  const tepi = [-64, -42.7, -21.3, 0, 21.3, 42.7, 64];
+  const kubah = `M-64 -84C-61 -113 -32 -125 0 -125C32 -125 61 -113 64 -84`;
+  // Tepi berlekuk dari kanan ke kiri: menutup bentuk kanopi setelah kubah.
+  let rimBalik = '';
+  for (let i = tepi.length - 1; i > 0; i--) {
+    const a = tepi[i], b = tepi[i - 1];
+    rimBalik += `Q${((a + b) / 2).toFixed(1)} -91 ${b} -84`;
+  }
+  const bentukKanopi = `${kubah}${rimBalik}Z`;
+  const rusuk = tepi.slice(1, -1).map(x => `<path d="M0 -125Q${(x * .55).toFixed(1)} -112 ${x} -84" style="fill:none;stroke:#D8CDE3;stroke-width:1.1"/>`).join('');
+  return `<svg class="lp-svg" viewBox="0 -24 150 194" aria-hidden="true" focusable="false" overflow="visible">
+  <defs>
+    <radialGradient id="${P}Kulit" cx="66%" cy="28%" r="80%">
+      <stop offset="0" stop-color="#D2FBEA"/><stop offset=".4" stop-color="#7EE0BD"/>
+      <stop offset=".82" stop-color="#3DB28C"/><stop offset="1" stop-color="#2A8C6D"/>
+    </radialGradient>
+    <radialGradient id="${P}Jilbab" cx="64%" cy="22%" r="85%">
+      <stop offset="0" stop-color="#FFF6FA"/><stop offset=".45" stop-color="#FFD9E7"/>
+      <stop offset=".85" stop-color="#F3A9C4"/><stop offset="1" stop-color="#E48AAE"/>
+    </radialGradient>
+    <linearGradient id="${P}Gamis" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8F7AD8"/><stop offset=".35" stop-color="#B7A5F0"/>
+      <stop offset=".7" stop-color="#D2C6FA"/><stop offset="1" stop-color="#9A86E0"/>
+    </linearGradient>
+    <radialGradient id="${P}Kanopi" cx="62%" cy="18%" r="95%">
+      <stop offset="0" stop-color="#FFFFFF"/><stop offset=".55" stop-color="#FBF8FC"/>
+      <stop offset=".9" stop-color="#E9E0EE"/><stop offset="1" stop-color="#DCD0E4"/>
+    </radialGradient>
+    <radialGradient id="${P}Pupil" cx="42%" cy="38%" r="70%">
+      <stop offset="0" stop-color="#6A4AA8"/><stop offset=".55" stop-color="#2A1650"/><stop offset="1" stop-color="#140A28"/>
+    </radialGradient>
+    <linearGradient id="${P}Putih" x1="0" y1="0" x2="0" y2="1">
+      <stop offset=".55" stop-color="#fff"/><stop offset="1" stop-color="#E6E0F2"/>
+    </linearGradient>
+    <g id="${P}Bunga">
+      <g fill="#F7A6C3">
+        <path d="M0-1C-2-4-2.4-7 0-8.6C2.4-7 2-4 0-1Z"/>
+        <path d="M0-1C-2-4-2.4-7 0-8.6C2.4-7 2-4 0-1Z" transform="rotate(72)"/>
+        <path d="M0-1C-2-4-2.4-7 0-8.6C2.4-7 2-4 0-1Z" transform="rotate(144)"/>
+        <path d="M0-1C-2-4-2.4-7 0-8.6C2.4-7 2-4 0-1Z" transform="rotate(216)"/>
+        <path d="M0-1C-2-4-2.4-7 0-8.6C2.4-7 2-4 0-1Z" transform="rotate(288)"/>
+      </g>
+      <circle r="1.9" fill="#E0578A"/><circle r=".8" fill="#FFE08A"/>
+    </g>
+    <clipPath id="${P}KlipKanopi"><path d="${bentukKanopi}"/></clipPath>
+  </defs>
+
+  <!-- payung putih bermotif sakura (di belakang badan; porosnya di genggaman tangan kanan) -->
+  <g transform="translate(112 132) rotate(-19)">
+    <g class="lp-payung">
+      <path d="M0 0V-104" style="stroke:#8C7A6A;stroke-width:2.6;stroke-linecap:round"/>
+      <path d="M0 0V9Q0 15-6 15Q-11 15-11 10" style="fill:none;stroke:#7A4A2E;stroke-width:3.6;stroke-linecap:round"/>
+      <g class="lp-kanopi" transform="translate(0 -18)">
+        <path d="${bentukKanopi}" fill="url(#${P}Kanopi)"/>
+        <g clip-path="url(#${P}KlipKanopi)">
+          ${bunga(-44, -98, 1.15, 10)}${bunga(-18, -113, .95, 40)}${bunga(12, -104, 1.3, -12)}
+          ${bunga(40, -110, .9, 25)}${bunga(-30, -89, .8, 60)}${bunga(28, -90, 1, 5)}
+          ${bunga(55, -95, .75, -30)}${bunga(-57, -88, .7, 15)}${bunga(-4, -92, .7, 70)}
+          <path d="M-64 -84C-61 -113 -32 -125 0 -125" style="fill:none;stroke:#fff;stroke-width:5;opacity:.5"/>
+          <path d="${kubah}" style="fill:none;stroke:#C9B8D6;stroke-width:1.2;opacity:.8"/>
+          <ellipse cx="30" cy="-112" rx="16" ry="6" transform="rotate(18 30 -112)" fill="#fff" opacity=".7"/>
+        </g>
+        ${rusuk}
+        <path d="M64 -84${rimBalik}" style="fill:none;stroke:#CDBFD9;stroke-width:1.3"/>
+        <circle cx="0" cy="-127" r="3" fill="#E8CC6B" stroke="#A07F14" stroke-width=".7"/>
+      </g>
+    </g>
+  </g>
+  <!-- kaki & gamis -->
+  <g class="lp-kaki kiri"><ellipse cx="62" cy="163" rx="10" ry="5.5" fill="#2E9C7A"/></g>
+  <g class="lp-kaki kanan"><ellipse cx="88" cy="163" rx="10" ry="5.5" fill="#35A884"/></g>
+  <path d="M47 118Q75 112 103 118L110 158Q75 166 40 158Z" fill="url(#${P}Gamis)"/>
+  <path d="M60 124 57 159M90 124 93 159M75 122V162" style="fill:none;stroke:#7D69C6;stroke-width:1.2;opacity:.5"/>
+  <path d="M40 158Q75 166 110 158" style="fill:none;stroke:#6F5BBE;stroke-width:1.4;opacity:.7"/>
+
+  <!-- jilbab: kain luar yang membingkai wajah, jatuh ke bahu -->
+  <path d="M75 46C104 46 118 68 118 92C118 108 121 120 124 128Q75 142 26 128C29 120 32 108 32 92C32 68 46 46 75 46Z" fill="url(#${P}Jilbab)"/>
+  <path d="M36 118Q75 134 114 118" style="fill:none;stroke:#E28DB0;stroke-width:1.6;opacity:.8"/>
+  <path d="M40 104Q42 118 38 126M110 104Q108 118 112 126" style="fill:none;stroke:#E28DB0;stroke-width:1.4;opacity:.7"/>
+  <!-- lengan kiri (bisa terulur) -->
+  <g class="lp-lengan kiri"><g class="lp-lengan-putar">
+    <path d="M50 112Q36 118 33 131" style="fill:none;stroke:#F2B2CA;stroke-width:13;stroke-linecap:round"/>
+    <ellipse cx="32.5" cy="133" rx="6.5" ry="6" fill="#5CCFA8"/>
+  </g></g>
+
+  <!-- wajah -->
+  <ellipse cx="75" cy="89" rx="29" ry="26" fill="url(#${P}Kulit)"/>
+  <ellipse cx="75" cy="89" rx="30.4" ry="27.4" style="fill:none;stroke:#fff;stroke-width:2.2;stroke-dasharray:2.4 2.2;opacity:.85"/>
+  <ellipse cx="75" cy="89" rx="32" ry="29" style="fill:none;stroke:#D97BA2;stroke-width:1.2;opacity:.55"/>
+  <!-- bros sakura di dagu -->
+  <g transform="translate(75 119) scale(.72)"><use href="#${P}Bunga"/></g>
+  <circle cx="75" cy="119" r="1.6" fill="#E8CC6B" stroke="#A07F14" stroke-width=".5"/>
+  <!-- kilap jilbab & wajah -->
+  <ellipse cx="96" cy="64" rx="5" ry="9" transform="rotate(34 96 64)" fill="#fff" opacity=".6"/>
+  <ellipse cx="93" cy="76" rx="4" ry="6" transform="rotate(30 93 76)" fill="#fff" opacity=".35"/>
+  <!-- pipi -->
+  <ellipse cx="55" cy="99" rx="6.5" ry="3.6" fill="#FF7FAA" opacity=".55"/><ellipse cx="95" cy="99" rx="6.5" ry="3.6" fill="#FF7FAA" opacity=".55"/>
+  <!-- mata -->
+  <g class="e e-mata-normal">
+    <ellipse cx="63" cy="86" rx="9.6" ry="10.8" fill="url(#${P}Putih)"/><ellipse cx="87" cy="86" rx="9.6" ry="10.8" fill="url(#${P}Putih)"/>
+    <g class="lp-pupil"><ellipse cx="64" cy="88" rx="6.4" ry="7.4" fill="url(#${P}Pupil)"/><ellipse cx="88" cy="88" rx="6.4" ry="7.4" fill="url(#${P}Pupil)"/>
+    <circle cx="66.8" cy="84.4" r="2.8" fill="#fff"/><circle cx="90.8" cy="84.4" r="2.8" fill="#fff"/>
+    <circle cx="61.6" cy="91.6" r="1.3" fill="#fff" opacity=".9"/><circle cx="85.6" cy="91.6" r="1.3" fill="#fff" opacity=".9"/></g>
+    <path d="M54 80.5 50.5 78M55.6 77.6 53.4 74.4M96 80.5 99.5 78M94.4 77.6 96.6 74.4" style="${garis};stroke-width:1.8"/>
+  </g>
+  <g class="e e-kedip"><path d="M54 87Q63 92 72 87M78 87Q87 92 96 87" style="${garis}"/><path d="M54 87 50.5 85M96 87 99.5 85" style="${garis};stroke-width:1.8"/></g>
+  <g class="e e-mata-senang"><path d="M55 89Q63 79 71 89M79 89Q87 79 95 89" style="${garis};stroke-width:3"/></g>
+  <g class="e e-mata-khawatir">
+    <ellipse cx="63" cy="87" rx="9" ry="10" fill="#fff"/><ellipse cx="87" cy="87" rx="9" ry="10" fill="#fff"/>
+    <ellipse cx="63" cy="89" rx="5.4" ry="6.4" fill="url(#${P}Pupil)"/><ellipse cx="87" cy="89" rx="5.4" ry="6.4" fill="url(#${P}Pupil)"/>
+    <circle cx="65.4" cy="86" r="2.2" fill="#fff"/><circle cx="89.4" cy="86" r="2.2" fill="#fff"/>
+    <path d="M55 74 69 71M81 71 95 74" style="${garis};stroke-width:2.2"/>
+  </g>
+  <!-- mulut -->
+  <g class="e e-mulut-normal"><path d="M69 101Q72 104 75 101Q78 104 81 101" style="${garis};stroke-width:2.3"/></g>
+  <g class="e e-mulut-o"><ellipse cx="75" cy="103" rx="3.4" ry="4" fill="#6A1030"/></g>
+  <g class="e e-mulut-senang">
+    <path d="M66 99Q75 113 84 99Z" fill="#7A1235" stroke="${tinta}" stroke-width="2" stroke-linejoin="round"/>
+    <ellipse cx="75" cy="106" rx="4.4" ry="2.6" fill="#FF6F9F"/>
+  </g>
+
+  <!-- tangan kanan menggenggam gagang payung (poros putar payung) -->
+  <ellipse cx="112" cy="130" rx="7" ry="6.4" fill="#4FC39C"/>
+  <ellipse cx="114" cy="128" rx="2.6" ry="1.6" fill="#fff" opacity=".35"/>
+</svg>`;
+}
+
+/* ---------- 3 · Sakura berguguran di dasbor ---------- */
+const SAKURA = {
+  aktif: true,
+  PERAN: ['Guru BK', PERAN_WAKASIS, 'Guru Piket', 'Osis'],
+  VIEW: ['dashboard', 'bk'],
+  ULANG_MS: 45000,        // pindah halaman lalu kembali dalam 45 dtk → tidak diulang
+  terakhir: Object.create(null),
+  UMUR_MS: 8000,          // tiap hembusan paling lama ±8 dtk setelah kelopak terakhir lahir
+  kanvas: null, raf: 0, kelopak: [], sprite: null, tAkhir: 0
+};
+
+/** Apakah akun/konteks ini memakai tema sakura? */
+function temaSakura() {
+  if (!SAKURA.aktif || !APP.profil) return false;
+  if (SAKURA.PERAN.includes(role())) return true;
+  let u = null;
+  try { u = unitAktif(); } catch (e) {}
+  return u === UNIT_PUTRI;
+}
+
+function tandaiTemaSakura() {
+  const on = temaSakura();
+  const html = document.documentElement;
+  if (on) html.dataset.sakura = '1'; else delete html.dataset.sakura;
+  return on;
+}
+
+/** Kelopak sakura sebagai bitmap kecil — digambar sekali, dipakai ulang. */
+function spriteKelopak() {
+  if (SAKURA.sprite) return SAKURA.sprite;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const WARNA = [['#FFF4F8', '#FBC4D6', '#EE92B3'], ['#FFFFFF', '#FFD6E4', '#F5A9C3'], ['#FFF0F6', '#F7B2CB', '#E27CA2']];
+  SAKURA.sprite = WARNA.map(([a, b, c]) => {
+    const s = 28 * dpr, cv = document.createElement('canvas');
+    cv.width = cv.height = Math.ceil(s);
+    const g = cv.getContext('2d');
+    g.scale(s / 28, s / 28);
+    // Kelopak: bulat telur dengan takik di ujung (ciri kelopak sakura).
+    g.beginPath();
+    g.moveTo(14, 26);
+    g.bezierCurveTo(4.5, 21, 3, 10, 8.4, 4.2);
+    g.quadraticCurveTo(11.4, 2.2, 14, 6.4);
+    g.quadraticCurveTo(16.6, 2.2, 19.6, 4.2);
+    g.bezierCurveTo(25, 10, 23.5, 21, 14, 26);
+    g.closePath();
+    const gr = g.createRadialGradient(17, 9, 1, 14, 16, 15);
+    gr.addColorStop(0, a); gr.addColorStop(.55, b); gr.addColorStop(1, c);
+    g.fillStyle = gr; g.fill();
+    g.strokeStyle = 'rgba(214,94,140,.35)'; g.lineWidth = .7;
+    g.beginPath(); g.moveTo(14, 24); g.quadraticCurveTo(13.2, 16, 14, 9); g.stroke();
+    g.fillStyle = 'rgba(255,255,255,.55)';
+    g.beginPath(); g.ellipse(17.5, 11, 2.2, 4.2, .5, 0, Math.PI * 2); g.fill();
+    return cv;
+  });
+  return SAKURA.sprite;
+}
+
+function hentikanSakura() {
+  if (SAKURA.raf) cancelAnimationFrame(SAKURA.raf);
+  SAKURA.raf = 0;
+  SAKURA.kelopak = [];
+  SAKURA.tAkhir = 0;
+  if (SAKURA.kanvas) { SAKURA.kanvas.remove(); SAKURA.kanvas = null; }
+}
+
+/**
+ * Hembuskan kelopak. `n` kelopak lahir berangsur selama `lahirMs`, jatuh
+ * dari tepi atas (condong dari kanan atas, arah sumber cahaya), berayun,
+ * berputar, dan membalik (skala-X = cos). Kanvas dilepas begitu kelopak
+ * terakhir keluar layar, jadi tidak ada loop yang tertinggal.
+ */
+function guguranSakura(opsi = {}) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+  const hemat = document.documentElement.classList.contains('hemat');
+  const kecil = innerWidth < 640;
+  const n = opsi.n || (hemat ? 12 : kecil ? 22 : 34);
+  const lahirMs = opsi.lahirMs || 2600;
+  const sprite = spriteKelopak();
+
+  if (!SAKURA.kanvas) {
+    const cv = document.createElement('canvas');
+    cv.className = 'sakura-kanvas';
+    cv.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(cv);
+    SAKURA.kanvas = cv;
+  }
+  const cv = SAKURA.kanvas;
+  const dpr = Math.min(hemat ? 1 : 2, window.devicePixelRatio || 1);
+  const W = innerWidth, H = innerHeight;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  }
+  const ctx = cv.getContext('2d');
+  const sekarang = performance.now();
+  for (let i = 0; i < n; i++) {
+    const ukuran = (kecil ? 11 : 13) + Math.random() * (kecil ? 8 : 11);
+    const asal = opsi.asal;          // {x,y} — hembusan dari titik tertentu
+    SAKURA.kelopak.push({
+      lahir: sekarang + (i / n) * lahirMs * (0.6 + Math.random() * 0.4),
+      x: asal ? asal.x + (Math.random() - .5) * 120 : W * (0.08 + Math.random() * 1.0),
+      y: asal ? asal.y + (Math.random() - .5) * 40 : -30 - Math.random() * 60,
+      vy: 78 + Math.random() * 64,            // px/dtk
+      vx: -(14 + Math.random() * 26),         // angin dari kanan
+      ayun: 16 + Math.random() * 34, fAyun: .7 + Math.random() * .9, fase: Math.random() * 6.3,
+      rot: Math.random() * 6.3, vRot: (Math.random() - .5) * 2.4,
+      balik: Math.random() * 6.3, vBalik: 1.6 + Math.random() * 2.6,
+      s: ukuran, img: sprite[i % sprite.length], a: .85 + Math.random() * .15
+    });
+  }
+  // Umur total dibatasi: setelah UMUR_MS kelopak yang tersisa memudar 1 dtk lalu kanvas dilepas.
+  SAKURA.tAkhir = Math.max(SAKURA.tAkhir || 0, sekarang + lahirMs + SAKURA.UMUR_MS);
+  const minBingkai = hemat ? 32 : 0;          // mode hemat ≤ ±30 fps
+  let lalu = sekarang, tulisLalu = 0;
+
+  const langkah = (t) => {
+    SAKURA.raf = 0;
+    if (!SAKURA.kanvas) return;
+    const dt = Math.min(.05, (t - lalu) / 1000); lalu = t;
+    if (minBingkai && t - tulisLalu < minBingkai) { SAKURA.raf = requestAnimationFrame(langkah); return; }
+    tulisLalu = t;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    let hidup = 0;
+    const sisa = SAKURA.tAkhir - t;                 // ms menuju batas umur
+    const redup = sisa < 1000 ? Math.max(0, sisa / 1000) : 1;
+    for (const k of SAKURA.kelopak) {
+      if (t < k.lahir) { hidup++; continue; }
+      if (k.mati) continue;
+      const u = (t - k.lahir) / 1000;
+      k.y += k.vy * dt;
+      k.x += k.vx * dt;
+      k.rot += k.vRot * dt;
+      k.balik += k.vBalik * dt;
+      const x = k.x + Math.sin(u * k.fAyun * 2 + k.fase) * k.ayun;
+      if (k.y > H + 30 || x < -40) { k.mati = true; continue; }
+      hidup++;
+      const pudar = k.y > H * .82 ? Math.max(0, 1 - (k.y - H * .82) / (H * .18 + 30)) : 1;
+      ctx.globalAlpha = k.a * pudar * redup;
+      ctx.setTransform(dpr, 0, 0, dpr, x * dpr, k.y * dpr);
+      ctx.rotate(k.rot);
+      ctx.scale(Math.max(.18, Math.abs(Math.cos(k.balik))), 1);
+      ctx.drawImage(k.img, -k.s / 2, -k.s / 2, k.s, k.s);
+    }
+    ctx.globalAlpha = 1;
+    if (hidup && sisa > 0) SAKURA.raf = requestAnimationFrame(langkah);
+    else hentikanSakura();
+  };
+  if (!SAKURA.raf) SAKURA.raf = requestAnimationFrame(langkah);
+  return true;
+}
+
+/** Dipanggil setelah halaman dasbor siap. */
+function mulaiSakuraDasbor(view, paksa = false) {
+  if (!tandaiTemaSakura() || !SAKURA.VIEW.includes(view)) return false;
+  const k = view + '|' + (APP.profil?.id || '') + '|' + (normalUnit(APP.ctx?.gender) || '');
+  const kini = Date.now();
+  if (!paksa && SAKURA.terakhir[k] && kini - SAKURA.terakhir[k] < SAKURA.ULANG_MS) return false;
+  SAKURA.terakhir[k] = kini;
+  setelahLayarMuat(() => { if (APP.view === view && temaSakura()) guguranSakura(); });
+  return true;
+}
+
+/** Jalankan fn setelah layar muat awal tertutup (kelopak tidak jatuh di balik tirai). */
+function setelahLayarMuat(fn) {
+  const lm = document.getElementById('layarMuat');
+  if (!lm || lm.classList.contains('tutup')) return fn();
+  const mo = new MutationObserver(() => {
+    if (!lm.classList.contains('tutup')) return;
+    mo.disconnect(); clearTimeout(cadangan);
+    setTimeout(fn, 380);                    // biarkan tirai memudar dulu
+  });
+  const cadangan = setTimeout(() => { mo.disconnect(); fn(); }, 15000);
+  mo.observe(lm, { attributes: true, attributeFilter: ['class'] });
+}
+
+(function pasangSakuraNavigasi() {
+  const navSebelum = navigateTo;
+  navigateTo = async function (view) {
+    const tujuan = view || APP.view;
+    if (!SAKURA.VIEW.includes(tujuan)) hentikanSakura();
+    try { return await navSebelum.apply(this, arguments); }
+    finally {
+      tandaiTemaSakura();
+      if (APP.view === tujuan && SAKURA.VIEW.includes(tujuan)) {
+        // Biarkan transisi halaman (View Transition v2.36) selesai dulu.
+        setTimeout(() => { if (APP.view === tujuan) mulaiSakuraDasbor(tujuan); }, 260);
+      }
+    }
+  };
+  // Keluar akun → bersihkan.
+  window.addEventListener('pagehide', hentikanSakura);
+})();
+
+/* Ketuk panel sapaan (bukan tombolnya) → hembusan kelopak dari kanan atas panel. */
+document.addEventListener('click', (e) => {
+  if (!document.documentElement.dataset.sakura) return;
+  const sapa = e.target.closest && e.target.closest('#viewRoot .sapa');
+  if (!sapa || e.target.closest('button, a, input, select, label')) return;
+  const r = sapa.getBoundingClientRect();
+  guguranSakura({ n: 16, lahirMs: 900, asal: { x: r.right - 90, y: r.top + 10 } });
+});
+
+/* Sambutan: hujan monster tingkat 1 bila tidak ada tunggakan pembinaan. */
+(function pasangSambutanMonster() {
+  const hujanSebelum = hujanMonster;
+  hujanMonster = function (tingkat) {
+    if (!tingkat && SAKURA.aktif && APP.view === 'dashboard' && temaSakura()) {
+      HUJAN.sambutan = true;
+      return hujanSebelum.call(this, 1);
+    }
+    HUJAN.sambutan = false;
+    return hujanSebelum.apply(this, arguments);
+  };
+})();
+
+/* ---------- 4 · Panggung maskot di layar masuk ---------- */
+const PANGGUNG = { aktif: true, giliran: 0, main: false, anim: new Set(), tKedip: 0, tunda: new Set() };
+
+function lpTunda(ms) {
+  return new Promise(r => { const t = setTimeout(() => { PANGGUNG.tunda.delete(t); r(); }, ms); PANGGUNG.tunda.add(t); });
+}
+/** element.animate yang tercatat (bisa dibatalkan serentak) dan tidak pernah menolak. */
+function lpGerak(el, kf, opsi) {
+  if (!el || typeof el.animate !== 'function') return Promise.resolve();
+  const a = el.animate(kf, Object.assign({ fill: 'forwards' }, opsi));
+  PANGGUNG.anim.add(a);
+  return a.finished.catch(() => {}).then(() => { PANGGUNG.anim.delete(a); return a; });
+}
+function lpBatalSemua() {
+  PANGGUNG.anim.forEach(a => { try { a.cancel(); } catch (e) {} });
+  PANGGUNG.anim.clear();
+  PANGGUNG.tunda.forEach(clearTimeout);
+  PANGGUNG.tunda.clear();
+  clearTimeout(PANGGUNG.tKedip);
+}
+
+function pasangPanggungLogin() {
+  if (!PANGGUNG.aktif) return null;
+  const scr = document.getElementById('loginScreen');
+  const form = scr && scr.querySelector('.login-form');
+  const kartu = form && form.querySelector('.login-card');
+  if (!form || !kartu) return null;
+  let p = document.getElementById('lpPanggung');
+  if (p) return p;
+  p = document.createElement('div');
+  p.id = 'lpPanggung';
+  p.className = 'lp-panggung';
+  p.setAttribute('aria-hidden', 'true');
+  p.title = 'Ketuk untuk memutar ulang';
+  p.innerHTML = `
+    <div class="lp-lantai"></div>
+    <div class="lp-aktor lp-si-peci" data-ekspresi="normal">
+      <div class="lp-bayang"></div>
+      <div class="lp-badan"><div class="lp-langkah">${svgSiPeci()}</div></div>
+    </div>
+    <div class="lp-aktor lp-si-payung" data-ekspresi="normal">
+      <div class="lp-bayang"></div>
+      <div class="lp-badan"><div class="lp-langkah">${svgSiPayung()}</div></div>
+    </div>
+    <div class="lp-peci-lepas">${svgPeciLepas()}</div>
+    <div class="lp-efek"></div>`;
+  form.insertBefore(p, kartu);
+  form.classList.add('ada-panggung');
+  p.addEventListener('click', () => { if (!PANGGUNG.main) mainkanAdegan(); });
+  return p;
+}
+
+/** Ukuran & titik penting panggung, dibaca sekali per adegan. */
+function ukurPanggung(p) {
+  const W = p.clientWidth, H = p.clientHeight;
+  const peci = p.querySelector('.lp-si-peci'), pay = p.querySelector('.lp-si-payung');
+  const wP = peci.offsetWidth, hP = peci.offsetHeight, wJ = pay.offsetWidth, hJ = pay.offsetHeight;
+  const lantai = parseFloat(getComputedStyle(peci).bottom) || 0;
+  const xP = Math.round(W / 2 - wP * .96);
+  const xJ = Math.round(W / 2 - wJ * .12);
+  return { W, H, wP, hP, wJ, hJ, lantai, xP, xJ,
+    // peci di kepala Si Peci: kotak lepas (viewBox 34..86 × 2..34 dari 120×132)
+    peciW: wP * 52 / 120, peciH: hP * 32 / 132,
+    peciKepala: { x: xP + wP * 34 / 120, y: -(lantai + hP * (132 - 34) / 132) } };
+}
+
+function lpEkspresi(el, e) { if (el) el.dataset.ekspresi = e; }
+
+function lpEfek(p, kelas, html, x, y) {
+  const d = document.createElement('span');
+  d.className = 'lp-fx ' + kelas;
+  d.innerHTML = html || '';
+  d.style.left = x + 'px';
+  d.style.bottom = y + 'px';
+  p.querySelector('.lp-efek').appendChild(d);
+  return d;
+}
+
+/** Pose akhir tanpa gerak (dipakai "kurangi gerak" & setelah adegan). */
+function posePanggungAkhir(p, u) {
+  const peci = p.querySelector('.lp-si-peci'), pay = p.querySelector('.lp-si-payung');
+  peci.style.transform = `translateX(${u.xP}px)`;
+  pay.style.transform = `translateX(${u.xJ}px)`;
+  peci.style.opacity = pay.style.opacity = '1';
+  const payung = pay.querySelector('.lp-payung');
+  if (payung) payung.style.transform = 'rotate(-12deg)';
+  lpEkspresi(peci, 'normal'); lpEkspresi(pay, 'normal');
+}
+
+function jadwalKedip(p) {
+  clearTimeout(PANGGUNG.tKedip);
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const tik = () => {
+    const scr = document.getElementById('loginScreen');
+    if (!p.isConnected || !scr || scr.classList.contains('hidden') || document.hidden) {
+      PANGGUNG.tKedip = setTimeout(tik, 4000); return;
+    }
+    const aktor = p.querySelectorAll('.lp-aktor[data-ekspresi="normal"]');
+    const a = aktor[Math.floor(Math.random() * aktor.length)];
+    if (a && !PANGGUNG.main) { a.classList.add('kedip'); setTimeout(() => a.classList.remove('kedip'), 150); }
+    PANGGUNG.tKedip = setTimeout(tik, 2600 + Math.random() * 2800);
+  };
+  PANGGUNG.tKedip = setTimeout(tik, 1800);
+}
+
+async function mainkanAdegan() {
+  const p = pasangPanggungLogin();
+  if (!p || !p.clientWidth) return;
+  lpBatalSemua();
+  const giliran = ++PANGGUNG.giliran;
+  const masih = () => PANGGUNG.giliran === giliran && p.isConnected;
+  const u = ukurPanggung(p);
+  const peci = p.querySelector('.lp-si-peci'), pay = p.querySelector('.lp-si-payung');
+  const bPeci = peci.querySelector('.lp-badan'), bPay = pay.querySelector('.lp-badan');
+  const shP = peci.querySelector('.lp-bayang'), shJ = pay.querySelector('.lp-bayang');
+  const payung = pay.querySelector('.lp-payung'), lengan = pay.querySelector('.lp-lengan-putar');
+  const lambai = peci.querySelector('.lp-lengan.kanan');
+  const peciBadan = peci.querySelector('.lp-peci-badan'), lepas = p.querySelector('.lp-peci-lepas');
+  const efek = p.querySelector('.lp-efek');
+  efek.innerHTML = '';
+  [peci, pay, bPeci, bPay, shP, shJ, payung, lengan, lambai, lepas].forEach(el => { if (el) el.style.transform = ''; });
+  peciBadan.style.visibility = ''; lepas.style.opacity = '0';
+  lepas.style.width = u.peciW + 'px'; lepas.style.height = u.peciH + 'px';
+  peci.classList.remove('jalan', 'kedip'); pay.classList.remove('jalan', 'kedip');
+
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { posePanggungAkhir(p, u); return; }
+
+  PANGGUNG.main = true;
+  p.classList.add('main');
+  try {
+    const s = parseFloat(getComputedStyle(p).getPropertyValue('--lp-s')) || 1;
+    /* 1 · Si Peci berjalan masuk dari kiri */
+    lpEkspresi(peci, 'normal'); lpEkspresi(pay, 'normal');
+    pay.style.opacity = '0';
+    pay.style.transform = `translateX(${u.W + 24}px)`;
+    peci.classList.add('jalan');
+    await lpGerak(peci, [
+      { transform: `translateX(${-u.wP - 24}px)`, opacity: 0 },
+      { transform: `translateX(${-u.wP * .4}px)`, opacity: 1, offset: .16 },
+      { transform: `translateX(${u.xP}px)`, opacity: 1 }
+    ], { duration: 2100, easing: 'cubic-bezier(.3,.05,.55,1)' });
+    if (!masih()) return;
+
+    /* 2 · Terpeleset sarungnya sendiri → jatuh telentang ke kiri */
+    peci.classList.remove('jalan');
+    lpEkspresi(peci, 'kaget');
+    const seru = lpEfek(p, 'lp-seru', '!', u.xP + u.wP * .78, u.lantai + u.hP * .92);
+    lpGerak(seru, [{ transform: 'scale(0) translateY(6px)', opacity: 0 }, { transform: 'scale(1.25)', opacity: 1, offset: .35 },
+      { transform: 'scale(1)', opacity: 1, offset: .7 }, { transform: 'scale(.9) translateY(-4px)', opacity: 0 }], { duration: 900 })
+      .then(() => seru.remove());
+    await lpTunda(170);
+    const jatuh = lpGerak(bPeci, [
+      { transform: 'rotate(0deg)' },
+      { transform: 'rotate(10deg) translateY(-7%)', offset: .22 },
+      { transform: 'rotate(-96deg)', offset: .74 },
+      { transform: 'rotate(-80deg) translateY(-3%)', offset: .86 },
+      { transform: 'rotate(-86deg)' }
+    ], { duration: 620, easing: 'cubic-bezier(.45,0,.7,1)' });
+    lpGerak(shP, [{ transform: 'translateX(0) scaleX(1)' }, { transform: `translateX(${-u.hP * .5}px) scaleX(1.9)`, offset: .8 },
+      { transform: `translateX(${-u.hP * .48}px) scaleX(1.85)` }], { duration: 620, easing: 'ease-in' });
+    // peci terlempar ke atas, mendarat terbalik di tempat ia tadi berdiri
+    peciBadan.style.visibility = 'hidden';
+    lepas.style.opacity = '1';
+    const k0 = u.peciKepala, gx = u.xP + u.wP * .62, gy = -u.lantai - u.peciH * .15;
+    lpGerak(lepas, [
+      { transform: `translate(${k0.x}px, ${k0.y}px) rotate(0deg)` },
+      { transform: `translate(${(k0.x + gx) / 2}px, ${k0.y - 52 * s}px) rotate(130deg)`, offset: .42 },
+      { transform: `translate(${gx}px, ${gy}px) rotate(192deg)`, offset: .84 },
+      { transform: `translate(${gx + 3}px, ${gy - 6 * s}px) rotate(198deg)`, offset: .92 },
+      { transform: `translate(${gx + 4}px, ${gy}px) rotate(196deg)` }
+    ], { duration: 820, easing: 'cubic-bezier(.33,.0,.6,1)' });
+    await jatuh;
+    if (!masih()) return;
+    // debu saat menghantam lantai
+    for (let i = 0; i < 5; i++) {
+      const d = lpEfek(p, 'lp-debu', '', u.xP - u.hP * .1 + i * u.hP * .22, u.lantai - 2);
+      const arah = (i - 2) * 9 * s;
+      lpGerak(d, [{ transform: 'translate(0,0) scale(.3)', opacity: .8 }, { transform: `translate(${arah}px, ${-14 * s}px) scale(1.25)`, opacity: 0 }],
+        { duration: 640 + i * 40, easing: 'cubic-bezier(.2,.7,.3,1)' }).then(() => d.remove());
+    }
+    await lpTunda(260);
+    lpEkspresi(peci, 'pusing');
+    // bintang berputar di atas kepala yang terbaring
+    const bx = u.xP + u.wP * .15 - u.hP * .7, by = u.lantai + u.wP * .5;
+    const orbit = lpEfek(p, 'lp-orbit', '<i>✦</i><i>✦</i><i>✧</i>', bx, by);
+    lpGerak(orbit, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(720deg)' }], { duration: 2600, easing: 'linear' });
+
+    /* 3 · Si Payung datang dari kanan */
+    await lpTunda(250);
+    if (!masih()) return;
+    pay.classList.add('jalan');
+    lpEkspresi(pay, 'khawatir');
+    await lpGerak(pay, [
+      { transform: `translateX(${u.W + 24}px)`, opacity: 0 },
+      { transform: `translateX(${u.W - u.wJ * .5}px)`, opacity: 1, offset: .18 },
+      { transform: `translateX(${u.xJ}px)`, opacity: 1 }
+    ], { duration: 1650, easing: 'cubic-bezier(.3,.05,.5,1)' });
+    if (!masih()) return;
+    pay.classList.remove('jalan');
+
+    /* 4 · Memayungi & mengulurkan tangan */
+    lpGerak(payung, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-31deg)', offset: .7 }, { transform: 'rotate(-26deg)' }],
+      { duration: 620, easing: 'cubic-bezier(.3,1.3,.5,1)' });
+    await lpTunda(180);
+    lpGerak(lengan, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(44deg)', offset: .75 }, { transform: 'rotate(38deg)' }],
+      { duration: 520, easing: 'cubic-bezier(.3,1.2,.5,1)' });
+    kelopakPayung(p, u, s);
+    await lpTunda(620);
+    if (!masih()) return;
+
+    /* 5 · Si Peci bangkit dibantu */
+    orbit.remove();
+    lpEkspresi(peci, 'kaget');
+    await lpTunda(160);
+    lpGerak(shP, [{ transform: `translateX(${-u.hP * .48}px) scaleX(1.85)` }, { transform: 'translateX(0) scaleX(1)' }], { duration: 560, easing: 'ease-out' });
+    await lpGerak(bPeci, [
+      { transform: 'rotate(-86deg)' },
+      { transform: 'rotate(8deg) translateY(-9%)', offset: .62 },
+      { transform: 'rotate(-3deg)', offset: .84 },
+      { transform: 'rotate(0deg)' }
+    ], { duration: 640, easing: 'cubic-bezier(.3,.9,.4,1)' });
+    if (!masih()) return;
+    lpGerak(lengan, [{ transform: 'rotate(38deg)' }, { transform: 'rotate(0deg)' }], { duration: 420, easing: 'ease-in-out' });
+
+    /* 6 · Peci melompat kembali ke kepala */
+    const lx = gx + 4, ly = gy;
+    await lpGerak(lepas, [
+      { transform: `translate(${lx}px, ${ly}px) rotate(196deg)` },
+      { transform: `translate(${(lx + k0.x) / 2}px, ${k0.y - 58 * s}px) rotate(60deg)`, offset: .55 },
+      { transform: `translate(${k0.x}px, ${k0.y - 4 * s}px) rotate(-6deg)`, offset: .88 },
+      { transform: `translate(${k0.x}px, ${k0.y}px) rotate(0deg)` }
+    ], { duration: 620, easing: 'cubic-bezier(.35,0,.45,1)' });
+    if (!masih()) return;
+    peciBadan.style.visibility = '';
+    lepas.style.opacity = '0';
+    lpGerak(bPeci, [{ transform: 'scale(1,1)' }, { transform: 'scale(1.06,.9)', offset: .35 }, { transform: 'scale(.97,1.04)', offset: .7 },
+      { transform: 'scale(1,1)' }], { duration: 380, easing: 'ease-out' });
+
+    /* 7 · Senang bersama: hati, lompatan, lambaian, payung dibagi berdua */
+    lpEkspresi(peci, 'senang'); lpEkspresi(pay, 'senang');
+    const hati = lpEfek(p, 'lp-hati', '♥', u.xP + u.wP * .98, u.lantai + u.hP * .78);
+    lpGerak(hati, [{ transform: 'translateY(0) scale(0)', opacity: 0 }, { transform: 'translateY(-10px) scale(1.25)', opacity: 1, offset: .3 },
+      { transform: 'translateY(-38px) scale(1)', opacity: 0 }], { duration: 1300, easing: 'ease-out' }).then(() => hati.remove());
+    lpGerak(payung, [{ transform: 'rotate(-26deg)' }, { transform: 'rotate(-6deg)', offset: .45 }, { transform: 'rotate(-15deg)', offset: .75 },
+      { transform: 'rotate(-12deg)' }], { duration: 900, easing: 'ease-in-out' });
+    const loncat = (el, sh) => Promise.all([
+      lpGerak(el, [{ transform: 'translateY(0)' }, { transform: 'translateY(-16%) scale(.98,1.03)', offset: .35 }, { transform: 'translateY(0) scale(1.05,.94)', offset: .72 },
+        { transform: 'translateY(0) scale(1)' }], { duration: 480, iterations: 2, easing: 'cubic-bezier(.3,.6,.4,1)' }),
+      lpGerak(sh, [{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(.72)', opacity: .55, offset: .35 }, { transform: 'scale(1)', opacity: 1 }],
+        { duration: 480, iterations: 2 })
+    ]);
+    lpGerak(lambai, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-38deg)', offset: .25 }, { transform: 'rotate(-8deg)', offset: .5 },
+      { transform: 'rotate(-38deg)', offset: .75 }, { transform: 'rotate(0deg)' }], { duration: 1100, easing: 'ease-in-out' });
+    await loncat(bPeci, shP);
+    await lpTunda(900);
+    if (!masih()) return;
+    lpEkspresi(peci, 'normal'); lpEkspresi(pay, 'normal');
+  } finally {
+    if (PANGGUNG.giliran === giliran) {
+      PANGGUNG.main = false;
+      p.classList.remove('main');
+      jadwalKedip(p);
+    }
+  }
+}
+
+/** Kelopak berjatuhan dari tepi payung saat dimiringkan. */
+function kelopakPayung(p, u, s) {
+  if (document.documentElement.classList.contains('hemat')) return;
+  for (let i = 0; i < 8; i++) {
+    const x = u.xJ - u.wJ * .3 + Math.random() * u.wJ * 1.05;
+    const y = u.lantai + u.hJ * (.62 + Math.random() * .28);
+    const k = lpEfek(p, 'lp-kelopak', '', x, y);
+    const dx = -(18 + Math.random() * 30) * s, dy = (u.hJ * .72 + Math.random() * 14);
+    lpGerak(k, [
+      { transform: 'translate(0,0) rotate(0deg) scaleX(1)', opacity: 0 },
+      { transform: `translate(${dx * .3}px, ${dy * .25}px) rotate(80deg) scaleX(.4)`, opacity: 1, offset: .2 },
+      { transform: `translate(${dx * .7}px, ${dy * .65}px) rotate(200deg) scaleX(1)`, opacity: 1, offset: .65 },
+      { transform: `translate(${dx}px, ${dy}px) rotate(300deg) scaleX(.5)`, opacity: 0 }
+    ], { duration: 1600 + Math.random() * 900, delay: Math.random() * 700, easing: 'cubic-bezier(.3,.2,.6,1)' }).then(() => k.remove());
+  }
+}
+
+/* Mulai adegan saat layar masuk benar-benar tampil (setelah layar muat tertutup);
+   ulangi setiap kali layar masuk tampil lagi (keluar akun). */
+(function hidupkanPanggung() {
+  const scr = document.getElementById('loginScreen');
+  if (!scr || !PANGGUNG.aktif) return;
+  let jadwal = 0, tampilLalu = false;
+  const tampil = () => {
+    const lm = document.getElementById('layarMuat');
+    return !scr.classList.contains('hidden') && (!lm || lm.classList.contains('tutup'));
+  };
+  const periksa = () => {
+    const t = tampil();
+    if (t && !tampilLalu) {
+      clearTimeout(jadwal);
+      jadwal = setTimeout(() => { if (tampil()) { pasangPanggungLogin(); mainkanAdegan(); } }, 520);
+    }
+    if (!t && tampilLalu) { clearTimeout(jadwal); lpBatalSemua(); PANGGUNG.giliran++; PANGGUNG.main = false; }
+    tampilLalu = t;
+  };
+  pasangPanggungLogin();
+  const mo = new MutationObserver(periksa);
+  mo.observe(scr, { attributes: true, attributeFilter: ['class'] });
+  const lm = document.getElementById('layarMuat');
+  if (lm) mo.observe(lm, { attributes: true, attributeFilter: ['class'] });
+  periksa();
+})();
+
 // ---------------------------------------------------------------------
 hidupkanLayarLogin();
 

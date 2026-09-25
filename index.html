@@ -6435,6 +6435,196 @@
   }
   @media print { .nav-sorot { display:none; } }
 </style>
+<style id="gayaSakura">
+  /* =====================================================================
+   * v2.40 — KONTEKS PUTRI: SAKURA, MASKOT LOGIN, KONTRAS & ARAH CAHAYA
+   * ---------------------------------------------------------------------
+   *  Pasangan blok "v2.40" di app.js. Tidak berlapis (@layer) supaya
+   *  menang atas lapisan lama tanpa !important.
+   *
+   *  A. Kontras: teks alis (eyebrow) di permukaan TERANG memakai kuningan
+   *     tua & abu yang lebih pekat (≥ 4,5 : 1). Panel gelap tidak berubah.
+   *  B. Arah cahaya: satu sumber di KANAN ATAS (semburat kuningan .sapa &
+   *     kartu angka). Kartu unit sebelumnya diterangi dari kiri atas
+   *     (150°) tepat di bawah panel sapaan yang diterangi dari kanan atas;
+   *     kini 210°.
+   *  C. Tema sakura (html[data-sakura]).
+   *  D. Panggung maskot login.
+   * ===================================================================== */
+  :root {
+    --brass-teks: #86680F;          /* ±5,3 : 1 di atas putih */
+    --text-3-teks: #5E7389;         /* ±4,9 : 1 di atas putih/kertas */
+    --sakura-1: #FFE4EE;
+    --sakura-2: #F7A6C3;
+    --sakura-3: #D9588A;
+  }
+  @supports (color: oklch(50% .1 250)) {
+    :root {
+      --brass-teks: oklch(52% .105 84);
+      --text-3-teks: oklch(53% .032 240);
+      --sakura-1: oklch(94% .035 352);
+      --sakura-2: oklch(80% .1 352);
+      --sakura-3: oklch(62% .16 358);
+    }
+  }
+
+  /* ---------- A · kontras teks alis di permukaan terang ---------- */
+  :is(.topbar, .login-card, .unit-head, .card-head, .sb-judul) .eyebrow .ar,
+  .eyebrow.sb-judul .ar { color: var(--brass-teks); }
+  :is(.topbar, .login-card, .unit-head, .card-head, .sb-judul) .eyebrow .lat,
+  .eyebrow.sb-judul .lat { color: var(--text-3-teks); }
+  :is(.topbar, .login-card, .unit-head, .card-head) .eyebrow .rule,
+  .eyebrow.sb-judul .rule { background: var(--brass-teks); opacity: .45; }
+  .unit-head p, .rank .n { color: var(--text-3-teks); }
+
+  /* ---------- B · satu sumber cahaya: kanan atas ---------- */
+  .unit-card     { background: linear-gradient(210deg, var(--sea-hi), var(--navy)); }
+  .unit-card.mts { background: linear-gradient(210deg, #1B7AAD, #123C5E); }
+  .unit-card.ma  { background: linear-gradient(210deg, #0F766E, #0B2B45); }
+
+  /* ---------- C · tema sakura ---------- */
+  html[data-sakura] .sapa::after {
+    background: radial-gradient(circle,
+      color-mix(in oklab, var(--sakura-3) 40%, transparent) 0%,
+      color-mix(in oklab, var(--sakura-2) 14%, transparent) 42%, transparent 68%);
+  }
+  html[data-sakura] .sapa::before {
+    background-image: var(--girih),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='132' height='132' viewBox='0 0 132 132'%3E%3Cg fill='%23FFD6E4' fill-opacity='.10'%3E%3Cg transform='translate(34 36)'%3E%3Cpath id='k' d='M0-2C-3.4-7-4-12 0-15C4-12 3.4-7 0-2Z'/%3E%3Cuse href='%23k' transform='rotate(72)'/%3E%3Cuse href='%23k' transform='rotate(144)'/%3E%3Cuse href='%23k' transform='rotate(216)'/%3E%3Cuse href='%23k' transform='rotate(288)'/%3E%3C/g%3E%3Cg transform='translate(98 96) scale(.7) rotate(20)'%3E%3Cuse href='%23k'/%3E%3Cuse href='%23k' transform='rotate(72)'/%3E%3Cuse href='%23k' transform='rotate(144)'/%3E%3Cuse href='%23k' transform='rotate(216)'/%3E%3Cuse href='%23k' transform='rotate(288)'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  }
+  html[data-sakura] .sapa .eyebrow .ar { color: #F7D9E4; }
+  html[data-sakura] .amanah:hover { border-color: color-mix(in oklab, var(--sakura-2) 60%, transparent); }
+  html[data-sakura] .amanah .ikon { background: color-mix(in oklab, var(--sakura-2) 24%, transparent); color: #FFE1EC; }
+  /* Kertas halaman: semburat fajar merah muda dari kanan atas (arah cahaya yang sama). */
+  html[data-sakura] body {
+    background:
+      radial-gradient(1000px 560px at 100% 0%, color-mix(in oklab, var(--sakura-1) 70%, transparent), transparent 70%) fixed,
+      var(--paper);
+  }
+
+  .sakura-kanvas {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 45; contain: strict;
+  }
+  @media print { .sakura-kanvas { display: none; } }
+
+  /* ---------- D · panggung maskot login ---------- */
+  .login-form.ada-panggung { flex-direction: column; align-items: center; justify-content: center; }
+  .login-form.ada-panggung > .login-card { flex: none; }
+  .lp-panggung {
+    --lp-s: 1.1;
+    position: relative; z-index: 3; flex: none;
+    width: min(100%, 540px); height: calc(208px * var(--lp-s));
+    margin: 0 auto -3px;
+    overflow-x: clip; overflow-y: visible;
+    cursor: pointer; -webkit-tap-highlight-color: transparent; user-select: none;
+  }
+  .lp-lantai {
+    position: absolute; left: -6%; right: -6%; bottom: calc(-6px * var(--lp-s));
+    height: calc(40px * var(--lp-s)); pointer-events: none;
+    background: radial-gradient(50% 50% at 52% 58%,
+      color-mix(in oklab, var(--sakura-2) 30%, transparent) 0%,
+      color-mix(in oklab, #9FC7DE 12%, transparent) 55%, transparent 78%);
+  }
+  .lp-aktor {
+    position: absolute; left: 0; bottom: calc(12px * var(--lp-s));
+    opacity: 0; will-change: transform;
+  }
+  .lp-si-peci   { width: calc(120px * var(--lp-s)); height: calc(132px * var(--lp-s)); z-index: 2; }
+  .lp-si-payung { width: calc(150px * var(--lp-s)); height: calc(194px * var(--lp-s)); z-index: 1; }
+  .lp-badan, .lp-langkah { position: absolute; inset: 0; }
+  .lp-si-peci .lp-badan   { transform-origin: 15% 100%; }
+  .lp-si-payung .lp-badan { transform-origin: 50% 100%; }
+  .lp-langkah { transform-origin: 50% 100%; }
+  .lp-svg {
+    display: block; width: 100%; height: 100%; overflow: visible;
+    /* Bayangan jatuh lembut ke kiri bawah — berlawanan dengan sumber cahaya kanan atas. */
+    filter: drop-shadow(calc(-3px * var(--lp-s)) calc(7px * var(--lp-s)) calc(7px * var(--lp-s)) rgb(2 12 24 / .42));
+  }
+  .lp-bayang {
+    position: absolute; left: 12%; right: 12%; bottom: calc(-6px * var(--lp-s));
+    height: calc(14px * var(--lp-s)); border-radius: 50%;
+    background: radial-gradient(closest-side, rgb(1 8 16 / .62), rgb(1 8 16 / .28) 58%, transparent);
+  }
+  .lp-si-payung .lp-bayang { left: 24%; right: 22%; }
+
+  /* ekspresi */
+  .lp-aktor .e { visibility: hidden; }
+  .lp-aktor[data-ekspresi="normal"]:not(.kedip) .e-mata-normal,
+  .lp-aktor[data-ekspresi="normal"] .e-mulut-normal,
+  .lp-aktor[data-ekspresi="normal"].kedip .e-kedip,
+  .lp-aktor[data-ekspresi="kaget"] :is(.e-mata-kaget, .e-mulut-o),
+  .lp-aktor[data-ekspresi="pusing"] :is(.e-mata-pusing, .e-mulut-sedih, .e-air-mata),
+  .lp-aktor[data-ekspresi="senang"] :is(.e-mata-senang, .e-mulut-senang),
+  .lp-aktor[data-ekspresi="khawatir"] :is(.e-mata-khawatir, .e-mulut-o) { visibility: visible; }
+
+  /* poros bagian SVG (satuan = satuan viewBox) */
+  .lp-si-payung .lp-payung { transform-origin: 0 0; }
+  .lp-si-payung .lp-lengan-putar { transform-box: view-box; transform-origin: 50px 112px; }
+  .lp-si-peci .lp-lengan.kanan { transform-box: view-box; transform-origin: 99px 70px; }
+
+  /* berjalan: badan bergoyang, kaki bergantian */
+  @keyframes lpLangkah {
+    0%   { transform: translateY(0) rotate(-3.5deg); }
+    50%  { transform: translateY(-5%) rotate(0deg); }
+    100% { transform: translateY(0) rotate(3.5deg); }
+  }
+  @keyframes lpKaki { from { transform: translateY(0); } to { transform: translateY(-6px); } }
+  .lp-aktor.jalan .lp-langkah { animation: lpLangkah .42s ease-in-out infinite alternate; }
+  .lp-si-payung.jalan .lp-langkah { animation-duration: .52s; }
+  .lp-aktor.jalan .lp-kaki.kiri  { animation: lpKaki .42s ease-in-out infinite alternate; }
+  .lp-aktor.jalan .lp-kaki.kanan { animation: lpKaki .42s ease-in-out infinite alternate-reverse; }
+  .lp-si-payung.jalan .lp-kaki   { animation-duration: .52s; }
+
+  .lp-peci-lepas { position: absolute; left: 0; bottom: 0; z-index: 3; opacity: 0; pointer-events: none; }
+  .lp-peci-lepas svg { display: block; width: 100%; height: 100%; overflow: visible;
+    filter: drop-shadow(-2px 4px 4px rgb(2 12 24 / .4)); }
+
+  .lp-efek { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+  .lp-fx { position: absolute; display: block; will-change: transform, opacity; }
+  .lp-seru {
+    font: 800 calc(26px * var(--lp-s))/1 'Inter Tight', system-ui, sans-serif; color: #FFD76A;
+    text-shadow: 0 2px 0 #9A6B00, 0 5px 12px rgb(0 0 0 / .45);
+  }
+  .lp-debu {
+    width: calc(13px * var(--lp-s)); height: calc(13px * var(--lp-s)); margin-left: calc(-6px * var(--lp-s));
+    border-radius: 50%; background: radial-gradient(circle at 38% 34%, #FBF7FD, #C9BED8 75%);
+  }
+  .lp-orbit { width: calc(48px * var(--lp-s)); height: calc(48px * var(--lp-s)); margin: 0 0 calc(-24px * var(--lp-s)) calc(-24px * var(--lp-s)); }
+  .lp-orbit i {
+    position: absolute; font-style: normal; line-height: 1; color: #FFE08A;
+    font-size: calc(15px * var(--lp-s)); text-shadow: 0 0 8px rgb(255 214 110 / .85);
+  }
+  .lp-orbit i:nth-child(1) { left: 0; top: 40%; }
+  .lp-orbit i:nth-child(2) { right: 0; top: 40%; }
+  .lp-orbit i:nth-child(3) { left: 42%; top: -6%; font-size: calc(12px * var(--lp-s)); }
+  .lp-hati {
+    font-size: calc(28px * var(--lp-s)); line-height: 1; color: #FF6F9F; margin-left: -.5em;
+    text-shadow: 0 4px 12px rgb(255 111 159 / .55);
+  }
+  .lp-kelopak {
+    width: calc(11px * var(--lp-s)); height: calc(13px * var(--lp-s));
+    border-radius: 55% 55% 50% 50% / 70% 70% 38% 38%;
+    background: radial-gradient(circle at 62% 30%, #fff, #F9BCD1 58%, #E98AAE);
+  }
+
+  @media (min-width: 901px) and (max-height: 760px) { .lp-panggung { --lp-s: .86; } }
+  @media (min-width: 901px) and (max-height: 640px) { .lp-panggung { --lp-s: .66; } }
+  @media (max-width: 900px) {
+    .login-form.ada-panggung { justify-content: flex-end; align-items: stretch; }
+    .lp-panggung { --lp-s: .62; width: 100%; margin-bottom: -4px; }
+    /* Ruang maskot diambil dari baris kaki (Pengasuhan · Madrasah …),
+       supaya kartu masuk tetap muat satu layar tanpa digulir. */
+    #loginScreen:has(.lp-panggung) .login-foot { display: none; }
+  }
+  /* HP pendek (≤ 700 px): tidak ada ruang tanpa menggulir kartu → maskot disembunyikan. */
+  @media (max-width: 900px) and (max-height: 700px) { .lp-panggung { display: none; } }
+  @media (max-height: 540px) { .lp-panggung { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .lp-aktor .lp-langkah, .lp-aktor .lp-kaki { animation: none !important; }
+  }
+  @media print { .lp-panggung { display: none; } }
+</style>
 </head>
 <body>
 
