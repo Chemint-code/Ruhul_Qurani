@@ -22104,6 +22104,1043 @@ function pulangkanMonster(st) {
   };
 })();
 
+/* ---------- D · Kode Web Worker ----------
+ * Fungsi ini TIDAK pernah dijalankan di utas utama. Teksnya (toString)
+ * digabung dengan fungsi pengurai CSV asli menjadi satu Blob, lalu
+ * dijalankan sebagai Worker. Jadi pengurai CSV di Worker dan di utas utama
+ * adalah kode yang SAMA persis — tidak ada salinan yang bisa berbeda.
+ * Isinya:
+ *   1. RPC kecil: { rpc, nama, args } → { rpc, hasil | galat }.
+ *   2. Hujan monster: fisika + gambar di OffscreenCanvas, ≤ 30 fps,
+ *      berhenti total saat semua monster diam. Utas utama hanya mengirim
+ *      pesan kecil (gulir, ketuk, miring, ukuran kartu). */
+function kerangkaPekerja() {
+  const GRAV = .6;
+  const LAYAN = {
+    uraiCsv: (teks) => uraiCsv(teks),
+    ping: () => 'pong'
+  };
+
+  /* Kanvas dibagi menjadi "pita": di HP, Ringkasan bisa setinggi ±10.000 px,
+     padahal monster hanya tinggal di dua tempat — kartu di atas dan lantai di
+     dasar. Satu kanvas setinggi halaman melampaui batas tekstur GPU; dua pita
+     kecil tidak. Monster yang melintasi celah di antara pita dipindah langsung
+     ke atas pita lantai (tidak terlihat oleh siapa pun, tanpa kerja sia-sia). */
+  const H = {
+    pita: [], skala: 1, lebar: 0, tinggi: 0, dpr: 1,
+    mon: [], kartu: [], sprite: [], miring: 0, diam: false, tampak: true,
+    raf: 0, akhir: 0, gambarAkhir: 0, jarak: 1000 / 30, gen: 0, siap: false
+  };
+  // rAF milik Worker (selaras dengan bingkai layar); cadangan: setTimeout ± 30 fps.
+  const rafW = self.requestAnimationFrame
+    ? (f) => self.requestAnimationFrame(f)
+    : (f) => setTimeout(() => f(performance.now()), 33);
+  const batalW = self.cancelAnimationFrame ? (id) => self.cancelAnimationFrame(id) : (id) => clearTimeout(id);
+
+  function tanahDi(m) {
+    if (m.h >= 0) { const c = H.kartu[m.h]; if (c) return c.atas - m.u * .8; }
+    let susun = 0;
+    for (const o of H.mon) {
+      if (o === m || o.h >= 0 || !o.diDarat || o.lantaiIdx > m.lantaiIdx) continue;
+      if (Math.abs(o.x - m.x) < m.u * .62) susun++;
+    }
+    return H.tinggi - m.u - 2 - susun * m.u * .62;
+  }
+
+  function adaGerak(kini) {
+    if (Math.abs(H.miring) > .02) return true;
+    return H.mon.some(m => !m.diDarat || m.daun || Math.abs(m.vx) >= .02 || kini < m.mulai
+      || Math.abs(m.rot) > .3 || (m.penyet && kini - m.penyet < 380));
+  }
+
+  /* Fisika: salinan setia langkahHujan (v2.26–v2.28), tanpa guguran terus-menerus (v2.36 A1). */
+  function langkahFisika(kini) {
+    const dt = Math.min(2.2, Math.max(.25, (kini - (H.akhir || kini)) / 16.667));
+    H.akhir = kini;
+    const ax = H.miring, lebar = H.lebar;
+    for (const m of H.mon) {
+      if (kini < m.mulai) continue;
+      if (m.diDarat && Math.abs(ax) < .02 && Math.abs(m.vx) < .02) {
+        const g = tanahDi(m);
+        if (m.h >= 0) { const c = H.kartu[m.h]; if (c) m.x = c.kiri + m.dx; }
+        if (Math.abs(g - m.y) > .5) m.diDarat = false;
+        else { m.y = g; if (Math.abs(m.rot) > .3) m.rot *= .8; else m.rot = 0; continue; }
+      }
+      if (m.daun) {
+        m.fase += .055 * dt;
+        m.vy = Math.min(3.2, m.vy + .08 * dt);
+        m.vx = Math.sin(m.fase) * 1.6 + ax * 6;
+        m.rot = Math.sin(m.fase + .8) * 22;
+      } else {
+        m.vy = Math.min(24, m.vy + GRAV * dt);
+        m.vx = (m.vx + ax * dt) * Math.pow(.992, dt);
+        m.rot += m.vr * dt;
+      }
+      if (m.h >= 0) { m.dx += m.vx * dt; const c = H.kartu[m.h]; m.x = c ? c.kiri + m.dx : m.x + m.vx * dt; }
+      else m.x += m.vx * dt;
+      m.y += m.vy * dt;
+      // Lompati celah tak terlihat di antara pita atas dan pita lantai.
+      if (H.pita.length > 1 && m.h < 0 && m.vy > 0) {
+        const celahAtas = H.pita[0].y1, celahBawah = H.pita[H.pita.length - 1].y0;
+        if (m.y > celahAtas && m.y + m.u < celahBawah) m.y = celahBawah - m.u;
+      }
+      if (m.x < 0) { m.x = 0; m.vx = Math.abs(m.vx) * .3; if (m.h >= 0) m.h = -1; }
+      if (m.x > lebar - m.u) { m.x = lebar - m.u; m.vx = -Math.abs(m.vx) * .3; if (m.h >= 0) m.h = -1; }
+      if (m.h >= 0) {
+        const c = H.kartu[m.h], tengah = m.x + m.u / 2;
+        if (!c || tengah < c.kiri - 2 || tengah > c.kiri + c.lebar + 2) {
+          m.h = -1; m.diDarat = false;
+          m.lantaiIdx = Math.max(...H.mon.map(o => o.lantaiIdx)) + 1;
+        }
+      }
+      const tanah = tanahDi(m);
+      if (m.y >= tanah) {
+        m.y = tanah;
+        if (m.vy > 3 && !m.daun) { m.vy = -m.vy * .42; m.vr = -m.vr * .5 + (Math.random() - .5) * 4; }
+        else {
+          if (!m.diDarat) m.penyet = kini;
+          m.vy = 0; m.vr = 0; m.daun = 0; m.diDarat = true;
+          m.vx = (m.vx + ax * 1.4 * dt) * Math.pow(.86, dt);
+          m.rot = m.rot * Math.pow(.75, dt) + m.vx * 1.5;
+          if (Math.abs(m.vx) < .02) m.vx = 0;
+        }
+      } else m.diDarat = false;
+    }
+  }
+
+  /* "Penyet" saat mendarat: 1,25×0,7 → 0,92×1,1 → 1 dalam 380 ms (sama dengan monPenyet). */
+  function skalaPenyet(m, kini) {
+    if (!m.penyet) return [1, 1];
+    const k = (kini - m.penyet) / 380;
+    if (k >= 1) { m.penyet = 0; return [1, 1]; }
+    const e = 1 - Math.pow(1 - k, 3);
+    if (e < .6) { const u = e / .6; return [1.25 + (.92 - 1.25) * u, .7 + (1.1 - .7) * u]; }
+    const u = (e - .6) / .4; return [.92 + .08 * u, 1.1 - .1 * u];
+  }
+
+  function gambar(kini) {
+    const s = H.skala;
+    for (const pt of H.pita) {
+      const ctx = pt.ctx; if (!ctx) continue;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      for (const k of pt.kotak) ctx.clearRect(k[0], k[1], k[2], k[3]);   // hanya bekas monster, bukan seluruh kanvas
+      pt.kotak = [];
+    }
+    H.mon.forEach((m, i) => {
+      const spr = H.sprite[i]; if (!spr || kini < m.mulai && m.y < -m.u) return;
+      const u = m.u, p = u * .45;                         // ruang untuk rotasi & penyet
+      const [sx, sy] = skalaPenyet(m, kini);
+      for (const pt of H.pita) {
+        if (!pt.ctx || m.y + u + p < pt.y0 || m.y - p > pt.y1) continue;
+        const ctx = pt.ctx;
+        ctx.setTransform(s, 0, 0, s, 0, -pt.y0 * s);
+        ctx.translate(m.x + u / 2, m.y + u / 2);
+        if (m.rot) ctx.rotate(m.rot * Math.PI / 180);
+        ctx.translate(0, u / 2);
+        if (sx !== 1 || sy !== 1) ctx.scale(sx, sy);
+        ctx.drawImage(spr, -u / 2, -u, u, u);
+        pt.kotak.push([Math.floor((m.x - p) * s), Math.floor((m.y - p - pt.y0) * s), Math.ceil((u + 2 * p) * s), Math.ceil((u + 2 * p) * s)]);
+      }
+    });
+  }
+
+  function kirimKeadaan(jalan) {
+    const n = H.mon.length, a = new Float32Array(n * 7 + 1);
+    a[0] = jalan ? 1 : 0;
+    H.mon.forEach((m, i) => {
+      const o = 1 + i * 7;
+      a[o] = m.x; a[o + 1] = m.y; a[o + 2] = m.vx; a[o + 3] = m.vy; a[o + 4] = m.rot;
+      a[o + 5] = (m.diDarat ? 1 : 0) | (m.daun ? 2 : 0);
+      a[o + 6] = m.h;
+    });
+    self.postMessage({ t: 'hujan:keadaan', gen: H.gen, a }, [a.buffer]);
+  }
+
+  function tik(kini) {
+    H.raf = 0;
+    if (!H.pita.length || !H.tampak) return;
+    if (kini - H.gambarAkhir < H.jarak - 2) { H.raf = rafW(tik); return; }   // A8: ≤ 30 fps
+    H.gambarAkhir = kini;
+    langkahFisika(kini);
+    gambar(kini);
+    const jalan = adaGerak(kini);
+    kirimKeadaan(jalan);
+    if (!H.siap) { H.siap = true; self.postMessage({ t: 'hujan:siap', gen: H.gen }); }
+    if (jalan) H.raf = rafW(tik);
+  }
+  function bangun() {
+    if (H.raf || !H.pita.length || !H.tampak) return;
+    H.akhir = performance.now() - H.jarak;
+    H.raf = rafW(tik);
+  }
+  /** geo = [{y0, y1}] sejajar dengan H.pita. Batas: total ≤ 4 juta piksel (±16 MB). */
+  function aturUkuran(lebar, tinggi, geo) {
+    H.lebar = lebar; H.tinggi = tinggi;
+    if (geo) geo.forEach((g, i) => { if (H.pita[i]) { H.pita[i].y0 = g.y0; H.pita[i].y1 = g.y1; } });
+    let s = Math.min(H.dpr || 1, 2);
+    const luas = Math.max(1, H.pita.reduce((a, pt) => a + lebar * (pt.y1 - pt.y0), 0));
+    if (luas * s * s > 4e6) s = Math.max(.5, Math.sqrt(4e6 / luas));
+    H.skala = s;
+    for (const pt of H.pita) {
+      pt.kanvas.width = Math.max(1, Math.round(lebar * s));
+      pt.kanvas.height = Math.max(1, Math.round((pt.y1 - pt.y0) * s));
+      pt.kotak = [];
+    }
+  }
+
+  const HUJAN_W = {
+    'hujan:mulai'(m) {
+      if (H.raf) { batalW(H.raf); H.raf = 0; }
+      H.gen = m.gen;
+      H.pita = m.pita.map(p => ({ y0: p.y0, y1: p.y1, kanvas: p.kanvas, ctx: p.kanvas.getContext('2d'), kotak: [] }));
+      H.dpr = m.dpr; H.sprite = m.sprite; H.kartu = m.kartu || []; H.miring = 0; H.diam = !!m.diam;
+      H.tampak = true; H.siap = false;
+      const kini = performance.now();
+      H.mon = m.mon.map(o => ({ ...o, mulai: o.mulaiDalam > 0 ? kini + o.mulaiDalam : 0, penyet: 0 }));
+      aturUkuran(m.lebar, m.tinggi);
+      H.gambarAkhir = 0;
+      bangun();
+    },
+    'hujan:ukuran'(m) {
+      if (m.gen !== H.gen) return;
+      if (m.kartu) H.kartu = m.kartu;
+      const geoBeda = m.pita && m.pita.some((g, i) => !H.pita[i] || g.y0 !== H.pita[i].y0 || g.y1 !== H.pita[i].y1);
+      if (m.lebar !== H.lebar || m.tinggi !== H.tinggi || geoBeda) aturUkuran(m.lebar, m.tinggi, m.pita);
+      H.gambarAkhir = 0; bangun();
+    },
+    'hujan:gulir'(m) {
+      if (m.gen !== H.gen) return;
+      const kuat = Math.min(1.7, .6 + Math.abs(m.d) / 40);
+      for (const o of H.mon) {
+        if (!o.diDarat || o.daun) continue;
+        const lantai = o.h < 0;
+        o.vy = -(lantai ? 9 + Math.random() * 9 : 4 + Math.random() * 3) * kuat;
+        o.vr = (Math.random() - .5) * (lantai ? 16 : 6);
+        o.diDarat = false; o.mulai = 0;
+      }
+      bangun();
+    },
+    'hujan:ketuk'(m) {
+      if (m.gen !== H.gen) return;
+      const o = H.mon[m.i]; if (!o) return;
+      o.vy = -(8 + Math.random() * 5); o.vr = (Math.random() - .5) * 18; o.diDarat = false; o.mulai = 0; o.daun = 0;
+      bangun();
+    },
+    'hujan:miring'(m) { if (m.gen !== H.gen) return; H.miring = m.v; bangun(); },
+    'hujan:tampak'(m) { H.tampak = !!m.v; if (H.tampak) bangun(); else if (H.raf) { batalW(H.raf); H.raf = 0; } },
+    'hujan:henti'(m) {
+      if (m.gen != null && m.gen !== H.gen) return;
+      if (H.raf) { batalW(H.raf); H.raf = 0; }
+      H.sprite.forEach(b => { try { b.close(); } catch (e) {} });
+      H.pita = []; H.mon = []; H.sprite = [];
+    }
+  };
+
+  self.onmessage = (e) => {
+    const m = e.data || {};
+    if (m.rpc != null) {
+      let hasil, galat = null;
+      try {
+        const f = LAYAN[m.nama];
+        if (!f) throw new Error('layanan tidak dikenal: ' + m.nama);
+        hasil = f.apply(null, m.args || []);
+      } catch (err) { galat = String((err && err.message) || err); }
+      self.postMessage({ rpc: m.rpc, hasil, galat });
+      return;
+    }
+    const f = HUJAN_W[m.t];
+    if (f) { try { f(m); } catch (err) { self.postMessage({ t: 'galat', pesan: String(err && err.message || err) }); } }
+  };
+}
+
+/* =====================================================================
+ * v2.36 — SISTEM GERAK YANG DINGIN
+ * ---------------------------------------------------------------------
+ *  Dasar: rancangan-v2.36-sistem-gerak-dingin (disetujui 25-09-2026).
+ *  Temuan: dasbor yang DIAM memakai 27–44 % satu inti CPU (emulasi HP,
+ *  CPU 4× lebih lambat); ±95 % dari hujan monster yang tak pernah tidur.
+ *
+ *  A  Penjaga Panas  — guguran sekali saja; sensor miring hanya setelah
+ *                      monster diketuk (8 dtk); 3 dtk tanpa sentuhan →
+ *                      tidur; animasi tak berujung di luar layar dijeda;
+ *                      penghuni grafik tanpa offset-distance; mode efek
+ *                      otomatis ikut baterai & beban; dekorasi ≤ 30 fps.
+ *  B  Sistem Gerak   — token durasi & pegas CSS linear(); Gerak.main()
+ *                      di atas Web Animations API; dibatalkan saat pindah.
+ *  C  View Transitions — tirai 1,2 dtk hanya untuk muat pertama; pindah
+ *                      halaman ≤ 350 ms, arah maju/mundur; kartu santri
+ *                      memekar menjadi rinciannya (FLIP, WAAPI).
+ *  D  Web Worker     — hujan monster digambar Worker di OffscreenCanvas;
+ *                      pengurai CSV impor berjalan di Worker (kode sama).
+ *  Semua berupa PEMBUNGKUS; fungsi lama tidak ditimpa. Database tidak disentuh.
+ * ===================================================================== */
+APP.versi = 'rq-v2.36';
+
+const DINGIN = {
+  TIDUR_MS: 3000,          // A3: tanpa sentuhan selama ini → tidur
+  SENSOR_MS: 8000,         // A2: sensor miring menyala sesudah monster diketuk
+  VT_TUNGGU: 150,          // C: tunggu isi halaman baru selama ini (data dari cache) sebelum transisi
+  genHujan: 0,
+  tTidur: 0, tSensor: 0,
+  sensorAktif: false,
+  baterai: null,
+  sebabHemat: null         // 'baterai' | 'beban' saat mode otomatis memindahkan ke hemat
+};
+
+/* =====================================================================
+ * B · SISTEM GERAK
+ * ===================================================================== */
+const Gerak = {
+  halaman: new Set(),      // animasi milik halaman aktif → dibatalkan saat pindah
+  DUR: { kilat: 120, cepat: 200, sedang: 320, lambat: 520 },
+  _kurva: null,
+  kurva(nama) {
+    if (!this._kurva) {
+      const cs = getComputedStyle(document.documentElement);
+      const ambil = (v, cadangan) => (cs.getPropertyValue(v) || '').trim() || cadangan;
+      const bisaLinear = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('animation-timing-function', 'linear(0, 1)');
+      const lengkung = ambil('--lengkung', 'cubic-bezier(.22,1,.36,1)');
+      this._kurva = {
+        lengkung,
+        lembut:  bisaLinear ? ambil('--pegas-lembut', lengkung) : lengkung,
+        lenting: bisaLinear ? ambil('--pegas-lenting', lengkung) : 'cubic-bezier(.3,1.5,.5,1)',
+        mantap:  bisaLinear ? ambil('--pegas-mantap', lengkung) : lengkung
+      };
+    }
+    return this._kurva[nama] || this._kurva.lengkung;
+  },
+  PRESET: {
+    masuk:  { k: [{ opacity: 0, translate: '0 12px' }, { opacity: 1, translate: '0 0' }], d: 'sedang', e: 'lembut' },
+    muncul: { k: [{ opacity: 0, scale: .96 }, { opacity: 1, scale: 1 }], d: 'sedang', e: 'lembut' },
+    tekan:  { k: [{ scale: 1 }, { scale: .95 }, { scale: 1 }], d: 'cepat', e: 'lenting' }
+  },
+  /** Satu pintu animasi JS. Mengembalikan Animation (bisa di-await lewat .finished). */
+  main(el, nama, o = {}) {
+    const p = this.PRESET[nama];
+    if (!el || !p || !bolehGerak() || typeof el.animate !== 'function') return { finished: Promise.resolve(), cancel() {} };
+    const { milikHalaman = true, ...opsi } = o;
+    const a = el.animate(p.k, { duration: this.DUR[p.d], easing: this.kurva(p.e), fill: 'backwards', ...opsi });
+    if (milikHalaman) {
+      this.halaman.add(a);
+      a.finished.catch(() => {}).finally(() => this.halaman.delete(a));
+    }
+    return a;
+  },
+  /** Masuk berurutan untuk anak-anak sebuah wadah (dipakai sesudah isi datang terlambat). */
+  masukBerurutan(wadah, maks = 8) {
+    if (!wadah || !bolehGerak()) return;
+    [...wadah.children].filter(el => !el.classList.contains('hujan-mon')).slice(0, maks)
+      .forEach((el, i) => this.main(el, 'masuk', { delay: i * 34 }));
+  },
+  batalkanHalaman() {
+    for (const a of this.halaman) { try { a.cancel(); } catch (e) {} }
+    this.halaman.clear();
+  }
+};
+
+/* =====================================================================
+ * A3 · TIDUR — 3 dtk tanpa sentuhan
+ *  Memakai kelas .tenang milik v2.28 (yang dulu baru menyala sesudah
+ *  10 dtk): semua hiasan tak berujung dijeda, penghuni berhenti berjalan.
+ * ===================================================================== */
+function tidurkanHias() {
+  DINGIN.tTidur = 0;
+  if (document.hidden) return;
+  MULUS.tenang = true;
+  document.documentElement.classList.add('tenang');
+  aturPenghuniDingin();
+}
+function jadwalTidur() {
+  clearTimeout(DINGIN.tTidur);
+  DINGIN.tTidur = setTimeout(tidurkanHias, DINGIN.TIDUR_MS);
+}
+(function pasangTidur() {
+  const bangunkan = () => {
+    const tadiTidur = MULUS.tenang;
+    // aktifLagi() v2.28 sudah melepas .tenang lebih dulu (pendengar capture yang lebih awal).
+    if (tadiTidur || document.documentElement.classList.contains('tenang')) {
+      MULUS.tenang = false; document.documentElement.classList.remove('tenang');
+    }
+    jadwalTidur();
+    if (tadiTidur) aturPenghuniDingin();
+  };
+  ['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'].forEach(ev =>
+    window.addEventListener(ev, bangunkan, { passive: true, capture: true }));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) jadwalTidur(); });
+  jadwalTidur();
+})();
+
+/* =====================================================================
+ * A4 · Animasi tak berujung di luar layar → dijeda
+ *  v2.28 hanya mengamati beberapa wadah hiasan. Di sini SEMUA animasi CSS
+ *  tak berujung yang sedang berjalan diperiksa (sesudah pindah halaman &
+ *  sesudah gulir berhenti); yang sasarannya di luar layar diberi
+ *  .luar-layar (aturan jeda v2.28) sampai kembali terlihat.
+ * ===================================================================== */
+const LUAR = { io: null, diamati: new WeakSet(), t: 0, tM: 0 };
+function sapuLuarLayar() {
+  LUAR.t = 0;
+  if (typeof IntersectionObserver !== 'function' || !document.getAnimations) return;
+  LUAR.io = LUAR.io || new IntersectionObserver((entri) => {
+    for (const e of entri) e.target.classList.toggle('luar-layar', !e.isIntersecting);
+  }, { rootMargin: '60px 0px' });
+  for (const a of document.getAnimations()) {
+    // Yang sedang dijeda (mis. oleh .tenang) ikut diamati: saat bangun, ia tidak boleh jalan di luar layar.
+    if (a.playState === 'idle' || a.playState === 'finished' || a.timeline !== document.timeline) continue;   // scroll-driven: biarkan
+    const ef = a.effect; if (!ef || !ef.target) continue;
+    let tak = false;
+    try { tak = ef.getComputedTiming().iterations === Infinity; } catch (e) {}
+    if (!tak) continue;
+    const el = ef.target;
+    if (!el.isConnected || LUAR.diamati.has(el) || el === document.documentElement || el === document.body) continue;
+    if (el.closest('.lm, .swal2-container, #appShell > .sidebar')) continue;    // layar muat & dialog: selalu tampak saat hidup
+    LUAR.diamati.add(el);
+    LUAR.io.observe(el);
+  }
+}
+/** Gulir: tunggu sampai berhenti (debounce). */
+function jadwalSapu(ms = 250) { clearTimeout(LUAR.t); LUAR.t = setTimeout(sapuLuarLayar, ms); }
+/** Perubahan DOM: paling lambat `ms` lagi (tidak diundur terus oleh mutasi beruntun). */
+function jadwalSapuDom(ms = 400) { if (LUAR.tM) return; LUAR.tM = setTimeout(() => { LUAR.tM = 0; sapuLuarLayar(); }, ms); }
+window.addEventListener('scroll', () => jadwalSapu(300), { passive: true });
+
+/* =====================================================================
+ * A5 · Penghuni grafik: jalur keliling dengan transform (WAAPI)
+ *  Menggantikan offset-path/offset-distance (dihitung ulang tiap bingkai
+ *  di utas utama). Waktu, jeda, dan arah hadap sama dengan pengKeliling:
+ *  kaki selalu menapak ke tepi, searah jarum jam, 30 dtk per putaran.
+ * ===================================================================== */
+const KELILING = {
+  DURASI: 30000,
+  // [waktu, jarak] — sama dengan @keyframes pengKeliling (berhenti di 17/38/61/86 %)
+  HENTI: [[0, 0], [.16, .17], [.22, .17], [.41, .38], [.47, .38], [.66, .61], [.72, .61], [.91, .86], [.96, .86], [1, 1]],
+  peta: new WeakMap(),     // tombol → { a, ro, waktu }
+  U: 36, TEPI: 3, R: 14
+};
+
+/** Titik & sudut pada keliling persegi membulat (inset 3 px, jari-jari 14). s ∈ [0, 1]. */
+function titikKeliling(w, h, s) {
+  const t = KELILING.TEPI, r = Math.min(KELILING.R, (w - 2 * t) / 2, (h - 2 * t) / 2);
+  const x0 = t, y0 = t, x1 = w - t, y1 = h - t;
+  const lurusX = Math.max(0, x1 - x0 - 2 * r), lurusY = Math.max(0, y1 - y0 - 2 * r), busur = Math.PI * r / 2;
+  const seg = [
+    { l: lurusX, f: (k) => [x0 + r + k * lurusX, y0, 0] },
+    { l: busur,  f: (k) => { const a = -Math.PI / 2 + k * Math.PI / 2; return [x1 - r + r * Math.cos(a), y0 + r + r * Math.sin(a), k * 90]; } },
+    { l: lurusY, f: (k) => [x1, y0 + r + k * lurusY, 90] },
+    { l: busur,  f: (k) => { const a = k * Math.PI / 2; return [x1 - r + r * Math.cos(a), y1 - r + r * Math.sin(a), 90 + k * 90]; } },
+    { l: lurusX, f: (k) => [x1 - r - k * lurusX, y1, 180] },
+    { l: busur,  f: (k) => { const a = Math.PI / 2 + k * Math.PI / 2; return [x0 + r + r * Math.cos(a), y1 - r + r * Math.sin(a), 180 + k * 90]; } },
+    { l: lurusY, f: (k) => [x0, y1 - r - k * lurusY, 270] },
+    { l: busur,  f: (k) => { const a = Math.PI + k * Math.PI / 2; return [x0 + r + r * Math.cos(a), y0 + r + r * Math.sin(a), 270 + k * 90]; } }
+  ];
+  const total = seg.reduce((a, g) => a + g.l, 0) || 1;
+  let d = Math.max(0, Math.min(1, s)) * total;
+  for (const g of seg) {
+    if (d <= g.l || g === seg[seg.length - 1]) { const [x, y, arah] = g.f(g.l ? Math.min(1, d / g.l) : 0); return { x, y, arah }; }
+    d -= g.l;
+  }
+  return { x: x0, y: y0, arah: 0 };
+}
+
+/** Keyframe transform: kaki (tengah-bawah) di titik jalur, diputar arah + 180° (offset-rotate: reverse). */
+function kerangkaKeliling(w, h) {
+  const U = KELILING.U, H = KELILING.HENTI;
+  const batas = [];                                      // titik sudut jalur agar tidak "memotong" tikungan
+  for (let i = 0; i <= 64; i++) batas.push(i / 64);
+  const kf = [];
+  const tf = (s) => { const p = titikKeliling(w, h, s); return `translate(${(p.x - U / 2).toFixed(2)}px, ${(p.y - U).toFixed(2)}px) rotate(${(p.arah + 180).toFixed(2)}deg)`; };
+  for (let i = 0; i < H.length; i++) {
+    const [t, s] = H[i];
+    kf.push({ offset: t, transform: tf(s) });
+    const nx = H[i + 1]; if (!nx || nx[1] === s) continue;
+    for (const b of batas) if (b > s && b < nx[1]) kf.push({ offset: t + (b - s) / (nx[1] - s) * (nx[0] - t), transform: tf(b) });
+  }
+  return kf;
+}
+
+function penghuniBolehDingin() {
+  return bolehGerak() && typeof Element.prototype.animate === 'function';
+}
+
+/** Pasang/lepas animasi keliling pada satu penghuni, lalu jalankan/jeda sesuai keadaannya. */
+function aturSatuPenghuni(b) {
+  if (!b || !b.isConnected) return;
+  let st = KELILING.peta.get(b);
+  if (!penghuniBolehDingin()) {
+    if (st) { try { st.a.cancel(); } catch (e) {} if (st.ro) st.ro.disconnect(); KELILING.peta.delete(b); }
+    // Hanya bila perlu: classList.remove() SELALU menulis atribut (memicu pemantau → putaran tanpa akhir).
+    if (b.classList.contains('dingin')) b.classList.remove('dingin');
+    return;
+  }
+  const wadah = b.parentElement; if (!wadah) return;
+  const sibukTarik = b.matches('.meminta, .menarik, .pulang');
+  if (!st) {
+    const w = wadah.clientWidth, h = wadah.clientHeight;
+    if (!w || !h) return;
+    b.classList.add('dingin');
+    const a = b.animate(kerangkaKeliling(w, h), { duration: KELILING.DURASI, iterations: Infinity, easing: 'linear' });
+    const tunda = parseFloat(getComputedStyle(b).getPropertyValue('--tunda')) || 0;   // detik, negatif
+    a.currentTime = ((-tunda * 1000) % KELILING.DURASI + KELILING.DURASI) % KELILING.DURASI;
+    a.pause();
+    st = { a, w, h, waktu: a.currentTime, batal: false };
+    st.ro = new ResizeObserver(() => {
+      const w2 = wadah.clientWidth, h2 = wadah.clientHeight;
+      if (!w2 || !h2 || (w2 === st.w && h2 === st.h)) return;
+      st.w = w2; st.h = h2;
+      try { st.a.effect.setKeyframes(kerangkaKeliling(w2, h2)); } catch (e) {}
+    });
+    st.ro.observe(wadah);
+    KELILING.peta.set(b, st);
+  }
+  // Sedang ditarik (v2.35): posisinya milik penarik — lepaskan efek keliling, ingat waktunya.
+  if (sibukTarik) {
+    if (!st.batal) { st.waktu = st.a.currentTime; st.a.cancel(); st.batal = true; }
+    return;
+  }
+  if (st.batal) { st.batal = false; st.a.currentTime = st.waktu || 0; st.a.pause(); }
+  const jalan = b.classList.contains('jalan') && !b.classList.contains('bahagia')
+    && !MULUS.tenang && !b.classList.contains('luar-layar') && !document.hidden;
+  if (jalan && st.a.playState !== 'running') st.a.play();
+  else if (!jalan && st.a.playState === 'running') st.a.pause();
+}
+function aturPenghuniDingin() {
+  document.querySelectorAll('.penghuni').forEach(aturSatuPenghuni);
+}
+(function pantauPenghuni() {
+  const mo = new MutationObserver((daftar) => {
+    const kena = new Set();
+    for (const d of daftar) {
+      if (d.type === 'attributes' && d.target.classList && d.target.classList.contains('penghuni')) kena.add(d.target);
+      if (d.type === 'childList') d.addedNodes.forEach(n => {
+        if (n.nodeType !== 1) return;
+        if (n.classList.contains('penghuni')) kena.add(n);
+        else if (n.querySelectorAll) n.querySelectorAll('.penghuni').forEach(x => kena.add(x));
+      });
+    }
+    if (kena.size) { requestAnimationFrame(() => kena.forEach(aturSatuPenghuni)); jadwalSapuDom(400); }
+  });
+  const mulai = () => mo.observe($('viewRoot') || document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+  if ($('viewRoot')) mulai(); else document.addEventListener('DOMContentLoaded', mulai);
+})();
+
+/* =====================================================================
+ * A1 · A2 · A8 · HUJAN MONSTER
+ *  A1 Guguran terus-menerus dihapus: monster jatuh sekali saat Ringkasan
+ *     dibuka, lalu hanya bergerak bila digulir / diketuk.
+ *  A2 Sensor kemiringan tidak lagi menyala otomatis. Ketuk satu monster →
+ *     ia meloncat, dan sensor menyala 8 dtk (HP dimiringkan → monster
+ *     bergeser), lalu mati sendiri.
+ *  A8 Jalur DOM cadangan dibatasi ± 30 fps.
+ *  D1 Bila peramban mendukung OffscreenCanvas, seluruh hujan dipindah ke
+ *     kanvas yang digambar Web Worker; HUJAN.mon tetap dicerminkan di sini
+ *     (posisi, kecepatan) sehingga ketukan & uji lama tetap bekerja.
+ * ===================================================================== */
+(function penjagaHujan() {
+  const bangunAsli = bangunkanHujan;
+  const hentiSebelum = hentikanHujan;
+  const hujanSebelum = hujanMonster;
+  const langkahSebelum = langkahHujan;
+  const jadwalSebelum = jadwalkanGugur;
+  const gulirSebelum = gulirHujan;
+
+  hujanMonster = function () {
+    const hasil = hujanSebelum.apply(this, arguments);
+    HUJAN.gugurBerikut = Infinity;                                  // A1
+    window.removeEventListener('deviceorientation', sensorMiring);  // A2
+    matikanSensor(true);
+    if (HUJAN.lapis) hujanKeKanvas();                               // D1 (asinkron; gagal → tetap DOM)
+    return hasil;
+  };
+
+  jadwalkanGugur = function () {
+    if (!Number.isFinite(HUJAN.gugurBerikut)) { clearTimeout(MULUS.tGugur); MULUS.tGugur = 0; return; }
+    return jadwalSebelum.apply(this, arguments);
+  };
+
+  langkahHujan = function (kini) {
+    if (HUJAN.kanvas) { HUJAN.raf = HUJAN.pekerjaJalan ? 1 : 0; return; }   // digambar Worker
+    // A8: dekorasi ≤ 30 fps (fisika memakai dt, jadi melewati bingkai aman)
+    if (HUJAN.gambarAkhir && kini - HUJAN.gambarAkhir < 30) { HUJAN.raf = requestAnimationFrame(langkahHujan); return; }
+    HUJAN.gambarAkhir = kini;
+    return langkahSebelum.apply(this, arguments);
+  };
+
+  bangunkanHujan = function () {
+    if (HUJAN.kanvas) return kirimUkuranHujan();
+    return bangunAsli.apply(this, arguments);
+  };
+
+  gulirHujan = function () {
+    if (!HUJAN.kanvas) return gulirSebelum.apply(this, arguments);
+    const d = scrollY - HUJAN.gulir;
+    HUJAN.gulir = scrollY;
+    const kini = performance.now();
+    if (Math.abs(d) < 4 || kini - HUJAN.dorong < 320) return;
+    HUJAN.dorong = kini;
+    kirimHujan({ t: 'hujan:gulir', d });
+  };
+
+  hentikanHujan = function () {
+    matikanSensor(true);
+    if (HUJAN.kanvas) {
+      kirimHujan({ t: 'hujan:henti' });
+      window.removeEventListener('scroll', gulirHujan);
+      HUJAN.kanvas = null; HUJAN.pekerjaJalan = false; HUJAN.raf = 0;
+    }
+    DINGIN.genHujan++;
+    HUJAN.gambarAkhir = 0;
+    return hentiSebelum.apply(this, arguments);
+  };
+
+  // visibilitychange memanggil fungsi ASLI (terdaftar sebelum dibungkus) → teruskan ke Worker juga.
+  document.addEventListener('visibilitychange', () => {
+    if (HUJAN.kanvas) kirimHujan({ t: 'hujan:tampak', v: !document.hidden });
+  });
+
+  // A2: ketuk monster (lapisan hujan tidak menangkap klik → uji titik di sini).
+  document.addEventListener('pointerdown', (e) => {
+    if (!HUJAN.lapis || !HUJAN.mon.length || HUJAN.diam) return;
+    const r = HUJAN.lapis.getBoundingClientRect();
+    const px = e.clientX - r.left, py = e.clientY - r.top;
+    const pad = 6;
+    let kena = -1;
+    HUJAN.mon.forEach((m, i) => {
+      if (px >= m.x - pad && px <= m.x + m.u + pad && py >= m.y - pad && py <= m.y + m.u + pad) kena = i;
+    });
+    if (kena < 0) return;
+    ketukMonsterHujan(kena);
+  }, { passive: true, capture: true });
+})();
+
+function ketukMonsterHujan(i) {
+  const m = HUJAN.mon[i]; if (!m) return;
+  getar(8);
+  if (HUJAN.kanvas) kirimHujan({ t: 'hujan:ketuk', i });
+  else {
+    m.vy = -(8 + Math.random() * 5); m.vr = (Math.random() - .5) * 18; m.diDarat = false; m.mulai = 0; m.daun = 0;
+    bangunkanHujan();
+  }
+  nyalakanSensor();
+}
+
+function sensorDingin(e) {
+  sensorMiring(e);                      // hitungan v2.27 (zona mati, peredam) → HUJAN.miring
+  if (HUJAN.kanvas) kirimHujan({ t: 'hujan:miring', v: HUJAN.miring });
+}
+function nyalakanSensor() {
+  if (!('DeviceOrientationEvent' in window) || HUJAN.diam) return;
+  const DOE = window.DeviceOrientationEvent;
+  if (typeof DOE.requestPermission === 'function' && !HUJAN.izinDiminta) {       // iOS: harus dari sentuhan
+    HUJAN.izinDiminta = true; DOE.requestPermission().catch(() => {});
+  }
+  if (!DINGIN.sensorAktif) { window.addEventListener('deviceorientation', sensorDingin); DINGIN.sensorAktif = true; }
+  clearTimeout(DINGIN.tSensor);
+  DINGIN.tSensor = setTimeout(() => matikanSensor(false), DINGIN.SENSOR_MS);
+}
+function matikanSensor(diam) {
+  clearTimeout(DINGIN.tSensor); DINGIN.tSensor = 0;
+  if (DINGIN.sensorAktif) window.removeEventListener('deviceorientation', sensorDingin);
+  DINGIN.sensorAktif = false;
+  if (HUJAN.miring) {
+    HUJAN.miring = 0;
+    if (!diam) { if (HUJAN.kanvas) kirimHujan({ t: 'hujan:miring', v: 0 }); else bangunkanHujan(); }
+  }
+}
+
+/* =====================================================================
+ * D · WEB WORKER
+ * ===================================================================== */
+const Pekerja = {
+  w: null, gagal: false, id: 0, tunggu: new Map(),
+  /** Worker dibangun dari teks fungsi yang SUDAH ada di app.js — tanpa berkas tambahan. */
+  sumber() {
+    return [bersihkanTeksCsv, deteksiPemisah, uraiBarisCsv, PEKERJA_ASLI.uraiCsv].map(f => f.toString()).join('\n')
+      + `\nconst kunciKolom = ${kunciKolom.toString()};\n(${kerangkaPekerja.toString()})();\n`;
+  },
+  dapat() {
+    if (this.w || this.gagal) return this.w;
+    if (typeof Worker !== 'function' || typeof Blob !== 'function') { this.gagal = true; return null; }
+    try {
+      const url = URL.createObjectURL(new Blob([this.sumber()], { type: 'text/javascript' }));
+      const w = new Worker(url, { name: 'rq-pekerja' });
+      w.onmessage = (e) => this.terima(e.data || {});
+      w.onerror = (e) => { console.warn('[pekerja] galat:', e.message); this.matikan(); };
+      this.w = w;
+    } catch (e) { console.warn('[pekerja] tidak dapat dibuat:', e.message); this.gagal = true; }
+    return this.w;
+  },
+  matikan() {
+    try { this.w && this.w.terminate(); } catch (e) {}
+    this.w = null; this.gagal = true;
+    for (const [, j] of this.tunggu) j.gagal(new Error('pekerja berhenti'));
+    this.tunggu.clear();
+    if (HUJAN.kanvas) { HUJAN.kanvas = null; try { hujanMonster(APP.monster && APP.monster.tingkat); } catch (e) {} }
+  },
+  terima(m) {
+    if (m.rpc != null) {
+      const j = this.tunggu.get(m.rpc); if (!j) return;
+      this.tunggu.delete(m.rpc);
+      return m.galat ? j.gagal(new Error(m.galat)) : j.ok(m.hasil);
+    }
+    if (m.t === 'hujan:keadaan') return cerminHujan(m);
+    if (m.t === 'hujan:siap') return hujanKanvasSiap(m);
+    if (m.t === 'galat') console.warn('[pekerja]', m.pesan);
+  },
+  /** RPC. Bila Worker tidak ada / gagal, jalankan fungsi yang sama di utas utama. */
+  panggil(nama, args, cadangan) {
+    const w = this.dapat();
+    if (!w) return Promise.resolve().then(() => cadangan.apply(null, args));
+    const id = ++this.id;
+    return new Promise((ok, gagal) => {
+      this.tunggu.set(id, { ok, gagal });
+      w.postMessage({ rpc: id, nama, args });
+    }).catch((e) => { console.warn('[pekerja] cadangan utas utama:', e.message); return cadangan.apply(null, args); });
+  }
+};
+const PEKERJA_ASLI = { uraiCsv };
+
+/* ---------- D2 · CSV impor diurai di Worker ----------
+ * pratinjauCsv memanggil uraiCsv() secara sinkron. Pembungkusnya mengurai
+ * teks di Worker LEBIH DULU, lalu uraiCsv() cukup mengembalikan hasil yang
+ * sudah jadi (dicocokkan dengan teks yang sama persis). */
+const MEMO_CSV = { teks: null, hasil: null };
+uraiCsv = function (teks) {
+  if (MEMO_CSV.teks !== null && teks === MEMO_CSV.teks) { const h = MEMO_CSV.hasil; MEMO_CSV.teks = MEMO_CSV.hasil = null; return h; }
+  return PEKERJA_ASLI.uraiCsv(teks);
+};
+(function () {
+  const pratinjauSebelum = pratinjauCsv;
+  pratinjauCsv = async function (jenis, namaBerkas, teks) {
+    try {
+      const hasil = await Pekerja.panggil('uraiCsv', [teks], PEKERJA_ASLI.uraiCsv);
+      MEMO_CSV.teks = teks; MEMO_CSV.hasil = hasil;
+    } catch (e) { MEMO_CSV.teks = MEMO_CSV.hasil = null; }
+    return pratinjauSebelum.apply(this, arguments);
+  };
+})();
+
+/* ---------- D1 · Hujan monster di OffscreenCanvas ---------- */
+function kanvasHujanBoleh() {
+  return typeof HTMLCanvasElement !== 'undefined' && 'transferControlToOffscreen' in HTMLCanvasElement.prototype
+    && typeof createImageBitmap === 'function' && !Pekerja.gagal;
+}
+const SPRITE_HUJAN = new Map();       // kunci varian+warna → Promise<ImageBitmap>
+function spriteMonster(el, u) {
+  const warna = el.style.getPropertyValue('--m-warna').trim() || '#2BB3A3';
+  const kain = el.style.getPropertyValue('--m-jilbab').trim() || '#F3ECFA';
+  const svgEl = el.querySelector('svg'); if (!svgEl) return Promise.resolve(null);
+  const varian = svgEl.dataset.varian || 'peci';
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const px = Math.ceil(u * dpr * 1.25);
+  const kunci = `${varian}|${warna}|${kain}|${px}`;
+  if (!SPRITE_HUJAN.has(kunci)) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${px}" height="${px}">${isiMonster(varian)
+      .replace(/var\(--m-warna,[^)]*\)/g, warna).replace(/var\(--m-jilbab,[^)]*\)/g, kain)}</svg>`;
+    SPRITE_HUJAN.set(kunci, (async () => {
+      const img = new Image();
+      img.src = 'data:image/svg+xml,' + encodeURIComponent(svg);
+      await img.decode();
+      return createImageBitmap(img, { resizeWidth: px, resizeHeight: px, resizeQuality: 'high' });
+    })().catch((e) => { SPRITE_HUJAN.delete(kunci); throw e; }));
+  }
+  // Bitmap dipindah (transfer) ke Worker → setiap pengiriman butuh salinan sendiri.
+  return SPRITE_HUJAN.get(kunci).then(b => createImageBitmap(b));
+}
+
+function kartuHujan() {
+  return (HUJAN.kartuEls || []).map(el => { const c = HUJAN.cacheHinggap.get(el); return c ? { kiri: c.kiri, atas: c.atas, lebar: c.lebar } : null; });
+}
+function kirimHujan(pesan, transfer) {
+  const w = Pekerja.w; if (!w) return;
+  w.postMessage({ gen: DINGIN.genHujan, ...pesan }, transfer || []);
+}
+/** Pita kanvas: satu bila halaman pendek; dua (kartu di atas, lantai di dasar) bila tinggi. */
+function pitaHujan() {
+  const T = Math.round(HUJAN.tinggi);
+  if (T <= 3200) return [{ y0: 0, y1: T }];
+  const bawahKartu = Math.max(0, ...kartuHujan().filter(Boolean).map(k => k.atas + 200));
+  const a1 = Math.round(Math.min(T, Math.max(900, bawahKartu + 500)));
+  const b0 = Math.round(Math.max(a1, T - 1100));
+  if (b0 - a1 < 400) return [{ y0: 0, y1: T }];
+  return [{ y0: 0, y1: a1 }, { y0: b0, y1: T }];
+}
+function letakkanPita(geo) {
+  (HUJAN.kanvas || []).forEach((k, i) => {
+    const g = geo[i]; if (!g) return;
+    k.style.top = g.y0 + 'px'; k.style.height = (g.y1 - g.y0) + 'px';
+  });
+}
+function kirimUkuranHujan() {
+  if (!HUJAN.kanvas || !HUJAN.lapis) return;
+  ukurHujan();
+  const geo = pitaHujan();
+  if (geo.length !== HUJAN.kanvas.length) {          // susunan pita berubah (isi halaman tumbuh): bangun ulang
+    const t = APP.monster && APP.monster.tingkat;
+    if (t) { HUJAN.terakhir = Date.now(); hujanMonster(t); }   // tanpa guguran ulang
+    return;
+  }
+  letakkanPita(geo);
+  kirimHujan({ t: 'hujan:ukuran', lebar: HUJAN.lebar, tinggi: HUJAN.tinggi, kartu: kartuHujan(), pita: geo });
+}
+
+async function hujanKeKanvas() {
+  if (!kanvasHujanBoleh() || HUJAN.kanvas) return false;
+  const lapis = HUJAN.lapis, gen = ++DINGIN.genHujan;
+  let sprite;
+  try { sprite = await Promise.all(HUJAN.mon.map(m => spriteMonster(m.el, m.u))); }
+  catch (e) { console.warn('[hujan] sprite gagal, tetap DOM:', e.message); return false; }
+  if (gen !== DINGIN.genHujan || HUJAN.lapis !== lapis || !lapis.isConnected || sprite.some(s => !s)) {
+    sprite.forEach(s => s && s.close && s.close()); return false;
+  }
+  const w = Pekerja.dapat(); if (!w) return false;
+
+  // Serah terima: hentikan loop DOM, potret keadaan terakhir, kirim ke Worker.
+  cancelAnimationFrame(HUJAN.raf); HUJAN.raf = 0;
+  clearTimeout(MULUS.tGugur); MULUS.tGugur = 0;
+  ukurHujan();
+  HUJAN.kartuEls = [...new Set(HUJAN.mon.map(m => m.hinggap).filter(Boolean))];
+  const geo = pitaHujan();
+  const kanvas = geo.map(() => {
+    const k = document.createElement('canvas');
+    k.className = 'hujan-kanvas';
+    k.setAttribute('aria-hidden', 'true');
+    lapis.appendChild(k);
+    return k;
+  });
+  let off;
+  try { off = kanvas.map(k => k.transferControlToOffscreen()); }
+  catch (e) { kanvas.forEach(k => k.remove()); sprite.forEach(s => s.close()); return false; }
+  HUJAN.kanvas = kanvas; HUJAN.pekerjaJalan = true; HUJAN.raf = 1;
+  letakkanPita(geo);
+  const kini = performance.now();
+  const mon = HUJAN.mon.map(m => ({
+    x: m.x, y: m.y, vx: m.vx, vy: m.vy, rot: m.rot, vr: m.vr, u: m.u, dx: m.dx,
+    diDarat: m.diDarat, daun: m.daun, fase: m.fase, lantaiIdx: m.lantaiIdx,
+    h: m.hinggap ? HUJAN.kartuEls.indexOf(m.hinggap) : -1, mulaiDalam: Math.max(0, (m.mulai || 0) - kini)
+  }));
+  window.removeEventListener('scroll', gulirHujan);        // versi asli (DOM)
+  kirimHujan({ t: 'hujan:mulai', pita: geo.map((g, i) => ({ ...g, kanvas: off[i] })), lebar: HUJAN.lebar, tinggi: HUJAN.tinggi,
+    dpr: window.devicePixelRatio || 1, sprite, mon, kartu: kartuHujan(), diam: HUJAN.diam }, [...off, ...sprite]);
+  if (!HUJAN.diam) window.addEventListener('scroll', gulirHujan, { passive: true });   // pembungkus → Worker
+  // Kartu hinggap bisa masih bergeser (animasi masuk halaman) → ukur ulang dua kali.
+  setTimeout(() => { if (HUJAN.kanvas === kanvas) kirimUkuranHujan(); }, 600);
+  setTimeout(() => { if (HUJAN.kanvas === kanvas) kirimUkuranHujan(); }, 1600);
+  return true;
+}
+
+/** Bingkai pertama kanvas sudah tergambar → monster DOM disembunyikan (tanpa kedip). */
+function hujanKanvasSiap(m) {
+  if (m.gen !== DINGIN.genHujan || !HUJAN.lapis || !HUJAN.kanvas) return;
+  HUJAN.lapis.classList.add('berkanvas');
+}
+
+/** Cerminkan keadaan dari Worker ke HUJAN.mon (untuk ketukan, uji, dan pembacaan lain). */
+function cerminHujan(m) {
+  if (m.gen !== DINGIN.genHujan || !HUJAN.kanvas) return;
+  const a = m.a;
+  HUJAN.pekerjaJalan = a[0] === 1;
+  HUJAN.raf = HUJAN.pekerjaJalan ? 1 : 0;
+  HUJAN.mon.forEach((o, i) => {
+    const k = 1 + i * 7; if (k + 6 >= a.length) return;
+    o.x = a[k]; o.y = a[k + 1]; o.vx = a[k + 2]; o.vy = a[k + 3]; o.rot = a[k + 4];
+    o.diDarat = !!(a[k + 5] & 1); o.daun = (a[k + 5] & 2) ? 1 : 0;
+    if (a[k + 6] < 0 && o.hinggap) o.hinggap = null;
+  });
+}
+
+/* =====================================================================
+ * A7 · Mode efek otomatis: ikut baterai & beban, bukan hanya kelancaran
+ *  v2.28 memindahkan HP cepat ke mode penuh bila bingkainya mulus —
+ *  padahal mulus terus-menerus = CPU/GPU bekerja terus. Sekarang:
+ *   · baterai < 25 % dan tidak mengecas → hemat (kembali penuh saat
+ *     mengecas / ≥ 40 %); hanya pada pilihan "Otomatis".
+ *   · beban: bingkai panjang (Long Animation Frames) > 20 % waktu selama
+ *     4 dtk pertama Ringkasan → hemat, disimpan seperti hasil ukur.
+ * ===================================================================== */
+function terapkanEnergi() {
+  if (pilihanEfek() !== 'otomatis') return;
+  const b = DINGIN.baterai;
+  const lemah = b && !b.charging && b.level < .25;
+  const pulih = !b || b.charging || b.level >= .4;
+  if (lemah && !modeHemat()) { DINGIN.sebabHemat = 'baterai'; terapkanHemat(true); }
+  else if (pulih && modeHemat() && DINGIN.sebabHemat === 'baterai') {
+    DINGIN.sebabHemat = null;
+    const v = hasilUkurEfek();
+    terapkanHemat(v ? v.mode === 'hemat' : EFEK.tebakan);
+  }
+}
+(function pantauBaterai() {
+  if (typeof navigator.getBattery !== 'function') return;
+  navigator.getBattery().then((b) => {
+    DINGIN.baterai = b;
+    b.addEventListener('levelchange', terapkanEnergi);
+    b.addEventListener('chargingchange', terapkanEnergi);
+    terapkanEnergi();
+  }).catch(() => {});
+})();
+
+function ukurBeban(ms) {
+  return new Promise((ok) => {
+    const tipe = (typeof PerformanceObserver === 'function' && PerformanceObserver.supportedEntryTypes) || [];
+    if (!tipe.includes('long-animation-frame')) return ok(null);
+    let sibuk = 0;
+    const po = new PerformanceObserver((l) => l.getEntries().forEach(e => { sibuk += e.duration; }));
+    po.observe({ type: 'long-animation-frame' });
+    setTimeout(() => { po.disconnect(); ok(sibuk / ms); }, ms);
+  });
+}
+(function () {
+  const ujiSebelum = ujiKelancaran;
+  ujiKelancaran = async function () {
+    const hasil = await ujiSebelum.apply(this, arguments);
+    try {
+      terapkanEnergi();
+      if (pilihanEfek() === 'otomatis' && !modeHemat() && !EFEK.cekBeban && APP.view === 'dashboard' && !document.hidden) {
+        EFEK.cekBeban = true;
+        const beban = await ukurBeban(4000);
+        EFEK.beban = beban;
+        if (beban != null && beban > .2 && !modeHemat() && pilihanEfek() === 'otomatis') {
+          DINGIN.sebabHemat = 'beban'; terapkanHemat(true); simpanUkurEfek('hemat', 'beban');
+        }
+      }
+    } catch (e) {}
+    return hasil;
+  };
+})();
+
+/* Mode hemat/penuh berganti → penghuni grafik ikut (WAAPI hanya di mode penuh). */
+(function () {
+  const hematSebelum = terapkanHemat;
+  terapkanHemat = function () {
+    const h = hematSebelum.apply(this, arguments);
+    try { aturPenghuniDingin(); } catch (e) {}
+    return h;
+  };
+})();
+
+/* =====================================================================
+ * C · VIEW TRANSITIONS — pindah halaman tanpa tirai
+ * ===================================================================== */
+const URUT_MENU = () => {
+  const d = [...document.querySelectorAll('.tabbar [data-view], #sidebar [data-view], .sidebar [data-view]')].map(b => b.dataset.view);
+  const semua = [...new Set([...d, ...Object.keys(JUDUL)])];
+  return (v) => { const i = semua.indexOf(v); return i < 0 ? 999 : i; };
+};
+const VT = { jalan: null, lewatiTirai: false, dukungTipe: typeof ViewTransition !== 'undefined' && 'types' in ViewTransition.prototype };
+
+function vtBoleh(view) {
+  const l = $('layarMuat');
+  return typeof document.startViewTransition === 'function' && bolehGerak() && !document.hidden
+    && APP.viewTampil && view !== APP.viewTampil && (!l || l.classList.contains('tutup'))
+    && !document.querySelector('.swal2-container.swal2-backdrop-show');
+}
+
+(function () {
+  // Tirai muat: tidak dipakai bila perpindahan ini dijalankan View Transition.
+  const tiraiSebelum = LayarMuat.tiraiUntuk;
+  LayarMuat.tiraiUntuk = function () {
+    if (VT.lewatiTirai) return function tutup() {};
+    return tiraiSebelum.apply(this, arguments);
+  };
+
+  const navSebelum = navigateTo;
+  navigateTo = async function (view) {
+    if (!vtBoleh(view)) return navSebelum.apply(this, arguments);
+    if (VT.jalan) { try { VT.jalan.skipTransition(); } catch (e) {} }
+    Gerak.batalkanHalaman();
+    const urut = URUT_MENU();
+    const arah = urut(view) >= urut(APP.viewTampil) ? 'maju' : 'mundur';
+    const args = arguments, diri = this;
+    let janji = null, tepat = false;
+    const perbarui = async () => {
+      VT.lewatiTirai = true;
+      try { janji = navSebelum.apply(diri, args); }       // bagian sinkron: judul, tab aktif, kerangka
+      finally { VT.lewatiTirai = false; }
+      await Promise.race([janji.then(() => { tepat = true; }), tundaMs(DINGIN.VT_TUNGGU)]);
+    };
+    let vt;
+    try {
+      vt = VT.dukungTipe ? document.startViewTransition({ update: perbarui, types: [arah] })
+                         : document.startViewTransition(perbarui);
+    } catch (e) { return navSebelum.apply(this, arguments); }
+    VT.jalan = vt;
+    document.documentElement.dataset.arahVt = arah;
+    vt.finished.finally(() => { if (VT.jalan === vt) VT.jalan = null; delete document.documentElement.dataset.arahVt; });
+    try { await vt.updateCallbackDone; } catch (e) {}
+    if (!janji) return navSebelum.apply(this, arguments);
+    const hasil = await janji;
+    // Isi datang sesudah transisi (data dari jaringan): hadirkan dengan pegas, bukan muncul mendadak.
+    if (!tepat && APP.view === view) { try { await vt.finished; } catch (e) {} Gerak.masukBerurutan($('viewRoot')); }
+    jadwalSapu(400);
+    return hasil;
+  };
+})();
+
+/* Pindah halaman jalur apa pun: animasi halaman lama dibatalkan; sesudahnya sapu luar layar. */
+(function () {
+  const navSebelum = navigateTo;
+  navigateTo = async function () {
+    Gerak.batalkanHalaman();
+    const h = await navSebelum.apply(this, arguments);
+    jadwalSapu(400);
+    return h;
+  };
+})();
+
+/* ---------- C3 · Morf: kartu/baris santri memekar menjadi rinciannya ----------
+ *  FLIP dengan Web Animations API: dialog rincian muncul tepat dari kotak
+ *  yang diketuk (transform + clip-path, keduanya di compositor), lalu
+ *  mengembang ke ukuran aslinya dengan pegas lembut. */
+const MORF = { dari: null, t: 0 };
+document.addEventListener('pointerdown', (e) => {
+  const d = e.target.closest && e.target.closest('[data-detail]');
+  if (!d) return;
+  const kotak = d.closest('tr, .kartu, .card, li, .rank, .stat') || d;
+  MORF.dari = kotak.getBoundingClientRect(); MORF.t = performance.now();
+}, { passive: true, capture: true });
+
+(function () {
+  if (!window.Swal) return;
+  const detailSebelum = bukaDetailSantri;
+  bukaDetailSantri = function () {
+    MORF.siap = MORF.dari && performance.now() - MORF.t < 1500 ? MORF.dari : null;
+    MORF.dari = null;
+    return detailSebelum.apply(this, arguments);
+  };
+  const fireSebelum = Swal.fire;
+  Swal.fire = function (o) {
+    const dari = MORF.siap;
+    if (dari && o && typeof o === 'object' && !(o instanceof Element) && !o.toast && bolehGerak()) {
+      MORF.siap = null;
+      const didOpenAsli = o.didOpen;
+      o = { ...o, didOpen(popup) {
+        try { morfDari(popup, dari); } catch (e) {}
+        if (typeof didOpenAsli === 'function') return didOpenAsli.apply(this, arguments);
+      } };
+      return fireSebelum.call(this, o, ...[].slice.call(arguments, 1));
+    }
+    return fireSebelum.apply(this, arguments);
+  };
+})();
+
+function morfDari(popup, dari) {
+  popup.classList.add('morf');
+  const ke = popup.getBoundingClientRect();
+  if (!ke.width || !ke.height || !dari.width) { popup.classList.remove('morf'); return; }
+  const sx = dari.width / ke.width, sy = Math.max(dari.height / ke.height, .04);
+  const dx = dari.left - ke.left, dy = dari.top - ke.top;
+  const a = popup.animate([
+    { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, opacity: .35, borderRadius: '12px' },
+    { transform: 'none', opacity: 1 }
+  ], { duration: Gerak.DUR.lambat, easing: Gerak.kurva('lembut') });
+  const kaca = popup.parentElement;
+  if (kaca) kaca.animate([{ backgroundColor: 'transparent' }, {}], { duration: Gerak.DUR.sedang, easing: 'ease-out' });
+  a.finished.catch(() => {}).finally(() => popup.classList.remove('morf'));
+}
+
+// Sapuan pertama setelah halaman awal siap.
+setTimeout(() => jadwalSapu(0), 2500);
+
 // ---------------------------------------------------------------------
 hidupkanLayarLogin();
 

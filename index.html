@@ -3177,12 +3177,8 @@
   .hidden { display:none !important; }
   .rise { animation:naik .34s var(--lengkung) both; }
 
-  /* Transisi antar halaman — dipakai bila peramban mendukung
-     View Transitions; jika tidak, navigasi tetap berjalan biasa. */
-  ::view-transition-old(isi) { animation:vtKeluar .16s ease both; }
-  ::view-transition-new(isi) { animation:vtMasuk .22s var(--lengkung) both; }
-  @keyframes vtKeluar { to { opacity:0; transform:translateY(-4px); } }
-  @keyframes vtMasuk { from { opacity:0; transform:translateY(8px); } }
+  /* Transisi antar halaman: aturan tunggal ada di bagian 8 dan di
+     gayaDingin (v2.36, arah maju/mundur). */
   #viewRoot { view-transition-name: isi; }
 
   /* Animasi masuk tanpa keyframes untuk elemen yang baru dipasang */
@@ -4914,7 +4910,7 @@
   .lm-panggung i {
     position:absolute; top:0; left:0;
     width:var(--lm-s); height:var(--lm-s);
-    animation: lmTukar 2.4s cubic-bezier(.7,-.4,.3,1.4) infinite;
+    animation: lmTukar 2.4s var(--kurva-antisipasi) infinite;
     will-change: transform;
   }
   .lm-panggung i:nth-child(1) { background:var(--lm-1); border-radius:50%; }
@@ -4950,7 +4946,7 @@
     font-size: clamp(44px, 12vw, 92px); font-weight:800;
     letter-spacing:-.045em; line-height:.9; text-transform:uppercase;
   }
-  .lm-judul span { display:inline-block; animation: lmLompat 1.6s cubic-bezier(.5,0,.3,1.5) infinite; }
+  .lm-judul span { display:inline-block; animation: lmLompat 1.6s var(--kurva-lenting) infinite; }
   .lm-judul span:nth-child(odd) { color:var(--brass-hi); }
   .lm-judul span:nth-child(2) { animation-delay:.08s; }
   .lm-judul span:nth-child(3) { animation-delay:.16s; }
@@ -4972,7 +4968,7 @@
     font-size:14.5px; font-weight:600;
     color: color-mix(in oklab, #fff 84%, transparent);
   }
-  .lm-ticker ul { list-style:none; margin:0; padding:0; animation: lmGanti 8s cubic-bezier(.8,0,.2,1) infinite; }
+  .lm-ticker ul { list-style:none; margin:0; padding:0; animation: lmGanti 8s var(--kurva-tegas) infinite; }
   @keyframes lmGanti {
     0%, 20%  { transform: translateY(0); }
     25%, 45% { transform: translateY(-1.5em); }
@@ -5505,7 +5501,7 @@
     }
     .penghuni.bingung .mon { animation: pengJalan .55s ease-in-out infinite; }
     .penghuni.bahagia { animation-play-state: paused; }
-    .penghuni.bahagia .mon { animation: pengLoncat .6s cubic-bezier(.3, 1.5, .5, 1) infinite; }
+    .penghuni.bahagia .mon { animation: pengLoncat .6s var(--kurva-lenting) infinite; }
     .penghuni.bahagia .penghuni-hati { animation: pengHati 1.2s ease-out infinite; }
   }
   @supports not (offset-path: inset(0)) {
@@ -5616,8 +5612,8 @@
 @keyframes nyKilau  { 0%, 100% { filter: none; } 50% { filter: drop-shadow(0 0 6px color-mix(in oklab, var(--brass-hi) 70%, transparent)); } }
 /* .lm.tutup = display:none (v2.28), jadi goresan otomatis diulang setiap kali layar muat dibuka,
    dan tetap utuh selama memudar keluar. */
-.lm .lm-ny-cincin { animation: nyGores 1.1s cubic-bezier(.6, 0, .2, 1) .15s forwards; }
-.lm .lm-ny-huruf  { animation: nyGores 1.3s cubic-bezier(.65, 0, .25, 1) .35s forwards; }
+.lm .lm-ny-cincin { animation: nyGores 1.1s var(--kurva-tegas) .15s forwards; }
+.lm .lm-ny-huruf  { animation: nyGores 1.3s var(--kurva-tegas) .35s forwards; }
 .lm .lm-tanda-teks { animation: nyMuncul .6s ease-out 1.3s forwards; }
 .lm--penuh .lm-ny { animation: nyKilau 2.4s ease-in-out 1.7s 1; }
 @media (prefers-reduced-motion: reduce) {
@@ -5652,7 +5648,7 @@
    punya animasi masuk sendiri — wrMasuk — yang ikut ditahan lalu dilepas) */
 @keyframes ungkapBaris { from { opacity: 0; transform: translate3d(0, 10px, 0); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: no-preference) {
-  :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(-n+12) { animation: ungkapBaris .5s cubic-bezier(.2, .7, .2, 1) both; }
+  :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(-n+12) { animation: ungkapBaris .5s var(--lengkung) both; }
   :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(2)  { animation-delay: .03s; }
   :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(3)  { animation-delay: .06s; }
   :root.ungkap-halaman #viewRoot .tbl tbody tr:nth-child(4)  { animation-delay: .09s; }
@@ -6019,6 +6015,104 @@
   @media (prefers-reduced-motion: reduce) {
     .penghuni.meminta .mon, .penghuni.meminta::after, .penghuni-pinta, .tarik-debu, .tarik-percik i { animation:none !important; }
   }
+</style>
+<style id="gayaDingin">
+  /* =================================================================
+     v2.36 — SISTEM GERAK YANG DINGIN
+     Tanpa @layer (kecuali satu blok lembar bawah): menang atas gaya lama.
+     ================================================================= */
+
+  /* ---------- B · Token gerak: durasi + pegas fisika asli (CSS linear()) ----------
+     Kurva pegas dibangkitkan dari simulasi pegas teredam, 29 titik:
+       lembut  ζ=.55  lentingan 12,6 %   → kartu, tanda terima, halaman
+       lenting ζ=.38  lentingan 27 %     → ketukan monster, hal kecil yang gembira
+       mantap  ζ=.90  lentingan ±0,2 %   → lembar bawah (tidak boleh "melayang") */
+  :root {
+    --d-kilat: 120ms; --d-cepat: 200ms; --d-sedang: 320ms; --d-lambat: 520ms;
+    --pegas-lembut: linear(0, .064 3.6%, .218 7.1%, .413 10.7%, .610 14.3%, .786 17.9%, .927 21.4%,
+      1.028 25%, 1.090 28.6%, 1.120 32.1%, 1.126 35.7%, 1.114 39.3%, 1.093 42.9%, 1.068 46.4%,
+      1.043 50%, 1.022 53.6%, 1.006 57.1%, .994 60.7%, .987 64.3%, .984 67.9%, .984 71.4%,
+      .986 75%, .989 78.6%, .992 82.1%, .995 85.7%, .998 89.3%, 1 92.9%, 1.001 96.4%, 1);
+    --pegas-lenting: linear(0, .129 3.6%, .424 7.1%, .757 10.7%, 1.035 14.3%, 1.209 17.9%, 1.274 21.4%,
+      1.250 25%, 1.174 28.6%, 1.082 32.1%, 1.002 35.7%, .949 39.3%, .926 42.9%, .929 46.4%,
+      .948 50%, .973 53.6%, .996 57.1%, 1.012 60.7%, 1.020 64.3%, 1.020 67.9%, 1.015 71.4%,
+      1.009 75%, 1.002 78.6%, .997 82.1%, .995 85.7%, .994 89.3%, .995 92.9%, .997 96.4%, 1);
+    --pegas-mantap: linear(0, .036 3.6%, .122 7.1%, .232 10.7%, .347 14.3%, .459 17.9%, .561 21.4%,
+      .650 25%, .726 28.6%, .789 32.1%, .840 35.7%, .881 39.3%, .913 42.9%, .938 46.4%,
+      .956 50%, .970 53.6%, .980 57.1%, .988 60.7%, .993 64.3%, .996 67.9%, .999 71.4%, 1);
+    /* Kurva karakter lama, kini bernama (sebelumnya tersebar sebagai angka mentah). */
+    --kurva-tegas: cubic-bezier(.65, 0, .25, 1);
+    --kurva-lenting: cubic-bezier(.3, 1.5, .5, 1);
+    --kurva-antisipasi: cubic-bezier(.7, -.4, .3, 1.4);
+  }
+  @supports not (animation-timing-function: linear(0, 1)) {
+    :root { --pegas-lembut: var(--lengkung); --pegas-lenting: var(--kurva-lenting); --pegas-mantap: var(--lengkung); }
+  }
+
+  /* Pegas dipakai di titik sentuh yang paling sering terlihat. */
+  .terima:not(.pergi) { animation-timing-function: var(--pegas-lembut); animation-duration: .46s; }
+  @supports (transition-behavior: allow-discrete) {
+    .card, .stat { transition-timing-function: var(--pegas-lembut); }
+  }
+  @layer dasar { @media (max-width:640px) {
+    .swal2-container.lembar:not(:has(.swal2-toast)) .swal2-popup.swal2-show { animation:lembarNaik .38s var(--pegas-mantap) !important; }
+  } }
+
+  /* ---------- C · Peralihan halaman (View Transitions) ----------
+     Isi halaman (#viewRoot) TIDAK diberi nama sendiri: Ringkasan di HP bisa
+     setinggi ±10.000 px, dan memotret elemen setinggi itu diukur membuat
+     perenderan tersendat berdetik-detik. Yang dipotret: layar (root, seukuran
+     viewport) + bingkai tetap (bilah samping, bilah profil, bilah atas, tab
+     bawah) yang diberi nama sendiri sehingga TIDAK ikut bergeser.
+     Arah mengikuti urutan menu: maju = masuk dari kanan, mundur = dari kiri. */
+  #viewRoot { view-transition-name: none; }
+  #sidebar { view-transition-name: rq-samping; }
+  #profileBar { view-transition-name: rq-profil; }
+  .topbar { view-transition-name: rq-atas; }
+  .tabbar { view-transition-name: rq-tab; }
+  html:active-view-transition-type(maju)   ::view-transition-old(root) { animation: vtKeluarKiri  var(--d-cepat) ease-in both; }
+  html:active-view-transition-type(maju)   ::view-transition-new(root) { animation: vtMasukKanan var(--d-sedang) var(--pegas-lembut) both; }
+  html:active-view-transition-type(mundur) ::view-transition-old(root) { animation: vtKeluarKanan var(--d-cepat) ease-in both; }
+  html:active-view-transition-type(mundur) ::view-transition-new(root) { animation: vtMasukKiri  var(--d-sedang) var(--pegas-lembut) both; }
+  ::view-transition-group(judul-halaman) { animation-duration: var(--d-sedang); animation-timing-function: var(--pegas-lembut); }
+  ::view-transition-group(rq-samping), ::view-transition-group(rq-profil),
+  ::view-transition-group(rq-atas), ::view-transition-group(rq-tab) { animation-duration: var(--d-cepat); }
+  @keyframes vtKeluarKiri  { to   { opacity: 0; translate: -24px 0; } }
+  @keyframes vtKeluarKanan { to   { opacity: 0; translate: 24px 0; } }
+  @keyframes vtMasukKanan  { from { opacity: 0; translate: 32px 0; } }
+  @keyframes vtMasukKiri   { from { opacity: 0; translate: -32px 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+  }
+
+  /* ---------- A5 · Penghuni grafik tanpa Motion Path ----------
+     offset-distance tidak ditangani compositor (dihitung ulang tiap bingkai
+     di utas utama). Kelas .dingin: jalur keliling dijalankan Web Animations
+     API dengan transform murni — sepenuhnya di GPU. */
+  .penghuni.dingin { offset-path: none !important; animation-name: none !important; left: 0; top: 0; transform-origin: 50% 100%; }
+
+  /* ---------- A3/A4 · Tidur & luar layar ----------
+     Diberi #viewRoot / #appShell agar mengalahkan aturan animasi v2.35 yang lebih spesifik
+     (mis. .penghuni.meminta .mon) — tanpa itu, .luar-layar tidak menjeda monster penarik. */
+  #appShell .luar-layar, #appShell .luar-layar *,
+  #appShell .luar-layar::before, #appShell .luar-layar::after,
+  #appShell .luar-layar *::before, #appShell .luar-layar *::after { animation-play-state: paused !important; }
+  :root.tenang #viewRoot .penghuni, :root.tenang #viewRoot .penghuni *,
+  :root.tenang #viewRoot .penghuni::before, :root.tenang #viewRoot .penghuni::after,
+  :root.tenang #viewRoot .penghuni *::before, :root.tenang #viewRoot .penghuni *::after,
+  :root.tenang #appShell .live .dot { animation-play-state: paused !important; }
+
+  /* ---------- D1 · Hujan monster di kanvas (digambar Web Worker) ---------- */
+  .hujan-mon > .hujan-kanvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+  .hujan-mon.berkanvas > .mon-jatuh { visibility: hidden; }
+  @media print { .hujan-kanvas { display: none !important; } }
+
+  /* ---------- C · Morf kartu → rincian santri ---------- */
+  @layer dasar {
+    .swal2-container .swal2-popup.morf,
+    .swal2-container.lembar:not(:has(.swal2-toast)) .swal2-popup.swal2-show.morf { animation: none !important; }
+  }
+  .swal2-popup.morf { transform-origin: 0 0; will-change: transform, clip-path; }
 </style>
 </head>
 <body>
