@@ -8659,7 +8659,12 @@ function amankanLatarDokumen() {
    halaman berikutnya — bukan "hampir selalu", tetapi selalu.
    --------------------------------------------------------------------- */
 
-let _halamanPdf = null;   // { skala, rasio } — diisi sebelum render
+let _halamanPdf = null;   // { skala, rasio, … } — diisi sebelum render
+
+/* Kelonggaran ganjal. Nilainya sama persis dengan v2.41; hanya diangkat ke
+   tingkat modul agar cadanganGanjalPx() memakai angka yang sama. */
+const GANJAL_AMAN = 9;    // kelonggaran pembulatan, tak terlihat mata
+const GANJAL_IKUT = 112;  // ruang minimum yang harus tersisa di bawah sebuah judul
 
 function rapikanHalamanKlon(doc) {
   const o = _halamanPdf;
@@ -8676,8 +8681,8 @@ function rapikanHalamanKlon(doc) {
   const tinggiHal = Math.floor(lebarKanvas * o.rasio) / o.skala;
   if (!(tinggiHal > 80)) return;
 
-  const AMAN = 9;    // kelonggaran pembulatan, tak terlihat mata
-  const IKUT = 112;  // ruang minimum yang harus tersisa di bawah sebuah judul
+  const AMAN = GANJAL_AMAN;
+  const IKUT = GANJAL_IKUT;
 
   const ganjalSebelum = (el, tinggi) => {
     if (!(tinggi > 0)) return;
@@ -8747,9 +8752,112 @@ function siapkanKlonPdf(doc) {
 
     // Lapis 3 — pastikan blok penutup tidak terbelah antar halaman.
     rapikanHalamanKlon(doc);
+
+    // Lapis 4 (v2.41.2) — catat tinggi salinan SESUDAH diganjal, supaya
+    // kanvas dipotong tepat di ujung isi (lihat potongKanvasPdf()).
+    catatTinggiKlon(doc);
   } catch (e) {
     console.warn('[PDF] Penyiapan salinan gagal, lanjut apa adanya:', e);
   }
+}
+
+/* ---------------------------------------------------------------------
+   KANVAS SETINGGI SALINAN — v2.41.2
+
+   Gejala: pada PDF unduhan, bagian bawah blok penutup hilang — garis
+   tanda tangan, nama musyrif, "( ……… )" wali santri, dan baris keabsahan.
+   Jalur Cetak Laporan tidak terkena karena tidak memakai html2canvas.
+
+   Akar masalah: html2canvas 1.0.0 (bawaan html2pdf 0.10.1) menetapkan
+   ukuran kanvas dari elemen HIDUP, SEBELUM dokumen disalin dan sebelum
+   onclone dijalankan. Ganjal dari rapikanHalamanKlon() hanya menambah
+   tinggi SALINAN, sehingga isi di bawahnya terdorong keluar kanvas dan
+   terpotong sebanyak total tinggi ganjal. Makin banyak judul yang
+   didorong ke halaman berikut, makin banyak yang hilang.
+
+   Perbaikan (logika ganjal TIDAK diubah):
+     1. Kanvas diberi cadangan tinggi — batas atas total ganjal yang
+        mungkin disisipkan (cadanganGanjalPx()).
+     2. Tinggi salinan sesudah diganjal dicatat (catatTinggiKlon()).
+     3. Sebelum dipecah per halaman, kanvas dipotong tepat setinggi
+        salinan (potongKanvasPdf()). Laporan tanpa ganjal menghasilkan
+        kanvas yang identik dengan v2.41.
+   --------------------------------------------------------------------- */
+
+/**
+ * Batas atas total ganjal (px CSS) yang dapat disisipkan rapikanHalamanKlon():
+ *   · judul: ganjal = sisa + AMAN, dengan sisa < IKUT;
+ *   · blok utuh: ganjal < tinggi blok + 2 × AMAN.
+ * Ditambah 4 px per butir dan 16 px sebagai kelonggaran selisih tata letak
+ * dokumen hidup vs salinan.
+ */
+function cadanganGanjalPx(akar) {
+  if (!akar) return 0;
+  let r = 16;
+  akar.querySelectorAll('h3').forEach((j) => {
+    if (j.previousElementSibling) r += GANJAL_IKUT + GANJAL_AMAN + 4;
+  });
+  akar.querySelectorAll('.blok-utuh').forEach((el) => {
+    r += Math.ceil(el.getBoundingClientRect().height) + GANJAL_AMAN * 2 + 4;
+  });
+  return r;
+}
+
+/** Tinggi salinan (px CSS, diukur dari puncak kanvas) sesudah ganjal. */
+function catatTinggiKlon(doc) {
+  const o = _halamanPdf;
+  if (!o) return;
+  const wadah = doc.querySelector('.html2pdf__container');
+  const akar  = doc.querySelector('.laporan');
+  const r = (wadah || akar)?.getBoundingClientRect();
+  if (!r) return;
+  // Puncak kanvas = puncak wadah (html2canvas memakai batas wadah).
+  const atas = wadah ? r.top : 0;
+  const bawah = Math.max(r.bottom, akar ? akar.getBoundingClientRect().bottom : 0);
+  o.tinggiKlon = bawah - atas;
+  o.ganjalKlon = [...doc.querySelectorAll('[data-ganjal]')]
+    .reduce((a, g) => a + g.getBoundingClientRect().height, 0);
+}
+
+/**
+ * Dijalankan setelah html2pdf membangun wadahnya dan SEBELUM html2canvas
+ * mengukurnya: tinggi kanvas = tinggi wadah + cadangan ganjal.
+ */
+function pasangTinggiKanvas(pekerja) {
+  const o = _halamanPdf;
+  const wadah = pekerja?.prop?.container;
+  if (!o || !wadah) return;
+  const tinggi = Math.ceil(wadah.getBoundingClientRect().height);
+  if (!(tinggi > 0)) return;
+  o.tinggiHidup = tinggi;                                   // = bawaan html2canvas
+  o.cadangan = Math.max(0, Math.round(o.cadangan || 0));
+  pekerja.opt.html2canvas.height = tinggi + o.cadangan;
+}
+
+/**
+ * Potong kanvas setinggi isi yang sebenarnya: max(tinggi bawaan, tinggi
+ * salinan), tidak pernah melebihi kanvas. Tanpa ganjal → sama dengan v2.41.
+ */
+function potongKanvasPdf(kanvas) {
+  const o = _halamanPdf;
+  if (!o || !kanvas || !o.tinggiHidup) return kanvas;
+  const bawaan = Math.floor(o.tinggiHidup * o.skala);
+  const klon   = o.tinggiKlon ? Math.ceil(o.tinggiKlon * o.skala) : 0;
+  if (klon > kanvas.height) {
+    console.warn('[PDF] Salinan lebih tinggi dari cadangan kanvas:',
+                 { klon, kanvas: kanvas.height, ganjal: o.ganjalKlon, cadangan: o.cadangan });
+  }
+  const t = Math.min(kanvas.height, Math.max(bawaan, klon));
+  if (!(t > 0) || t >= kanvas.height) return kanvas;
+  const baru = document.createElement('canvas');
+  baru.width = kanvas.width;
+  baru.height = t;
+  const ctx = baru.getContext('2d');
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, baru.width, t);
+  ctx.drawImage(kanvas, 0, 0);
+  kanvas.width = kanvas.height = 0;                          // lepas memori kanvas besar
+  return baru;
 }
 
 /* ---------------------------------------------------------------------
@@ -8904,11 +9012,14 @@ async function unduhLaporanPdf(nisn, kodeKertas) {
        laporannya sangat panjang sehingga luas kanvas mendekati batas
        aman peramban. */
     const LUAS_KANVAS_MAKS = 2.4e8;
+    // v2.41.2: kanvas kini memuat cadangan ganjal, jadi ikut dihitung di sini.
+    const cadangan = cadanganGanjalPx(root);
     const skala = Math.max(2, Math.min(3,
-      Math.sqrt(LUAS_KANVAS_MAKS / Math.max(1, rect.width * rect.height))));
+      Math.sqrt(LUAS_KANVAS_MAKS / Math.max(1, rect.width * (rect.height + cadangan)))));
     _halamanPdf = {
       skala,
-      rasio: rasioHalaman(kertas)          // v2.41: A4 → 271/184, F4 → 304/184
+      rasio: rasioHalaman(kertas),         // v2.41: A4 → 271/184, F4 → 304/184
+      cadangan                              // v2.41.2: lihat KANVAS SETINGGI SALINAN
     };
 
     const pekerja = window.html2pdf().set({
@@ -8930,7 +9041,12 @@ async function unduhLaporanPdf(nisn, kodeKertas) {
       // blok penutup (`.blok-utuh`) ditangani rapikanHalamanKlon() yang
       // hitungannya tepat sampai piksel terakhir.
       pagebreak: { mode:['css','legacy'], avoid:['tr','h3'] }
-    }).from(root).toPdf();
+    }).from(root)
+      .toContainer()
+      .then(function () { pasangTinggiKanvas(this); })        // v2.41.2
+      .toCanvas()
+      .then(function () { this.prop.canvas = potongKanvasPdf(this.prop.canvas); })
+      .toPdf();
 
     // Kaki halaman resmi: identitas santri di kiri, nomor halaman di kanan.
     // Pembaca langsung tahu bila ada lembar yang hilang.
@@ -25125,7 +25241,7 @@ document.addEventListener('change', (e) => {
  *  PANGGUNG.aktif = false (tanpa maskot), MASTER_BERSAMA.aktif = false
  *  (katalog putri kembali terpisah seperti v2.10).
  * ===================================================================== */
-APP.versi = 'rq-v2.41';
+APP.versi = 'rq-v2.41.2';
 
 /* ---------- 1 · Master pelanggaran bersama untuk unit putri ---------- */
 const MASTER_BERSAMA = { aktif: true };
