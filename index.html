@@ -1115,6 +1115,12 @@
   .unit-box > i { font-size:11px; }
   .unit-box select.per-in { color:inherit; font-weight:700; }
   .unit-box .unit-tetap { letter-spacing:.01em; }
+  /* v2.44 — ikon asrama berupa monster (berpeci / berjilbab / keduanya) */
+  .unit-mon-wrap { display:inline-flex; align-items:center; flex:none; }
+  .unit-mon { width:20px; height:20px; overflow:visible; display:block; }
+  .unit-mon-wrap.dua .unit-mon + .unit-mon { margin-left:-6px; }
+  /* v2.44 — pemilih unit operasional di lencana konteks */
+  .ctx-badge select.per-in { color:inherit; font-weight:700; }
   @media (max-width:720px) { .unit-box > i { display:none; } }
   @media (max-width:420px) { .unit-box { padding:3px 7px; font-size:11px; } }
 
@@ -6967,7 +6973,7 @@
   <div class="pdf-card">
     <div class="sp"></div>
     <b>Menyiapkan PDF…</b>
-    <small>Laporan sedang dirender ke dokumen A4.</small>
+    <small>Laporan sedang disusun menjadi PDF.</small>
   </div>
 </div>
 

@@ -652,10 +652,10 @@ function periksaKamar(kamarMentah, peranMentah, kelas) {
   if (mauMudabbir) {
     const a = angkatanDariKelas(kelas);
     if (a !== ANGKATAN_MUDABBIR) {
-      masalah.push(`Mudabbir ditugaskan dari kelas ${ANGKATAN_MUDABBIR}; santri ini angkatan ${a || 'tidak dikenali'}`);
+      masalah.push(`Mudabbir diambil dari kelas ${ANGKATAN_MUDABBIR}, sedangkan santri ini angkatan ${a || 'tidak dikenali'}`);
     }
     if (nomor === null && !masalah.length) {
-      masalah.push('Mudabbir harus punya nomor kamar — ia bertugas menjaga satu kamar tertentu');
+      masalah.push('Mudabbir wajib punya nomor kamar karena ia menjaga satu kamar tertentu');
     }
   }
 
@@ -1158,7 +1158,7 @@ function kabarDataBaru() {
     if (APP.navSibuk) return kabarDataBaru();   // tunggu tampilan yang sedang dimuat selesai
     const el = document.activeElement;
     const sibuk = (window.Swal && Swal.isVisible()) || (el && ['INPUT','TEXTAREA','SELECT'].includes(el.tagName));
-    if (sibuk) { toast('info', 'Ada data terbaru — buka ulang menu ini untuk melihatnya.'); return; }
+    if (sibuk) { toast('info', 'Ada data terbaru. Buka ulang menu ini untuk melihatnya.'); return; }
     const y = window.scrollY;
     await navigateTo(APP.view);
     window.scrollTo({ top: y, behavior: 'auto' });
@@ -1169,7 +1169,7 @@ function tandaiLuring(e) {
   console.warn('[lokal] jaringan gagal, memakai data tersimpan:', e?.message || e);
   if (tandaiLuring.sudah) return;
   tandaiLuring.sudah = true;
-  toast('info', 'Koneksi lemah — menampilkan data tersimpan di perangkat.');
+  toast('info', 'Koneksi lemah. Yang tampil adalah data yang tersimpan di perangkat.');
   setTimeout(() => { tandaiLuring.sudah = false; }, 60_000);
 }
 
@@ -1383,10 +1383,54 @@ function pulihkanKonteks() {
 }
 
 function gambarBadgeKonteks() {
-  const el = $('ctxLabel'); if (el) el.textContent = labelKonteks();
-  const badge = $('ctxBadge');
-  if (badge) badge.title = 'Unit operasional aktif: ' + labelKonteks();
+  gambarPilihKonteks();
   gambarPilihUnit();
+}
+
+/**
+ * v2.44 — Pemilih unit operasional pada bilah atas: Semua Unit,
+ * Pengasuhan, Madrasah MTs, Madrasah MA. Sama seperti pemilih asrama,
+ * hanya pilihan yang boleh dibuka akun ini yang tampil. Bila hanya ada
+ * satu pilihan, yang tampil adalah lencana mati berisi unitnya.
+ */
+function gambarPilihKonteks() {
+  const badge = $('ctxBadge'); if (!badge) return;
+  const { unit, jenjang } = APP.ctx;
+  const kini = `${unit}|${unit === 'Madrasah' ? jenjang : 'Semua'}`;
+  const opsi = [
+    { v: 'Semua|Semua',      t: 'Semua Unit' },
+    { v: 'Pengasuhan|Semua', t: 'Pengasuhan' },
+    { v: 'Madrasah|MTs',     t: 'Madrasah MTs' },
+    { v: 'Madrasah|MA',      t: 'Madrasah MA' }
+  ].filter(o => { const [u, j] = o.v.split('|'); return bolehKonteks(u, j); });
+  if (!opsi.some(o => o.v === kini)) opsi.push({ v: kini, t: unit === 'Madrasah' ? 'Madrasah' : 'Semua Unit' });
+
+  badge.title = 'Unit yang sedang ditampilkan: ' + labelKonteks();
+  if (opsi.length < 2) {
+    badge.innerHTML = `<i class="fa-solid fa-layer-group"></i><span id="ctxLabel">${esc(opsi[0]?.t || 'Semua Unit')}</span>`;
+    return;
+  }
+  badge.innerHTML = `<i class="fa-solid fa-layer-group"></i>
+    <select id="ctxPilih" class="per-in" aria-label="Unit yang sedang ditampilkan">
+      ${opsi.map(o => `<option value="${o.v}" ${o.v === kini ? 'selected' : ''}>${esc(o.t)}</option>`).join('')}
+    </select>`;
+  $('ctxPilih')?.addEventListener('change', (e) => {
+    const [u, j] = e.target.value.split('|');
+    // Halaman Pengasuhan & Madrasah terikat pada unitnya: pindah halaman
+    // bila unit yang dipilih adalah unit yang lain.
+    const pindah = APP.view === 'pengasuhan' && u === 'Madrasah' ? 'madrasah'
+                 : APP.view === 'madrasah' && u === 'Pengasuhan' ? 'pengasuhan' : null;
+    setKonteks(u, j, pindah, APP.ctx.gender);
+  });
+}
+
+/** v2.44 — Ikon asrama: monster berpeci (putra), berjilbab (putri), keduanya (dua unit). */
+function ikonAsrama(g) {
+  try { pasangSpriteMonster(); } catch (e) {}
+  const mon = (id) => `<svg class="unit-mon" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><use href="#${id}"/></svg>`;
+  if (g === UNIT_PUTRI) return `<span class="unit-mon-wrap" data-tanpa-monster>${mon('rqMonJilbab')}</span>`;
+  if (g === UNIT_PUTRA) return `<span class="unit-mon-wrap" data-tanpa-monster>${mon('rqMonPeci')}</span>`;
+  return `<span class="unit-mon-wrap dua" data-tanpa-monster>${mon('rqMonPeci')}${mon('rqMonJilbab')}</span>`;
 }
 
 /**
@@ -1403,7 +1447,7 @@ function gambarPilihUnit() {
 
   if (kunci) {
     box.classList.remove('hidden');
-    box.innerHTML = `<i class="fa-solid fa-house-chimney-user"></i>
+    box.innerHTML = `${ikonAsrama(kunci)}
       <span class="unit-tetap" title="Akun Anda terkunci pada unit ini">Asrama ${
         kunci === UNIT_PUTRI ? 'Putri' : 'Putra'}</span>`;
     return;
@@ -1411,7 +1455,7 @@ function gambarPilihUnit() {
 
   box.classList.remove('hidden');
   const g = normalUnit(APP.ctx.gender) || 'Semua';
-  box.innerHTML = `<i class="fa-solid fa-house-chimney-user"></i>
+  box.innerHTML = `${ikonAsrama(g)}
     <select id="unitPilih" class="per-in" title="Unit asrama yang sedang ditampilkan">
       <option value="Semua" ${g === 'Semua' ? 'selected' : ''}>Dua Unit</option>
       <option value="putra" ${g === UNIT_PUTRA ? 'selected' : ''}>Asrama Putra</option>
@@ -2967,14 +3011,14 @@ async function viewDashboard() {
     <div class="grid-2">
       ${kartu('Gelombang Pelanggaran Mingguan', chartBox('chPekan'),
         `<span class="tag tag-sea">3 bulan terakhir</span>`,
-        'Akumulasi Senin–Minggu untuk melihat momentum kenaikan atau penurunan.')}
+        'Jumlah per pekan (Senin sampai Minggu) untuk melihat naik turunnya pelanggaran.')}
       ${kartu('Proporsi Kategori', chartBox('chKategori'), '',
         'Ringan · Sedang · Berat')}
     </div>
 
     <div class="grid-2">
       ${kartu('Tren per Angkatan', chartBox('chAngkatan'), '',
-        'Perbandingan VII–XII sepanjang 3 bulan terakhir.')}
+        'Perbandingan kelas VII sampai XII dalam 3 bulan terakhir.')}
       ${kartu('5 Pelanggaran Terbanyak', `<div class="card-body">
         ${topJenis.map(([nama, jml], i) => `<div class="rank">
           <span class="n">${String(i+1).padStart(2,'0')}</span>
@@ -3126,7 +3170,7 @@ function analisisEksekutif({ detail30, detailPrev30, bidangUrut, angkatan, izinS
     .sort((a,b) => b.per100 - a.per100)[0];
   if (topAng) {
     catatan.push({ level:'warn', judul:'Angkatan perlu perhatian: ' + topAng.angkatan,
-      teks:`Angkatan ${topAng.angkatan} mencatat ${topAng.per100} kasus per 100 santri — tertinggi secara relatif.`,
+      teks:`Angkatan ${topAng.angkatan} mencatat ${topAng.per100} kasus per 100 santri, tertinggi dibanding angkatan lain.`,
       rek:'Periksa kelas penyumbang utama dan koordinasikan pembinaan bersama wali kelas/wali asuh.' });
   }
 
@@ -3333,17 +3377,17 @@ async function viewPimpinan(opsi = {}) {
     ar1:'لوحة الإرشاد', lat:'Bimbingan & Konseling',
     ar2:'حال الطلاب المحتاجين للرعاية',
     judul:'Peta santri yang<br>membutuhkan pendampingan.',
-    teks:`Isi dan seluruh jendela rinciannya sama dengan dashboard pimpinan —
-          kedisiplinan, pola pelanggaran, perizinan, pembinaan, dan santri prioritas —
-          diarahkan untuk kerja bimbingan, bukan untuk menilai kinerja guru.`
+    teks:`Isinya sama dengan dashboard pimpinan: kedisiplinan, pola pelanggaran,
+          perizinan, pembinaan, dan santri prioritas. Halaman ini dipakai untuk
+          bimbingan, bukan untuk menilai kinerja guru.`
   };
   const heroPim = {
     ar1:'لوحة القيادة', lat:'Executive · Read Only',
     ar2:'تقرير حال الدايه',
     judul:'Analisis kondisi dayah<br>berbasis data.',
-    teks:`Ringkasan untuk membantu pimpinan melihat kedisiplinan, pola pelanggaran,
-          perizinan, pembinaan, dan santri yang membutuhkan perhatian — tanpa masuk
-          ke aktivitas input operasional.`
+    teks:`Ringkasan bagi pimpinan untuk melihat kedisiplinan, pola pelanggaran,
+          perizinan, pembinaan, dan santri yang perlu diperhatikan. Halaman ini
+          hanya untuk membaca, tidak untuk menginput data.`
   };
   const H = modeBk ? heroBk : heroPim;
 
@@ -3789,9 +3833,9 @@ async function bukaDetailSantri(nisn) {
           <i class="fa-regular fa-calendar-days"></i>
           <span>Cetak &amp; PDF mengikuti periode aktif:
             <b>${esc(labelPeriode())}</b>${APP.periode.aktif
-              ? ` — pelanggaran, pembinaan, dan perizinan disaring ke bulan ini
-                  (presensi tetap ditampilkan seluruhnya).`
-              : ` — seluruh riwayat santri akan tercetak.`}</span>
+              ? `. Pelanggaran, pembinaan, dan perizinan hanya bulan ini.
+                  Presensi tetap ditampilkan seluruhnya.`
+              : `. Seluruh riwayat santri akan tercetak.`}</span>
         </div>` : ''}
 
         ${(bolehCetak() || bolehPdf()) ? pilihKertasHTML() : ''}
@@ -3902,8 +3946,8 @@ async function modalAturKamar(nisn, s) {
              placeholder="mis. 21" value="${kini === null ? '' : kini}">
       <p class="hint" style="margin:6px 2px 14px">
         Bilangan ${KAMAR_MIN}–${KAMAR_MAKS}. Nomor kamar berlaku <b>dalam unit
-        ${esc(labelUnit)}</b> — Kamar 21 putra dan Kamar 21 putri adalah dua
-        kamar berbeda. Kosongkan untuk menghapus data kamar santri ini.
+        ${esc(labelUnit)}</b>. Kamar 21 putra dan Kamar 21 putri adalah dua
+        kamar yang berbeda. Kosongkan untuk menghapus data kamar santri ini.
       </p>
 
       <label class="switch-row" for="kmMud" ${bolehMudabbir ? '' : 'style="opacity:.55"'}>
@@ -3912,11 +3956,10 @@ async function modalAturKamar(nisn, s) {
       </label>
       <p class="hint" style="margin:6px 2px 0">
         ${bolehMudabbir
-          ? `Mudabbir disaring dan ditugaskan musyrif asrama dari kelas
-             ${ANGKATAN_MUDABBIR} untuk menjaga kamar angkatan
-             ${ANGKATAN_DIJAGA.join(' dan ')}. Catatan pelanggaran/prestasi
-             mudabbir <b>tidak dihitung</b> sebagai angka kamar yang ia jaga;
-             ia dilaporkan terpisah.`
+          ? `Mudabbir dipilih musyrif asrama dari kelas ${ANGKATAN_MUDABBIR}
+             untuk menjaga kamar angkatan ${ANGKATAN_DIJAGA.join(' dan ')}.
+             Catatan pelanggaran dan prestasi mudabbir <b>tidak dihitung</b>
+             untuk kamar yang ia jaga. Catatannya dilaporkan terpisah.`
           : `Hanya santri kelas ${ANGKATAN_MUDABBIR} yang dapat ditugaskan
              sebagai mudabbir. Santri ini angkatan ${esc(angk || 'tidak dikenali')}.`}
       </p>
@@ -3946,7 +3989,7 @@ async function modalAturKamar(nisn, s) {
       } catch (err) {
         const m = String(err?.message || '');
         Swal.showValidationMessage(/column .* does not exist/i.test(m)
-          ? 'Ditolak database: kolom nomor_kamar belum ada. Jalankan migration v2.17 terlebih dahulu.'
+          ? 'Data kamar belum bisa disimpan karena pengaturan sistem belum lengkap. Hubungi Admin.'
           : pesanKirim(err));
         return false;
       }
@@ -4184,7 +4227,7 @@ async function konfirmasiDuplikatPelanggaran(dup, labelKode) {
         satu langkah. Lanjutkan hanya bila ini memang kejadian kedua.</p>
     </div>`,
     showCancelButton: true,
-    confirmButtonText: 'Tetap catat — kejadian terpisah',
+    confirmButtonText: 'Tetap catat, ini kejadian lain',
     cancelButtonText: 'Batalkan',
     confirmButtonColor: '#9F1239'
   });
@@ -4295,7 +4338,7 @@ async function modalCatatPelanggaran(prefill) {
       if (!p.dupOk) {
         const dup = await cariDuplikatPelanggaran(nisn, kode, payload.p_tanggal);
         if (dup && !(await konfirmasiDuplikatPelanggaran(dup, fKode.value))) {
-          Swal.showValidationMessage('Dibatalkan — catatan hari ini sudah ada.');
+          Swal.showValidationMessage('Dibatalkan. Catatan hari ini sudah ada.');
           return false;
         }
       }
@@ -4430,10 +4473,9 @@ async function viewRekap() {
     <div class="stats" id="rkKpi"></div>
     ${kartu('Rekap Pelanggaran per Santri', `
     <div class="card-note"><i class="fa-solid fa-circle-info"></i>
-      Menampilkan <b>akumulasi seluruh unit</b> — Pengasuhan dan Madrasah digabung,
-      tidak mengikuti unit yang sedang aktif. Perhitungan bersifat apa adanya:
-      pelanggaran dengan <b>kode yang sama</b> dijumlahkan, tanpa konversi
-      antar kategori.</div>
+      Yang tampil adalah <b>akumulasi seluruh unit</b>. Pengasuhan dan Madrasah
+      digabung, tidak mengikuti unit yang sedang aktif. Pelanggaran dengan
+      <b>kode yang sama</b> dijumlahkan apa adanya, tanpa dipindah ke kategori lain.</div>
     <div class="filters">
       <input id="rkCari" class="input grow" placeholder="Cari nama atau NISN santri…" value="${esc(stRekap.cari)}">
       <select id="rkKategori" class="input">
@@ -5031,10 +5073,166 @@ function bentukMenurutAturan(r, instrumen) {
   const info = ins ? ins.get(r.kategori_bina) : null;
   const n = r.tahap_hitung || 0;
   const batas = info && info.max > 0 ? info.max : null;
-  if (batas && n > batas) {
-    return { bentuk_final: 'Sudah melebihi modul Instrumen', overflow: true, batas };
+  const lewat = !!batas && n > batas;
+  // v2.43: baris yang menunggu musyawarah dan baris hasil musyawarah
+  // (Manual) menampilkan apa adanya — bukan tangga master.
+  if (r.menunggu_alasan) {
+    return { bentuk_final: labelMenunggu(r.menunggu_alasan), overflow: lewat, batas,
+             menunggu: String(r.menunggu_alasan), manual: false };
   }
-  return { bentuk_final: bentukAturan(info, n) || bentukBina(r), overflow: false, batas };
+  if (String(r.mode_pembinaan) === 'Manual') {
+    return { bentuk_final: bentukBina(r), overflow: lewat, batas, menunggu: null, manual: true };
+  }
+  if (lewat) {
+    return { bentuk_final: 'Sudah melebihi modul Instrumen', overflow: true, batas, menunggu: null, manual: false };
+  }
+  return { bentuk_final: bentukAturan(info, n) || bentukBina(r), overflow: false, batas, menunggu: null, manual: false };
+}
+
+/* ---------------------------------------------------------------------
+   v2.43 — PEMBINAAN MANUAL (HASIL MUSYAWARAH)
+
+   Database (trg_pembinaan_otomatis v2.43) tidak lagi melewati pelanggaran
+   tanpa jejak. Bila tahapnya melewati master, atau pelanggaran diinput
+   setelah pelanggaran sekategori yang tanggalnya lebih baru, dibuat baris
+   pembinaan bertanda `menunggu_alasan`. Baris itu tidak bisa diselesaikan
+   sebelum hukumannya diisi lewat RPC isi_pembinaan_manual() — hak Admin
+   dan guru kelas binaan, sama dengan pengesahan pembinaan.
+   --------------------------------------------------------------------- */
+const LABEL_MENUNGGU = {
+  lewat_batas:  'Menunggu hasil musyawarah',
+  input_mundur: 'Menunggu keputusan (input terlambat)',
+  tanpa_aturan: 'Menunggu hasil musyawarah'
+};
+const KET_MENUNGGU = {
+  lewat_batas:  'Melewati tahap terakhir instrumen',
+  input_mundur: 'Diinput setelah pelanggaran yang lebih baru',
+  tanpa_aturan: 'Tahap ini tidak ada di instrumen'
+};
+const labelMenunggu = (a) => LABEL_MENUNGGU[a] || 'Menunggu hasil musyawarah';
+const bolehBinaManual = () => bolehPembinaan() && !hanyaBaca();
+
+/**
+ * Pelanggaran aktif seorang santri yang boleh diisi manual:
+ *   tanpa    — belum punya pembinaan sama sekali,
+ *   menunggu — pembinaannya bertanda menunggu musyawarah,
+ *   proses   — pembinaannya masih Dalam Proses (hukuman otomatis diganti).
+ * Pembinaan yang sudah Selesai tidak ditawarkan.
+ */
+async function kandidatBinaManual(nisn) {
+  const [detail, pbn, petaTahap, aturan] = await Promise.all([
+    amanKosong(muatDetail, 'pelanggaran'), amanKosong(muatPembinaan, 'pembinaan'),
+    petaTahapPelanggaran(), muatMasterPembinaan()
+  ]);
+  const instrumen = petaInstrumenUnit(aturan);
+  const perLog = new Map();
+  (pbn || []).filter(aktifPembinaan).forEach(p => {
+    const id = String(p.id_log_pelanggaran || '').trim(); if (!id) return;
+    if (!perLog.has(id)) perLog.set(id, []);
+    perLog.get(id).push(p);
+  });
+  const URUT = { menunggu: 0, tanpa: 1, proses: 2 };
+  return (detail || []).filter(aktifDetail)
+    .filter(d => String(d.nisn) === String(nisn))
+    .map(d => {
+      const daftar = perLog.get(String(d.id_log)) || [];
+      if (daftar.some(p => String(p.status_pembinaan) === 'Selesai')) return null;
+      const p = daftar[0] || null;
+      const jenis = !p ? 'tanpa' : (p.menunggu_alasan ? 'menunggu' : 'proses');
+      const n = petaTahap.get(String(d.id_log))?.n || null;
+      const ins = instrumenUntuk(instrumen, unitBaris(d));
+      const info = ins ? ins.get(String(d.kategori || '').trim()) : null;
+      const batas = info && info.max > 0 ? info.max : null;
+      return { ...d, jenis, pbn: p, tahap: n, batas, lewat: !!(batas && n && n > batas) };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (URUT[a.jenis] - URUT[b.jenis])
+      || String(kunciTgl(b.tanggal)).localeCompare(String(kunciTgl(a.tanggal))));
+}
+
+function htmlKandidatBinaManual(list, pilihId) {
+  if (!list.length) {
+    return `<div class="hint" style="padding:10px 0">Tidak ada pelanggaran yang bisa diisi.
+      Semua pembinaan santri ini sudah selesai.</div>`;
+  }
+  const tagJenis = (k) => k.jenis === 'menunggu'
+      ? `<span class="tag tag-wait">${esc(KET_MENUNGGU[k.pbn?.menunggu_alasan] || 'Menunggu musyawarah')}</span>`
+    : k.jenis === 'tanpa'
+      ? '<span class="tag tag-berat">Belum ada pembinaan</span>'
+      : `<span class="tag tag-off">Otomatis: ${esc(bentukBina(k.pbn))}</span>`;
+  return `<div class="pm-daftar" style="max-height:260px;overflow:auto;border:1px solid var(--line, #e2e8f0);border-radius:10px">
+    ${list.map(k => `<label style="display:flex;gap:10px;align-items:flex-start;padding:9px 11px;
+        border-bottom:1px solid var(--line, #e2e8f0);cursor:pointer;text-align:left">
+      <input type="radio" name="pmPlg" value="${esc(k.id_log)}" ${String(k.id_log) === String(pilihId) ? 'checked' : ''}
+        style="margin-top:3px">
+      <span style="flex:1;min-width:0">
+        <b style="font-size:13px">${esc(k.nama_pelanggaran || k.kode_pelanggaran || '-')}</b>
+        <span style="display:block;font-size:11.5px;color:var(--text-3)">${esc(tgl(k.tanggal))} · ${esc(k.kategori || '-')}
+          ${k.tahap ? ` · <b style="color:${k.lewat ? 'var(--maroon)' : 'inherit'}">Ke-${k.tahap}</b>${
+            k.lewat ? ` (batas ${k.batas})` : ''}` : ''}</span>
+        <span style="display:inline-block;margin-top:4px">${tagJenis(k)}</span>
+      </span></label>`).join('')}
+  </div>`;
+}
+
+/** Form pembinaan manual. idLog opsional: langsung memilih pelanggaran itu. */
+async function modalBinaManual(idLog) {
+  if (!bolehBinaManual()) return toast('error', `Role ${role()} tidak berwenang mengisi pembinaan manual.`);
+  let awal = null;
+  if (idLog) {
+    const d = (await amanKosong(muatDetail, 'pelanggaran')).find(x => String(x.id_log) === String(idLog));
+    if (d) awal = { nisn: d.nisn, nama_siswa: d.nama_siswa, kelas: d.kelas };
+  }
+  const muatDaftar = async (nisn, pilih) => {
+    const wadah = $('pmDaftar'); if (!wadah) return;
+    wadah.innerHTML = '<div class="hint"><i class="fa-solid fa-circle-notch fa-spin"></i> Memuat pelanggaran…</div>';
+    const daftar = await kandidatBinaManual(nisn);
+    const bawaan = daftar[0] && daftar[0].jenis !== 'proses' ? daftar[0].id_log : '';
+    if ($('pmDaftar')) $('pmDaftar').innerHTML = htmlKandidatBinaManual(daftar, pilih || bawaan);
+  };
+
+  const res = await Swal.fire({
+    title: 'Pembinaan Manual', width: 600, showCancelButton: true,
+    confirmButtonText: 'Simpan Hasil Musyawarah', cancelButtonText: 'Batal', confirmButtonColor: '#14618B',
+    showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
+    html: `<div class="stack" style="text-align:left">
+      <p class="hint" style="margin:0">Untuk pengulangan yang melewati instrumen (mis. ke-16 dst.) atau pelanggaran
+        yang diinput terlambat. Hukuman diisi sesuai hasil musyawarah.</p>
+      <div class="field"><label class="label">Santri</label>
+        <input id="pmSantri" class="input" autocomplete="off" placeholder="Ketik nama atau NISN…"
+          value="${awal ? esc(`${awal.nisn} - ${awal.nama_siswa}`) : ''}">
+      </div>
+      <div class="field"><label class="label">Pelanggaran yang tersisa</label>
+        <div id="pmDaftar"><div class="hint">Pilih santri terlebih dahulu.</div></div></div>
+      <div class="field"><label class="label">Bentuk pembinaan (hasil musyawarah)</label>
+        <textarea id="pmBentuk" class="input" rows="2" maxlength="300"
+          placeholder="Contoh: Skorsing kegiatan asrama 3 hari dan pendampingan orang tua"></textarea></div>
+      <div class="field"><label class="label">Catatan musyawarah <small style="font-weight:normal">(opsional)</small></label>
+        <input id="pmCatatan" class="input" maxlength="1000" placeholder="Contoh: rapat pengasuhan 27 Sep, dihadiri wali kelas"></div>
+    </div>`,
+    didOpen: () => {
+      const inp = $('pmSantri');
+      saranSantri(inp, (it) => muatDaftar(it.nisn));
+      if (awal) { inp.dataset.picked = awal.nisn; muatDaftar(awal.nisn, idLog); }
+      setTimeout(() => (awal ? $('pmBentuk') : inp).focus(), 120);
+    },
+    preConfirm: async () => {
+      const nisn = $('pmSantri').dataset.picked;
+      if (!nisn) { Swal.showValidationMessage('Pilih santri dari daftar saran.'); return false; }
+      const pilih = document.querySelector('input[name="pmPlg"]:checked')?.value;
+      if (!pilih) { Swal.showValidationMessage('Pilih pelanggaran yang akan diisi.'); return false; }
+      const bentuk = $('pmBentuk').value.trim();
+      if (bentuk.length < 3) { Swal.showValidationMessage('Bentuk pembinaan wajib diisi.'); return false; }
+      const { data, error } = await db.rpc('isi_pembinaan_manual',
+        { p_id_log: pilih, p_bentuk: bentuk, p_catatan: $('pmCatatan').value.trim() });
+      if (error) { Swal.showValidationMessage(error.message); return false; }
+      return data;
+    }
+  });
+  if (!res.isConfirmed) return;
+  cacheHapus('pembinaan', 'laporan_bina');
+  toast('success', res.value?.aksi === 'dibuat' ? 'Pembinaan manual dibuat' : 'Hasil musyawarah tersimpan');
+  if (APP.view === 'pembinaan') await gambarBina();
 }
 
 // ---------- 16b. Penanda "perlu ditinjau" ----------------------------
@@ -5106,10 +5304,10 @@ async function tinjauAmbangBerat(idPembinaan) {
   await Swal.fire({
     icon: 'warning', width: 660, title: 'Perlu ditinjau',
     html: `<div style="text-align:left;font-size:13.5px">
-      <p style="margin:0 0 9px"><b>${esc(r.nama_siswa)}</b> — tercatat otomatis sebagai
+      <p style="margin:0 0 9px"><b>${esc(r.nama_siswa)}</b> tercatat otomatis dengan pembinaan
         <b>${esc(bentukBina(r))}</b>.</p>
       <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin:0 0 10px">
-        <tr><td style="padding:5px 0">Nomor tahap dari trigger database</td>
+        <tr><td style="padding:5px 0">Tahap menurut sistem (urutan input)</td>
             <td style="padding:5px 0;text-align:right"><b>ke-${esc(r.pengulangan_ke)}</b></td></tr>
         <tr><td style="padding:5px 0">Nomor tahap hasil hitung ulang (${JENDELA_TAHAP_BULAN} bulan berjalan)</td>
             <td style="padding:5px 0;text-align:right"><b>ke-${esc(r.tahap_hitung)}</b></td></tr>
@@ -5154,7 +5352,7 @@ async function viewPembinaan() {
       <i class="fa-solid fa-chevron-right alur-panah"></i>
       <div class="alur-langkah on"><span>2</span><div><b>Laporkan</b><small>Terkirim ke guru kelas binaan santri</small></div></div>
       <i class="fa-solid fa-chevron-right alur-panah"></i>
-      <div class="alur-langkah"><span>3</span><div><b>Disahkan</b><small>Guru menekan “Sahkan Selesai” — legalitas pada guru</small></div></div>
+      <div class="alur-langkah"><span>3</span><div><b>Disahkan</b><small>Guru menekan “Sahkan Selesai”. Pengesahan ada di tangan guru</small></div></div>
     </div>` : ''}
     ${kartu('Instruksi Pembinaan', `
       <div class="filters">
@@ -5162,7 +5360,7 @@ async function viewPembinaan() {
         <select id="pbKategori" class="input"><option value="">Semua Kategori</option>
           ${['Ringan','Sedang','Berat'].map(k => `<option ${k===stBina.kategori?'selected':''}>${k}</option>`).join('')}</select>
         <select id="pbStatus" class="input"><option value="">Semua Status</option>
-          ${['Dalam Proses','Menunggu Pengesahan','Selesai'].map(k => `<option ${k===stBina.status?'selected':''}>${k}</option>`).join('')}</select>
+          ${['Dalam Proses','Menunggu Musyawarah','Menunggu Pengesahan','Selesai'].map(k => `<option ${k===stBina.status?'selected':''}>${k}</option>`).join('')}</select>
         <select id="pbMode" class="input"><option value="">Semua Mode</option>
           ${['Otomatis','Manual'].map(k => `<option ${k===stBina.mode?'selected':''}>${k}</option>`).join('')}</select>
         <span class="sep"></span>
@@ -5179,7 +5377,10 @@ async function viewPembinaan() {
       </table></div>
       <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
       <div id="pgBina"></div>`,
-      `<button class="btn btn-ghost btn-sm" id="pbRefresh"><i class="fa-solid fa-rotate"></i>Muat Ulang</button>`,
+      `${bolehBinaManual() ? `<button class="btn btn-primary btn-sm" id="pbManual"
+          title="Isi hukuman hasil musyawarah untuk pelanggaran yang tersisa">
+          <i class="fa-solid fa-people-group"></i>Pembinaan Manual</button>` : ''}
+       <button class="btn btn-ghost btn-sm" id="pbRefresh"><i class="fa-solid fa-rotate"></i>Muat Ulang</button>`,
       `Tahap dihitung dari pelanggaran ${JENDELA_TAHAP_BULAN} bulan terakhir per kategori; `
       + `bentuk mengikuti Master Pembinaan.`)}`;
 
@@ -5222,6 +5423,9 @@ async function viewPembinaan() {
     }
     const t = e.target.closest('[data-tinjau]');
     if (t) return tinjauAmbangBerat(t.dataset.tinjau);
+    if (e.target.closest('#pbManual')) return modalBinaManual();
+    const mn = e.target.closest('[data-bina-manual]');
+    if (mn) return modalBinaManual(mn.dataset.binaManual);
     const l = e.target.closest('[data-lapor]');
     if (l) return modalLaporBina([l.dataset.lapor]);
     if (e.target.closest('#pbLaporMassal')) return modalLaporBina([...stBina.pilih]);
@@ -5289,10 +5493,12 @@ async function gambarBina() {
   const menunggu = semua.filter(menungguSah).length;
   const otomatis = semua.filter(r => String(r.mode_pembinaan) === 'Otomatis').length;
   const belumLapor = lapor ? semua.filter(r => r.status_pembinaan !== 'Selesai' && !laporanDari(r)).length : 0;
+  const nMusyawarah = semua.filter(r => r.menunggu).length;
   $('binaKpi').innerHTML =
     stat('Total Instruksi', angka(total), 'fa-solid fa-list', 'background:#EFF3F6;color:var(--text-2)', 'var(--text-3)', labelPeriode()) +
     stat('Dalam Proses', angka(proses), 'fa-solid fa-hourglass-half', 'background:var(--amber-bg);color:var(--amber)', 'var(--amber)',
-      lapor ? `${angka(belumLapor)} belum dilaporkan` : '') +
+      lapor ? `${angka(belumLapor)} belum dilaporkan`
+            : (nMusyawarah ? `${angka(nMusyawarah)} menunggu musyawarah` : '')) +
     stat('Menunggu Pengesahan', angka(menunggu), 'fa-solid fa-file-signature', 'background:#E7F1F7;color:var(--sea)', 'var(--sea)',
       bolehPembinaan() ? 'Laporan Ustadz GEN-Z untuk Anda' : 'Di tangan guru kelas binaan') +
     stat('Selesai', angka(total - proses), 'fa-solid fa-circle-check', 'background:var(--teal-bg);color:var(--teal)', 'var(--teal)',
@@ -5302,6 +5508,7 @@ async function gambarBina() {
   const rows = semua.filter(r => {
     if (stBina.kategori && r.kategori_bina !== stBina.kategori) return false;
     if (stBina.status === 'Menunggu Pengesahan') { if (!menungguSah(r)) return false; }
+    else if (stBina.status === 'Menunggu Musyawarah') { if (!r.menunggu) return false; }
     else if (stBina.status && String(r.status_pembinaan || 'Dalam Proses') !== stBina.status) return false;
     if (stBina.mode && String(r.mode_pembinaan || 'Manual') !== stBina.mode) return false;
     if (!k) return true;
@@ -5332,11 +5539,15 @@ async function gambarBina() {
     const selesai = String(r.status_pembinaan) === 'Selesai';
     const L = laporanDari(r);
     const tunggu = L && !selesai;
-    const bisaDipilih = lapor && !selesai && !L;
+    const bisaDipilih = lapor && !selesai && !L && !r.menunggu;
     const dipilih = bisaDipilih && stBina.pilih.has(id);
     const tahap = tahapBina(r);
     const catatan = String(r.catatan_pembinaan || '').trim();
     const tampilCatatan = catatan && !/^Pembinaan otomatis kategori /i.test(catatan);
+    const idLog = String(r.id_log_pelanggaran || '');
+    // v2.43: hukuman boleh diisi/diganti manual bila menunggu musyawarah
+    // atau tahapnya melewati instrumen, selama belum Selesai.
+    const bisaManual = editable && !selesai && !!idLog && (!!r.menunggu || (r.overflow && !r.manual));
 
     const aksi = [];
     if (bolehKabarWali() && perluKabarWali(r)) aksi.push(`<button class="btn btn-wa btn-sm" data-wa-wali="${esc(id)}"
@@ -5345,7 +5556,9 @@ async function gambarBina() {
          title="Kirim laporan pelaksanaan ke guru kelas binaan"><i class="fa-solid fa-paper-plane"></i>Laporkan ke Guru</button>`);
     if (L && (lapor || editable)) aksi.push(`<button class="btn btn-ghost btn-sm" data-bina-utas="${esc(L.utas[0])}"
          title="Buka percakapan laporan"><i class="fa-solid fa-comments"></i>Utas</button>`);
-    if (editable) aksi.push(`<button class="btn ${selesai ? 'btn-ghost' : tunggu ? 'btn-sah' : 'btn-ok'} btn-sm"
+    if (bisaManual) aksi.push(`<button class="btn btn-primary btn-sm" data-bina-manual="${esc(idLog)}"
+         title="Isi hukuman sesuai hasil musyawarah"><i class="fa-solid fa-people-group"></i>Isi Hasil Musyawarah</button>`);
+    if (editable && !r.menunggu) aksi.push(`<button class="btn ${selesai ? 'btn-ghost' : tunggu ? 'btn-sah' : 'btn-ok'} btn-sm"
          data-pbn="${esc(id)}|${selesai ? 'Dalam Proses' : 'Selesai'}">
          <i class="fa-solid ${selesai ? 'fa-arrow-rotate-left' : tunggu ? 'fa-file-signature' : 'fa-circle-check'}"></i>${
            selesai ? 'Buka Lagi' : tunggu ? 'Sahkan Selesai' : 'Selesaikan'}</button>`);
@@ -5364,9 +5577,12 @@ async function gambarBina() {
         ? `<span class="tag ${r.overflow ? 'tag-berat' : 'tag-sea'}">Ke-${tahap}</span>
            ${r.tahap_perkiraan ? `<div class="secondary" style="font-size:10px;margin-top:4px">perkiraan</div>` : ''}`
         : '<span class="tag tag-off">—</span>'}</td>
-      <td><div class="primary" ${r.overflow ? 'style="color:var(--maroon)"' : ''}>${esc(r.bentuk_final)}</div>
+      <td><div class="primary" ${r.menunggu ? 'style="color:var(--amber);font-style:italic"'
+          : (r.overflow && !r.manual) ? 'style="color:var(--maroon)"' : ''}>${esc(r.bentuk_final)}</div>
+        ${r.menunggu ? `<span class="tag tag-wait">${esc(KET_MENUNGGU[r.menunggu] || 'Menunggu musyawarah')}</span>` : ''}
+        ${r.manual ? `<span class="tag tag-sah" title="Ditetapkan melalui musyawarah"><i class="fa-solid fa-people-group"></i>Hasil musyawarah</span>` : ''}
         ${perluDitinjau(r) ? `<button class="tag tag-tinjau" data-tinjau="${esc(id)}"
-            title="Nomor tahap dari database berbeda dengan hitungan periode berjalan">
+            title="Tahap menurut sistem berbeda dengan hitungan menurut tanggal">
             <i class="fa-solid fa-magnifying-glass"></i>Perlu ditinjau</button>` : ''}
         ${r.overflow ? `<div class="secondary">Batas modul kategori ini: ${r.batas}</div>` : ''}
         ${tampilCatatan ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:5px">${esc(catatan)}</div>` : ''}</td>
@@ -5776,7 +5992,7 @@ function periksaCsv(jenis, baris, adaDb) {
         masalah.push(`Kelas "${data.kelas}" tidak mengikuti pola TINGKAT-HURUF, mis. VII-A`);
       } else if (unitKelas === UNIT_PUTRA) {
         masalah.push(`Kelas "${data.kelas}" adalah kelas PUTRA menurut ketetapan dayah `
-          + '(VII–IX putri = A/B/C, X–XII putri = A/B)');
+          + '(kelas putri VII sampai IX: A/B/C, kelas X sampai XII: A/B)');
       }
 
       const p = pecahKelas(data.kelas);
@@ -5840,7 +6056,7 @@ function periksaCsv(jenis, baris, adaDb) {
           masalah.push(`Tahap "${data.kategori} ke-${data.pengulangan_ke}" sudah ada pada baris ${pasangan.get(kunci)}`);
         } else pasangan.set(kunci, r.__baris);
         if (adaDb && adaDb.has(kunci)) {
-          masalah.push(`Tahap "${data.kategori} ke-${data.pengulangan_ke}" sudah terdaftar di database untuk unit putri`);
+          masalah.push(`Tahap "${data.kategori} ke-${data.pengulangan_ke}" sudah terdaftar untuk unit putri`);
         }
       }
       if (!data.keterangan) data.keterangan = '';
@@ -5851,10 +6067,10 @@ function periksaCsv(jenis, baris, adaDb) {
       const nilai = String(data[skema.kunci] ?? '');
       if (nilai) {
         if (terlihat.has(nilai)) {
-          masalah.push(`${skema.kunci === 'nisn' ? 'NISN' : 'Kode'} "${nilai}" ganda — sudah dipakai baris ${terlihat.get(nilai)}`);
+          masalah.push(`${skema.kunci === 'nisn' ? 'NISN' : 'Kode'} "${nilai}" ganda, sudah dipakai di baris ${terlihat.get(nilai)}`);
         } else terlihat.set(nilai, r.__baris);
         if (adaDb && adaDb.has(nilai)) {
-          masalah.push(`${skema.kunci === 'nisn' ? 'NISN' : 'Kode'} "${nilai}" sudah ada di database`);
+          masalah.push(`${skema.kunci === 'nisn' ? 'NISN' : 'Kode'} "${nilai}" sudah terdaftar`);
         }
       }
     }
@@ -5924,8 +6140,8 @@ function kartuUnggahCsv() {
       </div>
     </div>
     <b class="brk-nm">Unggah Berkas CSV</b>
-    <p class="brk-sub">Pengisian massal data asrama putri. Setiap berkas
-       ditinjau lebih dahulu sebelum masuk database.</p>
+    <p class="brk-sub">Pengisian data asrama putri sekaligus. Setiap berkas
+       diperiksa dulu sebelum disimpan.</p>
     <div class="unggah-list">
       ${Object.entries(SKEMA_CSV).map(([jenis, s]) => `
         <div class="unggah-item">
@@ -5943,8 +6159,8 @@ function kartuUnggahCsv() {
         </div>`).join('')}
     </div>
     <p class="hint" style="margin:10px 2px 0">
-      Kolom <b>unit_gender</b> tidak perlu ada di berkas — sistem mengisinya
-      <b>putri</b> secara otomatis pada saat pengiriman.</p>
+      Kolom <b>unit_gender</b> tidak perlu ada di berkas. Sistem mengisinya
+      <b>putri</b> secara otomatis saat dikirim.</p>
     <input type="file" id="csvInput" accept=".csv,text/csv,text/plain" class="hidden">
   </div>`;
 }
@@ -6046,7 +6262,7 @@ async function pratinjauCsv(jenis, namaBerkas, teks) {
     width: 1040,
     showCancelButton: true,
     cancelButtonText: 'Batal',
-    confirmButtonText: `Kirim ${angka(bersih.length)} baris ke database`,
+    confirmButtonText: `Simpan ${angka(bersih.length)} baris`,
     confirmButtonColor: '#14618B',
     showLoaderOnConfirm: true,
     allowOutsideClick: () => !Swal.isLoading(),
@@ -6133,8 +6349,8 @@ async function kirimCsv(jenis, rows) {
     const { error } = await db.from(skema.tabel).insert(potong);
     if (error) {
       segarkanSetelahUnggah(jenis);
-      throw new Error(`${pesanKirim(error)} — ${angka(masuk)} baris sudah masuk sebelum kegagalan `
-        + `(baris berkas 2–${masuk + 1}). Hapus baris yang sudah masuk dari berkas sebelum mengulang.`);
+      throw new Error(`${String(pesanKirim(error)).replace(/\.\s*$/, '')}. Sebanyak ${angka(masuk)} baris sudah tersimpan sebelum gagal `
+        + `(baris 2 sampai ${masuk + 1} di berkas). Hapus baris itu dari berkas sebelum mengulang.`);
     }
     masuk += potong.length;
   }
@@ -6146,18 +6362,18 @@ async function kirimCsv(jenis, rows) {
 function pesanKirim(error) {
   const m = String(error?.message || 'Galat tidak dikenal');
   if (/duplicate key|already exists/i.test(m)) {
-    return 'Ditolak database: ada kunci yang sudah terpakai. '
+    return 'Ditolak: ada kode atau NISN yang sudah terpakai. '
       + 'Kemungkinan data sudah diunggah sebelumnya.';
   }
   if (/violates row-level security|permission denied/i.test(m)) {
-    return 'Ditolak database: hanya Admin yang boleh mengisi tabel ini.';
+    return 'Ditolak: hanya Admin yang boleh mengisi data ini.';
   }
   if (/violates check constraint/i.test(m)) {
-    return `Ditolak database: nilai kolom di luar yang diizinkan (${m}).`;
+    return `Ditolak: ada isian yang tidak sesuai ketentuan (${m}).`;
   }
   if (/column .* does not exist/i.test(m)) {
-    return 'Ditolak database: kolom unit_gender belum ada. '
-      + 'Jalankan migration v2.10 terlebih dahulu.';
+    return 'Ditolak: pengaturan unit putri di sistem belum lengkap. '
+      + 'Hubungi Admin.';
   }
   return `Ditolak database: ${m}`;
 }
@@ -6441,7 +6657,7 @@ function kartuIdentitasDayah(identitas) {
         'Disarankan foto lanskap beresolusi tinggi (JPG/WEBP).')}
     </div>
     <input type="file" id="idnInput" accept="image/png,image/jpeg,image/webp" class="hidden">`,
-    '', 'Tampil di layar login — hanya Admin yang dapat mengubah');
+    '', 'Tampil di layar login. Hanya Admin yang dapat mengubahnya');
 }
 
 /** Klik salah satu bingkai Identitas Dayah → pilih berkas → unggah sebagai identitas global. */
@@ -6465,7 +6681,7 @@ function pasangIdentitasDayah() {
       APP.identitas = { ...(APP.identitas || {}), [kategori]: url };
       terapkanIdentitasVisual(APP.identitas);
       sync('done', 'Identitas dayah diperbarui');
-      toast('success', 'Tersimpan — bilah profil & layar login langsung diperbarui');
+      toast('success', 'Tersimpan. Bilah profil dan layar login sudah diperbarui');
     } catch (e) {
       sync('warn', 'Gagal mengunggah');
       fireError(e);
@@ -6567,7 +6783,7 @@ async function modalMaster(existing) {
       <div class="field"><label class="label">Bidang</label>
         <input id="mBidang" class="input" autocomplete="off" value="${esc(m.bidang||'')}"
                placeholder="Ketik: ubu, bahasa, atribut…">
-        <p class="hint">Dipilih dari Master Bidang. ${bidang.length ? '' : 'Master Bidang masih kosong — isi terlebih dahulu.'}</p></div>
+        <p class="hint">Dipilih dari Master Bidang. ${bidang.length ? '' : 'Master Bidang masih kosong. Isi terlebih dahulu.'}</p></div>
     </div>`,
     didOpen: () => saranBidang($('mBidang')),
     preConfirm: async () => {
@@ -6599,7 +6815,7 @@ async function modalMaster(existing) {
                 && /does not exist|schema cache/i.test(error.message || '')) {
         const { unit_gender, ...tanpaUnit } = payload;
         ({ error } = await simpan(tanpaUnit));
-        if (!error) toast('info', 'Tersimpan tanpa penanda unit — migration v2.10 belum dijalankan.');
+        if (!error) toast('info', 'Tersimpan tanpa penanda unit karena pengaturan sistem belum lengkap.');
       }
       if (error) { Swal.showValidationMessage(error.message); return false; }
       return true;
@@ -6767,13 +6983,13 @@ async function modalPengguna(u) {
           const kini = u.korps || '';
           const opsi = baku.includes(kini) ? baku : [...baku, kini];
           return opsi.map(x => `<option value="${esc(x)}" ${x === kini ? 'selected' : ''}>${
-            x || '— Tidak tergabung —'}</option>`).join('');
+            x || '(Tidak tergabung)'}</option>`).join('');
         })()}</select>
         <p class="hint">Menentukan lambang korps pada bilah profil, layar masuk,
-           dan lembar cetak. Untuk akun <b>tanpa kelas binaan</b> — misalnya Osis —
-           nilai ini juga mengunci unit asrama yang boleh dilihat, karena Osis putra
-           dan Osis putri punya struktur sendiri. Akun yang sudah punya kelas binaan
-           selalu mengikuti unit kelasnya, bukan korps.</p></div>
+           dan lembar cetak. Untuk akun <b>tanpa kelas binaan</b>, misalnya Osis,
+           pilihan ini juga menentukan asrama yang boleh dilihat, karena Osis putra
+           dan Osis putri punya susunan sendiri. Akun yang punya kelas binaan
+           selalu mengikuti unit kelasnya.</p></div>
       <div class="trio">
         <div class="field"><label class="label">Unit Akses</label>
           <select id="uUnit" class="input">${['Semua','Pengasuhan','Madrasah']
@@ -6982,6 +7198,14 @@ function petaBentukTercatat(pembinaan) {
  */
 function riwayatCetak(tampil, penuh, pembinaan, instrumen) {
   const tercatat = petaBentukTercatat(pembinaan);
+  // v2.43: pembinaan manual (hasil musyawarah) & yang menunggu musyawarah
+  // dicocokkan langsung lewat id_log — laporan_santri() kini membawanya.
+  const perLog = new Map();
+  (pembinaan || []).forEach(b => {
+    const id = String(b.id_log_pelanggaran || '').trim(); if (!id) return;
+    if (b.menunggu_alasan) perLog.set(id, { menunggu: String(b.menunggu_alasan), teks: labelMenunggu(b.menunggu_alasan) });
+    else if (String(b.mode_pembinaan) === 'Manual') perLog.set(id, { manual: true, teks: bentukBina(b) });
+  });
   const urut = (arr) => (arr || []).slice().sort((a, b) =>
     (URUT_KAT[a.kategori] ?? 99) - (URUT_KAT[b.kategori] ?? 99) ||
     String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal))));
@@ -7001,6 +7225,11 @@ function riwayatCetak(tampil, penuh, pembinaan, instrumen) {
     const info = ins ? ins.get(kategori) : null;
     const batas = info && info.max > 0 ? info.max : null;
     const overflow = isNum(batas) && n > batas;
+    const khusus = p.id_log ? perLog.get(String(p.id_log)) : null;
+    if (khusus) {
+      return { ...p, kategori, urutanKategori: n, batas, overflow,
+        manual: !!khusus.manual, menunggu: khusus.menunggu || null, bentukPembinaan: khusus.teks };
+    }
     return { ...p, kategori, urutanKategori: n, batas, overflow,
       bentukPembinaan: overflow
         ? 'Sudah melebihi modul Instrumen'
@@ -7153,15 +7382,15 @@ function bagianKesimpulanCetak(k) {
     </table>
 
     <p style="font-size:11.5px;line-height:1.6;margin:0 0 6px;">
-      Santri ini mencatat <b>${k.Z}</b> pelanggaran dari <b>${esc(String(k.X))}</b> total di
-      jenjang ${esc(k.jenjang)} (${esc(k.pctJenjang)}), dan ${esc(k.pctAngkatan)} dari angkatan
-      ${esc(k.angkatan)}. Mayoritas pada kategori <b>${esc(k.katDominan)}</b>.
-      Pada periode yang sama tercatat <b>${k.jumlahPrestasi}</b> apresiasi
+      Ananda tercatat <b>${k.Z}</b> kali melanggar dari <b>${esc(String(k.X))}</b> pelanggaran di
+      jenjang ${esc(k.jenjang)} (${esc(k.pctJenjang)}), atau ${esc(k.pctAngkatan)} dari angkatan
+      ${esc(k.angkatan)}. Sebagian besar termasuk kategori <b>${esc(k.katDominan)}</b>.
+      Pada periode yang sama ananda mendapat <b>${k.jumlahPrestasi}</b> apresiasi
       senilai <b>${k.poinPrestasi}</b> poin${k.areaKuat && k.areaKuat !== NA_DATA
-        ? `, terkuat pada bidang <b>${esc(k.areaKuat)}</b>` : ''},
+        ? `, paling banyak di bidang <b>${esc(k.areaKuat)}</b>` : ''},
       sehingga skor net menjadi <b>${k.net}</b>.
       Status: <b style="color:${warna};">${esc(k.tier.nama)}</b>.
-      Memerlukan fokus pada bidang <b>${esc(k.areaFokus)}</b>.
+      Pembinaan perlu difokuskan pada bidang <b>${esc(k.areaFokus)}</b>.
     </p>`;
   // Kotak catatan & tanda tangan tidak lagi dibuat di sini — keduanya
   // disatukan pada blokPenutupCetak() supaya tidak pernah terbelah halaman.
@@ -7722,9 +7951,9 @@ function blokPenutupCetak(pj, dicetak) {
 
     <p style="margin:18px 0 0;padding-top:7px;border-top:1px solid #e2e8f0;
               font-size:8.5px;line-height:1.6;color:#94a3b8;">
-      Diterbitkan oleh Sistem Informasi Pengembangan Santri — Dayah Ruhul Qurani,
-      ${esc(dicetak)}, atas tanggung jawab ${esc(nama)}.
-      Laporan dinyatakan sah setelah dibubuhi tanda tangan musyrif asrama.
+      Diterbitkan oleh Sistem Informasi Pengembangan Santri Dayah Ruhul Qurani
+      pada ${esc(dicetak)}, atas tanggung jawab ${esc(nama)}.
+      Laporan ini sah setelah ditandatangani musyrif asrama.
     </p>
   </div>`;
 }
@@ -7896,8 +8125,8 @@ function presensiLaporanHTML(data, { th, td, TABEL, kelas }) {
   if (tot) {
     const penuh = !tot.tidakHadir;
     ringkas = `Kehadiran <b>${pct(tot.hadirPct)}</b> dari ${angka(Math.round(tot.jp))} JP efektif
-      (${prHari(tot.jp)} hr · ${tot.pekan} pekan direkap)${penuh ? ' — <b>hadir penuh</b>' : ''} ·
-      alpa <b>${tot.A} JP</b> · sakit &amp; izin pulang ${tot.S + tot.IP} JP${tot.IK ? ` · izin kegiatan ${tot.IK} JP` : ''}.`;
+      (${prHari(tot.jp)} hari, ${tot.pekan} pekan direkap)${penuh ? ', <b>hadir penuh</b>' : ''}.
+      Alpa <b>${tot.A} JP</b>, sakit dan izin pulang ${tot.S + tot.IP} JP${tot.IK ? `, izin kegiatan ${tot.IK} JP` : ''}.`;
   } else {
     ringkas = `Belum ada pekan presensi yang direkap untuk kelas ${esc(kelas || '-')}.`;
   }
@@ -7929,8 +8158,9 @@ function presensiLaporanHTML(data, { th, td, TABEL, kelas }) {
       <thead><tr>${['Bulan','JP Efektif','Sakit','Izin Kegiatan','Izin Pulang','Alpa','Kehadiran'].map(th).join('')}</tr></thead>
       <tbody>${barisBulan}${barisTotal}</tbody>
     </table>
-    <p style="${KET}">Dihitung dari pekan yang sudah direkap wali kelas (6 hari × ${JP_PER_HARI} JP per pekan; pekan libur tidak dihitung).
-      Izin kegiatan adalah kegiatan resmi dayah sehingga tidak mengurangi kehadiran.</p>`;
+    <p style="${KET}">Kehadiran dihitung dari pekan yang sudah direkap wali kelas. Satu pekan berisi 6 hari
+      (${6 * JP_PER_HARI} JP), dan pekan libur tidak dihitung. Izin kegiatan termasuk hadir karena santri
+      mengikuti kegiatan resmi dayah.</p>`;
 }
 
 function bangunLaporanHTML(data) {
@@ -8025,16 +8255,16 @@ function bangunLaporanHTML(data) {
     ${data.presensiTerkunci ? (() => {
       const k = data.presensiRingkas;
       const isi = k
-        ? `Kehadiran <b>${k.hadirPct}%</b> dari ${angka(k.jpAmati)} JP teramati (${k.pekan} pekan) ·
-           alpa <b>${k.alpa} JP</b> (${prHari(k.alpa)} hr) · tidak hadir berizin ${k.berizin} JP.`
-        : 'Belum ada pekan presensi yang teramati untuk santri ini.';
+        ? `Kehadiran <b>${k.hadirPct}%</b> dari ${angka(k.jpAmati)} JP yang direkap (${k.pekan} pekan).
+           Alpa <b>${k.alpa} JP</b> (${prHari(k.alpa)} hari), tidak hadir dengan izin ${k.berizin} JP.`
+        : 'Belum ada pekan presensi yang direkap untuk santri ini.';
       const tdMentah = (h) => `<td style="border:1px solid #cbd5e1;padding:5px;">${h}</td>`;
       return `<table style="${TABEL}font-size:11px;"><tbody><tr>${tdMentah(isi)}</tr>
-        <tr>${tdMentah('<span style="color:#64748b;font-size:10px;">Ringkasan analisis. Rincian presensi per jenis dan per minggu hanya dibuka bagi Guru, Wali Kelas, dan Guru BK.</span>')}</tr></tbody></table>`;
+        <tr>${tdMentah('<span style="color:#64748b;font-size:10px;">Ini ringkasan. Rincian presensi per jenis dan per minggu hanya dapat dilihat Guru, Wali Kelas, dan Guru BK.</span>')}</tr></tbody></table>`;
     })() : presensiLaporanHTML(data, { th, td, TABEL, kelas: s.kelas })}
 
     <h3 style="${H3}">
-      2. Akumulasi Perkembangan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
+      2. Akumulasi Perkembangan${aktif ? ' (' + esc(labelPer) + ')' : ''}</h3>
     <table style="${TABEL}font-size:11px;">
       <thead><tr>${['Kategori','Catatan','Jumlah'].map(th).join('')}</tr></thead>
       <tbody>${baris(rekap, r =>
@@ -8043,12 +8273,18 @@ function bangunLaporanHTML(data) {
     </table>
 
     <h3 style="${H3}">
-      3. Riwayat Perkembangan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
+      3. Riwayat Perkembangan${aktif ? ' (' + esc(labelPer) + ')' : ''}</h3>
     <table style="${TABEL}font-size:10.5px;">
       <thead><tr>${['Tanggal','Bidang','Catatan','Kategori','Poin','Bentuk Pembinaan'].map(th).join('')}</tr></thead>
       <tbody>${baris(riwayat, p => {
-        const bg = p.overflow ? 'background:#fff4f4;' : '';
-        const selPembinaan = p.overflow
+        const bg = p.overflow && !p.manual && !p.menunggu ? 'background:#fff4f4;' : '';
+        const selPembinaan = p.menunggu
+          ? `<td style="border:1px solid #cbd5e1;padding:5px;color:#B45309;font-style:italic;">${esc(p.bentukPembinaan)}</td>`
+          : p.manual
+          ? `<td style="border:1px solid #cbd5e1;padding:5px;">${esc(p.bentukPembinaan)}
+               <span style="display:block;font-size:9px;color:#94a3b8;">(hasil musyawarah${
+                 p.overflow ? ` · ke-${p.urutanKategori}, di luar ${p.batas} tahap instrumen` : ''})</span></td>`
+          : p.overflow
           ? `<td style="border:1px solid #cbd5e1;padding:5px;${bg}color:#9F1239;font-weight:bold;">
                ${esc(p.bentukPembinaan)}
                <span style="display:block;font-weight:normal;font-size:9px;color:#94a3b8;">
@@ -8060,7 +8296,7 @@ function bangunLaporanHTML(data) {
     </table>
 
     <h3 style="${H3}">
-      4. Prestasi &amp; Apresiasi${aktif ? ' — ' + esc(labelPer) : ''}</h3>
+      4. Prestasi &amp; Apresiasi${aktif ? ' (' + esc(labelPer) + ')' : ''}</h3>
     <table style="${TABEL}font-size:11px;">
       <thead><tr>${['Tanggal','Kategori','Bentuk Apresiasi','Bidang','Poin'].map(th).join('')}</tr></thead>
       <tbody>${baris(prestasi, r =>
@@ -8075,7 +8311,7 @@ function bangunLaporanHTML(data) {
     </table>
 
     <h3 style="${H3}">
-      5. Capaian Tahfiz${aktif ? ' — ' + esc(labelPer) : ''}</h3>
+      5. Capaian Tahfiz${aktif ? ' (' + esc(labelPer) + ')' : ''}</h3>
     <table style="${TABEL}font-size:11px;margin-bottom:7px;">
       <tbody>
         <tr><td style="border:1px solid #cbd5e1;padding:5px;width:60%;">Setoran ziyadah (hafalan baru)</td>
@@ -8100,7 +8336,7 @@ function bangunLaporanHTML(data) {
     </table>
 
     <h3 style="${H3}">
-      6. Riwayat Perizinan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
+      6. Riwayat Perizinan${aktif ? ' (' + esc(labelPer) + ')' : ''}</h3>
     <table style="${TABEL}font-size:11px;">
       <thead><tr>${['Mulai','Selesai','Jenis','Alasan','Status'].map(th).join('')}</tr></thead>
       <tbody>${baris(data.perizinan, z =>
@@ -8124,7 +8360,7 @@ function bangunLaporanHTML(data) {
     </table>
 
     <h3 style="${H3}">
-      8. Kesimpulan Sementara${aktif ? ' — ' + esc(labelPer) : ''}</h3>
+      8. Kesimpulan Sementara${aktif ? ' (' + esc(labelPer) + ')' : ''}</h3>
     ${bagianKesimpulanCetak(kesimpulan)}
 
     ${blokPenutupCetak(data.penanggungJawab, dicetak)}
@@ -9244,7 +9480,7 @@ async function unduhLaporanPdf(nisn, kodeKertas) {
     const pesan = String(err && (err.message || err));
     if (/unsupported color|color function|oklab|oklch|color-mix/i.test(pesan) && htmlLaporan) {
       console.warn('[PDF] html2canvas menolak warna, beralih ke dialog cetak:', pesan);
-      toast('warning', 'Peramban menolak render warna. Dialihkan ke dialog cetak — pilih "Simpan sebagai PDF".');
+      toast('warning', 'Peramban tidak bisa membuat PDF langsung. Silakan pilih "Simpan sebagai PDF" di jendela cetak.');
       $('printArea').innerHTML = `<style>${gayaHalamanCetak(kertas)}</style>` + htmlLaporan;
       pulihkanLatar();
       stage.classList.remove('on'); stage.innerHTML = '';
@@ -9779,7 +10015,7 @@ async function viewMadrasah() {
       <button class="mod-card ${stMd.panel==='atribut'?'on':''}" data-mdpanel="atribut">
         <div class="ico" style="background:#E7F1F7;color:var(--sea)"><i class="fa-solid fa-shirt"></i></div>
         <div class="k">Pemeriksaan</div><b>Atribut Santri</b>
-        <p>Centang atribut yang tidak lengkap; tersimpan sebagai satu catatan pelanggaran.</p>
+        <p>Centang atribut yang tidak lengkap. Semuanya tersimpan sebagai satu catatan pelanggaran.</p>
         <span class="go">Buka panel <i class="fa-solid fa-arrow-right"></i></span>
       </button>
       <button class="mod-card ${stMd.panel==='pelanggaran'?'on':''}" data-mdpanel="pelanggaran">
@@ -9792,7 +10028,7 @@ async function viewMadrasah() {
         ? `<button class="mod-card ${stMd.panel==='presensi'?'on':''}" data-mdpanel="presensi">
         <div class="ico" style="background:var(--teal-bg);color:var(--teal)"><i class="fa-solid fa-calendar-check"></i></div>
         <div class="k">Kehadiran · format wali kelas</div><b>Presensi Kelas (JP)</b>
-        <p>Input mingguan S · IK · IP · A, tempel dari Excel sekolah, laporan bulanan C–G, dan akumulasi semester.</p>
+        <p>Isi presensi mingguan (S, IK, IP, A), tempel dari Excel sekolah, cetak laporan bulanan, dan lihat akumulasi semester.</p>
         <span class="go">Buka panel <i class="fa-solid fa-arrow-right"></i></span>
       </button>`
         : `<button class="mod-card terkunci" disabled aria-disabled="true"
@@ -10312,7 +10548,7 @@ function prGambarInput() {
   const kelasLain = MDS.kelas;
   const selesaiSemua = kelasLain.reduce((a, k) => a + [1,2,3,4,5].filter(i => ['selesai','libur'].includes(prStatusMinggu(k, i))).length, 0);
   const matriks = `<details class="pr-matriks">
-    <summary><i class="fa-solid fa-table-list"></i> Papan kelengkapan semua kelas — ${esc(prPeriodeTeks())}
+    <summary><i class="fa-solid fa-table-list"></i> Kelengkapan presensi semua kelas, ${esc(prPeriodeTeks())}
       <span class="tag tag-sea">${selesaiSemua} / ${kelasLain.length * 5} minggu</span></summary>
     <div class="pr-lebar"><table class="pr-mx">
       <thead><tr><th>Kelas</th>${[1,2,3,4,5].map(i => `<th>M${i}</th>`).join('')}</tr></thead>
@@ -10321,7 +10557,7 @@ function prGambarInput() {
         return `<td><button class="pr-mx-c st-${st}" data-prlompat="${esc(k)}|${i}"
           title="${esc(k)} minggu ke-${i}: ${st}">${{ selesai:'✓', libur:'L', terisi:'•', belum:'–' }[st]}</button></td>`;
       }).join('')}</tr>`).join('')}</tbody></table></div>
-    <p class="pr-cat">✓ selesai · L libur · – belum diinput. Klik sel untuk langsung membuka kelas &amp; minggunya.</p>
+    <p class="pr-cat">✓ selesai, L libur, - belum diisi. Klik sel untuk membuka kelas dan minggunya.</p>
   </details>`;
 
   const bolehIsi = bisa('presensi.isi');
@@ -10628,10 +10864,10 @@ function prGambarTempel() {
   const bolehIsi = bisa('presensi.isi');
   $('prIsi').innerHTML = `
     <div class="card-note"><i class="fa-solid fa-wand-magic-sparkles"></i>
-      Salin blok dari lembar <b>Laporan Bulanan Wali Kelas</b> (bagian D–G, boleh satu bulan penuh),
-      daftar dari WhatsApp, atau buka berkas Excel-nya langsung. Judul bagian
-      (SAKIT / IZIN KEGIATAN / IZIN PULANG / ALPA) dan <b>MINGGU KE-n</b> dikenali otomatis;
-      nama dicocokkan ke santri <b>${esc(stPr.kelas)}</b> walau ejaannya berbeda.</div>
+      Salin isi dari lembar <b>Laporan Bulanan Wali Kelas</b> (bagian D sampai G, boleh satu bulan penuh),
+      dari daftar di WhatsApp, atau buka langsung berkas Excel-nya. Judul bagian
+      (SAKIT, IZIN KEGIATAN, IZIN PULANG, ALPA) dan <b>MINGGU KE-n</b> dikenali otomatis.
+      Nama dicocokkan dengan santri <b>${esc(stPr.kelas)}</b> walaupun ejaannya berbeda.</div>
     <div class="md-form pr-tempel-form">
       <div class="field"><label class="label">Jenis bila tanpa judul</label>
         <select id="ptJenis" class="input">${PR_JENIS.map(j =>
@@ -10691,7 +10927,7 @@ function prGambarPratinjau(bolehIsi) {
       <div class="mini a"><span>Perlu dicek</span><b>${cek}</b></div>
       <div class="mini m"><span>Dilewati</span><b>${(t.lewat || []).length}</b></div>
     </div>
-    ${(t.lewat || []).length ? `<details class="pr-lewat"><summary>${t.lewat.length} baris dilewati — lihat</summary>
+    ${(t.lewat || []).length ? `<details class="pr-lewat"><summary>${t.lewat.length} baris dilewati (lihat)</summary>
       <ul>${t.lewat.map(l => `<li><code>baris ${l.baris}</code> ${esc(l.teks)} <em>(${esc(l.alasan)})</em></li>`).join('')}</ul></details>` : ''}
     <div class="tbl" style="margin-top:12px"><table class="pr-prev">
       <thead><tr><th class="center">Pakai</th><th>Tertulis</th><th>Santri ${esc(stPr.kelas)}</th>
@@ -10700,7 +10936,7 @@ function prGambarPratinjau(bolehIsi) {
         <td class="center"><input type="checkbox" class="pt-pakai" ${r.pakai ? 'checked' : ''} ${r.nisn ? '' : 'disabled'}></td>
         <td>${esc(r.asal)}${r.alias ? ' <span class="tag tag-sea">alias</span>' : ''}</td>
         <td><select class="input pt-santri">${opsi(r.nisn)}</select>
-          ${!r.nisn ? '<small class="pr-cat">tidak dikenali</small>' : r.ragu ? '<small class="pr-cat">mirip nama lain — periksa</small>' : ''}</td>
+          ${!r.nisn ? '<small class="pr-cat">tidak dikenali</small>' : r.ragu ? '<small class="pr-cat">mirip nama lain, mohon diperiksa</small>' : ''}</td>
         <td class="center">${r.minggu}</td>
         <td class="center"><span class="pr-jb j-${r.jenis}">${r.jenis}</span></td>
         <td class="center"><b>${r.jp}</b></td>
@@ -10933,7 +11169,7 @@ async function prGambarLaporan() {
 
   $('prIsi').innerHTML = `
     ${belumIsi.length ? `<div class="card-note"><i class="fa-solid fa-hourglass-half"></i>
-      Minggu ke-${belumIsi.join(', ')} belum diinput maupun ditandai libur — laporan mungkin belum lengkap.</div>` : ''}
+      Minggu ke-${belumIsi.join(', ')} belum diisi dan belum ditandai libur. Laporan mungkin belum lengkap.</div>` : ''}
     <div class="md-form pr-ttd">
       <div class="field"><label class="label">Wali Kelas ${esc(stPr.kelas)}</label>
         <input id="plWalas" class="input" value="${esc(dok.walas)}" placeholder="Nama wali kelas"></div>
@@ -10945,7 +11181,7 @@ async function prGambarLaporan() {
     <div class="minis">${PR_JENIS.map(j => `<div class="mini ${j.mini}"><span>${j.nama} · ${bag[j.k].siswa} santri</span>
       <b>${bag[j.k].jp} JP</b></div>`).join('')}</div>
     <div class="md-bar pr-bar"><span class="note-min"><i class="fa-solid fa-circle-info"></i>
-      Bagian C–G mengikuti lembar sekolah. Kolom JUMLAH SISWA = banyak santri berbeda, sama seperti rekap wali kelas.</span>
+      Bagian C sampai G mengikuti lembar sekolah. Kolom JUMLAH SISWA berisi banyaknya santri, sama seperti rekap wali kelas.</span>
       <span class="pr-aksi">
         <button class="btn btn-ghost btn-sm" id="plSalin"><i class="fa-solid fa-copy"></i>Salin ke Excel</button>
         <button class="btn btn-ghost btn-sm" id="plXlsx"><i class="fa-solid fa-file-excel"></i>Unduh .xlsx</button>
@@ -11242,8 +11478,8 @@ async function gambarKinerjaGuru() {
 
     ${kartu('Aktivitas & Kinerja Guru', `
       ${belum ? `<div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
-        <b>${angka(belum)}</b> aktivitas pada rentang ini belum terpetakan ke akun guru
-        mana pun — biasanya data impor lama tanpa nama penindak.</div>` : ''}
+        <b>${angka(belum)}</b> aktivitas pada rentang ini belum terhubung ke akun guru
+        mana pun. Biasanya ini data impor lama tanpa nama penindak.</div>` : ''}
       <div class="kg-roles" id="kgRoles">
         ${ROLE.map(x => `<button class="chip ${
           (stKg.role || 'Semua') === x ? 'on' : ''}" data-kgrole="${x}">${x}</button>`).join('')}
@@ -11529,9 +11765,7 @@ async function viewPengasuhan() {
       <span class="ar pgs-ayat">وَأْمُرْ أَهْلَكَ بِالصَّلَاةِ وَاصْطَبِرْ عَلَيْهَا</span>
       <h2>Pengasuhan Santri</h2>
       <p>Ubudiyah, bahasa, kebersihan, dan keamanan asrama dicatat di satu tempat.
-         Tiga layanan di bawah ini memakai basis data yang sama dengan laporan
-         perkembangan santri, sehingga hasil catatan hari ini langsung terbaca
-         pada rapor pembinaan.</p>
+         Catatan hari ini langsung masuk ke laporan perkembangan santri.</p>
       <div class="meta">
         <span><i class="fa-solid fa-user-tie"></i>${esc(APP.profil?.nama || '')}</span>
         <span><i class="fa-solid fa-id-badge"></i>${esc(role())}</span>
@@ -11662,7 +11896,7 @@ function pgsPanelCatat() {
       <div class="field wide"><label class="label">Catatan Kejadian</label>
         <textarea id="pgCatatan" class="input" rows="3" maxlength="500"
           placeholder="Contoh: tidak ikut shalat berjamaah subuh tanpa keterangan."></textarea>
-        <div class="pgs-meter"><span class="hint">Opsional — membantu wali kelas memahami konteks.</span>
+        <div class="pgs-meter"><span class="hint">Boleh dikosongkan. Catatan membantu wali kelas memahami kejadiannya.</span>
           <span class="hint mono" id="pgHitung">0 / 500</span></div></div>
     </div>
 
@@ -11768,9 +12002,9 @@ async function pgsSimpan() {
 function pgsPanelRekap() {
   return kartu('Rekap Pelanggaran per Santri', `
     <div class="card-note"><i class="fa-solid fa-circle-info"></i>
-      Menampilkan <b>akumulasi seluruh unit</b> — Pengasuhan dan Madrasah digabung.
-      Pelanggaran dengan <b>kode yang sama</b> dijumlahkan apa adanya, tanpa konversi
-      antar kategori.</div>
+      Yang tampil adalah <b>akumulasi seluruh unit</b>. Pengasuhan dan Madrasah digabung.
+      Pelanggaran dengan <b>kode yang sama</b> dijumlahkan apa adanya, tanpa dipindah
+      ke kategori lain.</div>
     <div class="filters">
       <input id="pgRkCari" class="input grow" placeholder="Cari nama atau NISN santri…"
              value="${esc(PGS.rk.cari)}">
@@ -12364,7 +12598,7 @@ function aiValidasiBulk(p) {
       issue:`Jenis pelanggaran "${inp.kode_pelanggaran || '(kosong)'}" tidak ada pada Master Pelanggaran unit ini.` });
   }
   if (list.length < AI_AMBANG.minSantri) {
-    errors.push({ field:'nisn_list', issue:`Minimal ${AI_AMBANG.minSantri} santri untuk input massal.` });
+    errors.push({ field:'nisn_list', issue:`Minimal ${AI_AMBANG.minSantri} santri untuk catat sekaligus.` });
   }
   if (list.length > AI_AMBANG.maksSantri) {
     errors.push({ field:'nisn_list', issue:`Maksimal ${AI_AMBANG.maksSantri} santri dalam satu proses.` });
@@ -12426,22 +12660,22 @@ function aiValidasiBulk(p) {
     if (['Ringan','Sedang'].includes(m.kategori) && sejenis % AI_AMBANG.kaskade === 0) {
       const naik = m.kategori === 'Ringan' ? 'Sedang' : 'Berat';
       peringatan.push({ nisn:n, jenis:'kaskade',
-        pesan:`${s.nama_siswa} mencapai ${sejenis}x jenis ini — rekap akan menaikkannya menjadi ${naik}.` });
+        pesan:`${s.nama_siswa} sudah ${sejenis} kali untuk jenis ini, sehingga rekap naik menjadi ${naik}.` });
     }
 
     const poinBaru = (s.total_poin_pelanggaran || 0) + m.bobot_poin;
     if (s.total_poin_pelanggaran < AI_AMBANG.poinKritis && poinBaru >= AI_AMBANG.poinKritis) {
       peringatan.push({ nisn:n, jenis:'ambang_poin',
-        pesan:`${s.nama_siswa} menembus ${AI_AMBANG.poinKritis} poin — masuk tier Kritis.` });
+        pesan:`${s.nama_siswa} mencapai ${AI_AMBANG.poinKritis} poin dan masuk tier Kritis.` });
     } else if (s.total_poin_pelanggaran < AI_AMBANG.poinPerhatian && poinBaru >= AI_AMBANG.poinPerhatian) {
       peringatan.push({ nisn:n, jenis:'ambang_poin',
-        pesan:`${s.nama_siswa} menembus ${AI_AMBANG.poinPerhatian} poin — masuk tier Perhatian Tinggi.` });
+        pesan:`${s.nama_siswa} mencapai ${AI_AMBANG.poinPerhatian} poin dan masuk tier Perhatian Tinggi.` });
     }
   });
 
   if (k.role === 'Osis') {
     peringatan.push({ nisn:'', jenis:'konflik_izin',
-      pesan:'Bila ada santri yang sedang berizin "Sesuai Waktu", baris itu dilewati — Osis tidak berwenang menimpanya.' });
+      pesan:'Santri yang sedang berizin "Sesuai Waktu" dilewati, karena Osis tidak berwenang menimpa izin.' });
   }
 
   return {
@@ -12490,7 +12724,7 @@ async function aiJalankanBulk(hasil) {
     html:`<p class="hint" style="margin:0">Memproses <b id="aiProg">0</b> dari ${total} santri.</p>`,
     didOpen: () => Swal.showLoading()
   });
-  sync('saving', 'Menyimpan input massal…');
+  sync('saving', 'Menyimpan catatan…');
 
   for (let i = 0; i < total; i++) {
     const p = panggilan[i];
@@ -12532,23 +12766,23 @@ async function aiJalankanBulk(hasil) {
     }
   } else if (laporan.konflik.length) {
     await Swal.fire({ icon:'info', title:'Sebagian dilewati',
-      text:'Beberapa santri sedang berizin sesuai waktu. Role Osis tidak berwenang menimpanya — laporkan ke Admin atau Guru.',
+      text:'Beberapa santri sedang berizin sesuai waktu. Osis tidak berwenang menimpa izin itu. Silakan laporkan ke Admin atau Guru.',
       confirmButtonColor:'#14618B' });
   }
 
   sync(laporan.gagal.length ? 'warn' : 'done',
-       laporan.gagal.length ? 'Sebagian gagal disimpan' : 'Input massal tersimpan');
+       laporan.gagal.length ? 'Sebagian gagal disimpan' : 'Catatan tersimpan');
 
   await Swal.fire({
     icon: laporan.gagal.length ? 'warning' : 'success',
-    title: 'Ringkasan Input Massal', width: 620,
+    title: 'Hasil Catat Sekaligus', width: 620,
     html: `<div style="text-align:left;font-size:13px">
       <p><b>${laporan.berhasil.length}</b> tersimpan ·
          <b>${laporan.konflik.length}</b> dilewati ·
          <b>${laporan.gagal.length}</b> gagal.</p>
       ${laporan.gagal.length ? `<p style="margin-top:8px"><b>Gagal:</b></p>
         <ul style="margin:4px 0 0 16px">${laporan.gagal
-          .map(x => `<li>${esc(x.nama_siswa)} — ${esc(x.pesan)}</li>`).join('')}</ul>` : ''}
+          .map(x => `<li><b>${esc(x.nama_siswa)}</b>: ${esc(x.pesan)}</li>`).join('')}</ul>` : ''}
     </div>`,
     confirmButtonColor:'#14618B'
   });
@@ -12571,7 +12805,7 @@ function aiGambarChip() {
         <span class="nis">${esc(s.kelas || '-')}</span>
         <button type="button" data-hapus="${esc(s.nisn)}" title="Keluarkan">
           <i class="fa-solid fa-xmark"></i></button></span>`).join('')
-    : `<span class="mchip-kosong">Belum ada santri dipilih — minimal ${AI_AMBANG.minSantri}.</span>`;
+    : `<span class="mchip-kosong">Belum ada santri dipilih. Minimal ${AI_AMBANG.minSantri} santri.</span>`;
 }
 
 async function modalMassalPelanggaran() {
@@ -12582,7 +12816,7 @@ async function modalMassalPelanggaran() {
   MASSAL.pilih = []; MASSAL.master = null;
 
   const res = await Swal.fire({
-    title:'Input Massal Pelanggaran', width: 660, showCancelButton:true,
+    title:'Catat Pelanggaran Sekaligus', width: 660, showCancelButton:true,
     confirmButtonText:'Periksa & Lanjut', cancelButtonText:'Batal',
     confirmButtonColor:'#14618B', showLoaderOnConfirm:true,
     allowOutsideClick:() => !Swal.isLoading(),
@@ -12659,10 +12893,10 @@ async function modalMassalPelanggaran() {
   const r = hasil.ringkasan;
 
   const konf = await Swal.fire({
-    title:'Konfirmasi Input Massal', width: 640,
+    title:'Periksa Sebelum Menyimpan', width: 640,
     showCancelButton:true, showDenyButton:true,
     confirmButtonText:`Simpan ${r.total_panggilan} catatan`,
-    denyButtonText:'Salin payload AI', cancelButtonText:'Batal',
+    denyButtonText:'Salin data untuk AI', cancelButtonText:'Batal',
     confirmButtonColor:'#14618B', denyButtonColor:'#4A6076',
     html:`<div style="text-align:left;font-size:13px">
       <p style="margin:0 0 8px"><b>${esc(r.kode_pelanggaran)} — ${esc(r.nama_pelanggaran)}</b><br>
@@ -12677,7 +12911,7 @@ async function modalMassalPelanggaran() {
     </div>`
   });
 
-  if (konf.isDenied) return aiSalinPayload(payload, 'Payload input massal');
+  if (konf.isDenied) return aiSalinPayload(payload, 'Data catat sekaligus');
   if (!konf.isConfirmed) return;
   await aiJalankanBulk(hasil);
 }
@@ -12834,7 +13068,7 @@ async function aiGambarAnalisisPeraturan() {
 
       <div class="ai-actions">
         <button class="btn btn-ghost btn-sm" data-ai="payload-peraturan">
-          <i class="fa-solid fa-file-code"></i>Salin payload AI</button>
+          <i class="fa-solid fa-file-code"></i>Salin data untuk AI</button>
         <button class="btn btn-ghost btn-sm" data-ai="prompt-peraturan">
           <i class="fa-solid fa-wand-magic-sparkles"></i>Salin instruksi AI</button>
       </div>`;
@@ -13024,7 +13258,7 @@ document.addEventListener('click', async (e) => {
     if (aksi === 'massal') return modalMassalPelanggaran();
     if (aksi === 'analisis-peraturan') return aiGambarAnalisisPeraturan();
 
-    if (aksi === 'prompt-bulk')      return aiSalin(AI_PROMPT.bulk, 'Instruksi input massal');
+    if (aksi === 'prompt-bulk')      return aiSalin(AI_PROMPT.bulk, 'Instruksi catat sekaligus');
     if (aksi === 'prompt-peraturan') return aiSalin(AI_PROMPT.peraturan, 'Instruksi analisis peraturan');
     if (aksi === 'prompt-pimpinan')  return aiSalin(AI_PROMPT.pimpinan, 'Instruksi analisis eksekutif');
     if (aksi === 'salin-kesimpulan') {
@@ -13034,13 +13268,13 @@ document.addEventListener('click', async (e) => {
 
     if (aksi === 'payload-peraturan') {
       const p = APP.aiPeraturan || await aiPayloadPeraturan(AI_AMBANG.mundurHari);
-      return aiSalinPayload(p, 'Payload analisis peraturan');
+      return aiSalinPayload(p, 'Data analisis peraturan');
     }
     if (aksi === 'payload-pimpinan') {
       const asli = mulaiSimpan(b, 'Menyusun…');
       const p = await aiPayloadPimpinan();
       selesaiSimpan(b, asli, true, 'Payload siap');
-      return aiSalinPayload(p, 'Payload dashboard pimpinan');
+      return aiSalinPayload(p, 'Data dashboard pimpinan');
     }
   } catch (err) { fireError(err); }
 });
@@ -13105,12 +13339,12 @@ function konsultanLokal(p) {
           ? 'Penurunan ini perlu dipastikan berasal dari perbaikan perilaku, bukan dari pencatatan yang mengendur.'
           : ubah !== null && ubah > 5
             ? 'Kenaikan ini layak ditelusuri ke bidang dan angkatan penyumbang terbesar.'
-            : 'Volume stabil; fokus dialihkan ke kualitas tindak lanjut.'),
+            : 'Jumlahnya stabil. Perhatian bisa dialihkan ke mutu tindak lanjut.'),
 
     beban_kategori:
       `Komposisi Ringan ${persenRingan}% · Sedang ${persenSedang}% · Berat ${persenBerat}%. `
       + (persenBerat > 15
-          ? `Porsi Berat melampaui 15% — ini temuan yang menuntut asesmen individual, bukan sekadar sanksi. `
+          ? `Porsi Berat lebih dari 15%. Ini perlu ditangani per santri, bukan sekadar diberi sanksi. `
           : `Porsi Berat masih di bawah 15%, artinya sebagian besar persoalan bersifat pembiasaan. `)
       + `Rata-rata ${kasusPerSantri} kasus per santri terlibat, sehingga beban tergolong `
       + (kasusPerSantri >= 3 ? 'terkonsentrasi pada sedikit santri yang berulang.'
@@ -13120,7 +13354,7 @@ function konsultanLokal(p) {
       ? `Bidang ${dom.nama} mendominasi dengan ${angka(dom.jumlah)} kasus (${dom.persen}%). `
         + (dom.persen >= 40
             ? 'Konsentrasi setinggi ini biasanya menandakan rumusan aturan yang belum operasional atau penegakan yang tidak seragam antar petugas.'
-            : 'Proporsi ini masih wajar untuk lingkungan asrama; yang perlu dijaga adalah konsistensi pembiasaan harian.')
+            : 'Porsi ini masih wajar untuk lingkungan asrama. Yang perlu dijaga adalah pembiasaan harian yang konsisten.')
         + (belumPeta ? ` Catatan: ${angka(belumPeta.jumlah)} kejadian belum terpetakan ke bidang mana pun.` : '')
       : 'Belum ada kejadian yang cukup untuk menilai fokus bidang.',
 
@@ -13128,8 +13362,8 @@ function konsultanLokal(p) {
       `${angka(p.pembinaan.total)} catatan pembinaan: ${angka(p.pembinaan.selesai)} Selesai `
       + `dan ${angka(p.pembinaan.proses)} Dalam Proses (${rasioSelesai}% tuntas). `
       + (t.tanpa_pembinaan > 0
-          ? `${t.tanpa_pembinaan} santri tier Kritis/Perhatian Tinggi belum memiliki catatan pembinaan sama sekali — ini celah terbesar saat ini.`
-          : 'Seluruh santri tier tinggi sudah tersentuh pembinaan; tinggal memastikan penutupan status setelah evaluasi.'),
+          ? `${t.tanpa_pembinaan} santri tier Kritis/Perhatian Tinggi belum punya catatan pembinaan sama sekali. Ini yang paling perlu segera ditangani.`
+          : 'Semua santri tier tinggi sudah mendapat pembinaan. Tinggal memastikan statusnya ditutup setelah evaluasi.'),
 
     perilaku_sekunder:
       `Izin Telat Balik ${p.izin.telat} dari ${p.izin.sesuai + p.izin.telat} izin yang sudah berketerangan `
@@ -13216,8 +13450,8 @@ function konsultanLokal(p) {
     lini_masa:'Tinjauan rutin 14 hari.' });
 
   const kesimpulan =
-    `${kondisi.ikon} ${kondisi.label} — ${angka(total)} catatan 90 hari, tren 30 hari ${arah}; `
-    + `${t['Kritis']} santri tier Kritis dan ${t['Perhatian Tinggi']} Perhatian Tinggi `
+    `${kondisi.ikon} ${kondisi.label}. Ada ${angka(total)} catatan dalam 90 hari, tren 30 hari ${arah}. `
+    + `${t['Kritis']} santri di tier Kritis dan ${t['Perhatian Tinggi']} di tier Perhatian Tinggi `
     + `(${t.rasio_kritis}% santri aktif berada di tier Kritis).`;
 
   const kini = tglDari(p.konteks.hari_ini) || new Date();
@@ -13587,7 +13821,7 @@ function bukaJenisTerbanyak() {
 /** Versi teks datar untuk disalin ke notula atau pesan. */
 function kesimpulanKeTeks(k) {
   const baris = [];
-  baris.push('KESIMPULAN KONSULTAN PENDIDIKAN — DAYAH RUHUL QURANI');
+  baris.push('KESIMPULAN KONSULTAN PENDIDIKAN DAYAH RUHUL QURANI');
   baris.push(`Tanggal ${tgl(hariIni())} · Kondisi: ${k.kondisi.label}`);
   baris.push('');
   baris.push(k.kesimpulan_sementara);
@@ -13818,7 +14052,7 @@ async function waKirimIzin(z, btn) {
     const nomor = WA.nomorUji ? WA.nomorUji.replace(/\D/g, '') : '';
     const url = `https://wa.me/${nomor}?text=${encodeURIComponent(pesan)}`;
     window.open(url, '_blank', 'noopener');
-    return toast('info', 'Webhook belum disetel — pesan dibuka di WhatsApp.');
+    return toast('info', 'Pengiriman otomatis belum diatur. Pesan dibuka di WhatsApp.');
   }
 
   const asli = btn ? mulaiSimpan(btn, 'Mengirim…') : null;
@@ -13908,6 +14142,7 @@ const WA_TAHAP_WALI = { Ringan: [11, 13], Sedang: [8, 12], Berat: 'semua' };
 
 /** Apakah satu baris pembinaan termasuk yang perlu dikabarkan ke rumah? */
 function perluKabarWali(r) {
+  if (r?.menunggu_alasan) return false;   // v2.43: hukumannya belum diputuskan
   const aturan = WA_TAHAP_WALI[String(r?.kategori_bina || '').trim()];
   if (!aturan) return false;
   const n = tahapBina(r);
@@ -14046,8 +14281,8 @@ async function waKabariWali(idPembinaan, btn) {
       <p style="margin:0 0 10px;font-size:13px;color:#475569">
         ${nomor
           ? `Pesan dikirim ke <b>+${esc(nomor)}</b> (wali ananda ${esc(nama)}).`
-          : `Nomor wali ananda ${esc(nama)} belum terisi di data santri —
-             WhatsApp akan membuka daftar kontak agar Anda memilih tujuannya sendiri.`}
+          : `Nomor wali ananda ${esc(nama)} belum terisi di data santri.
+             WhatsApp akan membuka daftar kontak agar Anda bisa memilih sendiri.`}
       </p>
       <textarea readonly style="width:100%;height:280px;font-family:ui-monospace,Menlo,Consolas,monospace;
         font-size:11.5px;line-height:1.55;padding:11px;border:1px solid #cbd5e1;border-radius:9px;
@@ -14063,7 +14298,7 @@ async function waKabariWali(idPembinaan, btn) {
   if (!konf.isConfirmed) return;
 
   window.open(`https://wa.me/${nomor}?text=${encodeURIComponent(pesan)}`, '_blank', 'noopener');
-  if (!nomor) toast('info', 'Nomor wali belum terisi — pilih kontak di WhatsApp.');
+  if (!nomor) toast('info', 'Nomor wali belum terisi. Silakan pilih kontak di WhatsApp.');
 }
 
 document.addEventListener('click', async (e) => {
@@ -14145,7 +14380,7 @@ function templatePesanBk(s) {
 
 Mohon bantuan Ustadz/Ustadzah selaku pembina kelas ${s.kelas || '-'}.
 
-Ananda ${s.nama} (NISN ${s.nisn}) termasuk santri yang membutuhkan perhatian khusus: ${ringkas} — tercatat ${s.kasus90} pelanggaran / ${s.poin90} poin dalam 90 hari terakhir (tier ${s.tier}).
+Ananda ${s.nama} (NISN ${s.nisn}) termasuk santri yang membutuhkan perhatian khusus: ${ringkas}. Tercatat ${s.kasus90} pelanggaran / ${s.poin90} poin dalam 90 hari terakhir (tier ${s.tier}).
 
 Mohon ananda disampaikan agar MENEMUI GURU BK di ruang BK pada waktu istirahat atau jam lain yang memungkinkan, untuk pendampingan lanjutan. Setelah disampaikan, mohon utas ini ditandai "Sudah diantar ke BK".
 
@@ -14309,8 +14544,8 @@ function gambarPanelPesanBk() {
   wrap.innerHTML = kartu('Pesan Tindak Lanjut ke Guru', `
     <div class="card-note"><i class="fa-solid fa-circle-info"></i>
       Sepuluh santri prioritas teratas pada periode <b>${esc(PIM.rentang || '90 hari terakhir')}</b>.
-      Pesan bawaan meminta guru pembina kelas menyuruh ananda <b>menemui Guru BK</b>;
-      naskahnya masih bisa disunting sebelum dikirim.</div>
+      Pesan ini meminta guru pembina kelas agar ananda <b>menemui Guru BK</b>.
+      Isinya masih bisa diubah sebelum dikirim.</div>
     <div class="minis">
       <div class="mini m"><span>Santri prioritas</span><b>${angka(stBk.santri.length)}</b></div>
       <div class="mini s"><span>Sudah dikirimi</span><b>${angka(terkirim)}</b></div>
@@ -14372,7 +14607,7 @@ async function modalPesanBk(nisn) {
         </select>
         <p class="hint">${pembina.length
           ? `Terisi otomatis dengan pembina kelas ${esc(s.kelas || '-')} — boleh diganti.`
-          : `Kelas ${esc(s.kelas || '-')} belum punya guru pembina terdaftar; pilih guru secara manual.`}</p>
+          : `Kelas ${esc(s.kelas || '-')} belum punya guru pembina terdaftar. Silakan pilih guru sendiri.`}</p>
       </div>
       ${pembina.length > 1 ? `<label class="ctx-note" style="cursor:pointer">
         <input type="checkbox" id="pbSemua" style="accent-color:var(--sea)">
@@ -14439,7 +14674,7 @@ async function viewPesan() {
     bisa('pesan.mulai')
       ? `<button class="btn btn-ghost btn-sm" id="msgKeBk">
            <i class="fa-solid fa-user-shield"></i>Daftar santri prioritas</button>` : '',
-    'Balasan dua arah · realtime');
+    'Balasan dua arah, langsung masuk');
 
   $('msgKeBk')?.addEventListener('click', () => navigateTo('bk'));
   $('msgCari').addEventListener('input', debounce(e => {
@@ -14833,15 +15068,15 @@ async function modalLaporBina(ids) {
         </select>
         <p class="hint">${tunggal.pengesah.length
           ? `Terisi otomatis dengan guru kelas binaan ${esc(tunggal.r.kelas || '-')}.`
-          : `Kelas ${esc(tunggal.r.kelas || '-')} belum punya guru kelas binaan; laporan diarahkan ke Admin.`}</p>
+          : `Kelas ${esc(tunggal.r.kelas || '-')} belum punya guru kelas binaan, jadi laporan dikirim ke Admin.`}</p>
       </div>
       ${tunggal.pengesah.length > 1 ? `<label class="ctx-note" style="cursor:pointer">
         <input type="checkbox" id="lbSemua" checked style="accent-color:var(--sea)">
-        Kirim ke semua guru kelas binaan ${esc(tunggal.r.kelas)} (${tunggal.pengesah.length} guru) — cukup satu yang mengesahkan
+        Kirim ke semua guru kelas binaan ${esc(tunggal.r.kelas)} (${tunggal.pengesah.length} guru). Cukup satu guru yang mengesahkan
       </label>` : ''}`
     : `<div class="lb-daftar">
-        <div class="lb-kepala"><b>${angka(siap.length)} pembinaan</b> akan dilaporkan — penerima dipilih otomatis
-          dari guru kelas binaan tiap santri.</div>
+        <div class="lb-kepala"><b>${angka(siap.length)} pembinaan</b> akan dilaporkan. Penerimanya otomatis
+          guru kelas binaan tiap santri.</div>
         ${siap.map(s => `<div class="lb-baris">
           <div><b>${esc(s.r.nama_siswa)}</b><small>${esc(s.r.kelas || '-')} · ${esc(s.r.kategori_bina || '-')}${
             tahapBina(s.r) ? ' ke-' + tahapBina(s.r) : ''} · ${esc(s.r.bentuk_final || bentukBina(s.r))}</small></div>
@@ -14867,7 +15102,7 @@ async function modalLaporBina(ids) {
       <div class="field"><label class="label">Catatan Pelaksanaan</label>
         <textarea id="lbCatatan" class="input" rows="4"
           placeholder="Contoh: pembinaan dilaksanakan ba'da Isya di mushalla asrama; ananda mengakui kesalahan dan berjanji memperbaiki."></textarea>
-        <p class="hint">Uraikan singkat bagaimana pembinaan dijalankan dan respons ananda — ini bahan guru sebelum mengesahkan.</p>
+        <p class="hint">Tuliskan singkat bagaimana pembinaan dijalankan dan bagaimana tanggapan ananda. Ini menjadi bahan guru sebelum mengesahkan.</p>
       </div>
     </div>`,
     didOpen: () => { if (tunggal) $('lbGuru').value = (tunggal.pengesah[0] || admin[0] || {}).id || ''; },
@@ -15096,7 +15331,7 @@ async function kirasAntrean(diam) {
 }
 
 window.addEventListener('online',  () => { gambarBadgeLuring(); kirasAntrean(); });
-window.addEventListener('offline', () => { gambarBadgeLuring(); toast('info', 'Mode luring — catatan disimpan sementara di perangkat.'); });
+window.addEventListener('offline', () => { gambarBadgeLuring(); toast('info', 'Sedang luring. Catatan disimpan sementara di perangkat.'); });
 
 /** Registrasi service worker + tombol "Pasang". */
 let promptPasang = null;
@@ -15489,7 +15724,7 @@ async function prsSimpan() {
       pencatat_id: APP.profil?.id || null
     });
     selesaiSimpan(btn, asli, true, hasil.antre ? 'Tersimpan luring' : 'Apresiasi tersimpan');
-    if (hasil.antre) toast('info', 'Tersimpan di perangkat — akan dikirim saat koneksi pulih.');
+    if (hasil.antre) toast('info', 'Tersimpan di perangkat. Akan dikirim begitu koneksi kembali.');
     else toast('success', `Apresiasi +${poin} poin dicatat.`);
 
     inpS.value = ''; inpS.removeAttribute('data-picked');
@@ -15703,8 +15938,8 @@ async function viewTahfiz() {
     <section class="card thf-juara">
       <div class="card-head">
         <div><h3><i class="fa-solid fa-ranking-star"></i>Peringkat Hafalan</h3>
-          <p class="sub">Sepuluh penyetor terbanyak pada ${esc(labelPeriode())} —
-             dihitung dari halaman yang terkumpul.</p></div>
+          <p class="sub">Sepuluh penyetor terbanyak pada ${esc(labelPeriode())},
+             dihitung dari jumlah halaman.</p></div>
         <span class="tag tag-emas"><i class="fa-solid fa-book-quran"></i>1 juz ≈ ${HALAMAN_PER_JUZ} halaman</span>
       </div>
       <div class="prs-board thf-board" id="thfBoard"></div>
@@ -15902,7 +16137,7 @@ async function thfSimpan() {
       catatan: $('thfCatatan').value.trim() || null
     });
     selesaiSimpan(btn, asli, true, hasil.antre ? 'Tersimpan luring' : 'Setoran tersimpan');
-    if (hasil.antre) toast('info', 'Tersimpan di perangkat — akan dikirim saat koneksi pulih.');
+    if (hasil.antre) toast('info', 'Tersimpan di perangkat. Akan dikirim begitu koneksi kembali.');
     else toast('success', 'Setoran tahfiz tercatat.');
 
     $('thfDari').value = ''; $('thfKe').value = ''; $('thfCatatan').value = '';
@@ -16156,10 +16391,10 @@ async function viewAudit() {
         <div class="eyebrow"><span class="ar">سجل التغييرات</span><span class="rule"></span>
           <span class="lat">Akuntabilitas</span></div>
         <h2>Setiap catatan adalah amanah.</h2>
-        <p>Seluruh penambahan, perubahan, dan penghapusan data tercatat lengkap dengan
-           pelakunya. Jejak ini ditulis langsung oleh database dan tidak bisa diubah dari
-           aplikasi. Jejak bulan yang sudah ditutup buku dan diarsipkan dapat ditandai
-           hapus oleh Admin, lalu dihapus permanen setelah masa tunggu 30 hari.</p>
+        <p>Setiap penambahan, perubahan, dan penghapusan data tercatat bersama
+           pelakunya. Jejak ini dicatat langsung oleh sistem dan tidak bisa diubah dari
+           aplikasi. Jejak bulan yang sudah ditutup buku boleh ditandai hapus oleh Admin,
+           lalu dihapus permanen setelah 30 hari.</p>
       </div>
       <div class="adm-actions">
         <button class="btn btn-onnavy" id="audMuat"><i class="fa-solid fa-rotate"></i>Muat Ulang</button>
@@ -16401,7 +16636,7 @@ async function audModalRincian(id) {
       </div>
       <div class="aud-diff">
         <section><h5>Sebelum</h5><div class="isi">${
-          r.data_lama ? kolom(lama, 'lama') : '<i>(baris baru — tidak ada data sebelumnya)</i>'}</div></section>
+          r.data_lama ? kolom(lama, 'lama') : '<i>(data baru, belum ada isi sebelumnya)</i>'}</div></section>
         <section><h5>Sesudah</h5><div class="isi">${
           r.data_baru ? kolom(baru, 'baru') : '<i>(baris dihapus)</i>'}</div></section>
       </div>
@@ -16519,7 +16754,7 @@ async function ctkMuat() {
   } catch (e) {
     stCtk.log = [];
     stCtk.galat = /log_cetak_laporan|does not exist|schema cache|PGRST205|42P01/i.test(e?.message || '')
-      ? 'Tabel log_cetak_laporan belum ada — jalankan migrasi 20260926_v2_41_log_cetak_laporan.sql.'
+      ? 'Catatan cetak belum tersedia di sistem. Hubungi Admin.'
       : (e?.message || String(e));
   }
   stCtk.kunci = kunci;
@@ -16744,7 +16979,7 @@ async function modalGoalBaru(nisn) {
     dibuat_oleh_id: APP.profil?.id || null
   });
   toast(hasil.antre ? 'info' : 'success',
-    hasil.antre ? 'Target disimpan luring — menunggu koneksi.' : 'Target pembinaan tersimpan.');
+    hasil.antre ? 'Target tersimpan di perangkat. Akan dikirim begitu koneksi kembali.' : 'Target pembinaan tersimpan.');
   return true;
 }
 
@@ -16851,7 +17086,7 @@ function trenPanelHTML() {
     <div class="tren-wrap">
       <div class="tren-head">
         <div><b>Tren 6 Bulan Terakhir</b>
-          <small>Tampilan layar saja — tidak ikut tercetak pada laporan.</small></div>
+          <small>Hanya tampil di layar, tidak ikut tercetak.</small></div>
         <div class="tren-legend">
           <span><i style="background:#9F1239"></i>Poin pelanggaran</span>
           <span><i style="background:#C9A227"></i>Poin apresiasi</span>
@@ -17667,7 +17902,7 @@ function panelPositif({ siswa, prestasi, tahfiz, bulanKunci }) {
     ? kartuBelumTerisi({
         judul: 'Catatan apresiasi belum terkumpul',
         jumlah: prestasi.length, dariSantri: siswa.length, ikon: 'fa-award',
-        akibat: 'Selama tabel ini kosong, skor net santri sama saja dengan poin pelanggaran — sisi positifnya tidak pernah ikut dihitung.',
+        akibat: 'Selama belum ada catatan apresiasi, skor net santri sama dengan poin pelanggarannya. Sisi baiknya belum ikut terhitung.',
         ajakan: 'Satu catatan apresiasi per pekan per rayon sudah cukup untuk membuat panel ini bermakna.',
         view: 'prestasi' })
     : `<div class="minis" style="padding-bottom:14px">
@@ -17839,12 +18074,11 @@ function panelSebaran({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presen
         ${hadirTutup ? '' : '<th>Kehadiran kelas</th><th>Alpa (JP/santri)</th>'}<th>Tren pelanggaran</th>
       </tr></thead><tbody>${tubuh}</tbody></table></div>
     <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
-    <p class="sb-kaki">Empat kolom pertama dihitung <b>per 100 santri</b> agar angkatan
-      berukuran berbeda dapat dibandingkan. Kolom tren adalah kemiringan garis regresi
-      linear atas jumlah pelanggaran bulanan — dihitung hanya pada tingkat kelompok,
-      tempat jumlah catatannya memadai.${hadirTutup ? '' : ` Kolom <b>kehadiran</b> dan <b>alpa</b> dihitung atas
-      santri yang pekan presensinya sudah ditandai selesai (izin kegiatan dihitung hadir);
-      angkatan tanpa pekan teramati bertanda —.`}</p>`,
+    <p class="sb-kaki">Empat kolom pertama dihitung <b>per 100 santri</b> supaya angkatan
+      yang jumlahnya berbeda tetap bisa dibandingkan. Kolom tren menunjukkan arah naik
+      atau turunnya pelanggaran bulanan per angkatan.${hadirTutup ? '' : ` Kolom <b>kehadiran</b> dan <b>alpa</b> hanya
+      menghitung pekan presensi yang sudah direkap. Izin kegiatan dihitung hadir.
+      Angkatan yang belum punya rekap diberi tanda strip.`}</p>`,
     '', `${bulanKunci.length} bulan terakhir`);
 
   return { html, isi };
@@ -18121,49 +18355,44 @@ function panelKamar({ siswa, detail, prestasi, tahfiz, pembinaan }) {
       Geser ke samping untuk kamar lainnya. Kolom kelas tetap di tempatnya.</p>
 
     <div class="mtx-kaki">
-      <p><b>Cara membaca.</b> Angka dalam sel adalah <b>cacah santri binaan</b>
-         kelas itu yang menghuni kamar itu — bukan jumlah kejadian, dan
-         sengaja tidak dinormalkan per 100 karena satu sel hanya berisi
+      <p><b>Cara membaca.</b> Angka dalam sel adalah <b>jumlah santri binaan</b>
+         kelas itu yang tinggal di kamar itu, bukan jumlah kejadian. Angkanya
+         tidak diubah ke per 100 santri karena satu sel hanya berisi
          beberapa anak. Coraknya: <span class="mtx-cth mtx-cth-m"></span> condong
          pelanggaran, <span class="mtx-cth mtx-cth-h"></span> condong apresiasi
          dan setoran, <span class="mtx-cth mtx-cth-b"></span> seimbang.
          Sel berisi kurang dari ${KAMAR_MIN_SEL} santri binaan
-         <b>tidak diberi corak sama sekali</b> dan angkanya dikelabukan —
-         menyimpulkan corak satu kamar dari satu dua anak sama saja dengan
-         membangkitkan label dari kebisingan, dan itu harus terlihat berbeda
-         dari sel yang memang sudah dihitung lalu ternyata seimbang.
+         <b>tidak diberi warna</b> dan angkanya dibuat abu-abu. Satu dua anak
+         belum cukup untuk menilai sebuah kamar, jadi sel seperti ini dibedakan
+         dari sel yang memang seimbang.
          Huruf <b class="mtx-m-cth">M</b> menandai kamar yang dijaga mudabbir.
-         Baris <b>Σ binaan</b> di kaki tabel memberi bacaan per kamar yang
-         cacahnya lebih kokoh. Arahkan kursor ke sel mana pun untuk rinciannya.</p>
+         Baris <b>Σ binaan</b> di bawah tabel menunjukkan jumlah per kamar.
+         Arahkan kursor ke sel untuk melihat rinciannya.</p>
 
       <p><b>Kemurnian angkatan.</b> Rata-rata
          <b>${Math.round(rerataMurni * 100)}%</b> penghuni binaan satu kamar
-         berasal dari angkatan yang sama; <b>${angka(murniPenuh)}</b> dari
+         berasal dari angkatan yang sama. <b>${angka(murniPenuh)}</b> dari
          ${angka(kamarIsi.length)} kamar murni satu angkatan.
          ${rerataMurni >= 0.95
-           ? 'Setinggi ini, kamar praktis berimpit dengan angkatan — perbedaan antar kamar sebagian besar masih perbedaan antar angkatan, dan keduanya belum dapat dipisahkan.'
-           : 'Pada tingkat ini kamar membawa keterangan yang tidak habis dijelaskan oleh angkatan, sehingga perbandingan antar kamar di dalam satu kelas memang bermakna.'}
-         Mudabbir tidak ikut dihitung di sini karena ia memang berasal dari
-         angkatan lain menurut penugasannya.</p>
+           ? 'Karena setinggi ini, kamar hampir sama dengan angkatan. Perbedaan antar kamar sebagian besar masih perbedaan antar angkatan.'
+           : 'Pada tingkat ini kamar punya ciri sendiri di luar angkatan, jadi perbandingan antar kamar dalam satu kelas bisa dipakai.'}
+         Mudabbir tidak ikut dihitung di sini karena ia berasal dari angkatan lain.</p>
 
       ${totalMudabbir ? `<p><b>Mudabbir.</b> ${angka(totalMudabbir)} mudabbir
          bertugas di ${angka(kamarDijaga)} kamar. Catatan mereka sendiri
          (${angka(mPlgTotal)} pelanggaran, ${angka(mPrsTotal)} apresiasi/setoran)
-         <b>tidak dihitung</b> sebagai angka kamar yang mereka jaga — mereka
-         pengawas, bukan binaan kamar itu, dan mencampurnya akan membuat
-         mutu pengawasan terbaca sebagai kondisi santri.</p>`
+         <b>tidak dihitung</b> untuk kamar yang mereka jaga. Mereka pengawas,
+         bukan binaan kamar itu.</p>`
         : `<p><b>Mudabbir.</b> Belum ada santri yang ditandai sebagai mudabbir
            dalam cakupan ini. Tandai lewat tombol <b>Atur Kamar</b> pada jendela
            detail santri kelas ${ANGKATAN_MUDABBIR}.</p>`}
 
       <p class="mtx-batas"><i class="fa-solid fa-triangle-exclamation"></i>
-         <span><b>Batas bacaan.</b> Matriks ini membaca <b>hunian kamar saat ini</b>.
-         Kejadian yang tercatat sebelum santri pindah kamar tetap dihitung pada
-         kamarnya yang sekarang. Selama riwayat pindah kamar belum dicatat,
-         perbedaan antar kamar dibaca sebagai <b>petunjuk untuk ditelusuri</b>,
-         bukan sebagai sebab. Matriks ini juga menampilkan
-         ${angka(berkamar.length)} dari ${angka(total)} santri dalam cakupan —
-         santri yang kamarnya belum didata tidak muncul di sel mana pun.</span></p>
+         <span><b>Perlu diingat.</b> Tabel ini memakai <b>kamar santri saat ini</b>.
+         Kejadian sebelum santri pindah kamar tetap dihitung di kamarnya yang sekarang.
+         Karena itu, perbedaan antar kamar adalah <b>petunjuk untuk ditelusuri</b>,
+         bukan penyebab. Tabel ini memuat ${angka(berkamar.length)} dari ${angka(total)}
+         santri. Santri yang kamarnya belum diisi tidak muncul.</span></p>
     </div>`;
 
   return bungkus(isi, { kolom, kamar, sel, cakupan: berkamar.length / total });
@@ -18242,7 +18471,7 @@ function panelTarget({ siswa, goals, targetTahfiz, tahfiz }) {
     : kartuBelumTerisi({
         judul: 'Target hafalan belum ditetapkan',
         jumlah: (targetTahfiz || []).length, dariSantri: siswa.length, ikon: 'fa-book-bookmark',
-        akibat: 'Tanpa target, setoran hanya terbaca sebagai kegiatan — bukan sebagai kemajuan terhadap sasaran.',
+        akibat: 'Tanpa target, setoran hanya terlihat sebagai kegiatan, belum sebagai kemajuan menuju sasaran.',
         ajakan: 'Target halaman per periode ditetapkan dari halaman Tahfiz.',
         view: 'tahfiz' });
 
@@ -18295,8 +18524,8 @@ function panelIpp(ipp, { batas = 10 } = {}) {
   const unsurHadir = (k) => {
     if (ipp.hadirTerkunci) return '';
     if (!k) return `<span class="ipp-u" title="${ipp.hadirTerkunci
-        ? 'Kehadiran — terkunci untuk peran Anda'
-        : 'Kehadiran — belum ada pekan presensi yang ditandai selesai'}">
+        ? 'Kehadiran: tidak dibuka untuk peran Anda'
+        : 'Kehadiran: belum ada pekan presensi yang direkap'}">
       <span class="ipp-bar ungu"><i style="width:0%"></i></span><b>—</b></span>`;
     const judul = `Kehadiran — ${k.hadirPct}% dari ${k.jpAmati} JP teramati (${k.pekan} pekan); alpa ${k.alpa} JP`;
     return `<span class="ipp-u" title="${esc(judul)}">
@@ -18311,9 +18540,9 @@ function panelIpp(ipp, { batas = 10 } = {}) {
         <small>${esc(x.kelas)} · ${esc(x.sebab)}</small>
       </div>
       <div class="ipp-unsur">
-        ${batang(x.beban,  ipp.maks.beban,  'merah',  'Beban — poin pelanggaran')}
-        ${batang(x.ikatan, ipp.maks.ikatan, 'hijau',  'Ikatan — apresiasi & setoran')}
-        ${batang(x.putus,  ipp.maks.putus,  'kuning', 'Keterputusan — izin keluar')}
+        ${batang(x.beban,  ipp.maks.beban,  'merah',  'Beban: poin pelanggaran')}
+        ${batang(x.ikatan, ipp.maks.ikatan, 'hijau',  'Ikatan: apresiasi dan setoran')}
+        ${batang(x.putus,  ipp.maks.putus,  'kuning', 'Keterputusan: izin keluar')}
         <span class="ipp-u" title="Respons — pembinaan yang tuntas">
           <span class="ipp-bar biru"><i style="width:${x.respons === null ? 0 : x.respons}%"></i></span>
           <b>${x.respons === null ? '—' : x.respons + '%'}</b></span>
@@ -18324,7 +18553,7 @@ function panelIpp(ipp, { batas = 10 } = {}) {
       'Seluruh santri berada pada dukungan umum sepanjang jendela ini.', 'fa-circle-check');
 
   const catatanIkatan = ipp.ikatanAktif
-    ? `Kriteria <b>Ikatan nol</b> aktif — santri tanpa satu pun catatan positif ikut ditandai.`
+    ? `Kriteria <b>Ikatan nol</b> aktif. Santri yang belum punya catatan baik sama sekali ikut ditandai.`
     : `Kriteria <b>Ikatan nol</b> sedang nonaktif: baru ${angka(ipp.punyaIkatan)} dari
        ${angka(ipp.daftar.length)} santri yang memiliki catatan apresiasi atau setoran.
        Kriteria ini menyala sendiri setelah pencatatan positif mencapai
@@ -18334,11 +18563,11 @@ function panelIpp(ipp, { batas = 10 } = {}) {
     ? `Unsur <b>Kehadiran</b> tidak ditampilkan untuk peran ${esc(role())}.`
     : ipp.teramati
     ? `Unsur <b>Kehadiran</b> terbaca untuk ${angka(ipp.teramati)} dari ${angka(ipp.daftar.length)}
-       santri — hanya pekan presensi yang sudah ditandai selesai yang dihitung; santri lain
-       bertanda —. Yang dibaca sebagai sinyal adalah <b>alpa</b> (≥ ${KH_AMBANG_ALPA_JP} JP → tier 2,
+       santri. Hanya pekan presensi yang sudah direkap yang dihitung. Santri lain
+       diberi tanda strip. Yang dijadikan tanda bahaya adalah <b>alpa</b> (≥ ${KH_AMBANG_ALPA_JP} JP → tier 2,
        ≥ ${Math.round(KH_AMBANG_ALPA_KRONIS * 100)}% jam → tier 3) dan ketidakhadiran kronis
-       ≥ ${Math.round(KH_AMBANG_KRONIS * 100)}% jam pelajaran apa pun alasannya; izin kegiatan (IK)
-       tidak dihitung sebagai ketidakhadiran.`
+       ≥ ${Math.round(KH_AMBANG_KRONIS * 100)}% jam pelajaran apa pun alasannya. Izin kegiatan (IK)
+       tidak dihitung sebagai tidak hadir.`
     : `Unsur <b>Kehadiran</b> belum terbaca: belum ada pekan presensi kelas yang ditandai selesai
        pada jendela ini. Ketiadaan catatan presensi tidak dibaca sebagai hadir.`;
 
@@ -18352,10 +18581,10 @@ function panelIpp(ipp, { batas = 10 } = {}) {
     </div>
     <div class="ipp${ipp.hadirTerkunci ? ' tanpa-hadir' : ''}">${baris}</div>
     <p class="sb-kaki">${ipp.hadirTerkunci ? 'Unsur-unsur ini' : 'Kelima unsur'} <b>sengaja tidak dijumlahkan</b> menjadi satu skor:
-      satu angka tunggal menyembunyikan sebab, sedangkan batang-batang berdampingan
+      satu angka menutupi penyebabnya, sedangkan batang yang berdampingan
       menunjukkan ikatan mana yang mengendur. Yang ditampilkan adalah <b>status</b> pada
-      jendela ${ipp.hari} hari berjalan, bukan arah perubahan — jumlah titik waktu per
-      santri belum memadai untuk menaksir tren perorangan. ${catatanIkatan}
+      jendela ${ipp.hari} hari berjalan, bukan arah perubahan. Data per santri belum
+      cukup untuk melihat tren masing-masing. ${catatanIkatan}
       ${catatanHadir}</p>`,
     `<span class="tag tag-berat">Tier 3: ${angka(ipp.tier3)}</span>
      <span class="tag tag-sedang">Tier 2: ${angka(ipp.tier2)}</span>
@@ -18619,8 +18848,8 @@ const labPct  = (x, d = 1) => `${(Math.round(x * 100 * 10 ** d) / 10 ** d).toLoc
 const labDes  = (x, d = 2) => x === null || x === undefined || !isFinite(x) ? '—'
   : Number(x).toLocaleString('id-ID', { minimumFractionDigits: d, maximumFractionDigits: d });
 const labKlaim = (jenis) => {
-  const t = { d:['deskriptif','Apa yang tercatat'], k:['kontrafaktual','Bila aturan diubah — pasti'],
-              s:['skenario','Bila perilaku berubah — asumsi, bukan ramalan'] }[jenis];
+  const t = { d:['deskriptif','Apa yang tercatat'], k:['kontrafaktual','Bila aturan diubah (pasti)'],
+              s:['skenario','Bila perilaku berubah (asumsi, bukan ramalan)'] }[jenis];
   return `<span class="lab-klaim ${t[0]}" title="${esc(t[1])}"><i class="fa-solid ${
     jenis === 'd' ? 'fa-eye' : jenis === 'k' ? 'fa-code-branch' : 'fa-dice'}"></i>${t[0]}</span>`;
 };
@@ -18692,9 +18921,9 @@ async function viewLab() {
       <div class="eyebrow"><span class="ar">مختبر السياسات</span><span class="rule"></span>
         <span class="lat">Observatorium Perkembangan</span></div>
       <h2 style="font-size:clamp(24px,3vw,32px)">Laboratorium Kebijakan</h2>
-      <p>Indeks Peringatan Pembinaan dan sebaran perkembangan dibaca sebagai model ilmiah:
-         definisi operasional yang terbuka, uji mutu data, uji ekor sebaran, dan percobaan
-         aturan sebelum aturan itu diberlakukan kepada santri yang nyata.</p>
+      <p>Di sini Indeks Peringatan Pembinaan diuji secara ilmiah. Definisinya terbuka,
+         mutu datanya diperiksa, sebarannya diuji, dan setiap aturan dicoba dulu
+         sebelum diberlakukan kepada santri.</p>
       <div class="meta lab-meta">
         <span>${labKlaim('d')}</span><span>${labKlaim('k')}</span><span>${labKlaim('s')}</span>
         <label class="lab-jendela"><i class="fa-regular fa-calendar"></i>Jendela
@@ -18781,7 +19010,7 @@ function labTabModel() {
   </div>`;
 
   const barisDef = [
-    ['Beban', 'Luaran perilaku yang dipantau; rujukan disiplin (SWPBIS)',
+    ['Beban', 'Perilaku yang dipantau, rujukan disiplin (SWPBIS)',
      'Jumlah bobot poin pelanggaran aktif dalam jendela', 'detail_data', 'Rasio (poin)',
      `≥ ${A.bebanT3} → tier 3 · ≥ ${A.bebanT2} → tier 2`, 'Ta’dīb'],
     ['Ikatan', 'Commitment & involvement (Hirschi)',
@@ -18790,11 +19019,11 @@ function labTabModel() {
     ['Keterputusan', 'Involvement terbalik (Hirschi)',
      'Jumlah izin keluar yang dimulai dalam jendela', 'log_perizinan', 'Hitungan',
      A.pakaiPutus ? `≥ ${A.putusT2} → tier 2` : 'nonaktif', 'Amanah'],
-    ['Respons', 'Attachment yang dilembagakan; kesetiaan pelaksanaan',
+    ['Respons', 'Keterikatan yang dilembagakan, kesetiaan pelaksanaan',
      'Persentase pembinaan berstatus Selesai dalam jendela', 'log_pembinaan', 'Rasio (%)',
      A.pakaiMacet ? `< ${A.macetPct}% dari ≥ ${A.macetMin} pembinaan → tier 3` : 'nonaktif', 'Ta’dīb'],
-    ['Kehadiran', 'Behavioral engagement; indikator kehadiran EWS (Henry dkk., 2011)',
-     'JP hadir ÷ JP teramati; alpa dalam JP. Hanya pekan bertanda selesai', 'data_presensi, presensi_minggu', 'Rasio (%, JP)',
+    ['Kehadiran', 'Keterlibatan perilaku, indikator kehadiran EWS (Henry dkk., 2011)',
+     'JP hadir ÷ JP teramati, alpa dalam JP. Hanya pekan yang sudah direkap', 'data_presensi, presensi_minggu', 'Rasio (%, JP)',
      A.pakaiHadir ? `alpa ≥ ${A.alpaJp} JP → 2 · alpa ≥ ${pctA(A.alpaKronis)} → 3 · absen ≥ ${pctA(A.absenKronis)} → 2` : 'nonaktif', 'Tabayyun · Itqān']
   ].map(r => `<tr>${r.map((c, i) => i === 0 ? `<td><b>${esc(c)}</b></td>` : `<td>${esc(c)}</td>`).join('')}</tr>`).join('');
 
@@ -18816,15 +19045,15 @@ function labTabModel() {
 
   const mutu = [
     ['Pelanggaran', dW.length, santriDari(dW),
-     `${hariIsi} dari ${hariKal} hari berisi catatan (${pctA(hariIsi / hariKal)}); hari tersibuk memuat ${dW.length ? pctA(puncak / dW.length) : '0%'} catatan`,
+     `${hariIsi} dari ${hariKal} hari berisi catatan (${pctA(hariIsi / hariKal)}), hari tersibuk memuat ${dW.length ? pctA(puncak / dW.length) : '0%'} catatan`,
      hariIsi / hariKal < 0.3 ? 'buruk' : hariIsi / hariKal < 0.6 ? 'sedang' : 'baik'],
-    ['Apresiasi', pW.length, santriDari(pW), 'Sisi positif; menentukan aktif tidaknya aturan ikatan nol',
+    ['Apresiasi', pW.length, santriDari(pW), 'Sisi baik santri, menentukan aktif tidaknya aturan ikatan nol',
      santriDari(pW) / n < 0.15 ? 'buruk' : 'sedang'],
     ['Setoran tahfiz', tW.length, santriDari(tW), 'Konsistensi ibadah sebagai ikatan positif',
      santriDari(tW) / n < 0.15 ? 'buruk' : 'sedang'],
     ['Perizinan', iW.length, santriDari(iW), 'Tanggal mulai izin', 'baik'],
     ['Pembinaan', bW.length, santriDari(bW),
-     `${proses.length} masih "Dalam Proses" (${bW.length ? pctA(proses.length / bW.length) : '0%'}), ${tuaProses} di antaranya > 14 hari — aturan macet membaca ini sebagai respons rendah`,
+     `${proses.length} masih "Dalam Proses" (${bW.length ? pctA(proses.length / bW.length) : '0%'}), ${tuaProses} di antaranya lebih dari 14 hari. Aturan macet membacanya sebagai respons rendah`,
      bW.length && proses.length / bW.length > 0.5 ? 'buruk' : 'sedang'],
     ['Presensi kelas', (d.presensi.rows || []).length, U.teramati,
      d.presensi.terkunci ? 'Terkunci untuk peran ini' : `${kelasAmati} dari ${kelasSemua} kelas memiliki pekan bertanda selesai`,
@@ -18855,9 +19084,9 @@ function labTabModel() {
 
   return `
     ${kartu('Kerangka Model', `<div class="card-body">${alur}
-      ${labCatatan(`Kelima unsur <b>tidak dijumlahkan</b>. Satu skor komposit menyembunyikan sebab;
-        yang ditanyakan model ini bukan "berapa skornya", melainkan "ikatan mana yang mengendur"
-        — pertanyaan yang menuntun <i>tabayyun</i> sebelum penetapan.`)}</div>`,
+      ${labCatatan(`Kelima unsur <b>tidak dijumlahkan</b>, karena satu skor menutupi penyebabnya.
+        Pertanyaannya bukan "berapa skornya", tetapi "ikatan mana yang mengendur".
+        Pertanyaan ini menuntun <i>tabayyun</i> sebelum keputusan diambil.`)}</div>`,
       labKlaim('d'), 'Alur dari catatan menjadi keputusan musyawarah')}
 
     ${kartu('Definisi Operasional Variabel', `<div class="tbl"><table>
@@ -18866,24 +19095,24 @@ function labTabModel() {
       <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>`,
       '', `Jendela ${LAB.hari} hari · aturan yang tampil mengikuti isian Laboratorium`)}
 
-    ${kartu('Mutu Data — sebelum angka dipercaya', `<div class="tbl"><table>
+    ${kartu('Mutu Data: periksa sebelum angka dipercaya', `<div class="tbl"><table>
       <thead><tr><th>Sumber</th><th>Baris</th><th>Santri tercakup</th><th>Catatan mutu</th><th>Status</th></tr></thead>
       <tbody>${mutu}</tbody></table></div>
       <div class="card-body">${chartBox('labHarian')}
       ${labCatatan(`Grafik ini adalah <b>tanggal input</b>, bukan tanggal kejadian. Bila catatan menumpuk
-        pada sedikit hari, deret harian menggambarkan kebiasaan mencatat — bukan dinamika perilaku.
-        Membacanya sebagai perilaku adalah <i>ludic fallacy</i>: memperlakukan model sebagai kenyataan.
-        Ketepatan waktu pencatatan (<i>itqān</i>) adalah prasyarat analisis, bukan hiasan.`)}</div>`,
+        pada sedikit hari, grafik ini lebih menggambarkan kebiasaan mencatat daripada perilaku santri.
+        Membacanya sebagai perilaku adalah <i>ludic fallacy</i>, yaitu menganggap model sama dengan kenyataan.
+        Mencatat tepat waktu (<i>itqān</i>) adalah syarat analisis yang benar.`)}</div>`,
       labKlaim('d'), `Jendela ${LAB.hari} hari`)}
 
-    ${kartu('Validitas Konvergen & Diskriminan — korelasi Spearman antar-unsur', `${matriks}
-      <div class="card-body">${labCatatan(`ρ sedang (0,3–0,5) antara dua unsur perilaku menandakan keduanya
-        mengukur hal yang berkaitan tanpa saling menggandakan — itulah alasan unsur baru layak ditambahkan.
-        ρ mendekati 1 berarti satu unsur mubazir; ρ mendekati 0 dengan unsur perilaku lain perlu
-        dipertanyakan maknanya. Bila unsur positif (Ikatan) justru searah dengan unsur negatif, curigai
-        <b>efek pencatat</b>: kelas yang pengasuhnya rajin mencatat tampak lebih baik sekaligus lebih buruk —
-        yang terukur adalah kerajinan mencatat, bukan perilaku. Pasangan dengan n &lt; 10 tidak dihitung.`)}</div>`,
-      labKlaim('d'), 'Warna merah = searah, biru = berlawanan; pekat = kuat')}
+    ${kartu('Validitas Konvergen dan Diskriminan: korelasi Spearman antar-unsur', `${matriks}
+      <div class="card-body">${labCatatan(`ρ sedang (0,3 sampai 0,5) antara dua unsur berarti keduanya berkaitan tanpa saling
+        mengulang. Karena itulah unsur baru layak ditambahkan. ρ mendekati 1 berarti satu unsur tidak perlu.
+        ρ mendekati 0 perlu dipertanyakan maknanya. Bila unsur positif (Ikatan) justru searah dengan
+        unsur negatif, curigai <b>efek pencatat</b>. Kelas yang pengasuhnya rajin mencatat tampak lebih baik
+        sekaligus lebih buruk. Yang terukur adalah kerajinan mencatat, bukan perilaku.
+        Pasangan dengan n &lt; 10 tidak dihitung.`)}</div>`,
+      labKlaim('d'), 'Merah berarti searah, biru berlawanan, warna pekat berarti kuat')}
 
     ${kartu('Rujukan Model', `<div class="card-body lab-rujuk">
       <p>Hirschi, T. (1969). <i>Causes of delinquency</i>. University of California Press.</p>
@@ -18944,16 +19173,16 @@ function labTabIpp() {
       ${stat('Tier 1 · universal', angka(E.tier1), 'fa-solid fa-circle-check', 'background:var(--teal-bg);color:var(--teal)', 'var(--teal)', labPct(E.tier1 / n) + ' santri')}
       ${stat('Kehadiran teramati', angka(E.teramati), 'fa-solid fa-calendar-check', 'background:var(--violet-bg);color:var(--violet)', 'var(--violet)', labPct(E.teramati / n) + ' santri')}
     </div>
-    ${labCatatan(`Dalam kerangka SWPBIS, tier 3 lazimnya menampung porsi kecil santri (kerap disebut
-      sekitar 1–5%). Porsi yang jauh lebih besar bukan bukti dayah lebih bermasalah; lebih sering itu tanda
+    ${labCatatan(`Dalam kerangka SWPBIS, tier 3 biasanya hanya berisi sedikit santri (sekitar 1 sampai 5%).
+      Porsi yang jauh lebih besar belum tentu berarti dayah lebih bermasalah. Lebih sering itu tanda
       <b>aturannya terlalu longgar</b> atau <b>datanya belum rapi</b>. Uji keduanya di tab Laboratorium.`)}
 
     ${kartu('Sumbangan Setiap Aturan', `<div class="tbl"><table class="lab-unik">
       <thead><tr><th>Aturan</th><th>Proporsi</th><th>Menandai</th><th>Unik</th><th>% santri</th></tr></thead>
       <tbody>${tUnik}</tbody></table></div>
       <div class="card-body">${labCatatan(`<b>Unik</b> = santri yang tidak akan terangkat ke tier tersebut
-        seandainya aturan ini dihapus. Aturan dengan sumbangan unik nol adalah kandidat <i>via negativa</i>
-        — dihapus tanpa kehilangan daya deteksi. Aturan yang menandai banyak santri tetapi sumbangan
+        seandainya aturan ini dihapus. Aturan dengan sumbangan unik nol bisa dihapus (<i>via negativa</i>)
+        tanpa mengurangi kemampuan mendeteksi. Aturan yang menandai banyak santri tetapi sumbangan
         uniknya besar adalah penentu utama beban kerja pengasuh.`)}</div>`,
       labKlaim('d'), 'Aturan baku yang sedang dipakai dashboard')}
 
@@ -19039,13 +19268,13 @@ function labTabSebar() {
 
   return `${seb.html}
     ${kartu('Komposisi Tier per Angkatan', `${chartBox('labKomposisi')}
-      <div class="card-body">${labCatatan(`Proporsi, bukan jumlah — angkatan besar tidak otomatis tampak
-        lebih bermasalah. Jendela ${LAB.hari} hari, aturan baku.`)}</div>`, labKlaim('d'))}
-    ${kartu('Peta Kelas — urut dari porsi tier 3 tertinggi', `<div class="tbl"><table class="sebar">
+      <div class="card-body">${labCatatan(`Yang dipakai adalah proporsi, bukan jumlah, supaya angkatan besar tidak otomatis
+        terlihat lebih bermasalah. Jendela ${LAB.hari} hari, aturan baku.`)}</div>`, labKlaim('d'))}
+    ${kartu('Peta Kelas: urut dari porsi tier 3 tertinggi', `<div class="tbl"><table class="sebar">
       <thead><tr><th>Kelas</th><th>Santri</th><th>Tier 3</th><th>Tier 2</th><th>Beban / santri</th>
         <th>Kehadiran</th><th>Alpa / santri (JP)</th></tr></thead><tbody>${tKel}</tbody></table></div>
       <div class="card-body">${labCatatan(`Kelas kecil mudah tampak ekstrem karena satu santri saja
-        menggeser persentasenya jauh. Bandingkan kolom Santri sebelum menyimpulkan — ini hukum bilangan
+        menggeser persentasenya jauh. Lihat kolom Santri sebelum menyimpulkan. Ini hukum bilangan
         kecil, bukan pola.`)}</div>`, labKlaim('d'), `Jendela ${LAB.hari} hari`)}`;
 }
 
@@ -19122,12 +19351,12 @@ function labTabEkor() {
   const ekorTebal  = (S.kurt !== null && S.kurt > 6) || (alfa !== null && alfa < 2);
   const ekorSedang = !ekorTebal && ((alfa !== null && alfa < 4) || S.ms[3].r > 0.1);
   const putusan = terkonsentrasi && ekorTebal
-    ? ['Extremistan', 'buruk', 'Beban terkonsentrasi dan ekornya tebal: satu-dua santri dapat mengubah wajah statistik dayah. Rerata tidak mewakili siapa pun; kebijakan harus dirancang untuk ekornya.']
+    ? ['Extremistan', 'buruk', 'Beban terpusat dan ekornya tebal. Satu dua santri bisa mengubah seluruh statistik dayah. Rata-rata tidak mewakili siapa pun, jadi kebijakan harus dirancang untuk santri di ujung atas.']
     : terkonsentrasi && ekorSedang
-      ? ['Terkonsentrasi, ekor sedang', 'sedang', 'Pola Pareto nyata dan ekor atasnya lebih tebal daripada sebaran normal, tetapi belum liar: statistik dayah belum dikuasai satu-dua santri. Rerata menyesatkan untuk perencanaan; rencanakan kapasitas dari persentil atas, bukan dari rata-rata.']
+      ? ['Terkonsentrasi, ekor sedang', 'sedang', 'Pola Pareto terlihat jelas dan ujung atasnya lebih tebal dari sebaran normal, tetapi belum ekstrem. Statistik dayah belum dikuasai satu dua santri. Untuk perencanaan, pakai persentil atas, bukan rata-rata.']
     : terkonsentrasi
-      ? ['Terkonsentrasi, ekor tipis', 'sedang', 'Pola Pareto nyata, tetapi jumlah kasus per santri berbatas sehingga ekornya tidak liar. Intervensi tersasar pada kelompok kecil memberi hasil terbesar; sisi Extremistan dayah lebih mungkin terletak pada DAMPAK kejadian berat daripada jumlah catatan.']
-      : ['Mediocristan', 'baik', 'Beban tersebar relatif merata; rerata cukup mewakili. Kebijakan universal (tier 1) lebih tepat daripada pengejaran individu.'];
+      ? ['Terkonsentrasi, ekor tipis', 'sedang', 'Pola Pareto terlihat jelas, tetapi jumlah kasus per santri terbatas sehingga ujungnya tidak ekstrem. Pembinaan yang terarah pada kelompok kecil memberi hasil terbesar. Risiko terbesar dayah lebih mungkin ada pada DAMPAK kejadian berat, bukan jumlah catatan.']
+      : ['Mediocristan', 'baik', 'Beban tersebar cukup merata, jadi rata-rata sudah mewakili. Kebijakan umum (tier 1) lebih tepat daripada menangani santri satu per satu.'];
 
   const barisBerat = berat.slice(-12).reverse().map(r => `<tr data-detail="${esc(r.nisn)}" style="cursor:pointer">
     <td>${tgl(r.tanggal)}</td><td><b>${esc(peta[String(r.nisn)]?.nama_siswa || r.nisn)}</b></td>
@@ -19145,11 +19374,11 @@ function labTabEkor() {
       ${stat('Koefisien Gini', labDes(S.gini), 'fa-solid fa-chart-area', 'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)', `0 = merata · 1 = satu santri menanggung semua · poin ${labDes(S.giniPoin)}`)}
       ${stat('10% santri teratas', labPct(S.atas10, 0), 'fa-solid fa-users-line', 'background:var(--amber-bg);color:var(--amber)', 'var(--amber)', `menanggung porsi catatan · 20%: ${labPct(S.atas20, 0)} · 1%: ${labPct(S.atas1, 0)}`)}
       ${stat('Kurtosis berlebih', labDes(S.kurt), 'fa-solid fa-mountain', 'background:var(--violet-bg);color:var(--violet)', 'var(--violet)', 'normal = 0 · > 6 menandakan ekor tebal')}
-      ${stat('Santri tanpa catatan', labPct(S.nol / n, 0), 'fa-solid fa-feather', 'background:var(--teal-bg);color:var(--teal)', 'var(--teal)', `${angka(S.nol)} dari ${angka(S.n)} — bukan berarti tanpa risiko`)}
+      ${stat('Santri tanpa catatan', labPct(S.nol / n, 0), 'fa-solid fa-feather', 'background:var(--teal-bg);color:var(--teal)', 'var(--teal)', `${angka(S.nol)} dari ${angka(S.n)}, belum tentu tanpa risiko`)}
     </div>
 
     <div class="grid-half">
-      ${kartu('Kurva Lorenz — ketimpangan beban', `${chartBox('labLorenz')}
+      ${kartu('Kurva Lorenz: ketimpangan beban', `${chartBox('labLorenz')}
         <div class="card-body">${labCatatan(`Garis putus-putus = kesetaraan sempurna. Makin jauh kurva melengkung
           ke bawah, makin sedikit santri yang menanggung sebagian besar catatan.`)}</div>`, labKlaim('d'))}
       ${kartu('Sebaran jumlah catatan per santri', `${chartBox('labHist')}
@@ -19158,31 +19387,31 @@ function labTabEkor() {
     </div>
 
     <div class="grid-half">
-      ${kartu('Uji Ekor — rasio maks/jumlah & taksiran Hill', `<div class="card-body">
+      ${kartu('Uji Ekor: rasio maks/jumlah dan taksiran Hill', `<div class="card-body">
         <div class="tbl"><table><thead><tr><th>Momen ke-p</th><th>maks(xᵖ) ÷ Σxᵖ</th><th>Bacaan</th></tr></thead><tbody>
         ${S.ms.map(m => `<tr><td>p = ${m.p}</td><td class="num"><b>${labDes(m.r, 3)}</b></td>
-          <td><small>${m.r > 0.1 ? 'didominasi satu pengamatan — momen ini tidak stabil' : 'tidak didominasi satu pengamatan'}</small></td></tr>`).join('')}
+          <td><small>${m.r > 0.1 ? 'dikuasai satu pengamatan, momen ini tidak stabil' : 'tidak didominasi satu pengamatan'}</small></td></tr>`).join('')}
         </tbody></table></div>
         <p class="lab-hill">Indeks ekor Hill (poin, ${S.hill ? `k = ${S.hill.k} dari ${S.hill.n}` : 'data kurang'}):
           <b>α ≈ ${S.hill ? labDes(S.hill.alfa) : '—'}</b>
-          ${S.hill ? (S.hill.alfa < 2 ? '— ragam tidak stabil (ekor sangat tebal)' : S.hill.alfa < 4 ? '— ekor tebal sedang' : '— ekor relatif tipis') : ''}</p>
+          ${S.hill ? (S.hill.alfa < 2 ? '(ragam tidak stabil, ekor sangat tebal)' : S.hill.alfa < 4 ? '(ekor tebal sedang)' : '(ekor relatif tipis)') : ''}</p>
         ${labCatatan(`Rasio maks/jumlah (Taleb) yang tinggi pada p = 4 berarti kurtosis dan simpangan baku di
-          atas ditentukan oleh satu-dua santri saja — angka-angka itu jangan dipakai untuk menetapkan ambang.
+          atas ditentukan oleh satu dua santri saja. Angka-angka itu jangan dipakai untuk menetapkan ambang.
           Taksiran Hill pada data hitungan berbatas bersifat <b>indikatif</b>: nilai-nilai kembar dan jumlah yang
           kecil membuatnya bias.`)}</div>`, labKlaim('d'))}
-      ${kartu('Via Negativa — seberapa bergantung pada segelintir santri', `<div class="card-body">
+      ${kartu('Via Negativa: seberapa bergantung pada segelintir santri', `<div class="card-body">
         <div class="tbl"><table><thead><tr><th>Santri teratas</th><th>Porsi catatan</th><th>Porsi poin</th><th>Bila separuhnya pulih</th></tr></thead><tbody>
         ${S.top.map(t => `<tr><td><b>${t.k} santri</b> <small>(${labPct(t.k / n, 1)})</small></td>
           <td class="num">${labPct(t.kasus)}</td><td class="num">${labPct(t.poin)}</td>
           <td class="num">total dayah turun <b>${labPct(t.kasus / 2)}</b></td></tr>`).join('')}
         </tbody></table></div>
         ${labCatatan(`Sistem yang bebannya bertumpu pada segelintir orang itu <b>rapuh</b>: kepindahan, kepulangan,
-          atau pulihnya beberapa santri mengubah seluruh statistik. Bagi manajemen, ini juga peluang —
-          pembinaan intensif yang tepat sasaran (tier 3) memberi hasil terbesar per jam pengasuh. Kolom
+          atau pulihnya beberapa santri mengubah seluruh statistik. Bagi pengelola, ini juga peluang.
+          Pembinaan intensif yang tepat sasaran (tier 3) memberi hasil terbesar per jam pengasuh. Kolom
           terakhir adalah aritmetika, bukan janji keberhasilan.`)}</div>`, labKlaim('d'))}
     </div>
 
-    ${kartu('Kejadian Berat — sisi angsa hitam', `<div class="stats lab-stats-mini">
+    ${kartu('Kejadian Berat: sisi angsa hitam', `<div class="stats lab-stats-mini">
         ${stat('Kejadian Berat', angka(berat.length), 'fa-solid fa-bolt', 'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)', `${labPct(dW.length ? berat.length / dW.length : 0)} dari seluruh catatan`)}
         ${stat('Santri terlibat', angka(new Set(berat.map(r => r.nisn)).size), 'fa-solid fa-user', 'background:var(--amber-bg);color:var(--amber)', 'var(--amber)', 'dalam jendela')}
         ${stat('Jarak antarkejadian', jarak.length ? labDes(Stat.rerata(jarak), 1) + ' hari' : '—', 'fa-solid fa-ruler-horizontal', 'background:#E7F1F7;color:var(--sea)', 'var(--sea)', 'rerata, pada tanggal input')}
@@ -19191,14 +19420,14 @@ function labTabEkor() {
       ${klaster.length ? `<div class="card-body" style="padding-bottom:0">${labCatatan(`Kelompok terbesar:
         ${klaster.slice(0, 5).map(c => `<b>${esc(c.kl)}</b> · ${esc(c.kd)} · ${tgl(c.t)} (${c.n} santri)`).join('; ')}.
         Pelanggaran yang terjadi berkelompok adalah <b>risiko bertaut</b>: satu peristiwa menaikkan banyak santri
-        sekaligus, sehingga beban pengasuh melonjak serentak — inilah alasan skenario Monte Carlo memuat kejutan satu kelas.
-        Sebagian kelompok bisa juga berupa satu penertiban massal pada hari input; periksa sebelum menyimpulkan.`)}</div>` : ''}
+        sekaligus, sehingga beban pengasuh melonjak bersamaan. Karena itu skenario Monte Carlo memuat kejutan satu kelas.
+        Sebagian kelompok bisa juga berasal dari satu razia pada hari input. Periksa dulu sebelum menyimpulkan.`)}</div>` : ''}
       <div class="tbl"><table><thead><tr><th>Tanggal</th><th>Santri</th><th>Kelas</th><th>Pelanggaran</th><th>Poin</th></tr></thead>
         <tbody>${barisBerat}</tbody></table></div>
       <div class="card-body">${labCatatan(`Angsa hitam (Taleb, 2007): jarang, berdampak besar, dan tampak dapat
         dijelaskan <b>sesudah</b> terjadi. Indeks ini tidak meramalkan kejadian Berat dan tidak boleh diklaim
         demikian. Yang dapat dikelola adalah <b>kerapuhan</b>: apakah prosedur tabayyun, jalur pembinaan, dan
-        pemberitahuan wali siap bekerja ketika kejadian itu datang — bukan kapan ia datang.`)}</div>`,
+        pemberitahuan wali siap berjalan ketika kejadian itu datang, bukan kapan ia datang.`)}</div>`,
       labKlaim('d'), '12 kejadian terakhir dalam jendela')}`;
 }
 
@@ -19255,7 +19484,7 @@ function labTabLab() {
   }).join('');
 
   return `
-    ${kartu('Instrumen Percobaan — aturan penjenjangan', `<div class="card-body">
+    ${kartu('Instrumen Percobaan: aturan penjenjangan', `<div class="card-body">
       <div class="lab-hipo"><label class="label">Hipotesis kebijakan</label>
         <textarea class="input" id="labHipo" rows="2" placeholder="Contoh: Menaikkan ambang beban tier 3 menjadi 80 poin akan menurunkan beban tier 3 ke bawah kapasitas pengasuh tanpa melepaskan santri yang tidak hadir kronis.">${esc(LAB.hipotesis)}</textarea></div>
       <div class="lab-saklar-baris">${saklar}</div>
@@ -19271,25 +19500,25 @@ function labTabLab() {
         <button class="btn btn-ghost btn-sm" data-lab="baku"><i class="fa-solid fa-rotate-left"></i>Kembalikan aturan baku</button>
         <button class="btn btn-primary btn-sm" data-lab="simpan"><i class="fa-solid fa-bookmark"></i>Simpan ke Buku Catatan</button>
       </div></div>`,
-      labKlaim('k'), beda ? 'Aturan tandingan sedang diuji — dashboard tetap memakai aturan baku' : 'Masih sama dengan aturan baku')}
+      labKlaim('k'), beda ? 'Aturan percobaan sedang diuji. Dashboard tetap memakai aturan baku' : 'Masih sama dengan aturan baku')}
 
     <div id="labHasil">${labHasilEksp()}</div>
 
-    ${kartu('Analisis Sensitivitas — seberapa rapuh angka tier 3 terhadap pilihan ambang', `
+    ${kartu('Analisis Sensitivitas: seberapa rapuh angka tier 3 terhadap pilihan ambang', `
       ${chartBox('labTornado', true)}
       <div class="card-body">${labCatatan(`Setiap ambang digeser 25% ke bawah dan ke atas (yang lain tetap).
-        Batang panjang = keputusan yang <b>sensitif</b> terhadap angka yang dipilih secara arbitrer; di sanalah
-        ambang harus dimusyawarahkan dan dilandasi data, bukan kebiasaan. Batang pendek = ambang yang aman
+        Batang panjang berarti keputusannya <b>peka</b> terhadap angka yang dipilih. Ambang seperti ini perlu
+        dimusyawarahkan dan didasarkan pada data, bukan kebiasaan. Batang pendek berarti ambangnya aman
         dipertahankan.`)}</div>`, labKlaim('k'), 'Perubahan jumlah santri tier 3 terhadap aturan percobaan')}
 
-    ${kartu('Kurva Respons — sapuan satu instrumen', `<div class="card-body lab-sapu">
+    ${kartu('Kurva Respons: sapuan satu instrumen', `<div class="card-body lab-sapu">
         <label class="label">Instrumen</label>
         <select class="input" id="labSapuan">${LAB_PARAM.map(p =>
           `<option value="${p.k}" ${LAB.sapuan === p.k ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></div>
       ${chartBox('labSapu', true)}
       <div class="card-body">${labCatatan(`Cari <b>titik belok</b>: rentang ketika sedikit perubahan ambang
         memindahkan banyak santri. Ambang yang diletakkan tepat di titik belok membuat penjenjangan tidak
-        stabil — dua musyrif dengan catatan sedikit berbeda akan menghasilkan keputusan yang jauh berbeda.
+        stabil. Dua musyrif dengan catatan yang sedikit berbeda bisa menghasilkan keputusan yang jauh berbeda.
         Garis putus-putus = kapasitas tier 3.`)}</div>`, labKlaim('k'))}
 
     ${labKartuSkenario()}`;
@@ -19328,23 +19557,24 @@ function labHasilEksp() {
         <div class="lab-muat-k"><span>Beban tier 3 terhadap kapasitas pengasuh</span><b>${labPct(rasio, 0)}</b></div>
         <span class="lab-muat-bar"><i style="width:${Math.min(100, rasio * 100)}%"></i></span>
         <small>${angka(E.tier3)} santri ÷ kapasitas ${angka(kap)} · ${rasio > 1
-          ? `kelebihan ${angka(E.tier3 - kap)} santri — tier 3 yang melebihi kapasitas berubah menjadi daftar, bukan pembinaan`
+          ? `kelebihan ${angka(E.tier3 - kap)} santri. Tier 3 yang melebihi kapasitas hanya menjadi daftar, bukan pembinaan`
           : `sisa kapasitas ${angka(kap - E.tier3)} santri`}</small>
       </div>
       <p class="lab-sub" style="margin-top:10px">Porsi tier 3: <b>${labPct(E.tier3 / n)}</b> santri · tier 2 atau 3: <b>${labPct((E.tier3 + E.tier2) / n)}</b></p>
     </div>`, labKlaim('k'))}
-    ${kartu('Matriks Transisi — baku → percobaan', `<div class="card-body">
+    ${kartu('Matriks Transisi: baku ke percobaan', `<div class="card-body">
       <div class="tbl"><table class="lab-trans"><thead><tr><th>Baku ↓ · Percobaan →</th><th>T1</th><th>T2</th><th>T3</th></tr></thead>
         <tbody>${[1, 2, 3].map(a => `<tr><td><b>Tier ${a}</b></td>${sel(a, 1)}${sel(a, 2)}${sel(a, 3)}</tr>`).join('')}</tbody></table></div>
-      ${labCatatan(`Diagonal = santri yang tidak terpengaruh. Di atas diagonal = dinaikkan oleh aturan baru
-        (menambah beban pengasuh); di bawah = dilepas (risiko santri yang semestinya dibina menjadi tak terlihat).
-        Kebijakan yang baik bukan yang menurunkan angka, melainkan yang melepas santri yang tepat.`)}</div>`, labKlaim('k'))}
+      ${labCatatan(`Diagonal berisi santri yang tidak terpengaruh. Di atas diagonal adalah santri yang dinaikkan
+        aturan baru, sehingga beban pengasuh bertambah. Di bawahnya adalah santri yang dilepas, sehingga ada risiko
+        santri yang perlu dibina tidak terlihat. Kebijakan yang baik bukan yang menurunkan angka, tetapi yang
+        melepas santri yang tepat.`)}</div>`, labKlaim('k'))}
   </div>
   ${kartu(`Santri yang Berpindah Tier (${angka(pindah.length)})`, `<div class="tbl"><table>
     <thead><tr><th>Santri</th><th>Perpindahan</th><th>Sebab menurut aturan percobaan</th></tr></thead>
     <tbody>${daftarPindah}</tbody></table></div>
     ${pindah.length > 30 ? `<div class="card-body"><small class="lab-sub">Menampilkan 30 dari ${angka(pindah.length)}.</small></div>` : ''}`,
-    labKlaim('k'), 'Nama nyata — setiap baris adalah akibat nyata dari satu angka ambang')}`;
+    labKlaim('k'), 'Nama sebenarnya. Setiap baris adalah akibat langsung dari satu angka ambang')}`;
 }
 
 /** Jumlah tier 3 & 2 untuk satu set aturan (dipakai sensitivitas dan sapuan). */
@@ -19414,7 +19644,7 @@ function labKartuSkenario() {
   const M = LAB.mcAtur;
   const isian = (k, label, min, max, step, satuan) => `<div class="field"><label class="label">${label}</label>
     <div class="lab-isian"><input type="number" class="input" data-labm="${k}" min="${min}" max="${max}" step="${step}" value="${M[k]}"><span>${satuan}</span></div></div>`;
-  return kartu('Skenario Perilaku — simulasi Monte Carlo', `<div class="card-body">
+  return kartu('Skenario Perilaku: simulasi Monte Carlo', `<div class="card-body">
     <div class="lab-mc-isian">
       ${isian('ringan', 'Perubahan pelanggaran Ringan', -90, 300, 5, '%')}
       ${isian('sedang', 'Perubahan pelanggaran Sedang', -90, 300, 5, '%')}
@@ -19427,13 +19657,13 @@ function labKartuSkenario() {
     </div>
     <div class="lab-aksi"><button class="btn btn-primary btn-sm" data-lab="mc"><i class="fa-solid fa-dice"></i>Jalankan simulasi</button></div>
     <div id="labMcHasil">${LAB.mc ? labHasilMc() : `<p class="lab-sub">Belum dijalankan.</p>`}</div>
-    ${labCatatan(`<b>Asumsi yang dipakai, ditulis terbuka:</b> (1) laju tiap santri pada jendela berikutnya sama dengan
-      jendela ini, dikalikan perubahan per kategori — kegigihan perilaku; (2) jumlah pelanggaran mengikuti
-      sebaran Poisson; (3) santri tanpa riwayat tetap mendapat laju latar — ketiadaan catatan bukan jaminan
-      (masalah kalkun, Taleb); (4) kejutan: satu kelas acak lajunya dilipatgandakan — peristiwa kelompok
-      yang tidak tampak dalam data; (5) unsur selain beban (respons, izin, kehadiran, ikatan) dibekukan.
-      Keluarannya adalah <b>sebaran kemungkinan di bawah asumsi ini</b>, bukan ramalan. Ubah asumsinya dan
-      perhatikan persentil ke-95 — di sanalah perencanaan kapasitas diuji.`)}
+    ${labCatatan(`<b>Asumsi yang dipakai:</b> (1) laju tiap santri pada jendela berikutnya sama dengan
+      jendela ini, dikalikan perubahan per kategori. (2) Jumlah pelanggaran mengikuti sebaran Poisson.
+      (3) Santri tanpa riwayat tetap diberi laju dasar, karena tidak ada catatan belum tentu aman
+      (masalah kalkun, Taleb). (4) Kejutan: laju satu kelas acak dilipatgandakan, untuk peristiwa kelompok
+      yang tidak tampak dalam data. (5) Unsur selain beban (respons, izin, kehadiran, ikatan) dianggap tetap.
+      Hasilnya adalah <b>sebaran kemungkinan menurut asumsi ini</b>, bukan ramalan. Ubah asumsinya dan
+      perhatikan persentil ke-95. Di situlah kesiapan kapasitas diuji.`)}
   </div>`, labKlaim('s'), `Aturan percobaan · jendela ${LAB.hari} hari berikutnya`);
 }
 
@@ -19538,7 +19768,7 @@ function labTabMemo() {
       <thead><tr><th>Waktu</th><th>Hipotesis & aturan</th><th>Tier 3</th><th>Tier 2</th><th>Beban kapasitas</th><th>MC median / P95</th><th></th></tr></thead>
       <tbody>${baris}</tbody></table></div>
       <div class="card-body">${labCatatan(`Buku catatan tersimpan di perangkat ini saja. Setiap percobaan dapat
-        diulang persis sama (aturan, jendela, dan benih acak ikut disimpan) — syarat replikasi dalam laporan tesis.`)}</div>`,
+        diulang persis sama karena aturan, jendela, dan benih acaknya ikut disimpan. Ini syarat replikasi untuk laporan tesis.`)}</div>`,
       cat.length ? `<button class="btn btn-ghost btn-sm" data-lab="csv-catatan"><i class="fa-solid fa-file-csv"></i>Ekspor CSV</button>` : '',
       `${cat.length} percobaan`)}
     ${kartu('Memo untuk Musyawarah Pengasuh', `<div class="card-body">
@@ -19548,8 +19778,8 @@ function labTabMemo() {
         <button class="btn btn-ghost btn-sm" data-lab="unduh-memo"><i class="fa-solid fa-download"></i>Unduh .txt</button>
       </div>
       ${labCatatan(`Memo disusun otomatis dari angka di halaman ini dan <b>boleh disunting</b> sebelum dibawa ke
-        musyawarah. Memo ini bahan <i>syura</i>, bukan keputusan: ia menyebut apa yang tercatat, apa yang
-        berubah bila aturan diubah, dan batas-batas data — keputusan tetap pada musyawarah.`)}</div>`,
+        musyawarah. Memo ini bahan <i>syura</i>, bukan keputusan. Isinya adalah apa yang tercatat, apa yang
+        berubah bila aturan diubah, dan batas-batas datanya. Keputusan tetap di tangan musyawarah.`)}</div>`,
       '', 'Disusun dari Model, IPP, Ekor, dan Laboratorium')}`;
 }
 
@@ -19570,22 +19800,22 @@ function labSusunMemo() {
   const beda = labRingkasAturan(LAB.aturan);
   const pc = (x) => labPct(x, 0);
   const baris = [
-    'MEMO ANALISIS — BAHAN MUSYAWARAH PENGASUH',
+    'MEMO ANALISIS: BAHAN MUSYAWARAH PENGASUH',
     `Dayah Ruhul Qurani · disusun ${new Date().toLocaleDateString('id-ID', { dateStyle: 'long' })}`,
     `Jendela pengamatan: ${LAB.hari} hari (${tgl(kunciTgl(B.mulai))} – ${tgl(kunciTgl(B.akhir))}) · ${angka(n)} santri aktif`,
     '',
     'A. APA YANG TERCATAT (deskriptif)',
     `1. Indeks Peringatan Pembinaan menurut aturan baku: tier 3 = ${B.tier3} santri (${pc(B.tier3 / n)}), tier 2 = ${B.tier2} (${pc(B.tier2 / n)}), tier 1 = ${B.tier1} (${pc(B.tier1 / n)}).`,
     `2. Kapasitas pembinaan intensif diperkirakan ${kap} santri (${LAB.kap.pengasuh} pengasuh × ${LAB.kap.perPengasuh}); beban tier 3 = ${pc(B.tier3 / kap)} dari kapasitas.`,
-    `3. Sebaran pelanggaran ${S.gini >= 0.6 || S.atas10 >= 0.4 ? 'terkonsentrasi' : 'relatif merata'}: koefisien Gini ${labDes(S.gini)}; 10% santri teratas menanggung ${pc(S.atas10)} catatan; 10 santri teratas ${pc(S.top[1].kasus)}.`,
+    `3. Sebaran pelanggaran ${S.gini >= 0.6 || S.atas10 >= 0.4 ? 'terkonsentrasi' : 'relatif merata'}: koefisien Gini ${labDes(S.gini)}, 10% santri teratas menanggung ${pc(S.atas10)} catatan, dan 10 santri teratas ${pc(S.top[1].kasus)}.`,
     `4. ${unikMacet} santri berada di tier 3 semata-mata karena aturan "pembinaan macet" (bukan karena beban atau kehadiran).`,
     '',
     'B. BATAS DATA (tabayyun sebelum menetapkan)',
-    `1. Catatan pelanggaran jatuh pada ${hariIsi} dari ${LAB.hari} hari kalender — tanggal yang tersimpan adalah tanggal input, bukan tanggal kejadian.`,
-    `2. ${proses} dari ${bW.length} pembinaan dalam jendela masih berstatus "Dalam Proses"; bila sebagian sebenarnya sudah dilaksanakan, aturan macet menaikkan santri secara keliru.`,
+    `1. Catatan pelanggaran jatuh pada ${hariIsi} dari ${LAB.hari} hari kalender. Tanggal yang tersimpan adalah tanggal input, bukan tanggal kejadian.`,
+    `2. ${proses} dari ${bW.length} pembinaan dalam jendela masih berstatus "Dalam Proses". Bila sebagian sebenarnya sudah dilaksanakan, aturan macet menaikkan santri secara keliru.`,
     `3. Kehadiran kelas baru teramati pada ${B.teramati} santri (${pc(B.teramati / n)}).`,
     '',
-    'C. BILA ATURAN DIUBAH (kontrafaktual — pasti)',
+    'C. BILA ATURAN DIUBAH (kontrafaktual, pasti)',
     beda === 'aturan baku'
       ? '1. Belum ada aturan tandingan yang diuji.'
       : `1. Aturan yang diuji: ${beda}.`,
@@ -19593,9 +19823,9 @@ function labSusunMemo() {
       `2. Hasil: tier 3 = ${E.tier3} (baku ${B.tier3}), tier 2 = ${E.tier2} (baku ${B.tier2}); beban tier 3 = ${pc(E.tier3 / kap)} dari kapasitas.`,
     LAB.hipotesis ? `3. Hipotesis: ${LAB.hipotesis}` : '',
     '',
-    'D. SKENARIO (asumsi — bukan ramalan)',
+    'D. SKENARIO (asumsi, bukan ramalan)',
     LAB.mc
-      ? `1. Dengan perubahan Ringan ${LAB.mc.M.ringan}%, Sedang ${LAB.mc.M.sedang}%, Berat ${LAB.mc.M.berat}%, laju latar ${LAB.mc.M.latar}%, dan peluang kejutan ${LAB.mc.M.pShock}% (×${LAB.mc.M.kShock}): median tier 3 = ${Math.round(Stat.kuantil(LAB.mc.t3s, 0.5))}, P95 = ${Math.round(Stat.kuantil(LAB.mc.t3s, 0.95))}; peluang melampaui kapasitas ${pc(LAB.mc.lebih / LAB.mc.it)} (${LAB.mc.it} iterasi, benih ${LAB.mc.M.seed}).`
+      ? `1. Dengan perubahan Ringan ${LAB.mc.M.ringan}%, Sedang ${LAB.mc.M.sedang}%, Berat ${LAB.mc.M.berat}%, laju latar ${LAB.mc.M.latar}%, dan peluang kejutan ${LAB.mc.M.pShock}% (×${LAB.mc.M.kShock}): median tier 3 = ${Math.round(Stat.kuantil(LAB.mc.t3s, 0.5))}, P95 = ${Math.round(Stat.kuantil(LAB.mc.t3s, 0.95))}, peluang melampaui kapasitas ${pc(LAB.mc.lebih / LAB.mc.it)} (${LAB.mc.it} iterasi, benih ${LAB.mc.M.seed}).`
       : '1. Simulasi belum dijalankan.',
     '',
     'E. PERTANYAAN UNTUK MUSYAWARAH',
@@ -19660,7 +19890,7 @@ function labPerbaruiEksp(gambarUlangInstrumen) {
   if (LAB.tab !== 'lab') return;
   if (gambarUlangInstrumen) { labGambar(); return; }
   const h = $('labHasil'); if (h) h.innerHTML = labHasilEksp();
-  const m = $('labMcHasil'); if (m) m.innerHTML = `<p class="lab-sub">Aturan berubah — jalankan ulang simulasi.</p>`;
+  const m = $('labMcHasil'); if (m) m.innerHTML = `<p class="lab-sub">Aturan berubah. Jalankan ulang simulasi.</p>`;
   labGrafikLab();
   tandaiTabelBisaGeser();
 }
@@ -19779,9 +20009,9 @@ async function viewTutupBuku() {
         <div class="eyebrow"><span class="ar">إغلاق الدفاتر</span><span class="rule"></span>
           <span class="lat">Tutup Buku Bulanan</span></div>
         <h2>Bulan yang selesai, dibukukan.</h2>
-        <p>Rekap per santri disusun otomatis setiap tanggal 1 pukul 07.00 WIB. Setelah rekap
-           diperiksa, salinan lengkap bulan itu diarsipkan ke Storage. Sesudah itu jejak audit
-           bulan tersebut boleh ditandai hapus, dan dihapus permanen paling cepat 30 hari kemudian.</p>
+        <p>Rekap per santri disusun otomatis setiap tanggal 1 pukul 07.00 WIB. Setelah diperiksa,
+           salinan lengkap bulan itu disimpan ke arsip. Sesudah itu jejak audit bulan tersebut
+           boleh ditandai hapus, lalu dihapus permanen paling cepat 30 hari kemudian.</p>
       </div>
       <div class="adm-actions">
         <input type="month" id="tbBulan" class="input" value="${esc(stTb.periode)}" title="Bulan">
@@ -20061,8 +20291,8 @@ async function tbTutupBuku(bulan, opsi = {}) {
         ${opsi.lewatiRekap ? '' : '<li>Menyusun rekap per santri (pelanggaran, pembinaan, izin, prestasi, tahfiz).</li>'}
         <li>Mengarsipkan salinan lengkap bulan itu ke Storage <code>arsip/${esc(tbFolder(bulan))}</code>.</li>
       </ol>
-      <p class="hint" style="margin:0">Data di database <b>tidak</b> dihapus. Jejak audit baru bisa ditandai hapus setelah arsip tersimpan.</p>
-      ${belumUsai ? '<p class="hint" style="margin:10px 0 0;color:var(--maroon)"><b>Bulan ini belum berakhir.</b> Catatan yang masuk sesudah ini tidak ikut terarsip; tutup buku ulang di awal bulan depan.</p>' : ''}
+      <p class="hint" style="margin:0">Data santri <b>tidak</b> dihapus. Jejak audit baru bisa ditandai hapus setelah arsip tersimpan.</p>
+      ${belumUsai ? '<p class="hint" style="margin:10px 0 0;color:var(--maroon)"><b>Bulan ini belum berakhir.</b> Catatan yang masuk sesudah ini tidak ikut terarsip. Tutup buku lagi di awal bulan depan.</p>' : ''}
     </div>`,
     showCancelButton: true, confirmButtonText: 'Ya, tutup buku', cancelButtonText: 'Batal',
     confirmButtonColor: '#14618B'
@@ -20118,7 +20348,7 @@ async function tbTutupBuku(bulan, opsi = {}) {
 async function tbSusunUlang(bulan) {
   if (!isAdmin()) return;
   const r = await Swal.fire({ icon: 'question', title: `Susun ulang rekap ${tbLabelBulan(bulan)}?`,
-    text: 'Rekap bulan ini dihitung ulang dari catatan terkini. Arsip Storage tidak berubah; arsipkan ulang bila perlu.',
+    text: 'Rekap bulan ini dihitung ulang dari catatan terbaru. Arsip lama tidak berubah, jadi arsipkan ulang bila perlu.',
     showCancelButton: true, confirmButtonText: 'Susun ulang', cancelButtonText: 'Batal', confirmButtonColor: '#14618B' });
   if (!r.isConfirmed) return;
   try {
@@ -20134,9 +20364,9 @@ async function tbSusunUlang(bulan) {
 async function tbTandaiAudit(bulan) {
   if (!isAdmin()) return;
   const r = await Swal.fire({ icon: 'warning', title: `Tandai hapus jejak audit ${tbLabelBulan(bulan)}?`,
-    html: `<p style="text-align:left;margin:0">Jejak audit bulan ini disembunyikan dari halaman Jejak Audit (soft delete).
-      Masih bisa <b>dipulihkan</b> kapan saja sebelum dihapus permanen. Hapus permanen paling cepat
-      30 hari setelah penandaan, dan salinannya sudah ada di arsip Storage.</p>`,
+    html: `<p style="text-align:left;margin:0">Jejak audit bulan ini disembunyikan dari halaman Jejak Audit.
+      Masih bisa <b>dipulihkan</b> kapan saja sebelum dihapus permanen. Hapus permanen baru bisa
+      30 hari setelah ditandai, dan salinannya sudah tersimpan di arsip.</p>`,
     showCancelButton: true, confirmButtonText: 'Tandai hapus', cancelButtonText: 'Batal', confirmButtonColor: '#9F1239' });
   if (!r.isConfirmed) return;
   try {
@@ -20151,7 +20381,7 @@ async function tbTandaiAudit(bulan) {
 async function tbPulihkanAudit(bulan) {
   if (!isAdmin()) return;
   const r = await Swal.fire({ icon: 'question', title: `Pulihkan jejak audit ${tbLabelBulan(bulan)}?`,
-    text: 'Penandaan hapus dibatalkan; jejak kembali tampil di halaman Jejak Audit.',
+    text: 'Tanda hapus dibatalkan. Jejak kembali tampil di halaman Jejak Audit.',
     showCancelButton: true, confirmButtonText: 'Pulihkan', cancelButtonText: 'Batal', confirmButtonColor: '#14618B' });
   if (!r.isConfirmed) return;
   try {
@@ -20178,7 +20408,7 @@ async function tbHapusPermanen() {
     const { data: n } = await q(db.rpc('hapus_permanen_audit'), 'hapus_permanen_audit');
     await Swal.fire({ icon: n ? 'success' : 'info',
       title: n ? `${angka(n)} jejak dihapus permanen` : 'Belum ada yang memenuhi syarat',
-      text: n ? 'Ruang yang kosong dipakai ulang oleh database untuk jejak baru.'
+      text: n ? 'Ruang yang kosong akan dipakai ulang untuk jejak baru.'
               : 'Jejak baru boleh dihapus permanen 30 hari setelah ditandai.',
       confirmButtonColor: '#14618B' });
     stAud.rows = null;
@@ -20347,7 +20577,7 @@ function monsterBilahProfil(t, n) {
     bingkai.appendChild(grup);
   }
   if (!t) { grup.hidden = true; return; }
-  const teks = `${angka(n)} pembinaan belum selesai — selesaikan agar monster pergi`;
+  const teks = `${angka(n)} pembinaan belum selesai. Selesaikan agar monster pergi`;
   grup.title = teks;
   grup.setAttribute('aria-label', teks);
   grup.dataset.tingkat = String(t);
@@ -20883,7 +21113,7 @@ function pasangPenghuniGrafik(canvasId) {
   b.style.setProperty('--m-warna', warna);
   b.style.setProperty('--m-jilbab', ['#FFE3EE', '#F3ECFA', '#E1F5F0', '#FFF1D6'][i % 4]);
   b.style.setProperty('--tunda', `${-(i * 3.7) % 22}s`);
-  b.setAttribute('aria-label', 'Monster penghuni grafik sedang bingung — klik untuk menyapanya');
+  b.setAttribute('aria-label', 'Monster penghuni grafik sedang bingung. Klik untuk menyapanya');
   b.title = 'Hmm? Sapa aku dong…';
   b.innerHTML = `<span class="penghuni-tanya" aria-hidden="true">?</span>
     <span class="penghuni-hati" aria-hidden="true">♥</span>
@@ -20898,7 +21128,7 @@ function pasangPenghuniGrafik(canvasId) {
     b._kembali = setTimeout(() => {
       b.classList.remove('bahagia'); b.classList.add('bingung');
       b.title = 'Hmm? Sapa aku dong…';
-      b.setAttribute('aria-label', 'Monster penghuni grafik sedang bingung — klik untuk menyapanya');
+      b.setAttribute('aria-label', 'Monster penghuni grafik sedang bingung. Klik untuk menyapanya');
     }, 5200);
   });
   wadah.appendChild(b);
@@ -21051,7 +21281,7 @@ function perbaruiTombolEfek() {
   const b = document.getElementById('btnEfek'); if (!b) return;
   const p = pilihanEfek();
   const teks = p === 'otomatis' ? `Otomatis (${modeHemat() ? 'hemat' : 'penuh'})` : LABEL_EFEK[p];
-  b.title = `Efek tampilan: ${teks} — klik untuk mengganti`;
+  b.title = `Efek tampilan: ${teks}. Klik untuk mengganti`;
   b.setAttribute('aria-label', b.title);
   b.dataset.efek = p;
   const s = b.querySelector('span'); if (s) s.textContent = 'Efek';
@@ -21658,11 +21888,11 @@ function akunBaru() {
 
 const DAFTAR_TUR = [
   { id: 'sapa', sel: ['#viewRoot .sapa'], judul: 'Amanah hari ini',
-    teks: 'Yang menunggu tindakan Anda — izin, pembinaan, kabar wali — selalu muncul di sini. Ketuk satu butir untuk langsung ke sana.' },
+    teks: 'Izin, pembinaan, dan kabar wali yang menunggu tindakan Anda selalu muncul di sini. Ketuk salah satunya untuk langsung ke sana.' },
   { id: 'unit', sel: ['#viewRoot .unit-grid'], judul: 'Mulai mencatat',
     teks: 'Pilih unit yang sedang Anda kerjakan, lalu catat pelanggaran atau apresiasi dari halaman unit itu.' },
   { id: 'izin', peran: ['Guru Piket', 'Klinik'], sel: ['#tabBar [data-view="perizinan"]', '#sidebar [data-view="perizinan"]'],
-    judul: 'Izin keluar-masuk', teks: 'Semua izin santri hari ini — mengajukan, memutuskan, dan menandai kembali.' },
+    judul: 'Izin keluar-masuk', teks: 'Semua izin santri hari ini: mengajukan, memutuskan, dan menandai sudah kembali.' },
   { id: 'pimpinan', peran: ['Pimpinan'], sel: ['#viewRoot .stats', '#viewRoot .card'], judul: 'Gambaran dayah',
     teks: 'Angka utama diperbarui otomatis setiap ada catatan baru dari guru dan musyrif.' },
   { id: 'santri', sel: ['#tabBar [data-view="siswa"]', '#sidebar [data-view="siswa"]'], judul: 'Profil santri',
@@ -21739,8 +21969,8 @@ function bingkaiSambut() {
     ? `${salamWaktu(new Date().getHours())}, ${namaDepan()}.`
     : `Ada yang baru, ${namaDepan()}.`;
   balon.querySelector('p').textContent = baru
-    ? 'Setiap catatan adalah amanah. chemint membantu Anda mencatat, membina, dan mengabari wali — tanpa kertas, dalam hitungan detik. Mari lihat sekilas, 30 detik saja.'
-    : 'Kini setiap kali Anda menyimpan, chemint memberi tanda terima yang lebih jelas — untuk siapa catatan itu dan apa langkah berikutnya. Mari lihat sekilas tempat-tempat pentingnya.';
+    ? 'Setiap catatan adalah amanah. chemint membantu Anda mencatat, membina, dan mengabari wali tanpa kertas. Mari lihat sebentar, cukup 30 detik.'
+    : 'Sekarang setiap kali Anda menyimpan, chemint memberi tanda terima yang lebih jelas: untuk siapa catatan itu dan apa langkah berikutnya. Mari lihat sebentar bagian-bagian pentingnya.';
   balon.querySelector('.tur-titik').textContent = '';
   balon.querySelector('[data-tur="lewati"]').textContent = baru ? 'Lewati' : 'Nanti saja';
   balon.querySelector('[data-tur="lanjut"]').textContent = TUR.langkah.length ? (baru ? 'Mulai tur' : 'Lihat sekilas') : 'Mulai bekerja';
@@ -21862,14 +22092,14 @@ function tandaiLangkah(k) {
   if (s.tur && s.santri && s.catat && !s.rayakan) {
     s.rayakan = Date.now();
     tulisLS(kunciLangkah(), JSON.stringify(s));
-    tandaTerima({ nada: 'syukuri', judul: 'Langkah pertama lengkap', sub: 'Jazakallahu khairan — Anda siap bertugas.' });
+    tandaTerima({ nada: 'syukuri', judul: 'Langkah pertama lengkap', sub: 'Jazakallahu khairan. Anda siap bertugas.' });
   }
 }
 
 const BUTIR_LANGKAH = [
   { k: 'tur', teks: 'Kenali ringkasan dan amanah harian', nav: '' },
   { k: 'santri', teks: 'Buka profil seorang santri', nav: 'siswa' },
-  { k: 'catat', teks: 'Simpan satu catatan — pelanggaran, apresiasi, izin, atau setoran', nav: '' }
+  { k: 'catat', teks: 'Simpan satu catatan: pelanggaran, apresiasi, izin, atau setoran', nav: '' }
 ];
 function kartuLangkahPertama() {
   const s = bacaLangkah();
@@ -21994,7 +22224,7 @@ const CERITA = {
   /** data: jumlah per pekan; indeks terakhir = pekan berjalan (belum lengkap). */
   pekan(data) {
     const n = data.length, total = jumlahkan(data);
-    if (n < 3 || total < 5) return { teks: `Tiga bulan terakhir tenang — hanya <b>${total}</b> catatan.`, nada: 'baik', sorot: null };
+    if (n < 3 || total < 5) return { teks: `Tiga bulan terakhir tenang, hanya <b>${total}</b> catatan.`, nada: 'baik', sorot: null };
     const lalu = Number(data[n - 2]) || 0, sebelum = Number(data[n - 3]) || 0, jalan = Number(data[n - 1]) || 0;
     const a = arahUbah(lalu, sebelum);
     return {
@@ -22024,7 +22254,7 @@ const CERITA = {
     const kini = jumlahkan(data.slice(-7)), lalu = jumlahkan(data.slice(-14, -7));
     if (!kini && !lalu) return { teks: 'Tidak ada santri yang mulai izin dalam 14 hari terakhir.', nada: 'netral', sorot: null };
     const a = arahUbah(kini, lalu), puncak = Math.max(...data.map(Number)), i = data.map(Number).lastIndexOf(puncak);   // puncak terbaru bila seri
-    return { teks: `Tujuh hari terakhir: <b>${kini}</b> santri mulai izin — ${banding(a, 'tujuh hari sebelumnya')}. Puncak ${esc(labels[i])} (${data[i]}).`,
+    return { teks: `Tujuh hari terakhir: <b>${kini}</b> santri mulai izin, ${banding(a, 'tujuh hari sebelumnya')}. Puncak ${esc(labels[i])} (${data[i]}).`,
       nada: 'netral', sorot: { indeks: i, label: String(data[i]) } };
   },
   /** datasets: [{label, data}] per angkatan; bandingkan 4 pekan lengkap terakhir dengan 4 sebelumnya. */
@@ -22361,7 +22591,7 @@ const KOSONG_CERITA = [
   [/^(Belum ada kejadian|Tidak ada pelanggaran Berat|Belum ada catatan pengasuhan|Tidak ada santri pada tier|Tidak ada santri yang berpindah tier)/i, 'Semoga ini tanda baik.'],
   [/^(Tidak ada data perizinan|Belum ada instruksi pembinaan)/i, 'Tidak ada yang menunggu tindakan.'],
   [/^Belum ada setoran tahfiz/i, 'Setoran pertama akan tampil di sini.'],
-  [/^Belum ada catatan apresiasi/i, 'Kebaikan juga layak dicatat — apresiasi pertama akan tampil di sini.'],
+  [/^Belum ada catatan apresiasi/i, 'Kebaikan juga layak dicatat. Apresiasi pertama akan tampil di sini.'],
   [/(tidak ditemukan|yang cocok|pada filter ini)/i, 'Coba kata kunci atau saringan lain.']
 ];
 
@@ -22593,7 +22823,7 @@ function siapkanMonsterTarik(st) {
   b.classList.remove('bingung', 'bahagia', 'jalan');
   b.classList.add('meminta');
   b.title = 'Tarik datanya? Klik aku!';
-  b.setAttribute('aria-label', 'Monster siap menarik data grafik — tekan untuk menarik');
+  b.setAttribute('aria-label', 'Monster siap menarik data grafik. Tekan untuk menarik');
   if (!b.querySelector('.penghuni-pinta')) {
     const p = document.createElement('span');
     p.className = 'penghuni-pinta'; p.setAttribute('aria-hidden', 'true');
@@ -22743,8 +22973,8 @@ function selesaiTarik(st, otomatis) {
   if (st.tali) { st.tali.remove(); st.tali = null; }
   const mon = b.querySelector('.mon'); if (mon) mon.style.transform = '';
   b.classList.add('bahagia');
-  b.title = otomatis ? 'Sudah kutarik — klik aku untuk menarik lagi' : 'Yeay! Klik lagi untuk menarik ulang';
-  b.setAttribute('aria-label', 'Monster selesai menarik data grafik — tekan untuk menarik ulang');
+  b.title = otomatis ? 'Sudah kutarik! Klik aku untuk menarik lagi' : 'Yeay! Klik lagi untuk menarik ulang';
+  b.setAttribute('aria-label', 'Monster selesai menarik data grafik. Tekan untuk menarik ulang');
   if (!otomatis) getar([8, 40, 8]);
   st.tPulang = setTimeout(() => pulangkanMonster(st), 1700);
 }
@@ -22759,7 +22989,7 @@ function pulangkanMonster(st) {
     const mon = b.querySelector('.mon'); if (mon) mon.style.transform = '';
     b.classList.add('bingung', 'datang');
     b.title = 'Hmm? Klik aku untuk menarik datanya lagi';
-    b.setAttribute('aria-label', 'Monster penghuni grafik — tekan untuk menarik ulang data');
+    b.setAttribute('aria-label', 'Monster penghuni grafik. Tekan untuk menarik ulang data');
     setTimeout(() => b.classList.remove('datang'), 320);
     st.jalan = false;
   }, 220);
@@ -23969,7 +24199,7 @@ function pesanIngatkanMusyrif(m, a, o) {
     '',
     `Laporan Perkembangan Santri akan dicetak ${o.tanggalCetak}. Mohon kesediaan ${sapa} untuk memeriksa catatan, memverifikasi, dan menuntaskan pembinaan sesuai prosedur, sehingga catatan yang akan dikirimkan kepada wali santri benar-benar dapat dipertanggungjawabkan.`,
     '',
-    'Ini adalah amanah — laporan tersebut menjadi bukti nyata progres pembinaan karakter santri kepada wali santri.',
+    'Ini amanah. Laporan tersebut menjadi bukti nyata perkembangan pembinaan santri bagi wali santri.',
     '',
     `*RINGKASAN KELAS BINAAN ${kelas}*`,
     `_Periode: ${o.periode} · ${angka(a.santri)} santri aktif_`,
@@ -24119,7 +24349,7 @@ function htmlBarisIngatkan(d, i) {
     <label class="ing-kepala">
       <input type="checkbox" class="ing-cek" data-i="${i}" ${d.bisaKirim ? 'checked' : 'disabled'}>
       <span class="ing-nama"><b>${esc(m.nama)}</b><small>Kelas ${esc((m.kelas_binaan || []).join(', '))}${
-        d.bisaKirim ? '' : ' · <span class="ing-merah">nomor WA belum terdaftar — kirim manual</span>'}</small></span>
+        d.bisaKirim ? '' : ' · <span class="ing-merah">nomor WA belum terdaftar, kirim manual</span>'}</small></span>
       <span class="ing-angka" title="Pelanggaran · Pembinaan belum selesai · Izin berjalan">
         <span>${angka(a.pelanggaran)}<i>plg</i></span><span class="${a.binaProses ? 'ing-buka' : ''}">${angka(a.binaProses)}<i>bina</i></span><span>${angka(a.izinPending)}<i>izin</i></span></span>
     </label>
@@ -24152,8 +24382,8 @@ async function bukaIngatkanMusyrif(btn) {
     title: 'Ingatkan musyrif kelas binaan?',
     customClass: { popup: 'ing-popup' },
     html: `<div class="ing">
-      <p class="ing-ket">Setiap musyrif menerima pesan pribadi berisi angka kelas binaannya sendiri —
-        dihitung dengan cara yang sama seperti dasbor mereka (periode <b>${esc(labelPeriode())}</b>).
+      <p class="ing-ket">Setiap musyrif menerima pesan pribadi berisi angka kelas binaannya sendiri,
+        dihitung sama seperti dasbor mereka (periode <b>${esc(labelPeriode())}</b>).
         Pesan belum terkirim sampai Anda menekan tombol kirim.</p>
       <div class="ing-isian">
         <label>Tanggal cetak laporan<input id="ingCetak" class="input" value="${esc(ING.tanggalCetak)}"></label>
@@ -24162,7 +24392,7 @@ async function bukaIngatkanMusyrif(btn) {
       <div class="ing-alat"><label><input type="checkbox" id="ingSemua" checked> Pilih semua</label>
         <span id="ingHitung"></span></div>
       ${tanpaNomor ? `<p class="ing-peringatan"><i class="fa-solid fa-triangle-exclamation"></i>
-        ${tanpaNomor} musyrif belum punya nomor WA di sistem; setelah pengiriman tersedia tombol kirim manual untuknya.</p>` : ''}
+        ${tanpaNomor} musyrif belum punya nomor WA di sistem. Setelah pengiriman, tersedia tombol kirim manual untuk mereka.</p>` : ''}
       <ul class="ing-daftar">${daftar.map(htmlBarisIngatkan).join('')}</ul>
     </div>`,
     showCancelButton: true,
@@ -24318,7 +24548,7 @@ async function tampilkanHasilIngatkan(baris, hasil) {
         t = setInterval(periksa, 3000);
         tBatas = setTimeout(() => {
           berhenti();
-          baris.filter(r => r.status === 'antri').forEach(r => { r.alasan = 'belum ada kabar dari server — periksa lagi nanti di log WA'; });
+          baris.filter(r => r.status === 'antri').forEach(r => { r.alasan = 'belum ada kabar pengiriman, periksa lagi nanti di log WA'; });
           perbarui();
         }, 120000);
         periksa();
@@ -25388,7 +25618,7 @@ document.addEventListener('change', (e) => {
  *  PANGGUNG.aktif = false (tanpa maskot), MASTER_BERSAMA.aktif = false
  *  (katalog putri kembali terpisah seperti v2.10).
  * ===================================================================== */
-APP.versi = 'rq-v2.42';
+APP.versi = 'rq-v2.44';
 
 /* ---------- 1 · Master pelanggaran bersama untuk unit putri ---------- */
 const MASTER_BERSAMA = { aktif: true };
