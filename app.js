@@ -7873,6 +7873,66 @@ function kopLaporan(logoKorps) {
 }
 
 
+/**
+ * v2.42 — Bagian "1. Presensi Madrasah" untuk peran yang membuka rincian.
+ * Kalimat ringkas di atas, tabel per bulan, baris total bila lebih dari
+ * satu bulan direkap, dan keterangan dasar hitung di bawahnya.
+ */
+function presensiLaporanHTML(data, { th, td, TABEL, kelas }) {
+  const SEL = 'border:1px solid #cbd5e1;padding:5px;';
+  const KET = 'margin:4px 0 0;font-size:9px;line-height:1.5;color:#64748b;';
+  const bulan = data.presensi || [];
+  const tot = data.presensiTotal;
+  const jpHr = (jp) => `${angka(Math.round(jp))} JP (${prHari(jp)} hr)`;
+  const sel = (jp) => jp ? `${jp} JP (${prHari(jp)} hr)` : '-';
+  const pct = (v) => v == null ? '-' : `${v}%`;   // desimal titik, sama dengan bagian lain laporan
+
+  if (data.presensiGagal) {
+    return `<table style="${TABEL}font-size:11px;"><tbody><tr><td style="${SEL}color:#64748b;">
+      Rekap presensi tidak dapat dimuat saat laporan dibuat. Silakan cetak ulang.</td></tr></tbody></table>`;
+  }
+
+  let ringkas;
+  if (tot) {
+    const penuh = !tot.tidakHadir;
+    ringkas = `Kehadiran <b>${pct(tot.hadirPct)}</b> dari ${angka(Math.round(tot.jp))} JP efektif
+      (${prHari(tot.jp)} hr · ${tot.pekan} pekan direkap)${penuh ? ' — <b>hadir penuh</b>' : ''} ·
+      alpa <b>${tot.A} JP</b> · sakit &amp; izin pulang ${tot.S + tot.IP} JP${tot.IK ? ` · izin kegiatan ${tot.IK} JP` : ''}.`;
+  } else {
+    ringkas = `Belum ada pekan presensi yang direkap untuk kelas ${esc(kelas || '-')}.`;
+  }
+  const kotakRingkas = `<table style="${TABEL}font-size:11px;"><tbody><tr>
+      <td style="${SEL}background:#f8fafc;">${ringkas}</td></tr></tbody></table>`;
+  if (!bulan.length) return kotakRingkas;
+
+  const tdHtml = (h, c, span) => `<td${span ? ` colspan="${span}"` : ''} style="${SEL}${c || ''}">${h}</td>`;
+  const catatanPekan = (b) => {
+    const bagian = [];
+    if (b.pekan + b.libur < b.pekanTotal) bagian.push(`${b.pekan} dari ${b.pekanTotal} pekan direkap`);
+    if (b.libur) bagian.push(`${b.libur} pekan libur`);
+    return bagian.length ? `<br><span style="font-size:9px;color:#64748b;">${bagian.join(' · ')}</span>` : '';
+  };
+  const TENGAH = 'text-align:center;';
+  const barisBulan = bulan.map(b => {
+    if (b.status !== 'rekap') {
+      const teks = b.status === 'libur' ? 'Libur madrasah' : 'Belum direkap wali kelas';
+      return `<tr>${tdHtml(esc(b.bulan))}${tdHtml(teks, 'text-align:center;color:#94a3b8;font-style:italic;', 6)}</tr>`;
+    }
+    return `<tr>${tdHtml(esc(b.bulan) + catatanPekan(b))}${td(jpHr(b.jp), TENGAH)}${td(sel(b.S), TENGAH)}${td(sel(b.IK), TENGAH)}${td(sel(b.IP), TENGAH)}${td(sel(b.A), TENGAH)}${td(pct(b.hadirPct), TENGAH + 'font-weight:bold;')}</tr>`;
+  }).join('');
+  const barisTotal = tot && tot.bulanRekap > 1
+    ? `<tr>${tdHtml('<b>Total</b>', 'background:#f8fafc;')}${td(jpHr(tot.jp), TENGAH + 'background:#f8fafc;font-weight:bold;')}${td(sel(tot.S), TENGAH + 'background:#f8fafc;')}${td(sel(tot.IK), TENGAH + 'background:#f8fafc;')}${td(sel(tot.IP), TENGAH + 'background:#f8fafc;')}${td(sel(tot.A), TENGAH + 'background:#f8fafc;')}${td(pct(tot.hadirPct), TENGAH + 'background:#f8fafc;font-weight:bold;')}</tr>`
+    : '';
+
+  return `${kotakRingkas}
+    <table style="${TABEL}font-size:11px;margin-top:6px;">
+      <thead><tr>${['Bulan','JP Efektif','Sakit','Izin Kegiatan','Izin Pulang','Alpa','Kehadiran'].map(th).join('')}</tr></thead>
+      <tbody>${barisBulan}${barisTotal}</tbody>
+    </table>
+    <p style="${KET}">Dihitung dari pekan yang sudah direkap wali kelas (6 hari × ${JP_PER_HARI} JP per pekan; pekan libur tidak dihitung).
+      Izin kegiatan adalah kegiatan resmi dayah sehingga tidak mengurangi kehadiran.</p>`;
+}
+
 function bangunLaporanHTML(data) {
   const s = data.siswa || {};
   const dicetak = new Date().toLocaleDateString('id-ID', { day:'2-digit', month:'long', year:'numeric' });
@@ -7971,13 +8031,7 @@ function bangunLaporanHTML(data) {
       const tdMentah = (h) => `<td style="border:1px solid #cbd5e1;padding:5px;">${h}</td>`;
       return `<table style="${TABEL}font-size:11px;"><tbody><tr>${tdMentah(isi)}</tr>
         <tr>${tdMentah('<span style="color:#64748b;font-size:10px;">Ringkasan analisis. Rincian presensi per jenis dan per minggu hanya dibuka bagi Guru, Wali Kelas, dan Guru BK.</span>')}</tr></tbody></table>`;
-    })() : `<table style="${TABEL}font-size:11px;">
-      <thead><tr>${['Bulan','Sakit','Izin Kegiatan','Izin Pulang','Alpa','Total'].map(th).join('')}</tr></thead>
-      <tbody>${baris(data.presensi, p => {
-        const sel = (jp) => jp ? `${jp} JP (${prHari(jp)} hr)` : '-';
-        return `<tr>${td(p.bulan)}${td(sel(p.S),'text-align:center')}${td(sel(p.IK),'text-align:center')}${td(sel(p.IP),'text-align:center')}${td(sel(p.A),'text-align:center')}${td(sel(p.total),'text-align:center;font-weight:bold')}</tr>`;
-      }, 'Belum ada data presensi.', 6)}</tbody>
-    </table>`}
+    })() : presensiLaporanHTML(data, { th, td, TABEL, kelas: s.kelas })}
 
     <h3 style="${H3}">
       2. Akumulasi Perkembangan${aktif ? ' — ' + esc(labelPer) : ''}</h3>
@@ -8079,19 +8133,95 @@ function bangunLaporanHTML(data) {
 
 // ---------- 20g. Pengambilan data & aksi cetak ------------------------
 
-/** Agregasi data_presensi (JP per minggu per jenis) → baris bulanan untuk lembar cetak. */
-function agregatPresensiCetak(rows) {
-  const peta = new Map();
-  (rows || []).forEach(r => {
-    const b = Number(r.bulan) || 0, th = Number(r.tahun) || 0;
-    if (!b || !th || !['S','IK','IP','A'].includes(r.jenis)) return;
-    const kunci = `${th}-${String(b).padStart(2, '0')}`;
-    if (!peta.has(kunci)) peta.set(kunci, { bulan: `${BULAN_ID[b - 1]} ${th}`, S:0, IK:0, IP:0, A:0, total:0 });
-    const o = peta.get(kunci);
-    o[r.jenis] += Number(r.jp) || 0;
-    o.total += Number(r.jp) || 0;
+/**
+ * v2.42 — Rekap presensi lembar laporan, per bulan.
+ *
+ * Sebelumnya lembar cetak hanya membaca baris KETIDAKHADIRAN (S/IK/IP/A).
+ * Santri yang hadir penuh tidak punya satu baris pun, sehingga laporannya
+ * berbunyi "Belum ada data presensi" — padahal kelasnya sudah direkap.
+ *
+ * Kini dasar hitungnya adalah pekan yang SUDAH DIREKAP wali kelas
+ * (presensi_minggu, status 'selesai'), sama persis dengan dasbor
+ * (hitungKehadiran):
+ *   · JP efektif  = Σ jpSegmenMinggu() pekan selesai kelas santri;
+ *                   pekan 'libur' dan pekan belum direkap tidak dihitung;
+ *   · ketidakhadiran hanya dari pekan selesai pada kelas pencatatan;
+ *   · kehadiran   = 1 − (S + IP + A) ÷ JP efektif. Izin kegiatan (IK) adalah
+ *                   kegiatan resmi dayah, jadi tidak mengurangi kehadiran —
+ *                   sama dengan RPC kehadiran_analisis().
+ * Bulan dari data pertama sampai bulan berjalan selalu tampil; bulan tanpa
+ * pekan selesai diberi status 'belum' (belum direkap) atau 'libur'.
+ */
+function rekapPresensiCetak(rows, pekan, kelasKini, kini) {
+  const sekarang = kini || new Date();
+  const kBln = (t, b) => `${t}-${String(b).padStart(2, '0')}`;
+  const kPk  = (t, b, m) => `${t}-${b}-${m}`;
+
+  // Kelas yang pernah ditempati santri (pindah kelas tetap terhitung).
+  const kelasSet = new Set([String(kelasKini || '')]);
+  (rows || []).forEach(r => { if (r.kelas) kelasSet.add(String(r.kelas)); });
+
+  const selesaiKelas = {};                       // kelas → Set(kunci pekan)
+  const bulan = new Map();
+  const ambil = (t, b) => {
+    const k = kBln(t, b);
+    if (!bulan.has(k)) bulan.set(k, { tahun: t, bulanKe: b, pekan: new Set(), libur: new Set(),
+                                      jp: 0, S: 0, IK: 0, IP: 0, A: 0 });
+    return bulan.get(k);
+  };
+
+  (pekan || []).forEach(p => {
+    const t = Number(p.tahun), b = Number(p.bulan), m = Number(p.minggu), kls = String(p.kelas || '');
+    if (!t || !b || !m || !kelasSet.has(kls)) return;
+    const o = ambil(t, b);
+    if (String(p.status) === 'selesai') {
+      (selesaiKelas[kls] = selesaiKelas[kls] || new Set()).add(kPk(t, b, m));
+      if (!o.pekan.has(m)) { o.pekan.add(m); o.jp += jpSegmenMinggu(t, b, m); }
+    } else if (String(p.status) === 'libur') {
+      o.libur.add(m);
+    }
   });
-  return [...peta.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([, v]) => v);
+
+  (rows || []).forEach(r => {
+    const t = Number(r.tahun), b = Number(r.bulan), m = Number(r.minggu);
+    if (!t || !b || !['S','IK','IP','A'].includes(r.jenis)) return;
+    const o = ambil(t, b);                         // bulan tetap tercatat walau belum direkap
+    if (!selesaiKelas[String(r.kelas || '')]?.has(kPk(t, b, m))) return;
+    o[r.jenis] += Number(r.jp) || 0;
+  });
+
+  if (!bulan.size) return { bulan: [], total: null };
+
+  // Rentang: bulan data pertama s.d. bulan berjalan (tanpa celah).
+  const kunci = [...bulan.keys()].sort();
+  let [t0, b0] = kunci[0].split('-').map(Number);
+  const kAkhir = [kunci[kunci.length - 1], kBln(sekarang.getFullYear(), sekarang.getMonth() + 1)].sort().pop();
+  for (let n = 0; n < 60 && kBln(t0, b0) <= kAkhir; n++) {
+    ambil(t0, b0);
+    if (++b0 > 12) { b0 = 1; t0++; }
+  }
+
+  const persen = (jp, tidak) => jp ? Math.round((1 - Math.min(jp, tidak) / jp) * 1000) / 10 : null;
+  const hasil = [...bulan.keys()].sort().filter(k => k <= kAkhir).map(k => {
+    const o = bulan.get(k);
+    const pekanTotal = Math.ceil(new Date(o.tahun, o.bulanKe, 0).getDate() / 7);
+    const tidakHadir = o.S + o.IP + o.A;
+    return {
+      bulan: `${BULAN_ID[o.bulanKe - 1]} ${o.tahun}`,
+      status: o.pekan.size ? 'rekap' : (o.libur.size ? 'libur' : 'belum'),
+      pekan: o.pekan.size, libur: o.libur.size, pekanTotal,
+      jp: o.jp, S: o.S, IK: o.IK, IP: o.IP, A: o.A, tidakHadir,
+      hadirPct: persen(o.jp, tidakHadir)
+    };
+  });
+
+  const rekap = hasil.filter(h => h.status === 'rekap');
+  const total = rekap.length ? rekap.reduce((a, h) => {
+    ['jp','S','IK','IP','A','tidakHadir','pekan'].forEach(x => { a[x] += h[x]; });
+    return a;
+  }, { jp: 0, S: 0, IK: 0, IP: 0, A: 0, tidakHadir: 0, pekan: 0, bulanRekap: rekap.length }) : null;
+  if (total) total.hadirPct = persen(total.jp, total.tidakHadir);
+  return { bulan: hasil, total };
 }
 
 async function ambilLaporan(nisn) {
@@ -8101,13 +8231,30 @@ async function ambilLaporan(nisn) {
   // Presensi selalu dibaca dari data_presensi (format JP S/IK/IP/A, v2.13);
   // bagian presensi dari RPC lama (log_presensi_madrasah, H/I/S/A) diabaikan.
   data.presensi = [];
+  data.presensiTotal = null;
   if (bisa('presensi.lihat')) {
+    // v2.42: ketidakhadiran + pekan yang sudah direkap kelasnya, supaya
+    // santri yang hadir penuh tetap mendapat rekap (bukan "belum ada data").
     try {
       const { data: rows, error } = await db.from('data_presensi')
-        .select('tahun,bulan,jenis,jp')
+        .select('kelas,tahun,bulan,minggu,jenis,jp')
         .eq('nisn', String(nisn));
-      if (!error && rows?.length) data.presensi = agregatPresensiCetak(rows);
+      if (error) throw error;
+      const kelas = [...new Set([String(data.siswa.kelas || ''), ...(rows || []).map(r => String(r.kelas || ''))])]
+        .filter(Boolean);
+      let pekan = [];
+      if (kelas.length) {
+        const { data: pm, error: e2 } = await db.from('presensi_minggu')
+          .select('kelas,tahun,bulan,minggu,status')
+          .in('kelas', kelas);
+        if (e2) throw e2;
+        pekan = pm || [];
+      }
+      const r = rekapPresensiCetak(rows || [], pekan, data.siswa.kelas);
+      data.presensi = r.bulan;
+      data.presensiTotal = r.total;
     } catch (e) {
+      data.presensiGagal = true;
       console.warn('Presensi cetak tidak tersedia:', e?.message || e);
     }
   } else {
@@ -25241,7 +25388,7 @@ document.addEventListener('change', (e) => {
  *  PANGGUNG.aktif = false (tanpa maskot), MASTER_BERSAMA.aktif = false
  *  (katalog putri kembali terpisah seperti v2.10).
  * ===================================================================== */
-APP.versi = 'rq-v2.41.2';
+APP.versi = 'rq-v2.42';
 
 /* ---------- 1 · Master pelanggaran bersama untuk unit putri ---------- */
 const MASTER_BERSAMA = { aktif: true };
