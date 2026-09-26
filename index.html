@@ -1942,6 +1942,36 @@
   .detail-periode.on > i { color:var(--brass); }
   @media (max-width:560px) { .detail-periode { padding:10px 11px; font-size:12px; } }
 
+  /* v2.41 · pemilih ukuran kertas laporan (A4 / F4) di detail santri */
+  .kertas-pilih { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:12px 0 0; }
+  .kertas-pilih .kp-label {
+    display:inline-flex; align-items:center; gap:6px; margin-right:4px;
+    font-size:10.5px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--text-3);
+  }
+  .kertas-pilih .kp-opsi {
+    position:relative; display:inline-flex; align-items:baseline; gap:7px; min-height:36px;
+    padding:7px 13px; border:1px solid var(--line); border-radius:999px; background:#fff;
+    font-size:12.5px; color:var(--text-2); cursor:pointer; user-select:none;
+    transition:border-color .15s, background-color .15s, color .15s;
+  }
+  .kertas-pilih .kp-opsi input { position:absolute; opacity:0; width:1px; height:1px; pointer-events:none; }
+  .kertas-pilih .kp-opsi b { font-weight:700; }
+  .kertas-pilih .kp-opsi small { font-family:'IBM Plex Mono', monospace; font-size:10.5px; color:var(--text-3); }
+  .kertas-pilih .kp-opsi.on {
+    border-color:var(--sea); color:var(--sea);
+    background: color-mix(in oklab, var(--sea) 8%, white);
+  }
+  .kertas-pilih .kp-opsi:has(input:focus-visible) { outline:2px solid var(--sea); outline-offset:2px; }
+
+  /* v2.41 · panel Status Cetak Laporan (Jejak Audit) */
+  .ctk-bar { height:6px; margin:2px 0 12px; border-radius:999px; background:var(--line-soft); overflow:hidden; }
+  .ctk-bar > span { display:block; height:100%; width:0; border-radius:inherit; background:var(--teal); transition:width .4s; }
+  .ctk-st { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:999px;
+            font-size:11.5px; font-weight:700; white-space:nowrap; }
+  .ctk-st.sudah { background:var(--teal-bg); color:var(--teal); }
+  .ctk-st.belum { background:var(--maroon-bg); color:var(--maroon); }
+  .ctk-jml { white-space:nowrap; font-size:12.5px; }
+
   /* ============================================================
      ADMINISTRASI PELANGGARAN (arsip)
      ============================================================ */

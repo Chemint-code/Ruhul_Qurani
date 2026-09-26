@@ -3794,6 +3794,8 @@ async function bukaDetailSantri(nisn) {
               : ` — seluruh riwayat santri akan tercetak.`}</span>
         </div>` : ''}
 
+        ${(bolehCetak() || bolehPdf()) ? pilihKertasHTML() : ''}
+
         <div class="detail-acts">
           ${bolehCetak() ? `<button class="btn btn-primary btn-sm" id="dCetak"><i class="fa-solid fa-print"></i>Cetak Laporan</button>` : ''}
           ${bolehPdf() ? `<button class="btn btn-ghost btn-sm" id="dPdf"><i class="fa-solid fa-file-pdf"></i>Unduh PDF</button>` : ''}
@@ -3811,8 +3813,9 @@ async function bukaDetailSantri(nisn) {
             '<p style="text-align:center;color:var(--text-3);padding:28px 0">Belum ada riwayat.</p>'}
         </div></div>`,
       didOpen: () => {
-        $('dCetak')?.addEventListener('click', () => cetakLaporan(nisn));
-        $('dPdf')?.addEventListener('click', () => unduhLaporanPdf(nisn));
+        pasangPilihKertas();
+        $('dCetak')?.addEventListener('click', () => cetakLaporan(nisn, kertasDipilih()));
+        $('dPdf')?.addEventListener('click', () => unduhLaporanPdf(nisn, kertasDipilih()));
         $('dReset')?.addEventListener('click', () => resetStatus(nisn));
         // SweetAlert tidak bisa bertumpuk: tutup detail dulu, lalu buka
         // kembali setelah selesai — pola yang sama dengan target pembinaan.
@@ -8185,15 +8188,24 @@ function teraCetakHTML() {
   return korpsMusyrifPutra() ? '<div class="tera-cetak" aria-hidden="true"></div>' : '';
 }
 
-async function cetakLaporan(nisn) {
+async function cetakLaporan(nisn, kodeKertas) {
   if (!bolehCetak()) return toast('error', `Role ${role()} tidak memiliki izin cetak.`);
+  const kertas = kertasLaporan(kodeKertas || kertasTersimpan());
   loading(true);
   try {
     pastikanGayaLembarLaporan();
     const dataMentah = await ambilLaporan(nisn);
     const data = await lengkapiLaporan(saringDataLaporanBulanan(dataMentah));
-    $('printArea').innerHTML = teraCetakHTML() + bangunLaporanHTML(data);
+    /* v2.41: @page di sini datang SETELAH @page{size:A4} milik index.html,
+       sehingga menang (pola yang sama dipakai rekap lanskap). Ikut terhapus
+       bersama isi #printArea pada 'afterprint'. */
+    $('printArea').innerHTML = `<style>${gayaHalamanCetak(kertas)}</style>`
+      + teraCetakHTML() + bangunLaporanHTML(data);
     window.print();
+    // Peramban tidak memberi tahu apakah pengguna menekan Cetak atau Batal;
+    // yang tercatat adalah "dialog cetak dibuka" (jenis 'cetak').
+    catatCetakLaporan({ nisn: data.siswa?.nisn || nisn, ukuran: kertas.kode, jenis: 'cetak',
+                        periode: data.periodeAktif ? periodeLaporanAktif() : null });
   } catch (err) { fireError(err); }
   finally { loading(false); }
 }
@@ -8741,16 +8753,70 @@ function siapkanKlonPdf(doc) {
 }
 
 /* ---------------------------------------------------------------------
-   Ukuran kertas A4 dan area cetaknya. Satu sumber angka untuk margin
-   jsPDF, lebar panggung render, dan kaki halaman — supaya perhitungan
-   batas halaman html2pdf tidak pernah lagi meleset.
+   UKURAN KERTAS — SATU SUMBER ANGKA (v2.41: A4 / F4)
+
+   Sebelumnya A4 ditulis mati sebagai tiga konstanta. Kini setiap ukuran
+   adalah satu baris di tabel ini, dan SEMUA titik di alur laporan membaca
+   dari baris yang dipilih:
+     · margin & format jsPDF/html2pdf,
+     · lebar panggung render (#pdfStage)  → lebarCetakPx(),
+     · rasio tinggi halaman untuk rapikanHalamanKlon() → rasioHalaman(),
+     · letak kaki halaman & tera,
+     · @page pada jalur Cetak Laporan     → gayaHalamanCetak().
+
+   margin mengikuti urutan html2pdf: [atas, kiri, bawah, kanan] (mm).
+
+   Mengapa margin samping F4 15,5 mm, bukan 13 mm:
+   F4 lima milimeter lebih lebar daripada A4. Dengan margin 15,5 mm, area
+   cetaknya tetap 184 mm — PERSIS sama dengan A4 — sehingga setiap baris
+   tabel membungkus teks di titik yang sama dengan tata letak A4 yang sudah
+   diverifikasi. Yang berubah hanya tinggi halaman (271 → 304 mm), dan itu
+   sepenuhnya ditangani rasio di rapikanHalamanKlon().
+
+   A4 sengaja tetap memakai format 'a4' (string bawaan jsPDF), bukan
+   [210, 297], supaya angka yang dipakai html2pdf identik byte demi byte
+   dengan versi yang sudah diuji.
    --------------------------------------------------------------------- */
-const MARGIN_MM      = 13;                       // sama dengan @page pada cetak
-const LEBAR_KERTAS_MM = 210;                     // A4 potret
-const TINGGI_KERTAS_MM = 297;
-const LEBAR_CETAK_PX  = Math.floor(
-  (LEBAR_KERTAS_MM - MARGIN_MM * 2) / 25.4 * 96  // 96 dpi, seperti hitungan html2pdf
-);
+const UKURAN_KERTAS = Object.freeze({
+  A4: Object.freeze({ kode:'A4', nama:'A4', ukuran:'210 × 297 mm', lebar:210, tinggi:297,
+                      format:'a4',        margin:[13, 13, 13, 13],     page:'A4' }),
+  F4: Object.freeze({ kode:'F4', nama:'F4', ukuran:'215 × 330 mm', lebar:215, tinggi:330,
+                      format:[215, 330],  margin:[13, 15.5, 13, 15.5], page:'215mm 330mm' })
+});
+const KERTAS_BAWAAN = 'A4';
+const KUNCI_KERTAS  = 'rq_kertas_laporan';
+
+/** Baris ukuran kertas; kode tak dikenal jatuh ke A4. */
+function kertasLaporan(kode) {
+  return UKURAN_KERTAS[kode] || UKURAN_KERTAS[KERTAS_BAWAAN];
+}
+/** Pilihan terakhir pengguna di perangkat ini (bawaan A4). */
+function kertasTersimpan() {
+  try { const k = localStorage.getItem(KUNCI_KERTAS); if (UKURAN_KERTAS[k]) return k; } catch (e) {}
+  return KERTAS_BAWAAN;
+}
+function simpanKertas(kode) {
+  if (!UKURAN_KERTAS[kode]) return;
+  try { localStorage.setItem(KUNCI_KERTAS, kode); } catch (e) {}
+}
+/** Area cetak (mm) = kertas dikurangi margin. */
+function areaCetakMm(k) {
+  return { lebar: k.lebar - k.margin[1] - k.margin[3],
+           tinggi: k.tinggi - k.margin[0] - k.margin[2] };
+}
+/** Lebar panggung render: 96 dpi, dibulatkan ke bawah seperti html2pdf. */
+function lebarCetakPx(k) { return Math.floor(areaCetakMm(k).lebar / 25.4 * 96); }
+/** Tinggi ÷ lebar area cetak — satu-satunya masukan kertas bagi rapikanHalamanKlon(). */
+function rasioHalaman(k) { const a = areaCetakMm(k); return a.tinggi / a.lebar; }
+/** @page untuk jalur Cetak Laporan (urutan CSS: atas kanan bawah kiri). */
+function gayaHalamanCetak(k) {
+  const [t, l, b, r] = k.margin;
+  return `@page{size:${k.page};margin:${t}mm ${r}mm ${b}mm ${l}mm}`;
+}
+/** Periode laporan untuk log: 'YYYY-MM' bila periode aktif, selain itu null. */
+function periodeLaporanAktif() {
+  return APP.periode?.aktif && APP.periode?.bulan ? APP.periode.bulan : null;
+}
 
 /**
  * Unduh PDF memakai panggung render terpisah (#pdfStage), bukan #printArea.
@@ -8777,8 +8843,10 @@ function muatHtml2pdf() {
   return muatHtml2pdf.janji;
 }
 
-async function unduhLaporanPdf(nisn) {
+async function unduhLaporanPdf(nisn, kodeKertas) {
   if (!bolehPdf()) return toast('error', `Role ${role()} tidak memiliki izin unduh PDF.`);
+  // v2.41: seluruh ukuran di bawah dibaca dari kertas ini, bukan dari A4.
+  const kertas = kertasLaporan(kodeKertas || kertasTersimpan());
   try { loading(true); await muatHtml2pdf(); }
   catch (e) { return fireError(new Error('Pustaka PDF gagal dimuat. Periksa koneksi internet lalu coba lagi.')); }
   finally { loading(false); }
@@ -8810,7 +8878,7 @@ async function unduhLaporanPdf(nisn) {
        html2pdf menjadi tepat dan blok yang ditandai `blok-utuh` benar-
        benar berpindah utuh ke halaman berikutnya.
        ------------------------------------------------------------- */
-    stage.style.width = LEBAR_CETAK_PX + 'px';
+    stage.style.width = lebarCetakPx(kertas) + 'px';
     stage.classList.add('on');
     mask.classList.add('on');
 
@@ -8840,11 +8908,11 @@ async function unduhLaporanPdf(nisn) {
       Math.sqrt(LUAS_KANVAS_MAKS / Math.max(1, rect.width * rect.height))));
     _halamanPdf = {
       skala,
-      rasio: (TINGGI_KERTAS_MM - MARGIN_MM * 2) / (LEBAR_KERTAS_MM - MARGIN_MM * 2)
+      rasio: rasioHalaman(kertas)          // v2.41: A4 → 271/184, F4 → 304/184
     };
 
     const pekerja = window.html2pdf().set({
-      margin: [MARGIN_MM, MARGIN_MM, MARGIN_MM, MARGIN_MM], filename: nama,
+      margin: kertas.margin.slice(), filename: nama,
       /* 0,90 bukan 1,0. Pada halaman berisi teks dan garis tabel selisih
          keduanya tidak terlihat mata, sedangkan ukuran berkasnya berbeda
          tiga sampai empat kali lipat — dan itu yang menentukan apakah 400
@@ -8856,7 +8924,8 @@ async function unduhLaporanPdf(nisn) {
         scrollX:0, scrollY:0, imageTimeout:15000,
         onclone: siapkanKlonPdf
       },
-      jsPDF: { unit:'mm', format:'a4', orientation:'portrait', compress:true },
+      jsPDF: { unit:'mm', format: Array.isArray(kertas.format) ? kertas.format.slice() : kertas.format,
+               orientation:'portrait', compress:true },
       // Baris tabel & judul bagian ditangani mesin bawaan html2pdf;
       // blok penutup (`.blok-utuh`) ditangani rapikanHalamanKlon() yang
       // hitungannya tepat sampai piksel terakhir.
@@ -8891,15 +8960,20 @@ async function unduhLaporanPdf(nisn) {
           pdf.setFont('helvetica', 'normal');
           pdf.setFontSize(7.5);
           pdf.setTextColor(150, 160, 172);
-          pdf.text(kakiSantri, MARGIN_MM, tinggi - 6);
-          pdf.text(`Halaman ${i} dari ${jml}`, lebar - MARGIN_MM, tinggi - 6, { align: 'right' });
+          pdf.text(kakiSantri, kertas.margin[1], tinggi - 6);
+          pdf.text(`Halaman ${i} dari ${jml}`, lebar - kertas.margin[3], tinggi - 6, { align: 'right' });
         }
       } catch (e) { console.warn('[PDF] Kaki halaman dilewati:', e.message); }
     });
 
     await pekerja.save(nama);
 
-    toast('success', `PDF ${data.periodeAktif ? labelPeriode() : 'lengkap'} berhasil diunduh.`);
+    // v2.41: dicatat SETELAH berkas diserahkan ke peramban. Tidak ditunggu,
+    // tidak pernah melempar — gagal mencatat tidak boleh menggagalkan unduhan.
+    catatCetakLaporan({ nisn: data.siswa?.nisn || nisn, ukuran: kertas.kode, jenis: 'pdf',
+                        periode: data.periodeAktif ? periodeLaporanAktif() : null });
+
+    toast('success', `PDF ${data.periodeAktif ? labelPeriode() : 'lengkap'} (${kertas.nama}) berhasil diunduh.`);
   } catch (err) {
     // Bila peramban tetap menolak (mis. versi lama tanpa dukungan warna
     // yang dipakai perangkat pengguna), laporan tidak dibiarkan hilang:
@@ -8908,11 +8982,14 @@ async function unduhLaporanPdf(nisn) {
     if (/unsupported color|color function|oklab|oklch|color-mix/i.test(pesan) && htmlLaporan) {
       console.warn('[PDF] html2canvas menolak warna, beralih ke dialog cetak:', pesan);
       toast('warning', 'Peramban menolak render warna. Dialihkan ke dialog cetak — pilih "Simpan sebagai PDF".');
-      $('printArea').innerHTML = htmlLaporan;
+      $('printArea').innerHTML = `<style>${gayaHalamanCetak(kertas)}</style>` + htmlLaporan;
       pulihkanLatar();
       stage.classList.remove('on'); stage.innerHTML = '';
       mask.classList.remove('on'); loading(false);
-      setTimeout(() => window.print(), 220);
+      setTimeout(() => {
+        window.print();
+        catatCetakLaporan({ nisn, ukuran: kertas.kode, jenis: 'cetak', periode: periodeLaporanAktif() });
+      }, 220);
       return;
     }
     fireError(err);
@@ -8925,6 +9002,137 @@ async function unduhLaporanPdf(nisn) {
     loading(false);
   }
 }
+
+/* =====================================================================
+   20a-2. PEMILIH KERTAS & LOG CETAK LAPORAN  (v2.41)
+   ===================================================================== */
+
+/** Kelompok radio A4/F4 di detail santri. Pilihan awal = pilihan terakhir. */
+function pilihKertasHTML() {
+  const kini = kertasTersimpan();
+  return `<div class="kertas-pilih" role="radiogroup" aria-label="Ukuran kertas laporan">
+    <span class="kp-label"><i class="fa-regular fa-file-lines"></i>Kertas</span>
+    ${Object.values(UKURAN_KERTAS).map(k => `
+      <label class="kp-opsi${k.kode === kini ? ' on' : ''}">
+        <input type="radio" name="dKertas" value="${k.kode}"${k.kode === kini ? ' checked' : ''}>
+        <b>${esc(k.nama)}</b><small>${esc(k.ukuran)}</small>
+      </label>`).join('')}
+  </div>`;
+}
+
+/** Ukuran yang sedang dipilih di detail santri (jatuh ke pilihan tersimpan). */
+function kertasDipilih() {
+  const el = document.querySelector('input[name="dKertas"]:checked');
+  return (el && UKURAN_KERTAS[el.value]) ? el.value : kertasTersimpan();
+}
+
+/** Pilihan disimpan begitu diganti — laporan berikutnya ikut, tetap bisa diganti lagi. */
+function pasangPilihKertas() {
+  document.querySelectorAll('input[name="dKertas"]').forEach((el) => {
+    el.addEventListener('change', () => {
+      if (!el.checked) return;
+      simpanKertas(el.value);
+      document.querySelectorAll('.kertas-pilih .kp-opsi')
+        .forEach(l => l.classList.toggle('on', !!l.querySelector('input')?.checked));
+    });
+  });
+}
+
+/* ---------------------------------------------------------------------
+   LOG CETAK — tidak pernah menghalangi unduhan
+
+   catatCetakLaporan() dipanggil TANPA await setelah berkas diserahkan ke
+   peramban. Ia tidak pernah melempar galat:
+     · berhasil           → baris masuk log_cetak_laporan lewat RPC;
+     · gagal jaringan     → disimpan di antrean perangkat, dikirim ulang
+                            saat koneksi pulih (waktu cetak asli ikut);
+     · gagal selain itu   → hanya console.warn (mis. migrasi v2.41 belum
+                            dijalankan, peran tak berizin). Tidak diantrekan
+                            supaya tidak berputar selamanya.
+   Antrean terpisah dari antrean catatan (rq_antrean_v1) agar lencana
+   "tertunda" di bilah atas tetap berarti catatan santri saja.
+   --------------------------------------------------------------------- */
+const KUNCI_ANTREAN_CETAK = 'rq_antrean_cetak_v1';
+const ANTREAN_CETAK_MAKS  = 300;
+const ANTREAN_CETAK_UMUR  = 7 * 864e5;   // sama dengan jepitan waktu di RPC
+
+function antreanCetakBaca() {
+  try { const v = JSON.parse(localStorage.getItem(KUNCI_ANTREAN_CETAK) || '[]'); return Array.isArray(v) ? v : []; }
+  catch (e) { return []; }
+}
+function antreanCetakTulis(list) {
+  try {
+    if (list.length) localStorage.setItem(KUNCI_ANTREAN_CETAK, JSON.stringify(list.slice(-ANTREAN_CETAK_MAKS)));
+    else localStorage.removeItem(KUNCI_ANTREAN_CETAK);
+  } catch (e) {}
+}
+function galatJaringanCetak(err) {
+  return !navigator.onLine ||
+    /fetch|network|failed to fetch|load failed|timeout|offline/i.test(String(err?.message || err || ''));
+}
+async function kirimLogCetak(e) {
+  const { error } = await db.rpc('catat_cetak_laporan', {
+    p_nisn: e.nisn, p_ukuran: e.ukuran, p_jenis: e.jenis,
+    p_periode: e.periode || null, p_waktu: e.waktu || null, p_versi: e.versi || null
+  });
+  if (error) throw error;
+}
+
+function catatCetakLaporan(o) {
+  const entri = {
+    nisn: String(o?.nisn || ''), ukuran: kertasLaporan(o?.ukuran).kode,
+    jenis: o?.jenis === 'cetak' ? 'cetak' : 'pdf', periode: o?.periode || null,
+    waktu: new Date().toISOString(), versi: APP.versi || null, uid: APP.profil?.id || null
+  };
+  if (!entri.nisn) return Promise.resolve(false);
+  return (async () => {
+    try {
+      if (!navigator.onLine) throw new Error('offline');
+      await kirimLogCetak(entri);
+      return true;
+    } catch (err) {
+      try {
+        if (galatJaringanCetak(err)) {
+          antreanCetakTulis([...antreanCetakBaca(), entri]);
+          console.warn('[Log cetak] Luring — disimpan di perangkat, dikirim saat online:', entri.nisn);
+        } else {
+          console.warn('[Log cetak] Tidak tercatat (unduhan tetap selesai):', err?.message || err);
+        }
+      } catch (e) {}
+      return false;
+    }
+  })();
+}
+
+/** Kirim ulang antrean log cetak. Hanya entri milik akun yang sedang masuk. */
+async function kirimUlangLogCetak() {
+  if (kirimUlangLogCetak.sibuk) return 0;
+  const q = antreanCetakBaca();
+  if (!q.length || !navigator.onLine || !APP.profil?.id) return 0;
+  kirimUlangLogCetak.sibuk = true;
+  let terkirim = 0;
+  const sisa = [], batas = Date.now() - ANTREAN_CETAK_UMUR;
+  try {
+    for (let i = 0; i < q.length; i++) {
+      const e = q[i];
+      if (!e || !e.nisn || Date.parse(e.waktu) < batas) continue;          // kedaluwarsa → dibuang
+      if (e.uid && e.uid !== APP.profil.id) { sisa.push(e); continue; }    // milik akun lain → tunggu
+      try { await kirimLogCetak(e); terkirim++; }
+      catch (err) {
+        if (galatJaringanCetak(err)) { sisa.push(...q.slice(i)); break; }   // putus lagi → berhenti
+        console.warn('[Log cetak] Entri tertunda dibuang:', err?.message || err);
+      }
+    }
+  } finally {
+    antreanCetakTulis(sisa);
+    kirimUlangLogCetak.sibuk = false;
+  }
+  if (terkirim) console.info(`[Log cetak] ${terkirim} catatan cetak tertunda terkirim.`);
+  return terkirim;
+}
+window.addEventListener('online', () => { setTimeout(kirimUlangLogCetak, 1500); });
+setTimeout(kirimUlangLogCetak, 6000);
+
 // ---------------------------------------------------------------------
 // 20b. CETAK REKAP BULANAN (laporan rutin pendidik)
 // ---------------------------------------------------------------------
@@ -15698,6 +15906,8 @@ async function viewAudit() {
 
     <div class="stats" id="audStat"></div>
 
+    ${statusCetakHTML()}
+
     <section class="card">
       <div class="card-head">
         <div><h3>Riwayat Perubahan</h3><p class="sub" id="audSub">Memuat…</p></div>
@@ -15757,7 +15967,14 @@ async function viewAudit() {
     if (p && p.dataset.pg.startsWith('aud:')) {
       stAud.page = Number(p.dataset.pg.split(':')[1]); audGambar();
     }
+    // v2.41: pager panel Status Cetak
+    if (p && p.dataset.pg.startsWith('ctk:')) {
+      stCtk.page = Number(p.dataset.pg.split(':')[1]); ctkGambar();
+    }
   });
+
+  // v2.41: dimuat sejajar, tidak menunda jejak audit; galatnya ditangani sendiri.
+  ctkPasang();
 
   await audMuat();
   await audGambar();
@@ -15947,6 +16164,199 @@ async function audEksporCsv() {
   unduhCsv(`jejak-audit-${hariIni()}.csv`, [
     ['Waktu','Pelaku','Peran','Tabel','Aksi','ID Baris','NISN','Ringkasan'],
     ...rows.map(r => [r.waktu, r.user_nama, r.user_role, r.tabel, r.aksi, r.baris_id, r.nisn, r.ringkas])
+  ]);
+}
+
+
+/* =====================================================================
+   34b. STATUS CETAK LAPORAN  (v2.41)
+   Santri aktif yang SUDAH / BELUM dicetak laporannya dalam satu rentang.
+   Sumber: log_cetak_laporan (RLS: Admin & Pimpinan) digabung dengan
+   daftar santri di perangkat (muatSiswa) — tanpa kueri gabung di server.
+   ===================================================================== */
+const stCtk = { dari:'', sampai:'', unit:'', kelas:'', status:'', cari:'',
+                page:1, size:25, log:null, kunci:'', galat:null };
+
+function ctkRentangBulanIni() {
+  const h = hariIni();
+  return { dari: h.slice(0, 8) + '01', sampai: h };
+}
+
+function statusCetakHTML() {
+  if (!stCtk.dari) Object.assign(stCtk, ctkRentangBulanIni());
+  return `<section class="card" id="ctkKartu">
+      <div class="card-head">
+        <div><h3>Status Cetak Laporan</h3>
+          <p class="sub" id="ctkSub">Memuat…</p></div>
+        <div class="actions">
+          <button class="btn btn-ghost btn-sm" id="ctkBulanIni"><i class="fa-regular fa-calendar"></i>Bulan ini</button>
+          <button class="btn btn-ghost btn-sm" id="ctkCsv"><i class="fa-solid fa-file-csv"></i>CSV</button>
+        </div>
+      </div>
+      <div class="ctk-bar" aria-hidden="true"><span id="ctkBarIsi"></span></div>
+      <div class="filters adm-filters">
+        <input id="ctkCari" class="input grow" placeholder="Cari nama atau NISN…">
+        <select id="ctkStatus" class="input" title="Status cetak">
+          <option value="">Semua status</option>
+          <option value="belum">Belum dicetak</option>
+          <option value="sudah">Sudah dicetak</option>
+        </select>
+        <select id="ctkUnit" class="input" title="Unit">
+          <option value="">Semua unit</option>
+          <option value="${UNIT_PUTRA}">Putra</option>
+          <option value="${UNIT_PUTRI}">Putri</option>
+        </select>
+        <select id="ctkKelas" class="input" title="Kelas"><option value="">Semua kelas</option></select>
+        <input id="ctkDari" type="date" class="input" title="Dari tanggal">
+        <input id="ctkSampai" type="date" class="input" title="Sampai tanggal">
+      </div>
+      <div class="tbl"><table class="adm-tbl ctk-tbl">
+        <thead><tr><th>Santri</th><th>Kelas</th><th>Status</th><th>Cetakan</th>
+          <th>Terakhir</th><th>Oleh</th></tr></thead>
+        <tbody id="ctkBody"><tr><td colspan="6" style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</td></tr></tbody>
+      </table></div>
+      <div id="ctkPager"></div>
+    </section>`;
+}
+
+function ctkPasang() {
+  if (!$('ctkKartu')) return;
+  $('ctkDari').value = stCtk.dari; $('ctkSampai').value = stCtk.sampai;
+  $('ctkStatus').value = stCtk.status; $('ctkUnit').value = stCtk.unit; $('ctkCari').value = stCtk.cari;
+  $('ctkCari').addEventListener('input', debounce(e => { stCtk.cari = e.target.value.trim(); stCtk.page = 1; ctkGambar(); }, 260));
+  $('ctkStatus').addEventListener('change', e => { stCtk.status = e.target.value; stCtk.page = 1; ctkGambar(); });
+  $('ctkUnit').addEventListener('change', e => { stCtk.unit = e.target.value; stCtk.kelas = ''; stCtk.page = 1; ctkGambar(); });
+  $('ctkKelas').addEventListener('change', e => { stCtk.kelas = e.target.value; stCtk.page = 1; ctkGambar(); });
+  const gantiRentang = () => {
+    const d = $('ctkDari').value, z = $('ctkSampai').value;
+    if (!d || !z) return;
+    if (d > z) { toast('error', 'Tanggal awal melewati tanggal akhir.'); return; }
+    stCtk.dari = d; stCtk.sampai = z; stCtk.page = 1; ctkGambar();
+  };
+  $('ctkDari').addEventListener('change', gantiRentang);
+  $('ctkSampai').addEventListener('change', gantiRentang);
+  $('ctkBulanIni').addEventListener('click', () => {
+    Object.assign(stCtk, ctkRentangBulanIni(), { page:1 });
+    $('ctkDari').value = stCtk.dari; $('ctkSampai').value = stCtk.sampai; ctkGambar();
+  });
+  $('ctkCsv').addEventListener('click', ctkEksporCsv);
+  ctkGambar().catch(e => console.warn('[Status cetak]', e?.message || e));
+}
+
+async function ctkMuat() {
+  const kunci = `${stCtk.dari}|${stCtk.sampai}`;
+  if (stCtk.log && stCtk.kunci === kunci) return stCtk.log;
+  const awal  = new Date(`${stCtk.dari}T00:00:00`).toISOString();
+  const akhir = tambahHari(new Date(`${stCtk.sampai}T00:00:00`), 1).toISOString();
+  stCtk.galat = null;
+  try {
+    stCtk.log = await ambilSemuaSaring('log_cetak_laporan',
+      'id,nisn,waktu,user_nama,user_role,ukuran_kertas,jenis,periode',
+      k => k.gte('waktu', awal).lt('waktu', akhir), [['waktu', false], ['id', false]]);
+  } catch (e) {
+    stCtk.log = [];
+    stCtk.galat = /log_cetak_laporan|does not exist|schema cache|PGRST205|42P01/i.test(e?.message || '')
+      ? 'Tabel log_cetak_laporan belum ada — jalankan migrasi 20260926_v2_41_log_cetak_laporan.sql.'
+      : (e?.message || String(e));
+  }
+  stCtk.kunci = kunci;
+  return stCtk.log;
+}
+
+/** Satu baris per santri aktif, digabung dengan ringkasan cetaknya. */
+async function ctkBaris() {
+  const [siswa, log] = await Promise.all([muatSiswa(), ctkMuat()]);
+  const per = new Map();
+  for (const r of log) {                                 // log sudah urut waktu menurun
+    const k = String(r.nisn);
+    const a = per.get(k) || { n:0, pdf:0, cetak:0, akhir:null, A4:0, F4:0 };
+    a.n++; a[r.jenis === 'cetak' ? 'cetak' : 'pdf']++;
+    if (r.ukuran_kertas === 'F4') a.F4++; else a.A4++;
+    if (!a.akhir) a.akhir = r;
+    per.set(k, a);
+  }
+  return (siswa || []).filter(aktifSantri).map(s => ({
+    nisn: String(s.nisn), nama: s.nama_siswa || '', kelas: s.kelas || '',
+    unit: unitBaris(s) || '', c: per.get(String(s.nisn)) || null
+  }));
+}
+
+function ctkUrutKelas(a, b) {
+  const ia = URUT_ANGKATAN.indexOf(angkatanDariKelas(a)), ib = URUT_ANGKATAN.indexOf(angkatanDariKelas(b));
+  return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || String(a).localeCompare(String(b), 'id', { numeric:true });
+}
+
+function ctkSaring(rows, tanpaStatus) {
+  let out = rows;
+  if (stCtk.unit)  out = out.filter(r => r.unit === stCtk.unit);
+  if (stCtk.kelas) out = out.filter(r => r.kelas === stCtk.kelas);
+  if (stCtk.cari) {
+    const k = stCtk.cari.toLowerCase();
+    out = out.filter(r => r.nama.toLowerCase().includes(k) || r.nisn.includes(k));
+  }
+  if (!tanpaStatus && stCtk.status) out = out.filter(r => stCtk.status === 'sudah' ? !!r.c : !r.c);
+  // Yang BELUM di atas — itulah yang perlu ditindaklanjuti.
+  return out.slice().sort((a, b) => (!!a.c - !!b.c) || ctkUrutKelas(a.kelas, b.kelas)
+    || a.nama.localeCompare(b.nama, 'id'));
+}
+
+async function ctkGambar() {
+  if (APP.view !== 'audit' || !$('ctkBody')) return;
+  const semua = await ctkBaris();
+  if (APP.view !== 'audit' || !$('ctkBody')) return;
+
+  // Pilihan kelas mengikuti unit terpilih.
+  const kelasAda = [...new Set(semua.filter(r => !stCtk.unit || r.unit === stCtk.unit).map(r => r.kelas).filter(Boolean))]
+    .sort(ctkUrutKelas);
+  if (stCtk.kelas && !kelasAda.includes(stCtk.kelas)) stCtk.kelas = '';
+  $('ctkKelas').innerHTML = '<option value="">Semua kelas</option>'
+    + kelasAda.map(k => `<option${k === stCtk.kelas ? ' selected' : ''}>${esc(k)}</option>`).join('');
+
+  const lingkup = ctkSaring(semua, true);               // untuk angka ringkasan
+  const sudah = lingkup.filter(r => r.c).length;
+  const pct = lingkup.length ? Math.round(sudah / lingkup.length * 100) : 0;
+  const rows = ctkSaring(semua, false);
+  const pages = Math.max(1, Math.ceil(rows.length / stCtk.size));
+  if (stCtk.page > pages) stCtk.page = pages;
+  const hal = rows.slice((stCtk.page - 1) * stCtk.size, stCtk.page * stCtk.size);
+
+  $('ctkSub').innerHTML = stCtk.galat
+    ? `<span style="color:var(--maroon)">${esc(stCtk.galat)}</span>`
+    : `<b>${angka(sudah)}</b> dari ${angka(lingkup.length)} santri aktif sudah dicetak (${pct}%) · `
+      + `<b>${angka(lingkup.length - sudah)}</b> belum · ${esc(tgl(stCtk.dari))} – ${esc(tgl(stCtk.sampai))}`;
+  $('ctkBarIsi').style.width = (stCtk.galat ? 0 : pct) + '%';
+
+  $('ctkBody').innerHTML = hal.map(r => {
+    const c = r.c, a = c?.akhir;
+    return `<tr>
+      <td><b>${esc(r.nama)}</b><div class="secondary">NISN ${esc(r.nisn)}</div></td>
+      <td>${esc(r.kelas || '—')}${r.unit ? `<div class="secondary">${r.unit === UNIT_PUTRI ? 'Putri' : 'Putra'}</div>` : ''}</td>
+      <td>${c ? '<span class="ctk-st sudah"><i class="fa-solid fa-check"></i>Sudah</span>'
+              : '<span class="ctk-st belum">Belum</span>'}</td>
+      <td class="ctk-jml">${c ? [c.pdf ? `PDF ×${c.pdf}` : '', c.cetak ? `Cetak ×${c.cetak}` : ''].filter(Boolean).join(' · ')
+                              + `<div class="secondary">${[c.A4 ? `A4 ×${c.A4}` : '', c.F4 ? `F4 ×${c.F4}` : ''].filter(Boolean).join(' · ')}</div>` : '—'}</td>
+      <td class="aud-waktu">${a ? waktuAudit(a.waktu) : '—'}${a?.periode ? `<div class="secondary">periode ${esc(a.periode)}</div>` : ''}</td>
+      <td>${a ? `<b>${esc(a.user_nama || '—')}</b><div class="secondary">${esc(a.user_role || '')}</div>` : '—'}</td>
+    </tr>`;
+  }).join('') || barisKosong(6, 'Tidak ada santri yang cocok.', 'Ubah filter atau rentang tanggal.');
+  $('ctkPager').innerHTML = pager('ctk', stCtk.page, rows.length, stCtk.size);
+  tandaiTabelBisaGeser();
+}
+
+async function ctkEksporCsv() {
+  let rows;
+  try { rows = ctkSaring(await ctkBaris(), false); } catch (e) { return fireError(e); }
+  if (!rows.length) return toast('error', 'Tidak ada data untuk diekspor.');
+  unduhCsv(`status-cetak-laporan-${stCtk.dari}_${stCtk.sampai}.csv`, [
+    ['Status','Nama','NISN','Kelas','Unit','Jumlah Cetak','PDF','Dialog Cetak','A4','F4',
+     'Terakhir','Oleh','Peran','Kertas Terakhir','Periode Laporan'],
+    ...rows.map(r => {
+      const c = r.c, a = c?.akhir;
+      return [c ? 'SUDAH' : 'BELUM', r.nama, r.nisn, r.kelas, r.unit,
+        c?.n || 0, c?.pdf || 0, c?.cetak || 0, c?.A4 || 0, c?.F4 || 0,
+        a ? waktuAudit(a.waktu) : '', a?.user_nama || '', a?.user_role || '',
+        a?.ukuran_kertas || '', a?.periode || ''];
+    })
   ]);
 }
 
@@ -24712,7 +25122,7 @@ document.addEventListener('change', (e) => {
  *  PANGGUNG.aktif = false (tanpa maskot), MASTER_BERSAMA.aktif = false
  *  (katalog putri kembali terpisah seperti v2.10).
  * ===================================================================== */
-APP.versi = 'rq-v2.40';
+APP.versi = 'rq-v2.41';
 
 /* ---------- 1 · Master pelanggaran bersama untuk unit putri ---------- */
 const MASTER_BERSAMA = { aktif: true };
