@@ -41,7 +41,7 @@
    hapus singgahan versi lama, lalu beri tahu halaman yang terbuka.
    ===================================================================== */
 
-const VERSI       = 'rq-v2.41';
+const VERSI       = 'rq-v2.41.1';
 const CACHE_INTI  = `${VERSI}-inti`;
 const CACHE_ASET  = `${VERSI}-aset`;
 

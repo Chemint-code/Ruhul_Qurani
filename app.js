@@ -23673,7 +23673,7 @@ const persenId = (x) => String(x).replace('.', ',');
 
 function barisPresensi(p) {
   if (!p.santri) return 'belum ada pekan presensi yang ditandai selesai (6 bulan terakhir)';
-  return `hadir ${persenId(p.hadirPct)} persen · alpa ${angka(p.alpa)} JP · ${angka(p.santri)} santri teramati (6 bulan terakhir)`;
+  return `hadir ${persenId(p.hadirPct)} persen · alpa ${angka(p.alpa)} jam pelajaran · ${angka(p.santri)} santri teramati (6 bulan terakhir)`;
 }
 function barisTarget(t) {
   if (!t.ada) return `belum ada target pembinaan untuk periode ${t.periode}`;
@@ -23722,9 +23722,12 @@ function pesanIngatkanMusyrif(m, a, o) {
     `Pengirim : ${o.pengirim}`,
     `_Dikirim melalui Sistem Informasi Pengembangan Santri pada ${waktu}._`
   ].join('\n')
-    // v2.37.1 — Fonnte paket gratis menolak pesan yang memuat tanda "%"
-    // ("invalid message request on free package"; 7 dari 7 kegagalan
-    // 25 Sep memuatnya, 6 yang terkirim tidak). Jaring pengaman umum.
+    // v2.41.1 — FORMAT YANG LOLOS Fonnte paket gratis ("invalid message
+    // request on free package"). Bukti wa_log s.d. 26 Sep 20.10 WIB: 21/21
+    // kegagalan memuat kata "JP", 139/139 kiriman terkirim tidak.
+    // Aturan sama dengan public.wa_format_aman() & wa-bot v8 amanFonnte(),
+    // sehingga pratinjau = teks yang benar-benar diterima musyrif.
+    .replace(/\bJP\b/gi, 'jam pelajaran')
     .replace(/\s?%/g, ' persen');
 }
 
