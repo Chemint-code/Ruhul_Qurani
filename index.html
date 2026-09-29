@@ -1121,6 +1121,49 @@
   .unit-mon-wrap.dua .unit-mon + .unit-mon { margin-left:-6px; }
   /* v2.44 — pemilih unit operasional di lencana konteks */
   .ctx-badge select.per-in { color:inherit; font-weight:700; }
+  /* v2.45 — Radar Amanah */
+  .radar-svg { display:block; width:100%; height:auto; overflow:visible; }
+  .radar-pita { stroke-width:.6; }
+  .radar-pita.t1 { fill: color-mix(in oklab, var(--sea) 8%, transparent); stroke: color-mix(in oklab, var(--sea) 35%, transparent); }
+  .radar-pita.t2 { fill: color-mix(in oklab, var(--amber) 10%, transparent); stroke: color-mix(in oklab, var(--amber) 40%, transparent); }
+  .radar-pita.t3 { fill: color-mix(in oklab, var(--maroon) 12%, transparent); stroke: color-mix(in oklab, var(--maroon) 45%, transparent); }
+  .radar-sekat { stroke: var(--line); stroke-width:.5; }
+  .radar-label { font-size:7px; font-weight:700; fill: var(--text-2, currentColor); cursor:pointer; }
+  .radar-label.on { fill: var(--sea); text-decoration: underline; }
+  .radar-titik, .radar-gumpal { cursor:pointer; transform-box: fill-box; transform-origin: center; transition: opacity .2s; }
+  .radar-titik.t3, .radar-gumpal.t3 circle { fill: var(--maroon); }
+  .radar-titik.t2, .radar-gumpal.t2 circle { fill: var(--amber); }
+  .radar-titik.t1, .radar-gumpal.t1 circle { fill: var(--sea); }
+  .radar-titik.tak { fill: transparent !important; stroke: var(--text-3, #888); stroke-width:1.2; stroke-dasharray: 2 1.6; }
+  .radar-gumpal.tak circle { stroke: var(--text-3, #888); stroke-width:1.2; stroke-dasharray: 2 1.6; }
+  .radar-gumpal text { font-size:7px; font-weight:800; fill:#fff; pointer-events:none; }
+  .radar-titik:focus-visible, .radar-gumpal:focus-visible, .radar-label:focus-visible { outline: 2px solid var(--sea); outline-offset: 2px; }
+  .radar-svg .redup { opacity:.18; }
+  .radar-sapu { transform-box: view-box; transform-origin: 100px 100px; pointer-events:none; }
+  .radar-sapu path { fill: color-mix(in oklab, var(--sea) 18%, transparent); }
+  .radar-sapu.selesai { opacity:0; transition: opacity .4s; }
+  .radar-bingkai { width: min(100%, 440px); margin: 8px auto 0; padding: 14px; box-sizing: border-box; }
+  .radar-ket, .radar-catatan, .radar-luring { font-size:.82rem; color: var(--text-3, inherit); text-align:center; margin:6px 12px; }
+  .radar-ket .t3 { color: var(--maroon); } .radar-ket .t2 { color: var(--amber); } .radar-ket .t1 { color: var(--sea); }
+  .radar-chip { display:flex; flex-wrap:wrap; gap:6px; padding: 12px 16px 4px; }
+  .radar-daftar ul { list-style:none; margin:0; padding: 4px 8px 12px; }
+  .radar-baris { display:grid; grid-template-columns: 1fr auto; gap:2px 8px; width:100%; text-align:left; padding:8px; border:0; border-bottom:1px solid var(--line); background:none; color:inherit; cursor:pointer; }
+  .radar-baris small { grid-column:1; color: var(--text-3, inherit); }
+  .radar-baris .tag { grid-row: 1 / span 2; grid-column:2; align-self:center; }
+  .radar-lembar { position:fixed; left:0; right:0; bottom:0; z-index:60; max-height:70vh; overflow:auto;
+    background: var(--surface, #fff); border-top-left-radius:18px; border-top-right-radius:18px;
+    box-shadow: 0 -8px 30px rgba(0,0,0,.18); padding: 18px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .radar-tutup { position:absolute; top:8px; right:10px; border:0; background:none; font-size:1.5rem; line-height:1; cursor:pointer; color:inherit; }
+  .radar-kartu-kepala { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding-right:28px; }
+  .radar-sebab, .radar-terakhir { margin:8px 0; }
+  .radar-mini { margin: 0 0 16px; }
+  .radar-mini-isi { display:flex; align-items:center; gap:14px; width:100%; padding:12px 14px; text-align:left; cursor:pointer;
+    border:1px solid var(--line); border-radius:16px; background: var(--surface, #fff); color:inherit; }
+  .radar-mini-isi .radar-svg { width:96px; flex:none; }
+  .radar-mini-teks { display:flex; flex-direction:column; gap:4px; font-size:.88rem; }
+  .radar-mini-teks .go { color: var(--sea); font-weight:700; }
+  .radar-mini-sk { height:120px; border-radius:16px; }
+  .radar-mini-gagal { padding:12px 14px; border:1px dashed var(--line); border-radius:16px; font-size:.88rem; }
   @media (max-width:720px) { .unit-box > i { display:none; } }
   @media (max-width:420px) { .unit-box { padding:3px 7px; font-size:11px; } }
 

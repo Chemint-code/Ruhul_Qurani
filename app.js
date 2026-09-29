@@ -18525,9 +18525,8 @@ function gambarTarget(d) {
    Panel 4 — Indeks Peringatan Pembinaan
    --------------------------------------------------------------------- */
 
-function panelIpp(ipp, { batas = 10 } = {}) {
-  const perhatian = ipp.daftar.filter(x => x.tingkat >= 2).slice(0, batas);
-
+/** Batang unsur IPP satu santri. Dipakai panel IPP dan kartu titik Radar (v2.45). */
+function htmlUnsurIpp(x, ipp) {
   const batang = (nilai, puncak, warna, judul) => {
     const p = puncak ? Math.min(100, Math.round(nilai / puncak * 100)) : 0;
     return `<span class="ipp-u" title="${esc(judul)}">
@@ -18550,13 +18549,7 @@ function panelIpp(ipp, { batas = 10 } = {}) {
       <b>${Math.round(k.hadirPct)}%${k.alpa ? `<em class="ipp-a"> · A${k.alpa}</em>` : ''}</b></span>`;
   };
 
-  const baris = perhatian.map(x => `
-    <div class="ipp-baris t${x.tingkat}" data-detail="${esc(x.nisn)}" role="button" tabindex="0">
-      <div class="ipp-nm">
-        <b>${esc(x.nama)}</b>
-        <small>${esc(x.kelas)} · ${esc(x.sebab)}</small>
-      </div>
-      <div class="ipp-unsur">
+  return `<div class="ipp-unsur">
         ${batang(x.beban,  ipp.maks.beban,  'merah',  'Beban: poin pelanggaran')}
         ${batang(x.ikatan, ipp.maks.ikatan, 'hijau',  'Ikatan: apresiasi dan setoran')}
         ${batang(x.putus,  ipp.maks.putus,  'kuning', 'Keterputusan: izin keluar')}
@@ -18564,7 +18557,19 @@ function panelIpp(ipp, { batas = 10 } = {}) {
           <span class="ipp-bar biru"><i style="width:${x.respons === null ? 0 : x.respons}%"></i></span>
           <b>${x.respons === null ? '—' : x.respons + '%'}</b></span>
         ${unsurHadir(x.kh)}
+      </div>`;
+}
+
+function panelIpp(ipp, { batas = 10 } = {}) {
+  const perhatian = ipp.daftar.filter(x => x.tingkat >= 2).slice(0, batas);
+
+  const baris = perhatian.map(x => `
+    <div class="ipp-baris t${x.tingkat}" data-detail="${esc(x.nisn)}" role="button" tabindex="0">
+      <div class="ipp-nm">
+        <b>${esc(x.nama)}</b>
+        <small>${esc(x.kelas)} · ${esc(x.sebab)}</small>
       </div>
+      ${htmlUnsurIpp(x, ipp)}
       <span class="tag ${x.tingkat === 3 ? 'tag-berat' : 'tag-sedang'}">Tier ${x.tingkat}</span>
     </div>`).join('') || kosong('Tidak ada santri pada tier 2 atau 3.',
       'Seluruh santri berada pada dukungan umum sepanjang jendela ini.', 'fa-circle-check');
@@ -26676,4 +26681,46 @@ function tataRadar(radar, { angkatan = null } = {}) {
     });
   }));
   return { sektor, titik: hasilTitik, gumpal, perAngkatan, angkatan };
+}
+
+/* ---------- 4 · Gambar SVG ------------------------------------------ */
+const tagTier = (tk) => tk === 3 ? 'tag-berat' : tk === 2 ? 'tag-sedang' : 'tag-ok';
+const labelTitik = (t) => `${t.nama}, ${t.kelas}, tier ${t.tingkat}: ${t.sebab}`;
+
+function ringkasRadar(r) {
+  const n3 = r.titik.filter(t => t.tingkat === 3).length, n2 = r.titik.filter(t => t.tingkat === 2).length;
+  return `${angka(r.total)} santri: ${angka(n3)} tier 3, ${angka(n2)} tier 2` +
+    (r.sentuhAktif ? `, ${angka(r.jumlahTakTersentuh)} belum tersentuh.` : '.');
+}
+
+/** Monster di ujung sapuan: peci, jilbab, atau keduanya (Dua Unit). */
+function ikonSapuRadar() {
+  try { pasangSpriteMonster(); } catch (e) {}
+  const g = unitGuru() || normalUnit(APP.ctx.gender) || 'Semua';
+  const pakai = (id, x) => `<use href="#${id}" x="${x}" y="-4" width="16" height="16"/>`;
+  if (g === UNIT_PUTRI) return pakai('rqMonJilbab', 118);
+  if (g === UNIT_PUTRA) return pakai('rqMonPeci', 118);
+  return pakai('rqMonPeci', 112) + pakai('rqMonJilbab', 124);
+}
+
+function gambarRadarSvg(tata, radar, { mini = false, id = 'radarSvg' } = {}) {
+  const f = (n) => Math.round(n * 100) / 100;
+  const titik = (sudutDer, r) => { const a = sudutDer * Math.PI / 180; return [f(100 + r * Math.cos(a)), f(100 + r * Math.sin(a))]; };
+  const pita = [1, 2, 3].map(tk => `<circle class="radar-pita t${tk}" cx="100" cy="100" r="${RADAR_PITA[tk][1]}"/>`).join('');
+  const sekat = tata.sektor.length > 1 ? tata.sektor.map(s => { const [x, y] = titik(s.mulai, 92);
+    return `<line class="radar-sekat" x1="100" y1="100" x2="${x}" y2="${y}"/>`; }).join('') : '';
+  const label = mini ? '' : tata.sektor.map(s => { const [x, y] = titik(s.mulai + s.sudut / 2, 101);
+    return `<text class="radar-label" data-sektor="${esc(s.label)}" role="button" tabindex="0" x="${x}" y="${y}"
+      text-anchor="middle" dominant-baseline="middle">${esc(s.label)}</text>`; }).join('');
+  const gumpal = tata.gumpal.map((g, i) => `<g class="radar-gumpal t${g.tingkat}${g.adaTakTersentuh ? ' tak' : ''}" data-s="${esc(g.sektor)}"${mini ? '' :
+      ` data-gumpal="${i}" role="button" tabindex="0" aria-label="${esc(`${g.n} santri, ${g.sektor}, tier ${g.tingkat}`)}"`}>
+      <circle cx="${f(g.x)}" cy="${f(g.y)}" r="7.5"/><text x="${f(g.x)}" y="${f(g.y)}" text-anchor="middle" dominant-baseline="central">${g.n}</text></g>`).join('');
+  const urutan = new Map(radar.titik.map((t, i) => [t.nisn, i]));
+  const dots = [...tata.titik].sort((a, b) => urutan.get(a.nisn) - urutan.get(b.nisn)).map(t =>
+    `<circle class="radar-titik t${t.tingkat}${t.takTersentuh ? ' tak' : ''}" data-s="${esc(t.s)}" cx="${f(t.x)}" cy="${f(t.y)}" r="${mini ? 3.2 : 4.2}"${mini ? '' :
+      ` data-nisn="${esc(t.nisn)}" role="button" tabindex="0" aria-label="${esc(labelTitik(t))}"`}/>`).join('');
+  const sapu = mini ? '' : `<g class="radar-sapu" aria-hidden="true"><path d="M100 100 L100 8 A92 92 0 0 1 146 20.33 Z"/>${ikonSapuRadar()}</g>`;
+  return `<svg class="radar-svg${mini ? ' mini' : ''}" viewBox="0 0 200 200" role="img" aria-describedby="${id}Ringkas">
+      <g class="radar-latar">${pita}${sekat}</g>${sapu}${label}<g class="radar-isi">${gumpal}${dots}</g></svg>
+    <span id="${id}Ringkas" class="sr-only">${esc(ringkasRadar(radar))}</span>`;
 }
