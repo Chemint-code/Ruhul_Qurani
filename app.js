@@ -26556,3 +26556,53 @@ hidupkanLayarLogin();
 APP.versi = 'rq-v2.45';
 
 const RADAR = { token: 0, tokenMini: 0, data: null, tata: null, saring: 'semua', kelas: null, angkatan: null, bahanTerakhir: null };
+
+/* ---------- 1 · Hak, menu, dan konstanta ---------------------------- */
+const RADAR_HARI_SENTUH = 30;      // jendela "belum tersentuh", terpisah dari jendela IPP (60)
+const RADAR_AMBANG_SENTUH = 0.30;  // penanda menyala bila ≤ 30% santri lingkup belum tersentuh
+// URUT_ANGKATAN sudah ada (modul matriks kamar) dan dipakai ulang di sini.
+
+/** Kelas berurut angkatan (VII…XII), lalu abjad. Kelas tanpa angkatan di akhir. */
+function urutKelas(daftar) {
+  const i = (k) => { const a = URUT_ANGKATAN.indexOf(angkatanDariKelas(k)); return a < 0 ? 99 : a; };
+  return [...daftar].sort((a, b) => (i(a) - i(b)) || String(a).localeCompare(String(b), 'id'));
+}
+
+/* ---------- 2 · Data: tier IPP + penanda belum tersentuh ------------- */
+
+/**
+ * Murni. `ipp` = hasil terapkanAturanIpp (urutan daftarnya dipertahankan).
+ * "Tersentuh" = ada catatan pelanggaran, apresiasi, setoran tahfiz, izin,
+ * atau pembinaan dalam `hari` terakhir. Presensi sengaja tidak dihitung:
+ * ia dicatat per kelas, bukan perhatian kepada satu santri.
+ */
+function hitungRadar({ ipp, detail, prestasi, tahfiz, izin, pembinaan,
+                       hari = RADAR_HARI_SENTUH, matikanSentuh = false, kini = new Date() }) {
+  const awal = new Date(kini); awal.setHours(0, 0, 0, 0);
+  const batas = tambahHari(awal, -(hari - 1));
+  const akhir = new Date(kini); akhir.setHours(23, 59, 59, 999);
+  const terakhir = new Map();
+  const catat = (rows, kolom, jenis) => (rows || []).forEach(r => {
+    const d = tglDari(kunciTgl(r[kolom]));
+    if (!d || d < batas || d > akhir) return;
+    const n = String(r.nisn || ''); if (!n) return;
+    const lama = terakhir.get(n);
+    if (!lama || d > lama.d) terakhir.set(n, { d, jenis });
+  });
+  catat(detail, 'tanggal', 'pelanggaran');
+  catat(prestasi, 'tanggal', 'apresiasi');
+  catat(tahfiz, 'tanggal', 'setoran tahfiz');
+  catat(izin, 'tanggal_mulai', 'izin');
+  catat(pembinaan, 'tanggal_pembinaan', 'pembinaan');
+
+  const titik = ipp.daftar.map(x => {
+    const t = terakhir.get(String(x.nisn));
+    return { nisn: String(x.nisn), nama: x.nama, kelas: x.kelas, tingkat: x.tingkat, sebab: x.sebab,
+      tersentuh: !!t, terakhir: t ? { hari: Math.round((awal - t.d) / 864e5), jenis: t.jenis } : null };
+  });
+  const total = titik.length;
+  const jumlahTakTersentuh = titik.filter(t => !t.tersentuh).length;
+  const sentuhAktif = !matikanSentuh && total > 0 && jumlahTakTersentuh / total <= RADAR_AMBANG_SENTUH;
+  return { titik, sektor: urutKelas([...new Set(titik.map(t => t.kelas))]),
+    sentuhAktif, jumlahTakTersentuh, total, hari };
+}
