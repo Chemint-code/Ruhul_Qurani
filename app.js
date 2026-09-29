@@ -1242,10 +1242,14 @@ async function ambilDenganRelasi(tabel, selectRelasi, atur) {
   }
 }
 
-/** Jalankan loader; bila tabelnya belum ada, kembalikan array kosong. */
+/** Jalankan loader; bila gagal, kembalikan array kosong BERTANDA `gagal`.
+ *  v2.45: tanda ini dibaca bahanIpp() supaya data yang tidak terbaca tidak
+ *  dianggap "tidak ada catatan". Tanda hilang bila array di-filter/map,
+ *  jadi periksa sebelum menyaring. Array kosong yang disimpan di cache
+ *  (muatPrestasi/muatTahfiz) ikut membawa tandanya. */
 async function amanKosong(fn, nama) {
   try { return await fn(); }
-  catch (e) { console.warn(`Data ${nama} tidak dapat dibaca:`, e.message); return []; }
+  catch (e) { console.warn(`Data ${nama} tidak dapat dibaca:`, e.message); return Object.assign([], { gagal: true }); }
 }
 
 async function muatDetail() {
@@ -2891,6 +2895,25 @@ function kartuUnit() {
     </div></div>`;
 }
 
+/**
+ * Lingkup data Ringkasan. Dipakai viewDashboard() dan Radar (v2.45) supaya
+ * keduanya menghitung IPP dari potongan data yang persis sama.
+ */
+function lingkupDasbor({ siswaAll, detailAll, izinAll, pembinaanAll }) {
+  const siswa   = filterBinaanUnit(siswaAll.filter(aktifSantri), 'kelas');
+  const detail  = lingkupDetail(detailAll);          // ikut periode → untuk KPI
+  const detailTr = lingkupDetail(detailAll, false);  // lintas periode → untuk grafik
+  const nisnBoleh = new Set(siswa.map(s => String(s.nisn)));
+  const izinSemua = perluFilterKelas() ? izinAll.filter(z => nisnBoleh.has(String(z.nisn))) : izinAll;
+  const izin = saringPeriodeIzin(izinSemua);
+  const pembinaan = filterBinaanUnit(
+    saringPeriode(pembinaanAll.filter(aktifPembinaan), 'tanggal_pembinaan')
+      .map(p => ({ ...p, kelas: p.siswa?.kelas || '' })), 'kelas');
+  const gagal = [['santri', siswaAll], ['pelanggaran', detailAll], ['perizinan', izinAll], ['pembinaan', pembinaanAll]]
+    .filter(([, a]) => a && a.gagal).map(([n]) => n);
+  return { siswa, detail, detailTr, izinSemua, izin, pembinaan, gagal };
+}
+
 async function viewDashboard() {
 
   // v2.18.1: foto profil sudah diminta saat login — jangan diminta dua kali.
@@ -2907,15 +2930,8 @@ async function viewDashboard() {
     amanKosong(muatPembinaan, 'pembinaan')
   ]);
 
-  const siswa   = filterBinaanUnit(siswaAll.filter(aktifSantri), 'kelas');
-  const detail  = lingkupDetail(detailAll);          // ikut periode → untuk KPI
-  const detailTr = lingkupDetail(detailAll, false);  // lintas periode → untuk grafik
-  const nisnBoleh = new Set(siswa.map(s => String(s.nisn)));
-  const izinSemua = perluFilterKelas() ? izinAll.filter(z => nisnBoleh.has(String(z.nisn))) : izinAll;
-  const izin = saringPeriodeIzin(izinSemua);
-  const pembinaan = filterBinaanUnit(
-    saringPeriode(pembinaanAll.filter(aktifPembinaan), 'tanggal_pembinaan')
-      .map(p => ({ ...p, kelas: p.siswa?.kelas || '' })), 'kelas');
+  const { siswa, detail, detailTr, izinSemua, izin, pembinaan, gagal: gagalInti } =
+    lingkupDasbor({ siswaAll, detailAll, izinAll, pembinaanAll });
 
   const izinPending = izin.filter(z => z.status_persetujuan === 'Pending').length;
   const izinSesuai  = izin.filter(z => z.status_persetujuan === 'Sesuai Waktu').length;
@@ -3120,7 +3136,8 @@ async function viewDashboard() {
   // menjatuhkan dashboard yang sudah tampil.
   try {
     const sebaran = await blokSebaran({
-      siswa, detail: detailTr, izin: izinSemua, pembinaan, ipp: true, batasIpp: 6 });
+      siswa, detail: detailTr, izin: izinSemua, pembinaan, ipp: true, batasIpp: 6, gagal: gagalInti });
+    RADAR.bahanTerakhir = sebaran.bahan;
     const kotak = $('blokSebaran');
     if (kotak) { kotak.innerHTML = sebaran.html; sebaran.gambar(); }
   } catch (e) {
@@ -18596,12 +18613,15 @@ function panelIpp(ipp, { batas = 10 } = {}) {
    Perakitan — dipanggil dari viewDashboard dan viewPimpinan
    --------------------------------------------------------------------- */
 
+const GAGAL_INTI    = ['santri', 'pelanggaran', 'perizinan', 'pembinaan'];
+const GAGAL_POSITIF = ['prestasi', 'tahfiz'];
+
 /**
- * Muat data tambahan lalu susun seluruh panel perluasan.
- * Mengembalikan { html, gambar } — html disisipkan ke DOM, lalu gambar()
- * dipanggil setelahnya untuk melukis grafiknya.
+ * Bahan enam bulan untuk panel perluasan dan IPP (v2.45: diekstrak dari
+ * blokSebaran supaya Radar membaca sumber yang sama). `gagal` memuat nama
+ * sumber yang tidak terbaca, bukan sekadar kosong.
  */
-async function blokSebaran({ siswa, detail, izin, pembinaan, ipp = true, batasIpp = 10 }) {
+async function bahanIpp({ siswa, detail, izin, pembinaan, gagal = [] }) {
   const bulanKunci = bulanTerakhir(6);
   const [prestasiAll, tahfizAll, goals, targetThf, presensiAll] = await Promise.all([
     amanKosong(muatPrestasi, 'prestasi'),
@@ -18623,32 +18643,73 @@ async function blokSebaran({ siswa, detail, izin, pembinaan, ipp = true, batasIp
   const dalamJendela = (rows, kolom) =>
     rows.filter(r => jendela.has(bulanDari(kunciTgl(r[kolom]))));
 
-  const prestasi  = dalamJendela(saring(prestasiAll.filter(aktifPrestasi)), 'tanggal');
-  const tahfiz    = dalamJendela(saring(tahfizAll.filter(aktifTahfiz)), 'tanggal');
-  const detail6   = dalamJendela(detail, 'tanggal');
-  const izin6     = dalamJendela(izin, 'tanggal_mulai');
-  const bina6     = dalamJendela(pembinaan, 'tanggal_pembinaan');
-  // Presensi sudah terpotong enam bulan saat dimuat; di sini hanya
-  // disaring pada santri yang boleh dilihat peran ini.
-  const presensiRaw = { rows: saring(presensiAll.rows || []), pekan: presensiAll.pekan || [],
-    terkunci: !!presensiAll.terkunci };
+  return {
+    bulanKunci,
+    prestasi: dalamJendela(saring(prestasiAll.filter(aktifPrestasi)), 'tanggal'),
+    tahfiz:   dalamJendela(saring(tahfizAll.filter(aktifTahfiz)), 'tanggal'),
+    detail6:  dalamJendela(detail, 'tanggal'),
+    izin6:    dalamJendela(izin, 'tanggal_mulai'),
+    bina6:    dalamJendela(pembinaan, 'tanggal_pembinaan'),
+    // Presensi sudah terpotong enam bulan saat dimuat; di sini hanya
+    // disaring pada santri yang boleh dilihat peran ini.
+    presensiRaw: { rows: saring(presensiAll.rows || []), pekan: presensiAll.pekan || [],
+      terkunci: !!presensiAll.terkunci },
+    goals: saring(goals), targetThf: saring(targetThf),
+    gagal: [...gagal, ...(prestasiAll.gagal ? ['prestasi'] : []), ...(tahfizAll.gagal ? ['tahfiz'] : [])]
+  };
+}
 
-  const pos = panelPositif({ siswa, prestasi, tahfiz, bulanKunci });
-  const seb = panelSebaran({ siswa, detail: detail6, prestasi, tahfiz,
-    izin: izin6, pembinaan: bina6, presensi: presensiRaw, bulanKunci });
+/**
+ * IPP dari bahan, dengan aturan baku. Data inti yang tidak terbaca → null
+ * (tier dari separuh data lebih berbahaya daripada tidak ada tier). Data
+ * positif yang tidak terbaca → kriteria Ikatan nol dimatikan, karena
+ * ketiadaan catatan yang tidak terbaca tidak boleh dibaca sebagai fakta.
+ * Tanpa galat, hasilnya sama persis dengan hitungIpp().
+ */
+function ippDariBahan(siswa, b) {
+  if (b.gagal.some(g => GAGAL_INTI.includes(g))) return null;
+  const unsur = hitungUnsurIpp({ siswa, detail: b.detail6, prestasi: b.prestasi, tahfiz: b.tahfiz,
+    izin: b.izin6, pembinaan: b.bina6, presensi: b.presensiRaw });
+  const matikan = b.gagal.some(g => GAGAL_POSITIF.includes(g));
+  return terapkanAturanIpp(unsur, { hari: IPP_JENDELA, ...(matikan ? { pakaiIkatan: false } : {}) });
+}
+
+/** Kalimat pemberitahuan sumber yang tidak terbaca. '' bila tidak ada. */
+function kalimatGagal(gagal, untuk) {
+  const inti = gagal.filter(g => GAGAL_INTI.includes(g)), positif = gagal.filter(g => GAGAL_POSITIF.includes(g));
+  if (inti.length) return `Sebagian data tidak terbaca (${inti.join(', ')}). ${untuk === 'radar'
+    ? 'Radar belum bisa digambar dengan jujur.' : 'Tingkat peringatan belum bisa dihitung dengan jujur.'}`;
+  if (positif.length) return `Data ${positif.join(' dan ')} tidak terbaca. Kriteria Ikatan nol dan penanda belum tersentuh dimatikan sementara.`;
+  return '';
+}
+
+/**
+ * Muat data tambahan lalu susun seluruh panel perluasan.
+ * Mengembalikan { html, gambar, ipp, bahan } — html disisipkan ke DOM, lalu
+ * gambar() dipanggil setelahnya untuk melukis grafiknya. v2.45: `bahan`
+ * dipakai kartu mini Radar supaya tidak memuat ulang.
+ */
+async function blokSebaran({ siswa, detail, izin, pembinaan, ipp = true, batasIpp = 10, gagal = [] }) {
+  const b = await bahanIpp({ siswa, detail, izin, pembinaan, gagal });
+
+  const pos = panelPositif({ siswa, prestasi: b.prestasi, tahfiz: b.tahfiz, bulanKunci: b.bulanKunci });
+  const seb = panelSebaran({ siswa, detail: b.detail6, prestasi: b.prestasi, tahfiz: b.tahfiz,
+    izin: b.izin6, pembinaan: b.bina6, presensi: b.presensiRaw, bulanKunci: b.bulanKunci });
   // v2.17 — matriks silang kelas x kamar. Memakai `siswa` yang SAMA
   // dengan panel di atasnya, jadi lingkup unit/kelas binaannya identik
   // dan tidak ada jalur data kamar yang menembus gerbang itu.
-  const kmr = panelKamar({ siswa, detail: detail6, prestasi, tahfiz, pembinaan: bina6 });
-  const tgt = panelTarget({ siswa, goals: saring(goals), targetTahfiz: saring(targetThf), tahfiz });
+  const kmr = panelKamar({ siswa, detail: b.detail6, prestasi: b.prestasi, tahfiz: b.tahfiz, pembinaan: b.bina6 });
+  const tgt = panelTarget({ siswa, goals: b.goals, targetTahfiz: b.targetThf, tahfiz: b.tahfiz });
 
-  let ippHtml = '';
+  let ippHasil = null, ippHtml = '';
   if (ipp) {
     // Jendela IPP (60 hari) berada di dalam enam bulan, jadi pemotongan
     // di atas tidak menghilangkan satu pun baris yang IPP butuhkan.
-    const hasil = hitungIpp({ siswa, detail: detail6, prestasi, tahfiz,
-      izin: izin6, pembinaan: bina6, presensi: presensiRaw });
-    ippHtml = panelIpp(hasil, { batas: batasIpp });
+    ippHasil = ippDariBahan(siswa, b);
+    const catatan = kalimatGagal(b.gagal, 'ipp');
+    ippHtml = ippHasil
+      ? panelIpp(ippHasil, { batas: batasIpp }) + (catatan ? `<p class="sb-kaki radar-catatan">${esc(catatan)}</p>` : '')
+      : kartu('Indeks Peringatan Pembinaan', kosong(catatan, 'Muat ulang halaman untuk mencoba lagi.', 'fa-triangle-exclamation'));
   }
 
   const html = `
@@ -18661,9 +18722,9 @@ async function blokSebaran({ siswa, detail, izin, pembinaan, ipp = true, batasIp
     ${ippHtml}`;
 
   return {
-    html,
+    html, ipp: ippHasil, bahan: b,
     gambar: () => {
-      gambarPositif({ bulanKunci, prsBulan: pos.prsBulan, thfBulan: pos.thfBulan,
+      gambarPositif({ bulanKunci: b.bulanKunci, prsBulan: pos.prsBulan, thfBulan: pos.thfBulan,
         prsTipis: pos.prsTipis, thfTipis: pos.thfTipis });
       gambarTarget(tgt);
       // Matriks sebaran lebih lebar daripada layar ponsel; helper ini
@@ -26477,3 +26538,21 @@ hidupkanLayarLogin();
     if (!APP.profil) LayarMuat.tutupAwal();
   }
 })();
+
+/* =====================================================================
+ * v2.45 — RADAR AMANAH
+ * ---------------------------------------------------------------------
+ *  Setiap santri binaan tampil sebagai titik. Jarak ke pusat = tier IPP
+ *  (tidak ada skor baru, lihat kepala modul IPP: unsur sengaja tidak
+ *  dijumlahkan dan tidak ada tren per santri). Sektor = kelas. Penanda
+ *  "belum tersentuh" = tanpa catatan apa pun 30 hari, hanya menyala bila
+ *  paling banyak 30% santri lingkup (peringatan yang menandai semua orang
+ *  tidak memperingatkan siapa pun).
+ *
+ *  Hak didaftarkan DI SINI, sesudah pasangPeranWakasis(), supaya Wakasis
+ *  (tidak membaca presensi mentah) tidak ikut mendapatkannya.
+ *  Hanya membaca. Tidak ada tabel, migrasi, atau RLS baru.
+ * ===================================================================== */
+APP.versi = 'rq-v2.45';
+
+const RADAR = { token: 0, tokenMini: 0, data: null, tata: null, saring: 'semua', kelas: null, angkatan: null, bahanTerakhir: null };
