@@ -10101,7 +10101,45 @@ function mdGambarPanel() {
   tandaiTabelBisaGeser();
 }
 
-/** Simpan pelanggaran lewat RPC catat_pelanggaran + alur konfirmasi izin. */
+/**
+ * Simpan satu pelanggaran lewat RPC catat_pelanggaran dengan seluruh
+ * pengaman: cek duplikat (kecuali sudah dilakukan pemanggil), konflik izin
+ * (Osis ditolak; selain Osis dikonfirmasi lalu p_force). Tidak menyentuh
+ * tombol atau toast. v2.46: dipakai bersama panel Madrasah dan Catat Kilat.
+ */
+async function simpanPelanggaranAman(payload, { lewatiDuplikat = false } = {}) {
+  if (!lewatiDuplikat) {
+    const dup = await cariDuplikatPelanggaran(payload.p_nisn, payload.p_kode, payload.p_tanggal);
+    if (dup && !(await konfirmasiDuplikatPelanggaran(dup, payload.p_kode))) return { ok: false, batal: true };
+  }
+  try {
+    let { data, error } = await db.rpc('catat_pelanggaran', payload);
+    if (error) throw error;
+    if (data?.conflict) {
+      if (role() === 'Osis') {
+        await Swal.fire({ icon:'error', title:'Tidak berwenang',
+          text:'Osis tidak dapat menimpa izin yang sudah berstatus Sesuai Waktu. Hubungi Admin/Guru.',
+          confirmButtonColor:'#9F1239' });
+        return { ok: false, batal: true };
+      }
+      const konf = await Swal.fire({
+        icon:'warning', title:'Terdeteksi izin yang sesuai waktu',
+        html:`<p style="text-align:left;font-size:13.5px">${esc(data.message || '')}</p>`,
+        showCancelButton:true, confirmButtonText:'Tetap catat pelanggaran',
+        cancelButtonText:'Batalkan', confirmButtonColor:'#9F1239' });
+      if (!konf.isConfirmed) return { ok: false, batal: true };
+      const r2 = await db.rpc('catat_pelanggaran', { ...payload, p_force: true });
+      if (r2.error) throw r2.error;
+      data = r2.data;
+    }
+    cacheHapus('detail','siswa','pembinaan');
+    return { ok: true, data: data || {} };
+  } catch (galat) {
+    return { ok: false, galat };
+  }
+}
+
+/** Simpan pelanggaran dari panel Madrasah: tombol dan toast di sekeliling simpanPelanggaranAman. */
 async function mdSimpanPelanggaran(payload, btn, label) {
   // Penjagaan duplikat didahulukan: bertanya setelah tersimpan sudah
   // terlambat, karena trigger pembinaan berjalan di detik yang sama.
@@ -10109,41 +10147,12 @@ async function mdSimpanPelanggaran(payload, btn, label) {
   if (dup && !(await konfirmasiDuplikatPelanggaran(dup, payload.p_kode))) return null;
 
   const asli = mulaiSimpan(btn, label);
-  try {
-    let { data, error } = await db.rpc('catat_pelanggaran', payload);
-    if (error) throw error;
-
-    if (data?.conflict) {
-      selesaiSimpan(btn, asli, true, 'Menunggu konfirmasi');
-      if (role() === 'Osis') {
-        await Swal.fire({ icon:'error', title:'Tidak berwenang',
-          text:'Osis tidak dapat menimpa izin yang sudah berstatus Sesuai Waktu. Hubungi Admin/Guru.',
-          confirmButtonColor:'#9F1239' });
-        return null;
-      }
-      const konf = await Swal.fire({
-        icon:'warning', title:'Terdeteksi izin yang sesuai waktu',
-        html:`<p style="text-align:left;font-size:13.5px">${esc(data.message || '')}</p>`,
-        showCancelButton:true, confirmButtonText:'Tetap catat pelanggaran',
-        cancelButtonText:'Batalkan', confirmButtonColor:'#9F1239' });
-      if (!konf.isConfirmed) return null;
-
-      const ulang = mulaiSimpan(btn, label);
-      const r2 = await db.rpc('catat_pelanggaran', { ...payload, p_force: true });
-      if (r2.error) { selesaiSimpan(btn, ulang, false, 'Gagal menyimpan'); throw r2.error; }
-      selesaiSimpan(btn, ulang, true, 'Pelanggaran tersimpan');
-      data = r2.data;
-    } else {
-      selesaiSimpan(btn, asli, true, 'Pelanggaran tersimpan');
-    }
-
-    cacheHapus('detail','siswa','pembinaan');
-    return data || {};
-  } catch (err) {
-    selesaiSimpan(btn, asli, false, 'Gagal menyimpan');
-    fireError(err);
-    return null;
-  }
+  const h = await simpanPelanggaranAman(payload, { lewatiDuplikat: true });
+  if (h.ok) { selesaiSimpan(btn, asli, true, 'Pelanggaran tersimpan'); return h.data; }
+  if (h.batal) { selesaiSimpan(btn, asli, true, 'Menunggu konfirmasi'); return null; }
+  selesaiSimpan(btn, asli, false, 'Gagal menyimpan');
+  fireError(h.galat);
+  return null;
 }
 
 // ---------- Panel 1: pemeriksaan atribut ----------
