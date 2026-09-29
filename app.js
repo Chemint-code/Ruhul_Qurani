@@ -2910,9 +2910,14 @@ function lingkupDasbor({ siswaAll, detailAll, izinAll, pembinaanAll }) {
   const pembinaan = filterBinaanUnit(
     saringPeriode(pembinaanAll.filter(aktifPembinaan), 'tanggal_pembinaan')
       .map(p => ({ ...p, kelas: p.siswa?.kelas || '' })), 'kelas');
-  const gagal = [['santri', siswaAll], ['pelanggaran', detailAll], ['perizinan', izinAll], ['pembinaan', pembinaanAll]]
+  return { siswa, detail, detailTr, izinSemua, izin, pembinaan,
+    gagal: daftarGagalInti({ siswaAll, detailAll, izinAll, pembinaanAll }) };
+}
+
+/** Nama sumber inti yang gagal dimuat (array bertanda `gagal` dari amanKosong). */
+function daftarGagalInti({ siswaAll, detailAll, izinAll, pembinaanAll }) {
+  return [['santri', siswaAll], ['pelanggaran', detailAll], ['perizinan', izinAll], ['pembinaan', pembinaanAll]]
     .filter(([, a]) => a && a.gagal).map(([n]) => n);
-  return { siswa, detail, detailTr, izinSemua, izin, pembinaan, gagal };
 }
 
 async function viewDashboard() {
@@ -3545,7 +3550,8 @@ async function viewPimpinan(opsi = {}) {
   try {
     const sebaran = await blokSebaran({
       siswa, detail: detailAktif, izin: izinAll, pembinaan: pbnAktif,
-      ipp: true, batasIpp: modeBk ? 15 : 10 });
+      ipp: true, batasIpp: modeBk ? 15 : 10,
+      gagal: daftarGagalInti({ siswaAll, detailAll, izinAll, pembinaanAll }) });
     const kotak = $('blokSebaran');
     if (kotak) { kotak.innerHTML = sebaran.html; sebaran.gambar(); }
   } catch (e) {
@@ -26569,7 +26575,7 @@ hidupkanLayarLogin();
  * ===================================================================== */
 APP.versi = 'rq-v2.45';
 
-const RADAR = { token: 0, tokenMini: 0, data: null, tata: null, saring: 'semua', kelas: null, angkatan: null, bahanTerakhir: null };
+const RADAR = { token: 0, tokenMini: 0, data: null, tata: null, saring: 'semua', kelas: null, angkatan: null, lengkap: false, bahanTerakhir: null };
 
 HAK['radar.lihat'] = ['Admin', 'Guru', 'Walas', 'Guru BK'];
 MENU_ROLE.radar = ['Admin', 'Guru', 'Walas', 'Guru BK'];
@@ -26787,14 +26793,23 @@ function kartuRadarGagal(gagal) {
     <p style="text-align:center"><button class="btn btn-ghost btn-sm" data-radar-ulang>Coba lagi</button></p></div>`);
 }
 
-function daftarTersaring() {
+/** Butir yang perlu dilihat lebih dulu: tier 3, tier 2, lalu tier 1 yang belum tersentuh. */
+const perluDilihat = (t, r) => t.tingkat >= 2 || (r.sentuhAktif && !t.tersentuh);
+
+/**
+ * Daftar di bawah radar. Saringan "Semua" menampilkan tier 3, tier 2, lalu
+ * belum tersentuh (urutan IPP). Tier 1 lainnya baru tampil setelah
+ * "Tampilkan juga" (RADAR.lengkap), supaya lingkup ratusan santri tidak
+ * menjadi daftar panjang yang menenggelamkan yang perlu dilihat.
+ */
+function daftarTersaring({ lengkap = RADAR.lengkap } = {}) {
   const r = RADAR.data.radar;
   if (RADAR.saring === 'tak' && !r.sentuhAktif) RADAR.saring = 'semua';
   const per = RADAR.tata.perAngkatan;
   return r.titik.filter(t =>
     (!RADAR.angkatan || (angkatanDariKelas(t.kelas) || 'Lainnya') === RADAR.angkatan) &&
     (!RADAR.kelas || kunciSektorRadar(t, per) === RADAR.kelas) &&
-    (RADAR.saring === 'semua' || (RADAR.saring === 't3' && t.tingkat === 3) ||
+    ((RADAR.saring === 'semua' && (lengkap || perluDilihat(t, r))) || (RADAR.saring === 't3' && t.tingkat === 3) ||
      (RADAR.saring === 't2' && t.tingkat === 2) || (RADAR.saring === 'tak' && !t.tersentuh)));
 }
 
@@ -26815,7 +26830,10 @@ function chipRadar(r) {
 
 function perbaruiDaftarRadar() {
   const daftar = $('radarDaftar'); if (!daftar) return;
-  daftar.innerHTML = htmlDaftarRadar(daftarTersaring());
+  const tampil = daftarTersaring();
+  const sisa = RADAR.saring === 'semua' && !RADAR.lengkap ? daftarTersaring({ lengkap: true }).length - tampil.length : 0;
+  daftar.innerHTML = htmlDaftarRadar(tampil) + (sisa > 0
+    ? `<p style="text-align:center"><button class="btn btn-ghost btn-sm" data-radar-lengkap>Tampilkan juga ${angka(sisa)} santri tier 1 lainnya</button></p>` : '');
   document.querySelectorAll('[data-radar-saring]').forEach(b => b.classList.toggle('on', b.dataset.radarSaring === RADAR.saring));
   document.querySelectorAll('.radar-layar .radar-svg [data-s]').forEach(el =>
     el.classList.toggle('redup', !!RADAR.kelas && el.dataset.s !== RADAR.kelas));
@@ -26824,7 +26842,13 @@ function perbaruiDaftarRadar() {
 
 async function viewRadar() {
   const token = ++RADAR.token;
-  RADAR.saring = 'semua'; RADAR.kelas = null; RADAR.angkatan = null;
+  // Penyegaran view yang sama (realtime, kabarDataBaru) tidak mengosongkan
+  // layar lebih dulu, jadi radar lama masih ada: pertahankan saringan dan
+  // lembar yang terbuka, dan jangan ulangi sapuan. Masuk dari halaman lain
+  // → keadaan awal.
+  const segarkan = !!document.querySelector('#viewRoot .radar-layar');
+  const lembarNisn = segarkan ? (document.querySelector('.radar-lembar')?.dataset.nisn || null) : null;
+  if (!segarkan) { RADAR.saring = 'semua'; RADAR.kelas = null; RADAR.angkatan = null; RADAR.lengkap = false; }
   if (!bolehRadar()) {
     $('viewRoot').innerHTML = kosong('Radar belum tersedia untuk akun ini.', 'Radar tampil untuk akun yang punya kelas binaan.', 'fa-satellite-dish');
     return;
@@ -26834,10 +26858,11 @@ async function viewRadar() {
   catch (e) { console.warn('Radar:', e.message); d = { gagal: ['santri'], ipp: null, radar: null }; }
   if (token !== RADAR.token || APP.view !== 'radar') return;   // sudah pindah halaman/unit
   RADAR.data = d;
-  gambarLayarRadar();
+  gambarLayarRadar({ sapu: !segarkan });
+  if (lembarNisn && d.radar) { const html = htmlKartuTitik(lembarNisn); if (html) bukaLembarRadar(html, lembarNisn); }
 }
 
-function gambarLayarRadar() {
+function gambarLayarRadar({ sapu = true } = {}) {
   const d = RADAR.data, root = $('viewRoot');
   if (!d.radar) { root.innerHTML = kartuRadarGagal(d.gagal); pasangKlikRadar(); return; }
   if (!d.radar.total) { root.innerHTML = kosong('Belum ada santri pada unit ini.', 'Pilih unit lain di bilah atas.', 'fa-satellite-dish'); return; }
@@ -26857,16 +26882,17 @@ function gambarLayarRadar() {
     </section>`;
   perbaruiDaftarRadar();
   pasangKlikRadar();
-  mulaiSapuRadar();
+  mulaiSapuRadar({ sapu });
 }
 
 /* ---------- 6 · Lembar bawah dan ketukan ----------------------------- */
 function tutupLembarRadar() { document.querySelectorAll('.radar-lembar').forEach(e => e.remove()); }
 
-function bukaLembarRadar(html) {
+function bukaLembarRadar(html, nisn = null) {
   tutupLembarRadar();
   const el = document.createElement('div');
   el.className = 'radar-lembar';
+  if (nisn) el.dataset.nisn = nisn;   // dipakai untuk membuka ulang setelah penyegaran
   el.setAttribute('role', 'dialog');
   el.setAttribute('aria-label', 'Rincian Radar');
   el.innerHTML = `<button class="radar-tutup" data-radar-tutup aria-label="Tutup">×</button>${html}`;
@@ -26916,7 +26942,7 @@ function ketukTerdekat(svg, e) {
   });
   if (!dekat || jarak > batas) return;
   if (dekat.dataset.gumpal !== undefined) return bukaGumpal(+dekat.dataset.gumpal);
-  bukaLembarRadar(htmlKartuTitik(dekat.dataset.nisn));
+  bukaLembarRadar(htmlKartuTitik(dekat.dataset.nisn), dekat.dataset.nisn);
 }
 
 function pasangKlikRadar() {
@@ -26929,6 +26955,7 @@ function pasangKlikRadar() {
       return navigateTo('radar');
     }
     if (e.target.closest('[data-radar-kembali]')) { RADAR.angkatan = null; RADAR.kelas = null; return gambarLayarRadar(); }
+    if (e.target.closest('[data-radar-lengkap]')) { RADAR.lengkap = true; return perbaruiDaftarRadar(); }
     const chip = e.target.closest('[data-radar-saring]');
     if (chip) { RADAR.saring = chip.dataset.radarSaring; return perbaruiDaftarRadar(); }
     const lab = e.target.closest('.radar-label[data-sektor]');
@@ -26936,7 +26963,7 @@ function pasangKlikRadar() {
     const g = e.target.closest('.radar-gumpal[data-gumpal]');
     if (g) return bukaGumpal(+g.dataset.gumpal);
     const b = e.target.closest('.radar-baris[data-nisn], .radar-titik[data-nisn]');
-    if (b) return bukaLembarRadar(htmlKartuTitik(b.dataset.nisn));
+    if (b) return bukaLembarRadar(htmlKartuTitik(b.dataset.nisn), b.dataset.nisn);
     const svg = e.target.closest('.radar-layar .radar-svg');
     if (svg) return ketukTerdekat(svg, e);
   });
@@ -26959,11 +26986,12 @@ Gerak.PRESET.kilauTitik = { k: [{ transform: 'scale(1)' }, { transform: 'scale(1
  * tidak cukup lama untuk mengganggu atau menghabiskan baterai. Titik
  * berpendar sesaat ketika tepi depan baji melewatinya.
  */
-function mulaiSapuRadar() {
+function mulaiSapuRadar({ sapu: putar = true } = {}) {
   const svg = document.querySelector('.radar-layar .radar-svg'); if (!svg) return;
   const sapu = svg.querySelector('.radar-sapu');
   if (!bolehGerak()) { sapu?.remove(); return; }
   svg.classList.add('berdenyut');   // denyut pelan titik belum tersentuh (CSS, dijeda saat .tenang)
+  if (!putar) { sapu?.remove(); return; }   // penyegaran: tanpa sapuan ulang
   const a = Gerak.main(sapu, 'sapuRadar', { duration: RADAR_PUTARAN_MS, iterations: RADAR_PUTARAN, easing: 'linear', fill: 'none' });
   a.finished.catch(() => {}).finally(() => sapu.classList.add('selesai'));
   svg.querySelectorAll('.radar-titik, .radar-gumpal').forEach(el => {
