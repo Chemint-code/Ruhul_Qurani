@@ -2919,6 +2919,7 @@ async function viewDashboard() {
 
   // v2.18.1: foto profil sudah diminta saat login — jangan diminta dua kali.
   const profilePromise = APP.janjiProfil || setupProfilUserLogin();
+  const tokenMini = ++RADAR.tokenMini;
   // v2.18.1: panel-panel di bawah dashboard dulu dimuat BERURUTAN setelah
   // data utama (±4 kali menunggu server). Sekarang diminta serentak sejak
   // awal; pemanggilan berikutnya di bawah menunggu janji yang sama.
@@ -3010,6 +3011,7 @@ async function viewDashboard() {
         : { jumlah: binaProses,  label: 'pembinaan belum diselesaikan', ikon: 'fa-hands-holding-child', view: 'pembinaan' },
       { jumlah: perluWali,   label: 'wali santri perlu dikabari', ikon: 'fa-comment-dots', view: 'pembinaan' }
     ])}
+    ${bolehRadar() ? `<div id="radarMini" class="radar-mini" aria-busy="true"><div class="rq-sk radar-mini-sk"></div></div>` : ''}
     ${kartuUnit()}
 
     <div class="stats">
@@ -3064,6 +3066,10 @@ async function viewDashboard() {
   pasangMonster(bolehLaporBina() ? binaBelumLapor : binaProses);
 
   onKlik(async (e) => {
+    if (e.target.closest('[data-radar-ulang-mini]')) {
+      cacheHapus('siswa', 'detail', 'izin', 'pembinaan', 'prestasi', 'tahfiz');
+      return navigateTo('dashboard');
+    }
     const n = e.target.closest('[data-nav]');
     if (n) return navigateTo(n.dataset.nav);
     const dt = e.target.closest('[data-detail]');
@@ -3139,9 +3145,11 @@ async function viewDashboard() {
     const sebaran = await blokSebaran({
       siswa, detail: detailTr, izin: izinSemua, pembinaan, ipp: true, batasIpp: 6, gagal: gagalInti });
     RADAR.bahanTerakhir = sebaran.bahan;
+    gambarRadarMini(siswa, sebaran.bahan, tokenMini);
     const kotak = $('blokSebaran');
     if (kotak) { kotak.innerHTML = sebaran.html; sebaran.gambar(); }
   } catch (e) {
+    gambarRadarMini(siswa, null, tokenMini);
     console.warn('Peta perkembangan tidak dapat ditampilkan:', e.message);
     const kotak = $('blokSebaran');
     if (kotak) kotak.innerHTML = kosong('Peta perkembangan belum dapat dimuat.',
@@ -26567,10 +26575,14 @@ HAK['radar.lihat'] = ['Admin', 'Guru', 'Walas', 'Guru BK'];
 MENU_ROLE.radar = ['Admin', 'Guru', 'Walas', 'Guru BK'];
 JUDUL.radar = { lat: 'Radar', ar: 'رادار الأمانة', teks: 'Radar Amanah' };
 
-/** Radar untuk peran yang membaca kelima unsur IPP. Guru/Walas wajib punya kelas binaan. */
+/**
+ * Radar untuk peran yang membaca kelima unsur IPP. Peran yang lingkupnya
+ * kelas binaan (Guru, Walas, Guru BK) wajib punya kelas binaan; tanpa itu
+ * lingkupnya kosong dan radar kosong hanya menyesatkan.
+ */
 function bolehRadar() {
   if (!bisa('radar.lihat')) return false;
-  if (['Guru', 'Walas'].includes(role())) return (APP.profil?.kelas_binaan || []).length > 0;
+  if (perluFilterKelas()) return (APP.profil?.kelas_binaan || []).length > 0;
   return true;
 }
 
@@ -26939,3 +26951,39 @@ function pasangKlikRadar() {
 
 /* ---------- 7 · Sapuan monster (isi di Tugas 7) ---------------------- */
 function mulaiSapuRadar() {}
+
+/* ---------- 8 · Kartu mini di Ringkasan ------------------------------ */
+function htmlMiniGagal(gagal) {
+  const teks = gagal.includes('santri') ? 'Radar tidak terbaca.' : kalimatGagal(gagal, 'radar');
+  return `<div class="radar-mini-gagal">${esc(teks)}
+    <button class="btn btn-ghost btn-sm" data-radar-ulang-mini>Coba lagi</button></div>`;
+}
+
+/** Dipanggil sesudah blokSebaran selesai. Tidak boleh menjatuhkan Ringkasan. */
+function gambarRadarMini(siswa, bahan, tokenMini) {
+  const kotak = $('radarMini');
+  if (!kotak || tokenMini !== RADAR.tokenMini) return;
+  kotak.removeAttribute('aria-busy');
+  try {
+    if (!bahan) { kotak.innerHTML = htmlMiniGagal(['santri']); return; }
+    const d = radarDariBahan(siswa, bahan);
+    if (!d.radar) { kotak.innerHTML = htmlMiniGagal(d.gagal); return; }
+    const r = d.radar;
+    if (!r.total) { kotak.remove(); return; }
+    const n3 = r.titik.filter(t => t.tingkat === 3).length, n2 = r.titik.filter(t => t.tingkat === 2).length;
+    const ada = n3 + n2 + (r.sentuhAktif ? r.jumlahTakTersentuh : 0);
+    const ringkas = ada
+      ? `<span><span class="t3">●</span> ${angka(n3)} tier 3 · <span class="t2">●</span> ${angka(n2)} tier 2${
+          r.sentuhAktif ? ` · ○ ${angka(r.jumlahTakTersentuh)} belum tersentuh` : ''}</span>`
+      : `<span>Semua santri binaan dalam dukungan umum.</span>`;
+    const catatan = catatanRadar(d).replace(/<\/?p[^>]*>/g, '');
+    kotak.innerHTML = `<button class="radar-mini-isi" data-nav="radar" aria-label="Buka Radar Amanah. ${esc(ringkasRadar(r))}">
+      ${gambarRadarSvg(tataRadar(r), r, { mini: true, id: 'radarMiniSvg' })}
+      <span class="radar-mini-teks"><b>Radar Amanah</b>${ringkas}
+        ${catatan ? `<small>${catatan}</small>` : ''}${barisLuring().replace(/<\/?p[^>]*>/g, '')}
+        <span class="go">Buka Radar <i class="fa-solid fa-arrow-right"></i></span></span></button>`;
+  } catch (e) {
+    console.warn('Radar mini:', e.message);
+    kotak.innerHTML = htmlMiniGagal(['santri']);
+  }
+}
