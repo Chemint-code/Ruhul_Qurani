@@ -2591,6 +2591,7 @@ async function navigateTo(view) {
   const tutupTirai = LayarMuat.tiraiUntuk(j);
   try {
     if (view === 'dashboard')        await viewDashboard();
+    else if (view === 'radar')       await viewRadar();
     else if (view === 'pimpinan')    await viewPimpinan();
     else if (view === 'bk')          await viewBk();
     else if (view === 'pesan')       await viewPesan();
@@ -26562,6 +26563,17 @@ APP.versi = 'rq-v2.45';
 
 const RADAR = { token: 0, tokenMini: 0, data: null, tata: null, saring: 'semua', kelas: null, angkatan: null, bahanTerakhir: null };
 
+HAK['radar.lihat'] = ['Admin', 'Guru', 'Walas', 'Guru BK'];
+MENU_ROLE.radar = ['Admin', 'Guru', 'Walas', 'Guru BK'];
+JUDUL.radar = { lat: 'Radar', ar: 'رادار الأمانة', teks: 'Radar Amanah' };
+
+/** Radar untuk peran yang membaca kelima unsur IPP. Guru/Walas wajib punya kelas binaan. */
+function bolehRadar() {
+  if (!bisa('radar.lihat')) return false;
+  if (['Guru', 'Walas'].includes(role())) return (APP.profil?.kelas_binaan || []).length > 0;
+  return true;
+}
+
 /* ---------- 1 · Hak, menu, dan konstanta ---------------------------- */
 const RADAR_HARI_SENTUH = 30;      // jendela "belum tersentuh", terpisah dari jendela IPP (60)
 const RADAR_AMBANG_SENTUH = 0.30;  // penanda menyala bila ≤ 30% santri lingkup belum tersentuh
@@ -26724,3 +26736,206 @@ function gambarRadarSvg(tata, radar, { mini = false, id = 'radarSvg' } = {}) {
       <g class="radar-latar">${pita}${sekat}</g>${sapu}${label}<g class="radar-isi">${gumpal}${dots}</g></svg>
     <span id="${id}Ringkas" class="sr-only">${esc(ringkasRadar(radar))}</span>`;
 }
+
+/* ---------- 5 · Layar penuh ----------------------------------------- */
+function radarDariBahan(siswa, bahan) {
+  const ipp = ippDariBahan(siswa, bahan);
+  if (!ipp) return { gagal: bahan.gagal, ipp: null, radar: null };
+  const radar = hitungRadar({ ipp, detail: bahan.detail6, prestasi: bahan.prestasi, tahfiz: bahan.tahfiz,
+    izin: bahan.izin6, pembinaan: bahan.bina6, matikanSentuh: bahan.gagal.some(g => GAGAL_POSITIF.includes(g)) });
+  return { gagal: bahan.gagal, ipp, radar };
+}
+
+/** Muat bahan dengan lingkup yang sama persis dengan Ringkasan. */
+async function siapkanRadar() {
+  const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
+    amanKosong(muatSiswa, 'santri'), amanKosong(muatDetail, 'pelanggaran'),
+    amanKosong(muatIzin, 'perizinan'), amanKosong(muatPembinaan, 'pembinaan')]);
+  const L = lingkupDasbor({ siswaAll, detailAll, izinAll, pembinaanAll });
+  const bahan = await bahanIpp({ siswa: L.siswa, detail: L.detailTr, izin: L.izinSemua, pembinaan: L.pembinaan, gagal: L.gagal });
+  return radarDariBahan(L.siswa, bahan);
+}
+
+const sedangLuring = () => navigator.onLine === false || !!tandaiLuring.sudah;
+const barisLuring = () => sedangLuring()
+  ? `<p class="radar-luring"><i class="fa-solid fa-cloud-arrow-down"></i> Data tersimpan di perangkat. Sambungkan internet untuk memperbarui.</p>` : '';
+
+/** Kalimat di bawah judul: sumber gagal, atau pencatatan belum merata. */
+function catatanRadar(d) {
+  const r = d.radar, gagal = kalimatGagal(d.gagal, 'radar');
+  if (gagal) return `<p class="radar-catatan">${esc(gagal)}</p>`;
+  if (!r.sentuhAktif && r.total) return `<p class="radar-catatan">Pencatatan belum merata: ${angka(r.jumlahTakTersentuh)} dari ${angka(r.total)} santri belum punya catatan ${r.hari} hari terakhir.</p>`;
+  return '';
+}
+
+function kartuRadarGagal(gagal) {
+  return kartu('Radar Amanah', `<div class="card-body">${kosong(
+    gagal.includes('santri') ? 'Radar tidak terbaca.' : kalimatGagal(gagal, 'radar'),
+    'Periksa koneksi, lalu coba lagi.', 'fa-triangle-exclamation')}
+    <p style="text-align:center"><button class="btn btn-ghost btn-sm" data-radar-ulang>Coba lagi</button></p></div>`);
+}
+
+function daftarTersaring() {
+  const r = RADAR.data.radar;
+  if (RADAR.saring === 'tak' && !r.sentuhAktif) RADAR.saring = 'semua';
+  const per = RADAR.tata.perAngkatan;
+  return r.titik.filter(t =>
+    (!RADAR.angkatan || (angkatanDariKelas(t.kelas) || 'Lainnya') === RADAR.angkatan) &&
+    (!RADAR.kelas || kunciSektorRadar(t, per) === RADAR.kelas) &&
+    (RADAR.saring === 'semua' || (RADAR.saring === 't3' && t.tingkat === 3) ||
+     (RADAR.saring === 't2' && t.tingkat === 2) || (RADAR.saring === 'tak' && !t.tersentuh)));
+}
+
+function htmlDaftarRadar(list) {
+  const tak = (t) => RADAR.data.radar.sentuhAktif && !t.tersentuh;
+  return list.length ? `<ul>${list.map(t => `<li><button class="radar-baris t${t.tingkat}" data-nisn="${esc(t.nisn)}">
+      <b>${esc(t.nama)}</b><small>${esc(t.kelas)} · ${esc(t.sebab)}${tak(t) ? ` · belum tersentuh ${RADAR.data.radar.hari} hari` : ''}</small>
+      <span class="tag ${tagTier(t.tingkat)}">Tier ${t.tingkat}</span></button></li>`).join('')}</ul>`
+    : kosong('Tidak ada santri pada saringan ini.', '', 'fa-circle-check');
+}
+
+function chipRadar(r) {
+  const n3 = r.titik.filter(t => t.tingkat === 3).length, n2 = r.titik.filter(t => t.tingkat === 2).length;
+  const c = [['semua', 'Semua', r.total], ['t3', 'Tier 3', n3], ['t2', 'Tier 2', n2]];
+  if (r.sentuhAktif) c.push(['tak', 'Belum tersentuh', r.jumlahTakTersentuh]);
+  return c.map(([k, l, n]) => `<button class="chip${RADAR.saring === k ? ' on' : ''}" data-radar-saring="${k}">${l} <b>${angka(n)}</b></button>`).join('');
+}
+
+function perbaruiDaftarRadar() {
+  const daftar = $('radarDaftar'); if (!daftar) return;
+  daftar.innerHTML = htmlDaftarRadar(daftarTersaring());
+  document.querySelectorAll('[data-radar-saring]').forEach(b => b.classList.toggle('on', b.dataset.radarSaring === RADAR.saring));
+  document.querySelectorAll('.radar-layar .radar-svg [data-s]').forEach(el =>
+    el.classList.toggle('redup', !!RADAR.kelas && el.dataset.s !== RADAR.kelas));
+  document.querySelectorAll('.radar-layar .radar-label').forEach(el => el.classList.toggle('on', el.dataset.sektor === RADAR.kelas));
+}
+
+async function viewRadar() {
+  const token = ++RADAR.token;
+  RADAR.saring = 'semua'; RADAR.kelas = null; RADAR.angkatan = null;
+  if (!bolehRadar()) {
+    $('viewRoot').innerHTML = kosong('Radar belum tersedia untuk akun ini.', 'Radar tampil untuk akun yang punya kelas binaan.', 'fa-satellite-dish');
+    return;
+  }
+  let d;
+  try { d = await siapkanRadar(); }
+  catch (e) { console.warn('Radar:', e.message); d = { gagal: ['santri'], ipp: null, radar: null }; }
+  if (token !== RADAR.token || APP.view !== 'radar') return;   // sudah pindah halaman/unit
+  RADAR.data = d;
+  gambarLayarRadar();
+}
+
+function gambarLayarRadar() {
+  const d = RADAR.data, root = $('viewRoot');
+  if (!d.radar) { root.innerHTML = kartuRadarGagal(d.gagal); pasangKlikRadar(); return; }
+  if (!d.radar.total) { root.innerHTML = kosong('Belum ada santri pada unit ini.', 'Pilih unit lain di bilah atas.', 'fa-satellite-dish'); return; }
+  RADAR.tata = tataRadar(d.radar, { angkatan: RADAR.angkatan });
+  root.innerHTML = `
+    ${barisLuring()}
+    ${catatanRadar(d)}
+    <section class="card radar-layar">
+      <div class="radar-bingkai">${gambarRadarSvg(RADAR.tata, d.radar, { id: 'radarPenuh' })}</div>
+      ${RADAR.angkatan ? `<p style="text-align:center"><button class="btn btn-ghost btn-sm" data-radar-kembali>Semua angkatan</button></p>` : ''}
+      <p class="radar-ket"><span class="t3">● Tier 3</span> · <span class="t2">● Tier 2</span> · <span class="t1">● Tier 1</span>${
+        d.radar.sentuhAktif ? ' · ○ Belum tersentuh' : ''}. Ketuk titik untuk melihat alasannya.</p>
+    </section>
+    <section class="card">
+      <div class="radar-chip">${chipRadar(d.radar)}</div>
+      <div id="radarDaftar" class="radar-daftar"></div>
+    </section>`;
+  perbaruiDaftarRadar();
+  pasangKlikRadar();
+  mulaiSapuRadar();
+}
+
+/* ---------- 6 · Lembar bawah dan ketukan ----------------------------- */
+function tutupLembarRadar() { document.querySelectorAll('.radar-lembar').forEach(e => e.remove()); }
+
+function bukaLembarRadar(html) {
+  tutupLembarRadar();
+  const el = document.createElement('div');
+  el.className = 'radar-lembar';
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-label', 'Rincian Radar');
+  el.innerHTML = `<button class="radar-tutup" data-radar-tutup aria-label="Tutup">×</button>${html}`;
+  $('viewRoot').appendChild(el);
+  Gerak.main(el, 'masuk');
+  el.querySelector('[data-detail], .radar-baris')?.focus();
+}
+
+function htmlKartuTitik(nisn) {
+  const d = RADAR.data, t = d.radar.titik.find(x => x.nisn === nisn), x = d.ipp.daftar.find(y => String(y.nisn) === nisn);
+  if (!t || !x) return '';
+  const terakhir = t.terakhir
+    ? `Terakhir dicatat: ${t.terakhir.hari === 0 ? 'hari ini' : `${t.terakhir.hari} hari lalu`} (${t.terakhir.jenis}).`
+    : `Belum ada catatan dalam ${d.radar.hari} hari terakhir.`;
+  return `<div class="radar-kartu">
+    <div class="radar-kartu-kepala"><b>${esc(t.nama)}</b><span>${esc(t.kelas)}</span>
+      <span class="tag ${tagTier(t.tingkat)}">Tier ${t.tingkat}</span></div>
+    <p class="radar-sebab">${esc(t.sebab)}</p>
+    <div class="ipp${d.ipp.hadirTerkunci ? ' tanpa-hadir' : ''}">${htmlUnsurIpp(x, d.ipp)}</div>
+    <p class="radar-terakhir">${esc(terakhir)}</p>
+    <button class="btn btn-primary btn-sm" data-detail="${esc(nisn)}">Buka detail santri <i class="fa-solid fa-arrow-right"></i></button>
+  </div>`;
+}
+
+function bukaGumpal(i) {
+  const g = RADAR.tata.gumpal[i]; if (!g) return;
+  const set = new Set(g.nisn);
+  bukaLembarRadar(`<h4>${angka(g.n)} santri · ${esc(g.sektor)} · Tier ${g.tingkat}</h4>
+    ${htmlDaftarRadar(RADAR.data.radar.titik.filter(t => set.has(t.nisn)))}`);
+}
+
+function pilihSektor(label) {
+  if (RADAR.tata.perAngkatan) { RADAR.angkatan = label; RADAR.kelas = null; return gambarLayarRadar(); }
+  RADAR.kelas = RADAR.kelas === label ? null : label;
+  perbaruiDaftarRadar();
+}
+
+/** Ketukan di antara titik diarahkan ke titik/gumpalan terdekat dalam 22 px layar. */
+function ketukTerdekat(svg, e) {
+  const R = svg.getBoundingClientRect(), skala = 200 / R.width;
+  const x = (e.clientX - R.left) * skala, y = (e.clientY - R.top) * skala, batas = 22 * skala;
+  let dekat = null, jarak = Infinity;
+  svg.querySelectorAll('.radar-titik[data-nisn], .radar-gumpal[data-gumpal]').forEach(el => {
+    const c = el.tagName.toLowerCase() === 'circle' ? el : el.querySelector('circle');
+    const j = Math.hypot(c.cx.baseVal.value - x, c.cy.baseVal.value - y);
+    if (j < jarak) { jarak = j; dekat = el; }
+  });
+  if (!dekat || jarak > batas) return;
+  if (dekat.dataset.gumpal !== undefined) return bukaGumpal(+dekat.dataset.gumpal);
+  bukaLembarRadar(htmlKartuTitik(dekat.dataset.nisn));
+}
+
+function pasangKlikRadar() {
+  onKlik((e) => {
+    if (e.target.closest('[data-radar-tutup]')) return tutupLembarRadar();
+    const dt = e.target.closest('[data-detail]');
+    if (dt) { tutupLembarRadar(); return bukaDetailSantri(dt.dataset.detail); }
+    if (e.target.closest('[data-radar-ulang]')) {
+      cacheHapus('siswa', 'detail', 'izin', 'pembinaan', 'prestasi', 'tahfiz');
+      return navigateTo('radar');
+    }
+    if (e.target.closest('[data-radar-kembali]')) { RADAR.angkatan = null; RADAR.kelas = null; return gambarLayarRadar(); }
+    const chip = e.target.closest('[data-radar-saring]');
+    if (chip) { RADAR.saring = chip.dataset.radarSaring; return perbaruiDaftarRadar(); }
+    const lab = e.target.closest('.radar-label[data-sektor]');
+    if (lab) return pilihSektor(lab.dataset.sektor);
+    const g = e.target.closest('.radar-gumpal[data-gumpal]');
+    if (g) return bukaGumpal(+g.dataset.gumpal);
+    const b = e.target.closest('.radar-baris[data-nisn], .radar-titik[data-nisn]');
+    if (b) return bukaLembarRadar(htmlKartuTitik(b.dataset.nisn));
+    const svg = e.target.closest('.radar-layar .radar-svg');
+    if (svg) return ketukTerdekat(svg, e);
+  });
+  // Enter/Spasi pada elemen SVG ber-role button → klik (SVG tidak melakukannya sendiri).
+  document.querySelectorAll('.radar-layar .radar-svg [role="button"]').forEach(el =>
+    el.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }));
+}
+
+/* ---------- 7 · Sapuan monster (isi di Tugas 7) ---------------------- */
+function mulaiSapuRadar() {}
