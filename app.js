@@ -27374,10 +27374,13 @@ function togglePilih(daftar) {
 
 function htmlAksiLasso() {
   const n = RADAR.pilih.size, luring = sedangLuring();
+  // Dialog lama memotong ke maksSantri; di atas batas itu tombol dinonaktifkan dan alasannya ditulis.
+  const maks = AI_AMBANG.maksSantri, lebih = n > maks;
   return `<span>${angka(n)} santri dipilih</span>
-    ${bolehKilatPlg() ? `<button class="btn btn-sm" data-lasso-plg${luring || n < AI_AMBANG.minSantri ? ' disabled' : ''}>Catat pelanggaran sekaligus</button>` : ''}
+    ${bolehKilatPlg() ? `<button class="btn btn-sm" data-lasso-plg${luring || n < AI_AMBANG.minSantri || lebih ? ' disabled' : ''}>Catat pelanggaran sekaligus</button>` : ''}
     ${bolehKilatPrs() ? `<button class="btn btn-sm" data-lasso-prs${n ? '' : ' disabled'}>Apresiasi sekaligus</button>` : ''}
-    <button class="btn btn-ghost btn-sm" data-lasso-batal>Batal</button>`;
+    <button class="btn btn-ghost btn-sm" data-lasso-batal>Batal</button>
+    ${lebih && bolehKilatPlg() ? `<small class="lasso-batas">Maksimal ${angka(maks)} santri untuk pelanggaran sekaligus.</small>` : ''}`;
 }
 
 function perbaruiPilihan() {

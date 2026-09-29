@@ -1178,20 +1178,22 @@
   .kilat-btn.prs { border-left:4px solid var(--teal, #0F766E); }
   .kilat-btn:disabled { opacity:.45; cursor:not-allowed; }
   .kilat-kosong { color: var(--text-3); font-size:.86rem; }
-  .kilat-bilah { position:fixed; left:50%; transform:translateX(-50%); bottom:16px; z-index:70; display:flex; align-items:center; gap:12px;
-    max-width: calc(100vw - 32px); padding:10px 14px; border-radius:14px; background: var(--navy, #0B2A45); color:#fff;
+  /* Di atas layar (bukan bawah) supaya tidak menutupi tombol cepat di lembar bawah. */
+  .kilat-bilah { position:fixed; left:0; right:0; margin:0 auto; top: calc(12px + env(safe-area-inset-top)); z-index:70;
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    width: calc(100vw - 32px); max-width:560px; box-sizing:border-box; padding:10px 14px; border-radius:14px; background: var(--navy, #0B2A45); color:#fff;
     box-shadow: 0 8px 24px rgba(0,0,0,.25); font-size:.88rem; }
   .kilat-bilah .btn { background:#fff; color: var(--navy, #0B2A45); white-space:nowrap; }
-  @media (max-width:760px) { .kilat-bilah { bottom: calc(76px + env(safe-area-inset-bottom)); } }
   .radar-alat { text-align:center; margin:8px 0 0; }
+  .lasso-batas { flex-basis:100%; color: var(--text-3); }
   .radar-bingkai.mode-pilih .radar-svg { touch-action:none; cursor:crosshair; }
   .radar-titik.terpilih, .radar-gumpal.terpilih circle { stroke: var(--navy, #0B2A45); stroke-width:2.4; }
   .radar-lasso { fill: color-mix(in oklab, var(--sea) 12%, transparent); stroke: var(--sea); stroke-width:1; stroke-dasharray:3 2; pointer-events:none; }
   .radar-daftar li { display:flex; align-items:center; gap:6px; }
   .radar-centang { padding:0 4px; }
   .radar-centang input { width:20px; height:20px; }
-  .lasso-aksi { position:fixed; left:50%; transform:translateX(-50%); bottom:16px; z-index:65; display:flex; flex-wrap:wrap; align-items:center; gap:8px;
-    max-width: calc(100vw - 32px); padding:10px 12px; border-radius:14px; background: var(--surface); border:1px solid var(--line);
+  .lasso-aksi { position:fixed; left:0; right:0; margin:0 auto; bottom:16px; z-index:65; display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+    width: calc(100vw - 32px); max-width:560px; box-sizing:border-box; padding:10px 12px; border-radius:14px; background: var(--surface); border:1px solid var(--line);
     box-shadow: 0 8px 24px rgba(0,0,0,.18); font-size:.88rem; }
   @media (max-width:760px) { .lasso-aksi { bottom: calc(76px + env(safe-area-inset-bottom)); } }
   @keyframes radarDenyut { 50% { opacity:.35; } }
