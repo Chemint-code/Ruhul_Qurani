@@ -1164,6 +1164,9 @@
   .radar-mini-teks .go { color: var(--sea); font-weight:700; }
   .radar-mini-sk { height:120px; border-radius:16px; }
   .radar-mini-gagal { padding:12px 14px; border:1px dashed var(--line); border-radius:16px; font-size:.88rem; }
+  @keyframes radarDenyut { 50% { opacity:.35; } }
+  .radar-svg.berdenyut .radar-titik.tak, .radar-svg.berdenyut .radar-gumpal.tak { animation: radarDenyut 2.4s ease-in-out infinite; }
+  html.tenang .radar-svg.berdenyut .radar-titik.tak, html.tenang .radar-svg.berdenyut .radar-gumpal.tak { animation-play-state: paused; }
   @media (max-width:720px) { .unit-box > i { display:none; } }
   @media (max-width:420px) { .unit-box { padding:3px 7px; font-size:11px; } }
 

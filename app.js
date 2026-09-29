@@ -26949,8 +26949,31 @@ function pasangKlikRadar() {
     }));
 }
 
-/* ---------- 7 · Sapuan monster (isi di Tugas 7) ---------------------- */
-function mulaiSapuRadar() {}
+/* ---------- 7 · Sapuan monster --------------------------------------- */
+const RADAR_PUTARAN_MS = 6000, RADAR_PUTARAN = 2;
+Gerak.PRESET.sapuRadar  = { k: [{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], d: 'lambat', e: 'lengkung' };
+Gerak.PRESET.kilauTitik = { k: [{ transform: 'scale(1)' }, { transform: 'scale(1.8)', offset: .3 }, { transform: 'scale(1)' }], d: 'lambat', e: 'lembut' };
+
+/**
+ * Dua putaran lalu berhenti: cukup untuk menarik mata ke titik tier 3,
+ * tidak cukup lama untuk mengganggu atau menghabiskan baterai. Titik
+ * berpendar sesaat ketika tepi depan baji melewatinya.
+ */
+function mulaiSapuRadar() {
+  const svg = document.querySelector('.radar-layar .radar-svg'); if (!svg) return;
+  const sapu = svg.querySelector('.radar-sapu');
+  if (!bolehGerak()) { sapu?.remove(); return; }
+  svg.classList.add('berdenyut');   // denyut pelan titik belum tersentuh (CSS, dijeda saat .tenang)
+  const a = Gerak.main(sapu, 'sapuRadar', { duration: RADAR_PUTARAN_MS, iterations: RADAR_PUTARAN, easing: 'linear', fill: 'none' });
+  a.finished.catch(() => {}).finally(() => sapu.classList.add('selesai'));
+  svg.querySelectorAll('.radar-titik, .radar-gumpal').forEach(el => {
+    const c = el.tagName.toLowerCase() === 'circle' ? el : el.querySelector('circle');
+    // Sudut dari atas searah jarum jam; tepi depan baji mulai di +30°.
+    const s = ((Math.atan2(c.cy.baseVal.value - 100, c.cx.baseVal.value - 100) * 180 / Math.PI + 90 - 30) % 360 + 360) % 360;
+    for (let p = 0; p < RADAR_PUTARAN; p++)
+      Gerak.main(el, 'kilauTitik', { delay: (p + s / 360) * RADAR_PUTARAN_MS, fill: 'none' });
+  });
+}
 
 /* ---------- 8 · Kartu mini di Ringkasan ------------------------------ */
 function htmlMiniGagal(gagal) {
