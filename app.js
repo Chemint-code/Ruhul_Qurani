@@ -27305,3 +27305,29 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && KILAT.tunda && !(window.Swal && Swal.isVisible())) urungKilat();
 });
 document.addEventListener('visibilitychange', () => { if (document.hidden) kirimKilatSegera(); });
+/* ---------- 4 · Geometri lasso --------------------------------------- */
+
+/** Ray casting setengah terbuka: tepi kiri/bawah masuk, tepi kanan/atas tidak. */
+function titikDalamPoligon(x, y, poli) {
+  let dalam = false;
+  for (let i = 0, j = poli.length - 1; i < poli.length; j = i++) {
+    const [xi, yi] = poli[i], [xj, yj] = poli[j];
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) dalam = !dalam;
+  }
+  return dalam;
+}
+
+function luasPoligon(p) {
+  let a = 0;
+  for (let i = 0, j = p.length - 1; i < p.length; j = i++) a += (p[j][0] + p[i][0]) * (p[j][1] - p[i][1]);
+  return a / 2;
+}
+
+/** NISN di dalam lasso (titik + seluruh anggota gumpalan). null bila sapuan terlalu kecil. */
+function pilihDalamLasso(tata, poli) {
+  if (!poli || poli.length < 3 || Math.abs(luasPoligon(poli)) < 4) return null;
+  const n = new Set();
+  (tata.titik || []).forEach(t => { if (titikDalamPoligon(t.x, t.y, poli)) n.add(t.nisn); });
+  (tata.gumpal || []).forEach(g => { if (titikDalamPoligon(g.x, g.y, poli)) g.nisn.forEach(x => n.add(x)); });
+  return n;
+}
