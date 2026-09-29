@@ -2375,6 +2375,7 @@ $('formLogin').addEventListener('submit', async (e) => {
 });
 
 $('btnLogout').addEventListener('click', async () => {
+  await kirimKilatSegera();   // v2.46: catatan Catat Kilat yang tertunda dikirim sebelum keluar
   const r = await Swal.fire({ icon:'question', title:'Keluar dari aplikasi?',
     showCancelButton:true, confirmButtonText:'Ya, keluar', cancelButtonText:'Batal',
     confirmButtonColor:'#9F1239' });
@@ -15430,7 +15431,7 @@ function tawarkanMuatUlang() {
   }).then(r => {
     if (r.isConfirmed) {
       navigator.serviceWorker?.controller?.postMessage({ tipe: 'lewati-tunggu' });
-      location.reload();
+      kirimKilatSegera().finally(() => location.reload());   // v2.46: kirim yang tertunda dulu
     } else {
       // Ditolak sekali bukan berarti selamanya; tawarkan lagi nanti.
       setTimeout(() => { versiBaruDitawarkan = false; }, 30 * 60 * 1000);
@@ -15439,6 +15440,7 @@ function tawarkanMuatUlang() {
 }
 
 $('btnSegarkan')?.addEventListener('click', async () => {
+  await kirimKilatSegera();   // v2.46: catatan Catat Kilat yang tertunda dikirim sebelum memuat ulang
   const r = await Swal.fire({
     icon: 'question', title: 'Segarkan aplikasi?',
     html: 'Singgahan di perangkat ini dibersihkan lalu halaman dimuat ulang '
@@ -26976,17 +26978,17 @@ function pasangKlikRadar() {
     if (kl) {
       const s = RADAR.data.siswaPeta.get(kl.dataset.kilatLainnya);
       tutupLembarRadar();
-      return modalCatatPelanggaran({ nisn: String(s.nisn), labelSantri: `${s.nisn} - ${s.nama_siswa}` });
+      return kirimKilatSegera().then(() => modalCatatPelanggaran({ nisn: String(s.nisn), labelSantri: `${s.nisn} - ${s.nama_siswa}` }));
     }
     const kb = e.target.closest('.kilat-btn[data-kilat]');
     if (kb) { if (!kb.disabled) mulaiKilat(kb.dataset.kilat, kb.dataset.kode, kb.dataset.nisn); return; }
     if (e.target.closest('[data-radar-pilih]')) return aturModePilih(!RADAR.pilihMode);
     if (e.target.closest('[data-lasso-batal]')) return aturModePilih(false);
     if (e.target.closest('[data-lasso-plg]')) {
-      return modalMassalPelanggaran({ pilih: santriTerpilih() }).then(ok => { if (ok) selesaiLasso([]); });
+      return kirimKilatSegera().then(() => modalMassalPelanggaran({ pilih: santriTerpilih() })).then(ok => { if (ok) selesaiLasso([]); });
     }
     if (e.target.closest('[data-lasso-prs]')) {
-      return modalApresiasiSekaligus(santriTerpilih()).then(h => { if (h) selesaiLasso(h.gagal); });
+      return kirimKilatSegera().then(() => modalApresiasiSekaligus(santriTerpilih())).then(h => { if (h) selesaiLasso(h.gagal); });
     }
     if (e.target.closest('[data-pilih-semua]')) { togglePilih(daftarTersaring().map(t => t.nisn).filter(n => !RADAR.pilih.has(n))); return; }
     if (RADAR.pilihMode) {
@@ -27231,13 +27233,21 @@ function gambarBilahKilat() {
     el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite');
     document.body.appendChild(el);
   }
-  el.innerHTML = `<span>Mencatat "${esc(t.label)}" untuk ${esc(t.nama)}</span>
-    <button class="btn btn-sm" data-kilat-urung>Urungkan (${t.sisa})</button>`;
+  // Tombol dibuat sekali per hitung mundur; tiap detik hanya teksnya yang
+  // diganti (elemennya tetap), supaya tekanan yang melintasi detak tetap
+  // menjadi klik. aria-label tetap "Urungkan" agar nama tombol tidak berubah.
+  if (el.dataset.id !== t.id) {
+    el.dataset.id = t.id;
+    el.innerHTML = `<span>Mencatat "${esc(t.label)}" untuk ${esc(t.nama)}</span>
+      <button class="btn btn-sm" data-kilat-urung aria-label="Urungkan">Urungkan (${t.sisa})</button>`;
+  } else {
+    const b = el.querySelector('[data-kilat-urung]'); if (b) b.textContent = `Urungkan (${t.sisa})`;
+  }
 }
 
 function mulaiTundaKilat(t) {
   if (KILAT.tunda) kirimKilatSegera();
-  KILAT.tunda = { ...t, sisa: KILAT_DETIK };
+  KILAT.tunda = { ...t, sisa: KILAT_DETIK, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}` };
   KILAT.tunda.pewaktu = setInterval(() => {
     const x = KILAT.tunda; if (!x) return;
     x.sisa -= 1;
@@ -27256,25 +27266,28 @@ async function mulaiKilat(jenis, kode, nisn) {
   const t = { jenis, kode, nisn, nama: s.nama_siswa || nisn,
     label: jenis === 'plg' ? m.nama_pelanggaran : m.nama_prestasi,
     payload: jenis === 'plg' ? { p_nisn: nisn, p_kode: kode, p_tanggal: hariIni(), p_catatan: '' } : payloadApresiasi(s, m) };
-  if (jenis === 'plg') {
-    if (!navigator.onLine) return tawarkanUlangKilat(t, null);
-    const btn = document.querySelector(`.kilat-btn[data-kilat="plg"][data-kode="${CSS.escape(kode)}"]`);
-    if (btn?.disabled) return;
-    if (btn) btn.disabled = true;
-    try {
+  const btn = document.querySelector(`.kilat-btn[data-kilat="${jenis}"][data-kode="${CSS.escape(kode)}"]`);
+  if (btn?.disabled) return;
+  if (btn) btn.disabled = true;
+  try {
+    // Hitung mundur yang berjalan dikirim lebih dulu, sebelum dialog apa pun
+    // untuk butir baru dibuka (dialog kiriman lama tidak menimpa dialog baru).
+    if (KILAT.tunda) await kirimKilatSegera();
+    if (jenis === 'plg') {
+      if (!navigator.onLine) return tawarkanUlangKilat(t, null);
       const rows = await amanKosong(muatDetail, 'pelanggaran');
       if (rows.gagal) return tawarkanUlangKilat(t, null);   // tanpa cek duplikat, tidak ada kiriman
       const dup = await cariDuplikatPelanggaran(nisn, kode, t.payload.p_tanggal);
       if (dup && !(await konfirmasiDuplikatPelanggaran(dup, t.label))) return;
-    } finally { if (btn) btn.disabled = false; }
-  }
+    }
+  } finally { if (btn) btn.disabled = false; }
   mulaiTundaKilat(t);
 }
 
 function urungKilat() {
   const t = KILAT.tunda; if (!t) return;
   clearInterval(t.pewaktu); KILAT.tunda = null; gambarBilahKilat();
-  toast('info', 'Dibatalkan. Tidak ada yang tercatat.');
+  toastKilat('info', 'Dibatalkan. Tidak ada yang tercatat.');
 }
 
 /** Hentikan hitung mundur dan kirim sekarang. */
@@ -27289,8 +27302,8 @@ async function kirimKilat(t) {
     try {
       const h = await simpanAman('log_prestasi', t.payload);
       catatRiwayatKilat('prs', t.kode);
-      if (h.antre) toast('info', 'Tersimpan di perangkat. Akan dikirim begitu koneksi kembali.');
-      else { toast('success', `Apresiasi +${angka(t.payload.poin)} poin dicatat.`); cacheHapus('prestasi'); segarkanRadarKilat(); }
+      if (h.antre) toastKilat('info', 'Tersimpan di perangkat. Akan dikirim begitu koneksi kembali.');
+      else { toastKilat('success', `Apresiasi +${angka(t.payload.poin)} poin dicatat.`); cacheHapus('prestasi'); segarkanRadarKilat(); }
       return true;
     } catch (galat) { tawarkanUlangKilat(t, galat); return false; }
   }
@@ -27298,13 +27311,27 @@ async function kirimKilat(t) {
   const h = await simpanPelanggaranAman(t.payload, { lewatiDuplikat: true });
   if (h.ok) {
     catatRiwayatKilat('plg', t.kode);
-    toast('success', `Tersimpan. Total poin ${t.nama}: ${h.data?.poin_baru ?? '-'}.`);
+    toastKilat('success', `Tersimpan. Total poin ${t.nama}: ${h.data?.poin_baru ?? '-'}.`);
     segarkanRadarKilat();
     return true;
   }
-  if (h.batal) { toast('info', 'Dibatalkan. Tidak ada yang tercatat.'); return false; }
+  if (h.batal) { toastKilat('info', 'Dibatalkan. Tidak ada yang tercatat.'); return false; }
   tawarkanUlangKilat(t, h.galat);
   return false;
+}
+
+/**
+ * Toast Catat Kilat. Toast info/galat memakai SweetAlert yang menutup dialog
+ * modal yang sedang terbuka, jadi ditunda sampai dialog itu selesai. Toast
+ * sukses lewat tanda terima (bukan SweetAlert) dan langsung tampil.
+ */
+function toastKilat(ikon, teks) {
+  const modalTerbuka = () => !!(window.Swal && Swal.isVisible() && !Swal.getPopup()?.classList.contains('swal2-toast'));
+  if (ikon === 'success' || !modalTerbuka()) return toast(ikon, teks);
+  const mulai = Date.now();
+  const tunggu = setInterval(() => {
+    if (!modalTerbuka() || Date.now() - mulai > 60000) { clearInterval(tunggu); toast(ikon, teks); }
+  }, 400);
 }
 
 function segarkanRadarKilat() { if (APP.view === 'radar') navigateTo('radar'); }
@@ -27322,8 +27349,11 @@ async function tawarkanUlangKilat(t, galat) {
     confirmButtonText: 'Coba lagi', denyButtonText: 'Buka formulir lengkap', cancelButtonText: 'Tutup',
     confirmButtonColor: '#14618B' });
   if (r.isConfirmed) {
-    if (plg && !navigator.onLine) return toast('error', 'Masih luring. Coba lagi setelah koneksi kembali.');
-    return mulaiTundaKilat(t);
+    if (plg && !navigator.onLine) return toastKilat('error', 'Masih luring. Coba lagi setelah koneksi kembali.');
+    // Kiriman yang "gagal" karena jaringan bisa saja sudah tersimpan di server:
+    // cek duplikat dijalankan lagi dari data terbaru.
+    cacheHapus('detail');
+    return mulaiKilat(t.jenis, t.kode, t.nisn);
   }
   if (r.isDenied) {
     return modalCatatPelanggaran({ nisn: t.nisn, labelSantri: `${t.nisn} - ${t.nama}`, kode: t.kode, labelKode: `${t.kode} — ${t.label}` });
@@ -27396,28 +27426,36 @@ function perbaruiPilihan() {
 
 /** Sapuan pointer menggambar lasso; saat lepas, isi lingkaran ditambahkan ke pilihan. */
 function pasangLasso(svg) {
-  let jejak = null, garis = null;
+  let jejak = null, garis = null, idPointer = null;
   const keVb = (e) => { const R = svg.getBoundingClientRect(); return [(e.clientX - R.left) * 200 / R.width, (e.clientY - R.top) * 200 / R.height]; };
   svg.addEventListener('pointerdown', (e) => {
-    if (!RADAR.pilihMode) return;
-    jejak = [keVb(e)];
-    garis = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-    garis.setAttribute('class', 'radar-lasso');
-    svg.appendChild(garis);
-    try { svg.setPointerCapture(e.pointerId); } catch (x) {}
+    if (!RADAR.pilihMode || !e.isPrimary || e.button > 0) return;
+    jejak = [keVb(e)]; garis = null; idPointer = e.pointerId;
   });
   svg.addEventListener('pointermove', (e) => {
-    if (!jejak) return;
-    jejak.push(keVb(e));
-    garis.setAttribute('points', jejak.map(p => p.map(v => v.toFixed(1)).join(',')).join(' '));
+    if (!jejak || e.pointerId !== idPointer) return;
+    const p = keVb(e);
+    if (!garis) {
+      // Pointer baru ditangkap setelah benar-benar bergerak (> 6 px). Tanpa itu
+      // klik biasa diarahkan ke SVG, bukan ke titik/label yang diketuk.
+      const R = svg.getBoundingClientRect();
+      if (Math.hypot(p[0] - jejak[0][0], p[1] - jejak[0][1]) * R.width / 200 < 6) return;
+      garis = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      garis.setAttribute('class', 'radar-lasso');
+      svg.appendChild(garis);
+      try { svg.setPointerCapture(e.pointerId); } catch (x) {}
+    }
+    jejak.push(p);
+    garis.setAttribute('points', jejak.map(q => q.map(v => v.toFixed(1)).join(',')).join(' '));
   });
   const selesai = () => {
     if (!jejak) return;
-    const jejakSelesai = jejak;
-    const hasil = pilihDalamLasso(RADAR.tata, jejakSelesai);
-    garis.remove(); jejak = null; garis = null;
+    const jejakSelesai = jejak, adaGaris = !!garis;
+    garis?.remove(); jejak = null; garis = null;
+    if (!adaGaris) return;                   // ketukan: klik biasa yang menangani
     RADAR.lassoTerakhir = jejakSelesai;
-    if (!hasil) return;                      // terlalu kecil: biarkan klik biasa yang menangani
+    const hasil = pilihDalamLasso(RADAR.tata, jejakSelesai);
+    if (!hasil) return;
     // Klik susulan dari sapuan ini (bila peramban mengirimnya) diabaikan. Penanda
     // dilepas pada giliran berikutnya supaya tidak menelan ketukan sungguhan.
     RADAR.lassoBaru = true;
@@ -27481,6 +27519,9 @@ async function modalApresiasiSekaligus(santri) {
     }
   });
   if (!res.isConfirmed) return null;
+  // Layar dikunci selama menyimpan, supaya kelompok yang sama tidak terkirim dua kali.
+  Swal.fire({ title: `Menyimpan ${angka(pilih.length)} apresiasi…`, allowOutsideClick: false, allowEscapeKey: false,
+    showConfirmButton: false, didOpen: () => Swal.showLoading() });
   let tersimpan = 0, antre = 0; const gagal = [];
   for (const s of pilih) {
     try { const h = await simpanAman('log_prestasi', payloadApresiasi(s, jenis, res.value.catatan)); h.antre ? antre++ : tersimpan++; }
