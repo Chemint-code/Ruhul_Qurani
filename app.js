@@ -12851,12 +12851,13 @@ function aiGambarChip() {
     : `<span class="mchip-kosong">Belum ada santri dipilih. Minimal ${AI_AMBANG.minSantri} santri.</span>`;
 }
 
-async function modalMassalPelanggaran() {
+async function modalMassalPelanggaran({ pilih = [] } = {}) {
   if (!bolehTulis()) {
     return Swal.fire({ icon:'error', title:'Tidak berwenang',
       text:`Role ${role()} tidak dapat mencatat pelanggaran.`, confirmButtonColor:'#9F1239' });
   }
-  MASSAL.pilih = []; MASSAL.master = null;
+  // v2.46: lasso Radar bisa mengisi santri lebih dulu. Tanpa argumen → kosong seperti sebelumnya.
+  MASSAL.pilih = (Array.isArray(pilih) ? pilih : []).slice(0, AI_AMBANG.maksSantri); MASSAL.master = null;
 
   const res = await Swal.fire({
     title:'Catat Pelanggaran Sekaligus', width: 660, showCancelButton:true,
@@ -12913,7 +12914,7 @@ async function modalMassalPelanggaran() {
         MASSAL.pilih = MASSAL.pilih.filter(x => String(x.nisn) !== b.dataset.hapus);
         aiGambarChip();
       });
-      setTimeout(() => $('msKode').focus(), 120);
+      setTimeout(() => $('msKode')?.focus(), 120);   // v2.46: dialog bisa sudah ditutup
     },
     preConfirm: async () => {
       const payload = await aiPayloadBulk({
@@ -12957,6 +12958,7 @@ async function modalMassalPelanggaran() {
   if (konf.isDenied) return aiSalinPayload(payload, 'Data catat sekaligus');
   if (!konf.isConfirmed) return;
   await aiJalankanBulk(hasil);
+  return true;
 }
 
 // ---------- 24e. Analisis peraturan & master ------------------------
@@ -26980,6 +26982,12 @@ function pasangKlikRadar() {
     if (kb) { if (!kb.disabled) mulaiKilat(kb.dataset.kilat, kb.dataset.kode, kb.dataset.nisn); return; }
     if (e.target.closest('[data-radar-pilih]')) return aturModePilih(!RADAR.pilihMode);
     if (e.target.closest('[data-lasso-batal]')) return aturModePilih(false);
+    if (e.target.closest('[data-lasso-plg]')) {
+      return modalMassalPelanggaran({ pilih: santriTerpilih() }).then(ok => { if (ok) selesaiLasso([]); });
+    }
+    if (e.target.closest('[data-lasso-prs]')) {
+      return modalApresiasiSekaligus(santriTerpilih()).then(h => { if (h) selesaiLasso(h.gagal); });
+    }
     if (e.target.closest('[data-pilih-semua]')) { togglePilih(daftarTersaring().map(t => t.nisn).filter(n => !RADAR.pilih.has(n))); return; }
     if (RADAR.pilihMode) {
       if (RADAR.lassoBaru && e.target.closest('.radar-svg')) return;
@@ -27423,4 +27431,71 @@ function aturModePilih(aktif) {
   if (!aktif) RADAR.pilih = new Set();
   tutupLembarRadar();
   gambarLayarRadar({ sapu: false });
+}
+/* ---------- 6 · Tindakan kelompok ----------------------------------- */
+
+/** Satu jenis apresiasi untuk banyak santri. Mengembalikan { gagal: nisn[] } atau null bila batal. */
+async function modalApresiasiSekaligus(santri) {
+  let pilih = (santri || []).slice(), jenis = null;
+  const res = await Swal.fire({
+    title: 'Apresiasi Sekaligus', width: 620, showCancelButton: true,
+    confirmButtonText: `Simpan ${pilih.length} apresiasi`, cancelButtonText: 'Batal', confirmButtonColor: '#14618B',
+    html: `<div class="stack">
+      <div class="field"><label class="label" for="apsJenis">Bentuk apresiasi</label>
+        <input id="apsJenis" class="input" autocomplete="off" placeholder="Pilih dari katalog…">
+        <div id="apsInfo" class="hint">Belum ada jenis dipilih.</div></div>
+      <div class="field"><label class="label">Santri</label><div class="mchips" id="apsChips"></div></div>
+      <div class="field"><label class="label" for="apsCatatan">Catatan</label>
+        <input id="apsCatatan" class="input" maxlength="500" placeholder="Boleh dikosongkan"></div>
+    </div>`,
+    didOpen: () => {
+      const gambar = () => {
+        $('apsChips').innerHTML = pilih.map(s => `<span class="mchip">${esc(s.nama_siswa || s.nisn)}
+          <span class="nis">${esc(s.kelas || '-')}</span>
+          <button type="button" data-hapus="${esc(s.nisn)}" title="Keluarkan"><i class="fa-solid fa-xmark"></i></button></span>`).join('')
+          || '<span class="mchip-kosong">Belum ada santri.</span>';
+        Swal.getConfirmButton().textContent = `Simpan ${pilih.length} apresiasi`;
+      };
+      gambar();
+      $('apsChips').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-hapus]'); if (!b) return;
+        pilih = pilih.filter(x => String(x.nisn) !== b.dataset.hapus); gambar();
+      });
+      lampirkanSaran($('apsJenis'), {
+        ambil: async (kata) => cariLokal((await muatMasterPrestasi()).filter(m => m.aktif !== false), kata,
+          ['kode_prestasi', 'nama_prestasi', 'kategori', 'bidang'], 40),
+        minKetik: 0, kosong: 'Jenis apresiasi tidak ditemukan.',
+        keItem: (m) => ({ huruf: esc((m.kategori || '?').charAt(0)), judul: `${esc(m.kode_prestasi)} — ${esc(m.nama_prestasi)}`,
+          sub: `${esc(m.kategori)} · +${m.bobot_poin} poin · ${esc(m.bidang || '-')}` }),
+        keTeks: (m) => `${m.kode_prestasi} — ${m.nama_prestasi}`,
+        onPilih: (m) => { jenis = m; $('apsInfo').textContent = `${m.kategori || 'Perunggu'} · +${Number(m.bobot_poin) || 5} poin · ${m.bidang || '-'}`; }
+      });
+    },
+    preConfirm: () => {
+      if (!jenis) { Swal.showValidationMessage('Pilih bentuk apresiasi dari katalog.'); return false; }
+      if (!pilih.length) { Swal.showValidationMessage('Belum ada santri.'); return false; }
+      return { catatan: $('apsCatatan').value.trim() || null };
+    }
+  });
+  if (!res.isConfirmed) return null;
+  let tersimpan = 0, antre = 0; const gagal = [];
+  for (const s of pilih) {
+    try { const h = await simpanAman('log_prestasi', payloadApresiasi(s, jenis, res.value.catatan)); h.antre ? antre++ : tersimpan++; }
+    catch (e) { gagal.push({ s, alasan: e?.message || 'galat tidak diketahui' }); }
+  }
+  if (tersimpan) cacheHapus('prestasi');
+  if (tersimpan + antre) catatRiwayatKilat('prs', jenis.kode_prestasi);
+  await Swal.fire({
+    icon: gagal.length ? 'warning' : 'success', title: 'Apresiasi sekaligus', confirmButtonColor: '#14618B',
+    html: `<p>${angka(tersimpan)} tersimpan · ${angka(antre)} tersimpan di perangkat · ${angka(gagal.length)} gagal</p>
+      ${gagal.length ? `<ul style="text-align:left">${gagal.map(g => `<li>${esc(g.s.nama_siswa || g.s.nisn)}: ${esc(g.alasan)}</li>`).join('')}</ul>` : ''}`
+  });
+  return { gagal: gagal.map(g => String(g.s.nisn)) };
+}
+
+/** Sesudah tindakan kelompok: yang gagal tetap terpilih, sisanya dilepas. */
+function selesaiLasso(sisaNisn = []) {
+  RADAR.pilih = new Set(sisaNisn);
+  RADAR.pilihMode = sisaNisn.length > 0;
+  navigateTo('radar');
 }
