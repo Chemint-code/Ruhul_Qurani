@@ -2,11 +2,19 @@
    SERVICE WORKER — Pengembangan Santri (Dayah Ruhul Qurani)
 
    Strategi sengaja dibuat sederhana supaya mudah ditelusuri:
-     · Kerangka aplikasi (HTML/JS/manifest)  -> network-first, cache
-       dipakai hanya bila jaringan gagal. Ini mencegah pengguna
-       terjebak pada versi lama setelah aplikasi diperbarui.
-     · Aset pihak ketiga (font, ikon, pustaka CDN) -> cache-first,
-       karena berversi dan praktis tidak pernah berubah.
+     · Kerangka aplikasi (HTML/JS/manifest)  -> CACHE-FIRST dari cache
+       versi ini (v2.46.1). Berkas diunduh SEKALI saat service worker
+       versi baru dipasang, bukan setiap kali aplikasi dibuka (dulu
+       network-first: ±516 KB gzip tiap buka, lihat PERFORMA.md).
+     · Aset pihak ketiga (font, ikon, pustaka CDN) -> cache-first di
+       cache bernama tetap (CACHE_ASET) yang TIDAK dibuang saat VERSI
+       naik. Pustaka CDN dikunci versi pastinya di index.html, jadi
+       versi baru = URL baru = entri baru.
+
+   !!! WAJIB SETIAP RILIS: naikkan VERSI di bawah. !!!
+   Sejak v2.46.1 hanya kenaikan VERSI yang membawa app.js/index.html
+   baru ke perangkat pengguna. Rilis tanpa kenaikan VERSI tidak sampai
+   sampai rilis berikutnya menaikkannya.
      · Permintaan ke Supabase (API/Auth/Storage) -> TIDAK PERNAH
        di-cache. Data santri harus selalu berasal dari server;
        penyimpanan sementara saat luring ditangani antrean di app.js.
@@ -41,9 +49,9 @@
    hapus singgahan versi lama, lalu beri tahu halaman yang terbuka.
    ===================================================================== */
 
-const VERSI       = 'rq-v2.46';
+const VERSI       = 'rq-v2.46.1';
 const CACHE_INTI  = `${VERSI}-inti`;
-const CACHE_ASET  = `${VERSI}-aset`;
+const CACHE_ASET  = 'rq-aset-v1';   // nama tetap: bertahan melewati kenaikan VERSI
 
 const INTI = [
   './',
@@ -83,14 +91,16 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
-    // Percepat navigasi pertama setelah aktif, bila peramban mendukung.
+    // v2.46.1: navigation preload DIMATIKAN. Kerangka dilayani dari cache,
+    // jadi permintaan preload hanya akan mengunduh index.html sia-sia.
     if (self.registration.navigationPreload) {
-      try { await self.registration.navigationPreload.enable(); } catch (err) {}
+      try { await self.registration.navigationPreload.disable(); } catch (err) {}
     }
 
+    // Buang cache versi lama; cache aset bernama tetap dipertahankan.
     const nama = await caches.keys();
     await Promise.all(nama
-      .filter(n => !n.startsWith(VERSI))
+      .filter(n => !n.startsWith(VERSI) && n !== CACHE_ASET)
       .map(n => caches.delete(n)));
     await self.clients.claim();
 
@@ -146,17 +156,23 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // 3. Berkas milik aplikasi sendiri: network-first.
+  // 3. Berkas milik aplikasi sendiri.
   if (url.origin === self.location.origin) {
     e.respondWith((async () => {
       const c = await caches.open(CACHE_INTI);
       const inti = berkasInti(req, url);
+      // 3a. Kerangka: cache-first dari cache versi ini. Versi baru datang
+      //     lewat install (VERSI naik), bukan lewat setiap pembukaan.
+      if (inti) {
+        const simpanan = await c.match(req, { ignoreSearch: true })
+          || (req.mode === 'navigate' ? await c.match('./index.html') : null);
+        if (simpanan) return simpanan;
+      }
+      // 3b. Belum ada di cache (atau bukan kerangka): jaringan, lalu simpan.
       try {
-        // Hasil navigation preload dipakai bila sudah tersedia.
-        const awal = e.preloadResponse ? await e.preloadResponse : null;
         // Berkas inti diambil dengan melewati singgahan HTTP peramban;
         // aset lain memakai jalur biasa agar tetap hemat kuota.
-        const res = awal || await fetch(inti ? new Request(req, { cache: 'reload' }) : req);
+        const res = await fetch(inti ? new Request(req, { cache: 'reload' }) : req);
         if (res && res.ok) c.put(req, res.clone());
         return res;
       } catch (err) {

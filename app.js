@@ -9781,16 +9781,25 @@ function aktifkanRealtime() {
     .on('postgres_changes', { event:'*', schema:'public', table:'pesan_bk' }, () => segarkan('pesan_bk'))
     .on('postgres_changes', { event:'*', schema:'public', table:'log_prestasi' }, () => segarkan('log_prestasi'))
     .on('postgres_changes', { event:'*', schema:'public', table:'log_tahfiz' }, () => segarkan('log_tahfiz'))
-    .subscribe((status) => {
-      const ok = status === 'SUBSCRIBED';
-      $('liveDot').classList.toggle('on', ok);
-      // v2.18: selama kanal putus, perubahan dari perangkat lain tidak
-      // tertambal. Begitu tersambung lagi, cache yang dijaga realtime
-      // dibuang sekali supaya tidak ada catatan yang terlewat.
-      if (ok && APP.rtPernahPutus) cacheHapus('detail', 'pembinaan', 'siswa');
-      if (!ok && APP.realtimeOk) APP.rtPernahPutus = true;
-      APP.realtimeOk = ok;
-    });
+    .subscribe(saatStatusRealtime);
+}
+
+/** Status kanal realtime (dipisah v2.46.1 supaya bisa diuji). */
+function saatStatusRealtime(status) {
+  const ok = status === 'SUBSCRIBED';
+  $('liveDot')?.classList.toggle('on', ok);
+  // v2.18: selama kanal putus, perubahan dari perangkat lain tidak
+  // tertambal. Begitu tersambung lagi, cache yang dijaga realtime
+  // dibuang sekali supaya tidak ada catatan yang terlewat.
+  // v2.46.1: lencana juga dihitung sekali, karena selama realtime hidup
+  // interval tidak lagi menghitungnya.
+  if (ok && APP.rtPernahPutus) {
+    cacheHapus('detail', 'pembinaan', 'siswa');
+    APP.rtPernahPutus = false;
+    refreshBadgePending(); refreshBadgePesan();
+  }
+  if (!ok && APP.realtimeOk) APP.rtPernahPutus = true;
+  APP.realtimeOk = ok;
 }
 
 /* ---------------------------------------------------------------------
@@ -9888,9 +9897,31 @@ async function tambalSiswaRT(nisnList) {
   simpanLokalNanti('siswa');
 }
 
-// Perbarui badge izin & pesan saat pengguna kembali ke tab.
-window.addEventListener('focus', () => { refreshBadgePending(); refreshBadgePesan(); });
-setInterval(() => { if (APP.profil) { refreshBadgePending(); refreshBadgePesan(); } }, 60_000);
+/* v2.46.1 — lencana izin & pesan dihitung hanya bila perlu. Hitungan
+ * count:'exact' di bawah RLS menilai kebijakan per baris; dulu dijalankan
+ * tiap 60 detik di setiap tab, juga tab tersembunyi dan saat realtime
+ * sudah memperbarui lencana lewat event (segarkanInti). */
+const LENCANA_JEDA = 60_000;
+
+/** Interval: hanya bila tab terlihat DAN realtime putus. */
+function segarkanLencanaBerkala() {
+  if (!APP.profil || document.hidden || APP.realtimeOk) return false;
+  refreshBadgePending(); refreshBadgePesan();
+  return true;
+}
+
+/** Kembali ke tab: paling sering sekali per LENCANA_JEDA. */
+function segarkanLencanaFokus() {
+  if (!APP.profil) return false;
+  const kini = Date.now();
+  if (kini - (APP.lencanaFokus || 0) < LENCANA_JEDA) return false;
+  APP.lencanaFokus = kini;
+  refreshBadgePending(); refreshBadgePesan();
+  return true;
+}
+
+window.addEventListener('focus', segarkanLencanaFokus);
+setInterval(segarkanLencanaBerkala, LENCANA_JEDA);
 
 // ---------------------------------------------------------------------
 // 23. MODUL MADRASAH — Pemeriksaan Atribut · Pelanggaran · Presensi
@@ -27108,7 +27139,7 @@ function gambarRadarMini(siswa, bahan, tokenMini) {
  *  Jalur tulis tetap yang lama: catat_pelanggaran dan simpanAman.
  *  Pelanggaran tidak pernah masuk antrean luring.
  * ===================================================================== */
-APP.versi = 'rq-v2.46';
+APP.versi = 'rq-v2.46.1';   // v2.46.1: performa (cache-first kerangka, lencana hemat, CDN pasti)
 
 const KILAT_DETIK = 5, KILAT_PLG = 4, KILAT_PRS = 2;
 const KILAT = { tunda: null };
