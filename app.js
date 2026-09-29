@@ -26606,3 +26606,74 @@ function hitungRadar({ ipp, detail, prestasi, tahfiz, izin, pembinaan,
   return { titik, sektor: urutKelas([...new Set(titik.map(t => t.kelas))]),
     sentuhAktif, jumlahTakTersentuh, total, hari };
 }
+
+/* ---------- 3 · Tata letak: sektor, posisi stabil, gumpalan ---------- */
+const RADAR_PITA = { 3: [4, 30], 2: [30, 62], 1: [62, 92] };   // jari-jari pada viewBox 200 × 200
+const RADAR_MIN_SUDUT = 12, RADAR_MAKS_SEKTOR = 12, RADAR_JARAK = 9;
+
+/** FNV-1a → [0, 1). Posisi titik diturunkan dari NISN supaya tidak berpindah antar hari. */
+function hashNisn(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0) / 4294967296;
+}
+
+/** Sudut sebanding jumlah santri, minimum RADAR_MIN_SUDUT, total 360°. */
+function bagiSudut(jumlah) {
+  const k = jumlah.length;
+  if (!k) return [];
+  if (k * RADAR_MIN_SUDUT >= 360) return jumlah.map(() => 360 / k);
+  const tetap = new Set();
+  for (;;) {
+    const sisa = 360 - RADAR_MIN_SUDUT * tetap.size;
+    const nBebas = jumlah.reduce((a, n, i) => a + (tetap.has(i) ? 0 : n), 0) || 1;
+    const sudut = jumlah.map((n, i) => tetap.has(i) ? RADAR_MIN_SUDUT : sisa * n / nBebas);
+    const kecil = sudut.findIndex((s, i) => !tetap.has(i) && s < RADAR_MIN_SUDUT);
+    if (kecil < 0) return sudut;
+    tetap.add(kecil);
+  }
+}
+
+const kunciSektorRadar = (t, perAngkatan) => perAngkatan ? (angkatanDariKelas(t.kelas) || 'Lainnya') : t.kelas;
+
+/**
+ * Murni. Lebih dari 12 kelas → sektor per angkatan; `angkatan` mempersempit
+ * ke kelas-kelas satu angkatan. Sel (sektor × pita) yang melebihi
+ * kapasitasnya diganti satu gumpalan berangka.
+ */
+function tataRadar(radar, { angkatan = null } = {}) {
+  let titik = radar.titik;
+  if (angkatan) titik = titik.filter(t => (angkatanDariKelas(t.kelas) || 'Lainnya') === angkatan);
+  const kelasAda = urutKelas([...new Set(titik.map(t => t.kelas))]);
+  const perAngkatan = !angkatan && kelasAda.length > RADAR_MAKS_SEKTOR;
+  const label = perAngkatan
+    ? [...URUT_ANGKATAN, 'Lainnya'].filter(a => titik.some(t => kunciSektorRadar(t, true) === a))
+    : kelasAda;
+  const jumlah = label.map(l => titik.filter(t => kunciSektorRadar(t, perAngkatan) === l).length);
+  const sudut = bagiSudut(jumlah);
+  let mulai = -90;                                   // mulai dari atas, searah jarum jam
+  const sektor = label.map((l, i) => { const s = { label: l, mulai, sudut: sudut[i], jumlah: jumlah[i] }; mulai += sudut[i]; return s; });
+
+  const hasilTitik = [], gumpal = [];
+  sektor.forEach(s => [3, 2, 1].forEach(tk => {
+    const isi = titik.filter(t => kunciSektorRadar(t, perAngkatan) === s.label && t.tingkat === tk);
+    if (!isi.length) return;
+    const [r0, r1] = RADAR_PITA[tk], rTengah = (r0 + r1) / 2;
+    const kapasitas = Math.max(1, Math.floor((s.sudut * Math.PI / 180) * rTengah * (r1 - r0) / (RADAR_JARAK * RADAR_JARAK)));
+    if (isi.length > kapasitas) {
+      const a = (s.mulai + s.sudut / 2) * Math.PI / 180;
+      gumpal.push({ sektor: s.label, tingkat: tk, n: isi.length, nisn: isi.map(t => t.nisn),
+        adaTakTersentuh: radar.sentuhAktif && isi.some(t => !t.tersentuh),
+        x: 100 + rTengah * Math.cos(a), y: 100 + rTengah * Math.sin(a) });
+      return;
+    }
+    const padS = Math.min(2, s.sudut / 4), padR = 3;
+    isi.forEach(t => {
+      const a = (s.mulai + padS + hashNisn(t.nisn) * (s.sudut - 2 * padS)) * Math.PI / 180;
+      const r = r0 + padR + hashNisn(t.nisn + '#r') * (r1 - r0 - 2 * padR);
+      hasilTitik.push({ ...t, s: s.label, x: 100 + r * Math.cos(a), y: 100 + r * Math.sin(a),
+        takTersentuh: radar.sentuhAktif && !t.tersentuh });
+    });
+  }));
+  return { sektor, titik: hasilTitik, gumpal, perAngkatan, angkatan };
+}
