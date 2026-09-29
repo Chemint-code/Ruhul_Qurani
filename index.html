@@ -1178,6 +1178,11 @@
   .kilat-btn.prs { border-left:4px solid var(--teal, #0F766E); }
   .kilat-btn:disabled { opacity:.45; cursor:not-allowed; }
   .kilat-kosong { color: var(--text-3); font-size:.86rem; }
+  .kilat-bilah { position:fixed; left:50%; transform:translateX(-50%); bottom:16px; z-index:70; display:flex; align-items:center; gap:12px;
+    max-width: calc(100vw - 32px); padding:10px 14px; border-radius:14px; background: var(--navy, #0B2A45); color:#fff;
+    box-shadow: 0 8px 24px rgba(0,0,0,.25); font-size:.88rem; }
+  .kilat-bilah .btn { background:#fff; color: var(--navy, #0B2A45); white-space:nowrap; }
+  @media (max-width:760px) { .kilat-bilah { bottom: calc(76px + env(safe-area-inset-bottom)); } }
   @keyframes radarDenyut { 50% { opacity:.35; } }
   .radar-svg.berdenyut .radar-titik.tak, .radar-svg.berdenyut .radar-gumpal.tak { animation: radarDenyut 2.4s ease-in-out infinite; }
   html.tenang .radar-svg.berdenyut .radar-titik.tak, html.tenang .radar-svg.berdenyut .radar-gumpal.tak { animation-play-state: paused; }

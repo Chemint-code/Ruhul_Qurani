@@ -2558,6 +2558,8 @@ $('viewRoot').addEventListener('click', (e) => { APP.onKlik?.(e); });
 function onKlik(fn) { APP.onKlik = fn; }
 
 async function navigateTo(view) {
+  // v2.46: hitung mundur Catat Kilat dikirim lebih dulu bila pindah ke halaman lain.
+  if (view !== 'radar' && KILAT.tunda) kirimKilatSegera();
   if (!(MENU_ROLE[view] || []).includes(role())) {
     toast('error', `Role ${role()} tidak memiliki akses ke menu ini.`);
     view = rumah();
@@ -26967,6 +26969,8 @@ function pasangKlikRadar() {
       tutupLembarRadar();
       return modalCatatPelanggaran({ nisn: String(s.nisn), labelSantri: `${s.nisn} - ${s.nama_siswa}` });
     }
+    const kb = e.target.closest('.kilat-btn[data-kilat]');
+    if (kb) { if (!kb.disabled) mulaiKilat(kb.dataset.kilat, kb.dataset.kode, kb.dataset.nisn); return; }
     if (e.target.closest('[data-radar-tutup]')) return tutupLembarRadar();
     const dt = e.target.closest('[data-detail]');
     if (dt) { tutupLembarRadar(); return bukaDetailSantri(dt.dataset.detail); }
@@ -27173,3 +27177,131 @@ function htmlKilat(nisn) {
     ${bPlg ? `<button class="btn btn-ghost btn-sm" data-kilat-lainnya="${esc(nisn)}">Lainnya…</button>` : ''}
   </div>`;
 }
+/* ---------- 3 · Hitung mundur, kirim, urungkan ----------------------- */
+
+/** Payload apresiasi, sama dengan formulir Prestasi (prsSimpan). */
+function payloadApresiasi(s, m, catatan = null) {
+  return {
+    nisn: String(s.nisn), nama_siswa: s.nama_siswa || null, kelas: s.kelas || null, jenjang: s.jenjang || null,
+    tanggal: hariIni(), kode_prestasi: m.kode_prestasi || null, judul: m.nama_prestasi,
+    kategori: m.kategori || 'Perunggu', bidang: m.bidang || null, poin: Math.max(1, Number(m.bobot_poin) || 5),
+    catatan, sumber: APP.ctx.unit === 'Madrasah' ? 'Madrasah' : 'Pengasuhan',
+    pencatat: APP.profil?.nama || null, pencatat_id: APP.profil?.id || null
+  };
+}
+
+function gambarBilahKilat() {
+  const t = KILAT.tunda;
+  let el = $('kilatBilah');
+  if (!t) { el?.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'kilatBilah'; el.className = 'kilat-bilah';
+    el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite');
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `<span>Mencatat "${esc(t.label)}" untuk ${esc(t.nama)}</span>
+    <button class="btn btn-sm" data-kilat-urung>Urungkan (${t.sisa})</button>`;
+}
+
+function mulaiTundaKilat(t) {
+  if (KILAT.tunda) kirimKilatSegera();
+  KILAT.tunda = { ...t, sisa: KILAT_DETIK };
+  KILAT.tunda.pewaktu = setInterval(() => {
+    const x = KILAT.tunda; if (!x) return;
+    x.sisa -= 1;
+    if (x.sisa <= 0) kirimKilatSegera(); else gambarBilahKilat();
+  }, 1000);
+  gambarBilahKilat();
+}
+
+/** Ketukan tombol cepat. */
+async function mulaiKilat(jenis, kode, nisn) {
+  const x = KILAT.tunda;
+  if (x && x.jenis === jenis && x.kode === kode && x.nisn === nisn) { x.sisa = KILAT_DETIK; gambarBilahKilat(); return; }
+  const d = RADAR.data, s = d?.siswaPeta?.get(nisn);
+  const m = jenis === 'plg' ? d?.master?.plg.find(b => b.kode_pelanggaran === kode) : d?.master?.prs.find(b => b.kode_prestasi === kode);
+  if (!s || !m) return;
+  const t = { jenis, kode, nisn, nama: s.nama_siswa || nisn,
+    label: jenis === 'plg' ? m.nama_pelanggaran : m.nama_prestasi,
+    payload: jenis === 'plg' ? { p_nisn: nisn, p_kode: kode, p_tanggal: hariIni(), p_catatan: '' } : payloadApresiasi(s, m) };
+  if (jenis === 'plg') {
+    if (!navigator.onLine) return tawarkanUlangKilat(t, null);
+    const btn = document.querySelector(`.kilat-btn[data-kilat="plg"][data-kode="${CSS.escape(kode)}"]`);
+    if (btn?.disabled) return;
+    if (btn) btn.disabled = true;
+    try {
+      const rows = await amanKosong(muatDetail, 'pelanggaran');
+      if (rows.gagal) return tawarkanUlangKilat(t, null);   // tanpa cek duplikat, tidak ada kiriman
+      const dup = await cariDuplikatPelanggaran(nisn, kode, t.payload.p_tanggal);
+      if (dup && !(await konfirmasiDuplikatPelanggaran(dup, t.label))) return;
+    } finally { if (btn) btn.disabled = false; }
+  }
+  mulaiTundaKilat(t);
+}
+
+function urungKilat() {
+  const t = KILAT.tunda; if (!t) return;
+  clearInterval(t.pewaktu); KILAT.tunda = null; gambarBilahKilat();
+  toast('info', 'Dibatalkan. Tidak ada yang tercatat.');
+}
+
+/** Hentikan hitung mundur dan kirim sekarang. */
+function kirimKilatSegera() {
+  const t = KILAT.tunda; if (!t) return Promise.resolve(false);
+  clearInterval(t.pewaktu); KILAT.tunda = null; gambarBilahKilat();
+  return kirimKilat(t);
+}
+
+async function kirimKilat(t) {
+  if (t.jenis === 'prs') {
+    try {
+      const h = await simpanAman('log_prestasi', t.payload);
+      catatRiwayatKilat('prs', t.kode);
+      if (h.antre) toast('info', 'Tersimpan di perangkat. Akan dikirim begitu koneksi kembali.');
+      else { toast('success', `Apresiasi +${angka(t.payload.poin)} poin dicatat.`); cacheHapus('prestasi'); segarkanRadarKilat(); }
+      return true;
+    } catch (galat) { tawarkanUlangKilat(t, galat); return false; }
+  }
+  if (!navigator.onLine) { tawarkanUlangKilat(t, null); return false; }
+  const h = await simpanPelanggaranAman(t.payload, { lewatiDuplikat: true });
+  if (h.ok) {
+    catatRiwayatKilat('plg', t.kode);
+    toast('success', `Tersimpan. Total poin ${t.nama}: ${h.data?.poin_baru ?? '-'}.`);
+    segarkanRadarKilat();
+    return true;
+  }
+  if (h.batal) { toast('info', 'Dibatalkan. Tidak ada yang tercatat.'); return false; }
+  tawarkanUlangKilat(t, h.galat);
+  return false;
+}
+
+function segarkanRadarKilat() { if (APP.view === 'radar') navigateTo('radar'); }
+
+/** Kiriman gagal: tawarkan Coba lagi atau formulir lengkap. Pelanggaran tidak diantrekan. */
+async function tawarkanUlangKilat(t, galat) {
+  const jaringan = !galat || !navigator.onLine || /fetch|network|timeout/i.test(galat?.message || '');
+  const plg = t.jenis === 'plg';
+  const r = await Swal.fire({
+    icon: 'error', title: plg ? 'Pelanggaran belum tercatat' : 'Apresiasi belum tercatat',
+    html: `<p style="font-size:13.5px">${esc(jaringan
+      ? (plg ? 'Pelanggaran belum tercatat: koneksi terputus.' : 'Apresiasi belum tercatat: koneksi terputus.')
+      : `${plg ? 'Pelanggaran' : 'Apresiasi'} belum tercatat. Pesan sistem: ${galat?.message || 'alasan tidak diketahui'}`)}</p>`,
+    showCancelButton: true, showDenyButton: plg,
+    confirmButtonText: 'Coba lagi', denyButtonText: 'Buka formulir lengkap', cancelButtonText: 'Tutup',
+    confirmButtonColor: '#14618B' });
+  if (r.isConfirmed) {
+    if (plg && !navigator.onLine) return toast('error', 'Masih luring. Coba lagi setelah koneksi kembali.');
+    return mulaiTundaKilat(t);
+  }
+  if (r.isDenied) {
+    return modalCatatPelanggaran({ nisn: t.nisn, labelSantri: `${t.nisn} - ${t.nama}`, kode: t.kode, labelKode: `${t.kode} — ${t.label}` });
+  }
+}
+
+// Bilah hidup di document.body, jadi pendengarnya di tingkat dokumen.
+document.addEventListener('click', (e) => { if (e.target.closest('#kilatBilah [data-kilat-urung]')) urungKilat(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && KILAT.tunda && !(window.Swal && Swal.isVisible())) urungKilat();
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden) kirimKilatSegera(); });
