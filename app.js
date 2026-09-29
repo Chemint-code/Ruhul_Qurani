@@ -27047,3 +27047,92 @@ function gambarRadarMini(siswa, bahan, tokenMini) {
     kotak.innerHTML = htmlMiniGagal(['santri']);
   }
 }
+
+/* =====================================================================
+ * v2.46 — CATAT KILAT DAN LASSO
+ * ---------------------------------------------------------------------
+ *  Dari lembar titik Radar: 4 tombol pelanggaran + 2 tombol apresiasi
+ *  yang cocok untuk santri itu, diurutkan menurut riwayat di perangkat
+ *  ini. Ketukan memulai hitung mundur 5 detik yang bisa diurungkan,
+ *  karena pemicu pembinaan berjalan di server pada detik penyimpanan
+ *  (urungkan sesudahnya tidak jujur). Lasso memilih banyak santri untuk
+ *  "Catat Pelanggaran Sekaligus" (dialog lama) atau Apresiasi Sekaligus.
+ *  Jalur tulis tetap yang lama: catat_pelanggaran dan simpanAman.
+ *  Pelanggaran tidak pernah masuk antrean luring.
+ * ===================================================================== */
+APP.versi = 'rq-v2.46';
+
+const KILAT_DETIK = 5, KILAT_PLG = 4, KILAT_PRS = 2;
+const KILAT = { tunda: null };
+
+/* ---------- 1 · Butir yang cocok dan urutannya ----------------------- */
+
+/** Jenjang santri dari kolom jenjang, atau dari angkatan kelasnya. */
+function jenjangSantri(s) {
+  const j = String(s?.jenjang || '').trim();
+  if (j === 'MTs' || j === 'MA') return j;
+  const a = angkatanDariKelas(s?.kelas);
+  return ['VII', 'VIII', 'IX'].includes(a) ? 'MTs' : ['X', 'XI', 'XII'].includes(a) ? 'MA' : '';
+}
+
+/**
+ * Butir katalog yang berlaku untuk satu santri: unit aktif (bila bukan
+ * Semua), jenjang santri, dan asrama santri (aturan katalog putri v2.44).
+ */
+function kandidatKilat(santri, masterPlg, masterPrs, unit = APP.ctx.unit) {
+  const j = jenjangSantri(santri);
+  const g = normalUnit(santri?.unit_gender) || unitDariKelas(santri?.kelas) || UNIT_PUTRA;
+  let plg = (masterPlg || []).slice();
+  if (unit && unit !== 'Semua') plg = plg.filter(m => String(m.sumber || 'Pengasuhan').trim() === unit);
+  plg = plg.filter(m => { const mj = String(m.jenjang || 'Semua').trim(); return !mj || mj === 'Semua' || !j || mj === j; });
+  plg = (g === UNIT_PUTRI && MASTER_BERSAMA.aktif) ? gabungMasterPutri(plg) : plg.filter(m => unitMaster(m) === g);
+  const prs = (masterPrs || []).filter(m => m.aktif !== false);
+  return { plg, prs };
+}
+
+/**
+ * Urutan tombol: riwayat perangkat (jumlah, lalu waktu terakhir), lalu
+ * frekuensi lingkup, lalu urutan katalog. Tanpa duplikat, paling banyak n.
+ */
+function urutKilat(kandidat, kunci, riwayat, frek, n) {
+  const ada = new Map((kandidat || []).map(m => [String(m[kunci]), m]));
+  const hasil = [];
+  const tambah = (k) => { if (ada.has(k) && !hasil.includes(k)) hasil.push(k); };
+  Object.entries(riwayat || {}).sort((a, b) => (b[1].n - a[1].n) || (b[1].t - a[1].t)).forEach(([k]) => tambah(k));
+  Object.entries(frek || {}).sort((a, b) => b[1] - a[1]).forEach(([k]) => tambah(k));
+  ada.forEach((_, k) => tambah(k));
+  return hasil.slice(0, n).map(k => ada.get(k));
+}
+
+/** Frekuensi kode dalam `hari` terakhir dari bahan Radar. */
+function frekuensiKilat(bahan, kini = new Date(), hari = 60) {
+  const awal = new Date(kini); awal.setHours(0, 0, 0, 0);
+  const batas = tambahHari(awal, -(hari - 1));
+  const hitung = (rows, kolom) => {
+    const f = {};
+    (rows || []).forEach(r => {
+      const d = tglDari(kunciTgl(r.tanggal)), k = String(r[kolom] || '').trim();
+      if (k && d && d >= batas) f[k] = (f[k] || 0) + 1;
+    });
+    return f;
+  };
+  return { plg: hitung(bahan?.detail6, 'kode_pelanggaran'), prs: hitung(bahan?.prestasi, 'kode_prestasi') };
+}
+
+const kunciRiwayatKilat = () => 'rq.kilat.v1.' + idSaya();
+
+function bacaRiwayatKilat() {
+  try {
+    const v = JSON.parse(localStorage.getItem(kunciRiwayatKilat()) || '{}');
+    return { plg: v.plg || {}, prs: v.prs || {} };
+  } catch (e) { return { plg: {}, prs: {} }; }
+}
+
+function catatRiwayatKilat(jenis, kode, kini = Date.now()) {
+  try {
+    const r = bacaRiwayatKilat();
+    const o = r[jenis][kode] || { n: 0, t: 0 };
+    r[jenis][kode] = { n: o.n + 1, t: kini };
+    localStorage.setItem(kunciRiwayatKilat(), JSON.stringify(r));
+  } catch (e) {}
+}
