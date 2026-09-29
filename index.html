@@ -1164,6 +1164,20 @@
   .radar-mini-teks .go { color: var(--sea); font-weight:700; }
   .radar-mini-sk { height:120px; border-radius:16px; }
   .radar-mini-gagal { padding:12px 14px; border:1px dashed var(--line); border-radius:16px; font-size:.88rem; }
+  /* v2.46 — Catat Kilat dan Lasso */
+  .kilat { margin: 10px 0; }
+  .kilat-judul { font-weight:700; margin:0 0 6px; }
+  .kilat-judul small { font-weight:400; color: var(--text-3); margin-left:6px; }
+  .kilat-kisi { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:6px; margin-bottom:8px; }
+  .kilat-btn { display:flex; justify-content:space-between; align-items:center; gap:6px; min-height:44px; padding:8px 10px;
+    border:1px solid var(--line); border-radius:12px; background: var(--surface); color:inherit; text-align:left; cursor:pointer; font-size:.86rem; }
+  .kilat-btn span { overflow:hidden; text-overflow:ellipsis; }
+  .kilat-btn.plg { border-left:4px solid var(--amber); }
+  .kilat-btn.plg.k-berat { border-left-color: var(--maroon); }
+  .kilat-btn.plg.k-ringan { border-left-color: var(--sea); }
+  .kilat-btn.prs { border-left:4px solid var(--teal, #0F766E); }
+  .kilat-btn:disabled { opacity:.45; cursor:not-allowed; }
+  .kilat-kosong { color: var(--text-3); font-size:.86rem; }
   @keyframes radarDenyut { 50% { opacity:.35; } }
   .radar-svg.berdenyut .radar-titik.tak, .radar-svg.berdenyut .radar-gumpal.tak { animation: radarDenyut 2.4s ease-in-out infinite; }
   html.tenang .radar-svg.berdenyut .radar-titik.tak, html.tenang .radar-svg.berdenyut .radar-gumpal.tak { animation-play-state: paused; }

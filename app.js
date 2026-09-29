@@ -26773,14 +26773,18 @@ function radarDariBahan(siswa, bahan) {
   return { gagal: bahan.gagal, ipp, radar };
 }
 
-/** Muat bahan dengan lingkup yang sama persis dengan Ringkasan. */
+/** Muat bahan dengan lingkup yang sama persis dengan Ringkasan. v2.46: + katalog, peta santri, frekuensi. */
 async function siapkanRadar() {
-  const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
+  const [siswaAll, detailAll, izinAll, pembinaanAll, masterPlg, masterPrs] = await Promise.all([
     amanKosong(muatSiswa, 'santri'), amanKosong(muatDetail, 'pelanggaran'),
-    amanKosong(muatIzin, 'perizinan'), amanKosong(muatPembinaan, 'pembinaan')]);
+    amanKosong(muatIzin, 'perizinan'), amanKosong(muatPembinaan, 'pembinaan'),
+    amanKosong(muatMaster, 'master pelanggaran'), amanKosong(muatMasterPrestasi, 'master prestasi')]);
   const L = lingkupDasbor({ siswaAll, detailAll, izinAll, pembinaanAll });
   const bahan = await bahanIpp({ siswa: L.siswa, detail: L.detailTr, izin: L.izinSemua, pembinaan: L.pembinaan, gagal: L.gagal });
-  return radarDariBahan(L.siswa, bahan);
+  return { ...radarDariBahan(L.siswa, bahan),
+    master: { plg: masterPlg, prs: masterPrs },
+    siswaPeta: new Map(L.siswa.map(s => [String(s.nisn), s])),
+    frek: frekuensiKilat(bahan) };
 }
 
 const sedangLuring = () => navigator.onLine === false || !!tandaiLuring.sudah;
@@ -26922,6 +26926,7 @@ function htmlKartuTitik(nisn) {
     <p class="radar-sebab">${esc(t.sebab)}</p>
     <div class="ipp${d.ipp.hadirTerkunci ? ' tanpa-hadir' : ''}">${htmlUnsurIpp(x, d.ipp)}</div>
     <p class="radar-terakhir">${esc(terakhir)}</p>
+    ${htmlKilat(nisn)}
     <button class="btn btn-primary btn-sm" data-detail="${esc(nisn)}">Buka detail santri <i class="fa-solid fa-arrow-right"></i></button>
   </div>`;
 }
@@ -26956,6 +26961,12 @@ function ketukTerdekat(svg, e) {
 
 function pasangKlikRadar() {
   onKlik((e) => {
+    const kl = e.target.closest('[data-kilat-lainnya]');
+    if (kl) {
+      const s = RADAR.data.siswaPeta.get(kl.dataset.kilatLainnya);
+      tutupLembarRadar();
+      return modalCatatPelanggaran({ nisn: String(s.nisn), labelSantri: `${s.nisn} - ${s.nama_siswa}` });
+    }
     if (e.target.closest('[data-radar-tutup]')) return tutupLembarRadar();
     const dt = e.target.closest('[data-detail]');
     if (dt) { tutupLembarRadar(); return bukaDetailSantri(dt.dataset.detail); }
@@ -27135,4 +27146,30 @@ function catatRiwayatKilat(jenis, kode, kini = Date.now()) {
     r[jenis][kode] = { n: o.n + 1, t: kini };
     localStorage.setItem(kunciRiwayatKilat(), JSON.stringify(r));
   } catch (e) {}
+}
+/* ---------- 2 · Tombol cepat di lembar titik ------------------------- */
+const bolehKilatPlg = () => bisa('plg.catat') && !hanyaBaca();
+const bolehKilatPrs = () => bisa('prestasi.catat') && !hanyaBaca();
+
+function htmlKilat(nisn) {
+  const d = RADAR.data, s = d?.siswaPeta?.get(nisn);
+  const bPlg = bolehKilatPlg(), bPrs = bolehKilatPrs();
+  if (!s || (!bPlg && !bPrs)) return '';
+  const k = kandidatKilat(s, d.master?.plg, d.master?.prs);
+  const r = bacaRiwayatKilat();
+  const plg = bPlg ? urutKilat(k.plg, 'kode_pelanggaran', r.plg, d.frek?.plg, KILAT_PLG) : [];
+  const prs = bPrs ? urutKilat(k.prs, 'kode_prestasi', r.prs, d.frek?.prs, KILAT_PRS) : [];
+  const luring = sedangLuring();
+  const tPlg = plg.map(m => `<button class="kilat-btn plg k-${esc(String(m.kategori || '').toLowerCase())}" data-kilat="plg"
+      data-kode="${esc(m.kode_pelanggaran)}" data-nisn="${esc(nisn)}"${luring ? ' disabled title="Perlu koneksi"' : ''}>
+      <span>${esc(m.nama_pelanggaran)}</span><b>${angka(m.bobot_poin)}</b></button>`).join('');
+  const tPrs = prs.map(m => `<button class="kilat-btn prs" data-kilat="prs"
+      data-kode="${esc(m.kode_prestasi)}" data-nisn="${esc(nisn)}">
+      <span>${esc(m.nama_prestasi)}</span><b>+${angka(m.bobot_poin)}</b></button>`).join('');
+  return `<div class="kilat">
+    <p class="kilat-judul">Catat Kilat${luring && bPlg ? ' <small>Pelanggaran perlu koneksi.</small>' : ''}</p>
+    ${plg.length + prs.length ? `<div class="kilat-kisi">${tPlg}${tPrs}</div>`
+      : `<p class="kilat-kosong">Belum ada jenis yang cocok untuk santri ini.</p>`}
+    ${bPlg ? `<button class="btn btn-ghost btn-sm" data-kilat-lainnya="${esc(nisn)}">Lainnya…</button>` : ''}
+  </div>`;
 }
