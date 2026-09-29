@@ -26586,7 +26586,7 @@ hidupkanLayarLogin();
  * ===================================================================== */
 APP.versi = 'rq-v2.45';
 
-const RADAR = { token: 0, tokenMini: 0, data: null, tata: null, saring: 'semua', kelas: null, angkatan: null, lengkap: false, bahanTerakhir: null };
+const RADAR = { token: 0, tokenMini: 0, data: null, tata: null, saring: 'semua', kelas: null, angkatan: null, lengkap: false, bahanTerakhir: null, pilihMode: false, pilih: new Set(), lassoBaru: false, lassoTerakhir: null };
 
 HAK['radar.lihat'] = ['Admin', 'Guru', 'Walas', 'Guru BK'];
 MENU_ROLE.radar = ['Admin', 'Guru', 'Walas', 'Guru BK'];
@@ -26830,7 +26830,8 @@ function daftarTersaring({ lengkap = RADAR.lengkap } = {}) {
 
 function htmlDaftarRadar(list) {
   const tak = (t) => RADAR.data.radar.sentuhAktif && !t.tersentuh;
-  return list.length ? `<ul>${list.map(t => `<li><button class="radar-baris t${t.tingkat}" data-nisn="${esc(t.nisn)}">
+  return list.length ? `<ul>${list.map(t => `<li>${RADAR.pilihMode ? `<label class="radar-centang"><input type="checkbox"
+      data-pilih-nisn="${esc(t.nisn)}"${RADAR.pilih.has(t.nisn) ? ' checked' : ''} aria-label="Pilih ${esc(t.nama)}"></label>` : ''}<button class="radar-baris t${t.tingkat}" data-nisn="${esc(t.nisn)}">
       <b>${esc(t.nama)}</b><small>${esc(t.kelas)} · ${esc(t.sebab)}${tak(t) ? ` · belum tersentuh ${RADAR.data.radar.hari} hari` : ''}</small>
       <span class="tag ${tagTier(t.tingkat)}">Tier ${t.tingkat}</span></button></li>`).join('')}</ul>`
     : kosong('Tidak ada santri pada saringan ini.', '', 'fa-circle-check');
@@ -26847,12 +26848,14 @@ function perbaruiDaftarRadar() {
   const daftar = $('radarDaftar'); if (!daftar) return;
   const tampil = daftarTersaring();
   const sisa = RADAR.saring === 'semua' && !RADAR.lengkap ? daftarTersaring({ lengkap: true }).length - tampil.length : 0;
-  daftar.innerHTML = htmlDaftarRadar(tampil) + (sisa > 0
+  daftar.innerHTML = (RADAR.pilihMode ? `<p class="radar-alat"><button class="btn btn-ghost btn-sm" data-pilih-semua>Pilih semua di daftar</button></p>` : '')
+    + htmlDaftarRadar(tampil) + (sisa > 0
     ? `<p style="text-align:center"><button class="btn btn-ghost btn-sm" data-radar-lengkap>Tampilkan juga ${angka(sisa)} santri tier 1 lainnya</button></p>` : '');
   document.querySelectorAll('[data-radar-saring]').forEach(b => b.classList.toggle('on', b.dataset.radarSaring === RADAR.saring));
   document.querySelectorAll('.radar-layar .radar-svg [data-s]').forEach(el =>
     el.classList.toggle('redup', !!RADAR.kelas && el.dataset.s !== RADAR.kelas));
   document.querySelectorAll('.radar-layar .radar-label').forEach(el => el.classList.toggle('on', el.dataset.sektor === RADAR.kelas));
+  perbaruiPilihan();
 }
 
 async function viewRadar() {
@@ -26863,7 +26866,7 @@ async function viewRadar() {
   // → keadaan awal.
   const segarkan = !!document.querySelector('#viewRoot .radar-layar');
   const lembarNisn = segarkan ? (document.querySelector('.radar-lembar')?.dataset.nisn || null) : null;
-  if (!segarkan) { RADAR.saring = 'semua'; RADAR.kelas = null; RADAR.angkatan = null; RADAR.lengkap = false; }
+  if (!segarkan) { RADAR.saring = 'semua'; RADAR.kelas = null; RADAR.angkatan = null; RADAR.lengkap = false; RADAR.pilihMode = false; RADAR.pilih = new Set(); }
   if (!bolehRadar()) {
     $('viewRoot').innerHTML = kosong('Radar belum tersedia untuk akun ini.', 'Radar tampil untuk akun yang punya kelas binaan.', 'fa-satellite-dish');
     return;
@@ -26886,7 +26889,9 @@ function gambarLayarRadar({ sapu = true } = {}) {
     ${barisLuring()}
     ${catatanRadar(d)}
     <section class="card radar-layar">
-      <div class="radar-bingkai">${gambarRadarSvg(RADAR.tata, d.radar, { id: 'radarPenuh' })}</div>
+      ${bolehKilatPlg() || bolehKilatPrs() ? `<p class="radar-alat"><button class="btn btn-ghost btn-sm" data-radar-pilih
+        aria-pressed="${RADAR.pilihMode}">Pilih beberapa</button></p>` : ''}
+      <div class="radar-bingkai${RADAR.pilihMode ? ' mode-pilih' : ''}">${gambarRadarSvg(RADAR.tata, d.radar, { id: 'radarPenuh' })}</div>
       ${RADAR.angkatan ? `<p style="text-align:center"><button class="btn btn-ghost btn-sm" data-radar-kembali>Semua angkatan</button></p>` : ''}
       <p class="radar-ket"><span class="t3">● Tier 3</span> · <span class="t2">● Tier 2</span> · <span class="t1">● Tier 1</span>${
         d.radar.sentuhAktif ? ' · ○ Belum tersentuh' : ''}. Ketuk titik untuk melihat alasannya.</p>
@@ -26894,10 +26899,12 @@ function gambarLayarRadar({ sapu = true } = {}) {
     <section class="card">
       <div class="radar-chip">${chipRadar(d.radar)}</div>
       <div id="radarDaftar" class="radar-daftar"></div>
-    </section>`;
+    </section>
+    ${RADAR.pilihMode ? `<div id="lassoAksi" class="lasso-aksi" role="region" aria-label="Pilihan santri">${htmlAksiLasso()}</div>` : ''}`;
   perbaruiDaftarRadar();
   pasangKlikRadar();
   mulaiSapuRadar({ sapu });
+  perbaruiPilihan();
 }
 
 /* ---------- 6 · Lembar bawah dan ketukan ----------------------------- */
@@ -26971,6 +26978,20 @@ function pasangKlikRadar() {
     }
     const kb = e.target.closest('.kilat-btn[data-kilat]');
     if (kb) { if (!kb.disabled) mulaiKilat(kb.dataset.kilat, kb.dataset.kode, kb.dataset.nisn); return; }
+    if (e.target.closest('[data-radar-pilih]')) return aturModePilih(!RADAR.pilihMode);
+    if (e.target.closest('[data-lasso-batal]')) return aturModePilih(false);
+    if (e.target.closest('[data-pilih-semua]')) { togglePilih(daftarTersaring().map(t => t.nisn).filter(n => !RADAR.pilih.has(n))); return; }
+    if (RADAR.pilihMode) {
+      if (RADAR.lassoBaru && e.target.closest('.radar-svg')) return;
+      const cb = e.target.closest('[data-pilih-nisn]');
+      if (cb) { togglePilih([cb.dataset.pilihNisn]); return; }
+      const g = e.target.closest('.radar-gumpal[data-gumpal]');
+      if (g) { togglePilih(RADAR.tata.gumpal[+g.dataset.gumpal].nisn); return; }
+      const t = e.target.closest('.radar-titik[data-nisn]');
+      if (t) { togglePilih([t.dataset.nisn]); return; }
+      // Label kelas tetap menyaring daftar di mode pilih; ketukan kosong lain di radar diabaikan.
+      if (e.target.closest('.radar-svg') && !e.target.closest('.radar-label')) return;
+    }
     if (e.target.closest('[data-radar-tutup]')) return tutupLembarRadar();
     const dt = e.target.closest('[data-detail]');
     if (dt) { tutupLembarRadar(); return bukaDetailSantri(dt.dataset.detail); }
@@ -26998,6 +27019,8 @@ function pasangKlikRadar() {
       e.preventDefault();
       el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     }));
+  const svgPenuh = document.querySelector('.radar-layar .radar-svg');
+  if (svgPenuh) pasangLasso(svgPenuh);
 }
 
 /* ---------- 7 · Sapuan monster --------------------------------------- */
@@ -27330,4 +27353,74 @@ function pilihDalamLasso(tata, poli) {
   (tata.titik || []).forEach(t => { if (titikDalamPoligon(t.x, t.y, poli)) n.add(t.nisn); });
   (tata.gumpal || []).forEach(g => { if (titikDalamPoligon(g.x, g.y, poli)) g.nisn.forEach(x => n.add(x)); });
   return n;
+}
+/* ---------- 5 · Mode pilih dan lasso -------------------------------- */
+const santriTerpilih = () => [...RADAR.pilih].map(n => RADAR.data?.siswaPeta?.get(n)).filter(Boolean);
+
+/** Tambah semua bila ada yang belum terpilih; lepas semua bila semuanya sudah. */
+function togglePilih(daftar) {
+  const semua = daftar.every(n => RADAR.pilih.has(n));
+  daftar.forEach(n => semua ? RADAR.pilih.delete(n) : RADAR.pilih.add(n));
+  perbaruiPilihan();
+}
+
+function htmlAksiLasso() {
+  const n = RADAR.pilih.size, luring = sedangLuring();
+  return `<span>${angka(n)} santri dipilih</span>
+    ${bolehKilatPlg() ? `<button class="btn btn-sm" data-lasso-plg${luring || n < AI_AMBANG.minSantri ? ' disabled' : ''}>Catat pelanggaran sekaligus</button>` : ''}
+    ${bolehKilatPrs() ? `<button class="btn btn-sm" data-lasso-prs${n ? '' : ' disabled'}>Apresiasi sekaligus</button>` : ''}
+    <button class="btn btn-ghost btn-sm" data-lasso-batal>Batal</button>`;
+}
+
+function perbaruiPilihan() {
+  document.querySelectorAll('.radar-layar .radar-titik[data-nisn]').forEach(el =>
+    el.classList.toggle('terpilih', RADAR.pilih.has(el.dataset.nisn)));
+  document.querySelectorAll('.radar-layar .radar-gumpal[data-gumpal]').forEach(el => {
+    const g = RADAR.tata?.gumpal[+el.dataset.gumpal];
+    el.classList.toggle('terpilih', !!g && g.nisn.some(n => RADAR.pilih.has(n)));
+  });
+  document.querySelectorAll('[data-pilih-nisn]').forEach(cb => { cb.checked = RADAR.pilih.has(cb.dataset.pilihNisn); });
+  const bar = $('lassoAksi'); if (bar) bar.innerHTML = htmlAksiLasso();
+}
+
+/** Sapuan pointer menggambar lasso; saat lepas, isi lingkaran ditambahkan ke pilihan. */
+function pasangLasso(svg) {
+  let jejak = null, garis = null;
+  const keVb = (e) => { const R = svg.getBoundingClientRect(); return [(e.clientX - R.left) * 200 / R.width, (e.clientY - R.top) * 200 / R.height]; };
+  svg.addEventListener('pointerdown', (e) => {
+    if (!RADAR.pilihMode) return;
+    jejak = [keVb(e)];
+    garis = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    garis.setAttribute('class', 'radar-lasso');
+    svg.appendChild(garis);
+    try { svg.setPointerCapture(e.pointerId); } catch (x) {}
+  });
+  svg.addEventListener('pointermove', (e) => {
+    if (!jejak) return;
+    jejak.push(keVb(e));
+    garis.setAttribute('points', jejak.map(p => p.map(v => v.toFixed(1)).join(',')).join(' '));
+  });
+  const selesai = () => {
+    if (!jejak) return;
+    const jejakSelesai = jejak;
+    const hasil = pilihDalamLasso(RADAR.tata, jejakSelesai);
+    garis.remove(); jejak = null; garis = null;
+    RADAR.lassoTerakhir = jejakSelesai;
+    if (!hasil) return;                      // terlalu kecil: biarkan klik biasa yang menangani
+    // Klik susulan dari sapuan ini (bila peramban mengirimnya) diabaikan. Penanda
+    // dilepas pada giliran berikutnya supaya tidak menelan ketukan sungguhan.
+    RADAR.lassoBaru = true;
+    setTimeout(() => { RADAR.lassoBaru = false; }, 0);
+    hasil.forEach(n => RADAR.pilih.add(n));
+    perbaruiPilihan();
+  };
+  svg.addEventListener('pointerup', selesai);
+  svg.addEventListener('pointercancel', selesai);
+}
+
+function aturModePilih(aktif) {
+  RADAR.pilihMode = aktif;
+  if (!aktif) RADAR.pilih = new Set();
+  tutupLembarRadar();
+  gambarLayarRadar({ sapu: false });
 }
