@@ -146,7 +146,7 @@
   function lebar(font, s) {
     const k = font + '|' + s;
     let v = R.lebarCache.get(k);
-    if (v === undefined) { ctx.font = font; v = ctx.measureText(s).width; R.lebarCache.set(k, v); }
+    if (v === undefined) { ctx.font = font; regang(font); v = ctx.measureText(s).width; regang(''); R.lebarCache.set(k, v); }
     return v;
   }
   /** Posisi x tiap huruf (kerning bawaan ikut terhitung lewat prefiks). */
@@ -157,13 +157,21 @@
     return v;
   }
   const fSans = (px, w = 800) => `${w} ${px.toFixed(1)}px ${F.sans}`;
+  /* v2.47.2 — merek "Chemint-Dest": Mona Sans (GitHub, 2024) Black Italic
+     dengan sumbu lebar 125 % — grotesk variabel terbaru yang lebar & miring,
+     cocok untuk gerak cepat. Cadangan: Inter Tight miring. */
+  const MEREK = 'Chemint-Dest', I_GARIS = MEREK.indexOf('-');
+  const fMerek = (px) => `italic 900 ${px.toFixed(1)}px 'Mona Sans', ${F.sans}`;
+  const regang = (font) => { if ('fontStretch' in ctx) ctx.fontStretch = /Mona Sans/.test(font) ? 'expanded' : 'normal'; };
   function hitungUkuranTeks() {
     const S = L.S;
     ctx.font = fSans(100);
     const wP = ctx.measureText('PRESTASI.').width || 560;
     L.fsKata = Math.max(26, Math.min(100 * S.w * 0.88 / wP, S.h * 0.34, 190));
-    const wC = ctx.measureText('chemint').width || 420;
-    L.fsMerek = Math.max(34, Math.min(100 * S.w * 0.8 / (wC * 1.0), S.h * 0.36, 230));
+    ctx.font = fMerek(100); regang(ctx.font);
+    const wC = ctx.measureText(MEREK).width || 820;
+    regang('');
+    L.fsMerek = Math.max(26, Math.min(100 * S.w * 0.84 / wC, S.h * 0.3, 200));
     ctx.font = fSans(100);
     const wI = ctx.measureText('PANTAU.').width || 460;
     L.fsIris = Math.max(20, Math.min(S.h * 0.24 * 0.74, 100 * S.w * 0.72 / wI, 150));
@@ -756,8 +764,8 @@
    * ================================================================= */
   const TAGLINE = ['Setiap', 'catatan', 'adalah', 'amanah.'];
   function tataMerek() {
-    const S = L.S, fs = L.fsMerek, font = fSans(fs);
-    const pos = posHuruf(font, 'chemint'), Wn = pos[pos.length - 1];
+    const S = L.S, fs = L.fsMerek, font = fMerek(fs);
+    const pos = posHuruf(font, MEREK), Wn = pos[pos.length - 1];
     const sub = Math.max(10, fs * .11), tag = Math.max(14, Math.min(fs * .21, 30));
     const tinggi = fs * .78 + fs * .2 + sub * 1.8 + tag * 2.1;
     const atas = S.cy - tinggi / 2, base = atas + fs * .76;
@@ -766,7 +774,7 @@
   }
   function beatMerek(t) {
     if (!KONFIG.MODUL.merek || t < 7480) return;
-    const S = L.S, m = tataMerek(), kat = 'chemint', n = kat.length;
+    const S = L.S, m = tataMerek(), kat = MEREK, n = kat.length;
     // partikel memusat (implosi) 7,5–8,45 dtk
     if (t < 8500) {
       const N = Math.round(TINGKAT[R.tingkat].debu * .8);
@@ -802,7 +810,7 @@
     }
     // huruf — kerning merapat, muncul dari tengah ke tepi
     if (pudar < 1) {
-      const ls = lerp(.55, -.02, E.expoOut(seg(t, 7760, 8450))) * m.fs;
+      const ls = lerp(.3, -.01, E.expoOut(seg(t, 7760, 8450))) * m.fs;
       const sy = 1 - .97 * E.backIn(pulang);
       const pS = lerp(-.3, 1.3, E.expoInOut(seg(t, 8250, 9000)));
       const gr = ctx.createLinearGradient(m.x0 - m.Wn * .1, 0, m.x0 + m.Wn * 1.1, 0);
@@ -810,16 +818,25 @@
       gr.addColorStop(0, W_.putih);
       stop(pS - .16, W_.putih); stop(pS - .05, W_.kuninganHi); stop(pS, '#FFF1C2'); stop(pS + .05, W_.kuninganHi); stop(pS + .16, W_.putih);
       gr.addColorStop(1, W_.putih);
-      ctx.font = m.font; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.font = m.font; regang(m.font); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
       const cyH = m.base - m.fs * .36;
       ctx.save(); ctx.translate(0, cyH); ctx.scale(1, sy); ctx.translate(0, -cyH);
       const mantap = E.expoOut(seg(t, 7760, 8600));
+      // "Dest": emas berkilau searah sapuan; tanda hubung = bilah emas miring (sama dengan gerbang masuk)
+      const grD = ctx.createLinearGradient(m.x0, m.base - m.fs * .75, m.x0 + m.Wn, m.base);
+      grD.addColorStop(0, '#FFF1C2'); grD.addColorStop(.5, W_.emas); grD.addColorStop(1, W_.kuninganHi);
       for (let j = 0; j < n; j++) {
         const d = Math.abs(j - (n - 1) / 2);
         const a = E.expoOut(seg(t, 7780 + d * 45, 8160 + d * 45));
         if (a <= 0) continue;
         const x = m.x0 + m.pos[j] + ls * (j - (n - 1) / 2), y = m.base + (1 - a) * m.fs * .22;
         ctx.globalAlpha = a * (1 - pudar);
+        if (j === I_GARIS) {
+          const lb = m.pos[j + 1] - m.pos[j], h = m.fs * .15, yb = y - m.fs * .36;
+          ctx.save(); ctx.translate(x + lb * .5, yb); ctx.transform(1, 0, -.25, 1, 0, 0);
+          ctx.fillStyle = W_.emas; ctx.fillRect(-lb * .42 * a, -h / 2, lb * .84 * a, h);
+          ctx.restore(); continue;
+        }
         if (TINGKAT[R.tingkat].kroma) {
           const dl = 1 + 5 * (1 - mantap);
           ctx.globalAlpha = a * (1 - pudar) * .5;
@@ -827,9 +844,9 @@
           ctx.fillStyle = W_.kuningan; ctx.fillText(kat[j], x + dl, y);
           ctx.globalAlpha = a * (1 - pudar);
         }
-        ctx.fillStyle = gr; ctx.fillText(kat[j], x, y);
+        ctx.fillStyle = j > I_GARIS ? grD : gr; ctx.fillText(kat[j], x, y);
       }
-      ctx.restore(); ctx.globalAlpha = 1;
+      ctx.restore(); ctx.globalAlpha = 1; regang('');
     }
     // garis aturan: muncul 8,25 dtk; saat pulang menjadi garis frame 0
     const tumbuh = E.expoOut(seg(t, 8250, 8700));
@@ -2132,7 +2149,7 @@
     periksaBaterai();
     // Huruf sudah dipakai halaman masuk; bila baru tiba, ukuran teks dihitung ulang.
     if (document.fonts && document.fonts.load) {
-      Promise.all(['800 40px "Inter Tight"', 'italic 400 30px "Instrument Serif"', '500 12px "IBM Plex Mono"', '700 30px Amiri']
+      Promise.all(['italic 900 40px "Mona Sans"', '800 40px "Inter Tight"', 'italic 400 30px "Instrument Serif"', '500 12px "IBM Plex Mono"', '700 30px Amiri']
         .map(f => document.fonts.load(f, f.includes('Amiri') ? 'روح' : 'Aa').catch(() => {})))
         .then(() => { if (R.hidup) { R.lebarCache.clear(); hitungUkuranTeks(); if (R.poster) gambarPoster(); } });
     }
@@ -2168,9 +2185,84 @@
     periksa();
   }
 
-  /* API kecil — dipakai uji otomatis & penelusuran, bukan oleh aplikasi. */
+
+  /* =================================================================
+   *  v2.47.2 · GERBANG "Chemint-Dest" — transisi saat Masuk ditekan
+   * -----------------------------------------------------------------
+   *  1  (0–0,52 dtk)  tirai navy menutup; huruf meluncur dari kanan
+   *                   (miring, kabur → tajam), bilah emas tanda hubung
+   *                   tumbuh, kilat cahaya menyapu → `tertutup` selesai.
+   *  ·  (menunggu)    bila server lambat: keterangan mono muncul 1,1 dtk.
+   *  2  buka() 0,46   KAMERA MENEROBOS bilah emas: kata membesar dengan
+   *                   poros di tengah bilah sampai emas memenuhi layar.
+   *  3  buka() 0,52   sapuan diagonal (sudut miring huruf) membuka
+   *                   aplikasi; aplikasi mengendap dari skala 1,03.
+   *  batal()          gagal masuk → memudar 0,2 dtk, kartu kembali.
+   *  Gerak dikurangi: hanya pudar masuk/keluar.
+   * ================================================================= */
+  function gerbang() {
+    if (!document.body || typeof document.body.animate !== 'function') return null;
+    const kurang = gerakDikurangi();
+    const el = document.createElement('div');
+    el.className = 'rq-gerbang'; el.setAttribute('aria-hidden', 'true');
+    const huruf = [...MEREK].map((c, i) => i === I_GARIS ? '<i class="rq-g-garis"></i>'
+      : `<span class="${i > I_GARIS ? 'rq-g-dest' : ''}">${c}</span>`).join('');
+    el.innerHTML = `<div class="rq-g-tirai"></div><div class="rq-g-kilat"></div>
+      <div class="rq-g-kata">${huruf}</div><div class="rq-g-ket">MENYIAPKAN CATATAN SANTRI</div>`;
+    document.body.appendChild(el);
+    const tirai = el.querySelector('.rq-g-tirai'), kilat = el.querySelector('.rq-g-kilat');
+    const kata = el.querySelector('.rq-g-kata'), ket = el.querySelector('.rq-g-ket'), garisEl = el.querySelector('.rq-g-garis');
+    // pas selebar 88 % layar
+    const lw = kata.getBoundingClientRect().width, batas = innerWidth * .88;
+    if (lw > batas) kata.style.fontSize = (parseFloat(getComputedStyle(kata).fontSize) * batas / lw).toFixed(1) + 'px';
+    const anim = [];
+    const A = (n, kf, o) => { const a = n.animate(kf, Object.assign({ fill: 'both' }, o)); anim.push(a); return a; };
+    let selesai = false, okTutup;
+    const tertutup = new Promise(r => { okTutup = r; });
+    const lepas = () => { if (selesai) return; selesai = true; clearTimeout(tKet); el.remove(); };
+    if (kurang) A(el, [{ opacity: 0 }, { opacity: 1 }], { duration: 160 }).finished.then(okTutup, okTutup);
+    else {
+      A(tirai, [{ opacity: 0, transform: 'scale(1.08)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'cubic-bezier(.2,.8,.2,1)' });
+      [...kata.children].forEach((h, i) => {
+        if (h === garisEl) A(h, [{ transform: 'skewX(-14deg) scaleX(0)' }, { transform: 'skewX(-14deg) scaleX(1.25)', offset: .7 }, { transform: 'skewX(-14deg) scaleX(1)' }],
+          { duration: 380, delay: 150, easing: 'cubic-bezier(.16,1,.3,1)' });
+        else A(h, [{ transform: 'translateX(1.1em) skewX(-18deg)', opacity: 0, filter: 'blur(5px)' },
+          { transform: 'none', opacity: 1, filter: 'blur(0)' }], { duration: 480, delay: 30 + i * 22, easing: 'cubic-bezier(.16,1,.3,1)' });
+      });
+      A(kilat, [{ transform: 'translateX(-70vw) skewX(-20deg)', opacity: 0 }, { opacity: 1, offset: .3 }, { transform: 'translateX(70vw) skewX(-20deg)', opacity: 0 }],
+        { duration: 620, delay: 200, easing: 'cubic-bezier(.45,0,.2,1)' });
+      setTimeout(okTutup, 540);
+    }
+    const tKet = setTimeout(() => { if (!selesai) A(ket, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: .72, transform: 'none' }], { duration: 300 }); }, 1100);
+    return {
+      tertutup,
+      buka() {
+        if (selesai) return Promise.resolve();
+        clearTimeout(tKet);
+        const app = document.getElementById('appShell');
+        if (kurang) return A(el, [{ opacity: 1 }, { opacity: 0 }], { duration: 220 }).finished.then(lepas, lepas);
+        A(ket, [{ opacity: getComputedStyle(ket).opacity }, { opacity: 0 }], { duration: 120 });
+        const rk = kata.getBoundingClientRect(), rg = garisEl.getBoundingClientRect();
+        kata.style.transformOrigin = `${(rg.left + rg.width / 2 - rk.left).toFixed(1)}px ${(rg.top + rg.height / 2 - rk.top).toFixed(1)}px`;
+        const S = Math.max(innerWidth / Math.max(1, rg.width), innerHeight / Math.max(1, rg.height)) * 2.4;
+        return A(kata, [{ transform: 'scale(1)' }, { transform: `scale(${S.toFixed(1)})` }], { duration: 460, easing: 'cubic-bezier(.7,0,.84,0)' })
+          .finished.then(() => {
+            if (app) app.animate([{ transform: 'scale(1.03)', filter: 'brightness(1.12)' }, { transform: 'none', filter: 'none' }], { duration: 640, easing: 'cubic-bezier(.16,1,.3,1)' });
+            return A(el, [{ clipPath: 'polygon(0% 0%, 130% 0%, 130% 100%, -22% 100%)' },
+              { clipPath: 'polygon(152% 0%, 130% 0%, 130% 100%, 130% 100%)' }], { duration: 520, easing: 'cubic-bezier(.65,0,.35,1)' }).finished;
+          }).then(lepas, lepas);
+      },
+      batal() {
+        if (selesai) return;
+        clearTimeout(tKet);
+        A(el, [{ opacity: 1 }, { opacity: 0 }], { duration: 200 }).finished.then(lepas, lepas);
+      }
+    };
+  }
+
+  /* API kecil — dipakai uji otomatis & penelusuran; gerbang() dipakai app.js saat Masuk. */
   window.RQReel = {
-    versi: 'v2.47.1', KONFIG, TINGKAT,
+    versi: 'v2.47.2', KONFIG, TINGKAT, gerbang,
     keadaan: () => ({
       hidup: R.hidup, jalan: R.jalan, poster: R.poster, tingkat: R.tingkat, tingkatAwal: R.tingkatAwal, sebab: R.sebab,
       waktu: R.waktu, t: R.waktu % KONFIG.DURASI, bingkai: R.bingkai, tataVer: R.tataVer, rataAwal: R.rataAwal ?? null,

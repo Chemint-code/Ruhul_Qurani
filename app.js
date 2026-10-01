@@ -2356,17 +2356,35 @@ $('formLogin').addEventListener('submit', async (e) => {
   const p = $('loginPassword').value;
   const email = u.includes('@') ? u : `${u}@${DOMAIN_INTERNAL}`;
 
+  // v2.47.2 — singgah: sesi masih aktif & isian belum diubah → lanjutkan sesi
+  // tanpa menghubungi server autentikasi (sandi tidak pernah disimpan).
+  const form = $('formLogin');
+  const singgah = form.dataset.sesi === 'aktif' && u === SINGGAH.id && p === SINGGAH.SANDI;
   const asli = { html: btn.innerHTML, disabled: false };
   btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i><span>Memproses…</span>';
+  btn.innerHTML = singgah ? '<i class="fa-solid fa-circle-notch fa-spin"></i><span>Melanjutkan…</span>'
+                          : '<i class="fa-solid fa-circle-notch fa-spin"></i><span>Memproses…</span>';
+  // v2.47.2 — gerbang "Chemint-Dest" (showreel.js). Tanpa showreel → layar muat lama.
+  const gerbang = (window.RQReel && typeof RQReel.gerbang === 'function') ? RQReel.gerbang() : null;
   try {
-    const { error } = await db.auth.signInWithPassword({ email, password: p });
-    if (error) throw new Error('Username atau password salah.');
-    LayarMuat.bukaAwal(['Menyiapkan akun', 'Mengambil catatan santri', 'Menyusun ringkasan', 'Hampir selesai']);
+    if (singgah) {
+      $('loginPassword').value = '';            // nilai tiruan tidak ikut disimpan pengelola sandi
+      if (!(await penggunaSesi())) throw new Error('Sesi sudah berakhir. Silakan masuk dengan kata sandi.');
+    } else {
+      if (SINGGAH.id && u !== SINGGAH.id) await bersihkanAkunPerangkat();   // ganti akun: data akun lama tidak ditinggal
+      const { error } = await db.auth.signInWithPassword({ email, password: p });
+      if (error) throw new Error('Username atau password salah.');
+    }
+    if (gerbang) await gerbang.tertutup;
+    else LayarMuat.bukaAwal(['Menyiapkan akun', 'Mengambil catatan santri', 'Menyusun ringkasan', 'Hampir selesai']);
+    delete form.dataset.sesi;
     await masukAplikasi();
-    if (!APP.profil) LayarMuat.tutupAwal();   // profil ditolak → kembali ke login
+    if (!APP.profil) { LayarMuat.tutupAwal(); gerbang?.batal(); }   // profil ditolak → kembali ke login
+    else if (gerbang) { await halamanPertamaSiap(); gerbang.buka(); }
   } catch (err) {
+    gerbang?.batal();
     LayarMuat.tutupAwal();
+    if (singgah) { $('loginPassword').value = ''; delete form.dataset.sesi; $('loginSesi')?.remove(); }
     toast('error', err.message);
   } finally {
     btn.disabled = asli.disabled;
@@ -26594,9 +26612,82 @@ function kelopakPayung(p, u, s) {
 // ---------------------------------------------------------------------
 hidupkanLayarLogin();
 
+/* =====================================================================
+ * v2.47.2 — SINGGAH: setiap aplikasi dibuka, layar masuk (showreel)
+ * selalu tampil dulu, juga bagi pengguna yang sesinya masih aktif.
+ *  · ID terisi dari sesi; kolom sandi diisi nilai TIRUAN (bukan sandi
+ *    asli — sandi tidak pernah disimpan di perangkat). Tekan Masuk →
+ *    sesi yang ada dilanjutkan tanpa autentikasi ulang.
+ *  · Mengubah ID/sandi → kembali menjadi masuk biasa. "Ganti akun" →
+ *    sesi diakhiri & data akun lama di perangkat dihapus.
+ *  · Matikan: SINGGAH.aktif = false, atau per perangkat localStorage
+ *    'rq-singgah' = 'mati' (perilaku lama: langsung ke dasbor).
+ * ===================================================================== */
+const SINGGAH = { aktif: true, SANDI: 'sesi-aktif-rq', id: '', user: null };
+try { if (localStorage.getItem('rq-singgah') === 'mati') SINGGAH.aktif = false; } catch (e) {}   // sakelar per perangkat
+
+async function bersihkanAkunPerangkat() {
+  if (APP.channel) db.removeChannel(APP.channel);
+  try { sessionStorage.removeItem('rq_ctx'); } catch (e) {}
+  await idbKosongkan();
+  try { localStorage.removeItem('rq_profil'); localStorage.removeItem('rq_jml'); } catch (e) {}
+  await db.auth.signOut();
+  SINGGAH.id = ''; SINGGAH.user = null;
+}
+
+/** Tunggu halaman pertama selesai dimuat (atau 4 dtk) sebelum gerbang dibuka. */
+async function halamanPertamaSiap(maks = 4000) {
+  const mulai = Date.now();
+  await new Promise(r => setTimeout(r, 60));
+  while ((APP.navSibuk || 0) > 0 && Date.now() - mulai < maks) await new Promise(r => setTimeout(r, 50));
+}
+
+function siapkanSinggah(user) {
+  const email = String(user?.email || '');
+  if (!SINGGAH.aktif || !email) return false;
+  const akhiran = '@' + DOMAIN_INTERNAL;
+  SINGGAH.id = email.toLowerCase().endsWith(akhiran) ? email.slice(0, -akhiran.length) : email;
+  SINGGAH.user = user;
+  const form = $('formLogin'), idEl = $('loginUsername'), sandi = $('loginPassword');
+  if (!form || !idEl || !sandi) return false;
+  form.dataset.sesi = 'aktif';
+  idEl.value = SINGGAH.id;
+  sandi.value = SINGGAH.SANDI;
+  const nama = profilTersimpan(user.id)?.nama;
+  const h2 = form.querySelector('h2'), sub = form.querySelector('.sub');
+  if (h2) h2.textContent = 'Selamat datang kembali';
+  if (sub) sub.textContent = nama ? `Assalamu’alaikum, ${nama}.` : 'Sesi Anda masih tersimpan di perangkat ini.';
+  if (!$('loginSesi')) {
+    const info = document.createElement('p');
+    info.id = 'loginSesi'; info.className = 'login-sesi';
+    info.innerHTML = '<i class="fa-solid fa-shield-halved"></i><span>Sesi masih aktif — cukup tekan <b>Masuk</b>.</span>'
+      + '<button type="button" id="btnGantiAkun">Bukan Anda? Ganti akun</button>';
+    form.insertBefore(info, form.querySelector('.field'));
+    info.querySelector('#btnGantiAkun').addEventListener('click', async () => {
+      const b = info.querySelector('#btnGantiAkun'); b.disabled = true;
+      await bersihkanAkunPerangkat();
+      delete form.dataset.sesi; info.remove();
+      idEl.value = ''; sandi.value = '';
+      if (h2) h2.textContent = 'Selamat datang';
+      if (sub) sub.textContent = 'Gunakan akun yang diberikan pengurus dayah.';
+      idEl.focus();
+    });
+  }
+  // Mengubah isian = masuk biasa (akun lain / sandi baru).
+  const lepas = (e) => {
+    if (form.dataset.sesi !== 'aktif') return;
+    if (e.target === idEl && idEl.value.trim() !== SINGGAH.id && sandi.value === SINGGAH.SANDI) sandi.value = '';
+    if (idEl.value.trim() !== SINGGAH.id || sandi.value !== SINGGAH.SANDI) { delete form.dataset.sesi; $('loginSesi')?.remove(); }
+  };
+  idEl.addEventListener('input', lepas); sandi.addEventListener('input', lepas);
+  sandi.addEventListener('focus', () => { if (sandi.value === SINGGAH.SANDI) sandi.select(); });
+  return true;
+}
+
 (async function start() {
   try {
     const { data: { session } } = await db.auth.getSession();
+    if (session && siapkanSinggah(session.user)) return;   // tampilkan showreel dulu; Masuk melanjutkan sesi
     if (session) await masukAplikasi();
   } finally {
     // Tanpa sesi / profil ditolak → tampilkan login. Bila profil sah,
@@ -27140,7 +27231,7 @@ function gambarRadarMini(siswa, bahan, tokenMini) {
  *  Pelanggaran tidak pernah masuk antrean luring.
  * ===================================================================== */
 APP.versi = 'rq-v2.46.1';   // v2.46.1: performa (cache-first kerangka, lencana hemat, CDN pasti)
-APP.versi = 'rq-v2.47.1';   // v2.47.1: Si Peci ninja & Si Payung menari pada jam showreel (showreel.js)
+APP.versi = 'rq-v2.47.2';   // v2.47.2: singgah di layar masuk + gerbang "Chemint-Dest" (showreel.js)
 
 const KILAT_DETIK = 5, KILAT_PLG = 4, KILAT_PRS = 2;
 const KILAT = { tunda: null };
