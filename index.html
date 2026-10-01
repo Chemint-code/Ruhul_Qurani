@@ -6766,7 +6766,17 @@
     -webkit-backdrop-filter: none; backdrop-filter: none;
     background: color-mix(in oklab, white 97%, transparent);
   }
-  @media print { .rq-reel { display: none; } }
+  /* v2.47.1 — kanvas aktor (Si Peci ninja & Si Payung) di ATAS kartu:
+     tanpa pointer, jadi kolom isian & tombol tetap bisa disentuh. */
+  .rq-aktor {
+    position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+    z-index: 3; display: block; pointer-events: none; contain: strict;
+  }
+  /* Panggung maskot DOM v2.40 diganti aktor showreel. Disembunyikan sejak
+     showreel mulai dimuat; bila showreel.js gagal, pemuat mencabut
+     .memuat-reel dan panggung lama tampil kembali. */
+  #loginScreen:is(.memuat-reel, .ada-reel) .lp-panggung { display: none; }
+  @media print { .rq-reel, .rq-aktor { display: none; } }
 </style>
 </head>
 <body>
@@ -6871,7 +6881,9 @@
     var lm = document.getElementById('layarMuat');
     if (dimuat || scr.classList.contains('hidden') || (lm && !lm.classList.contains('tutup'))) return;
     dimuat = true; mo.disconnect();
+    scr.classList.add('memuat-reel');
     var s = document.createElement('script'); s.src = 'showreel.js'; s.async = true;
+    s.onerror = function () { scr.classList.remove('memuat-reel'); };
     document.head.appendChild(s);
   }
   mo = new MutationObserver(periksa);
