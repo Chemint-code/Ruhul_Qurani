@@ -27140,6 +27140,7 @@ function gambarRadarMini(siswa, bahan, tokenMini) {
  *  Pelanggaran tidak pernah masuk antrean luring.
  * ===================================================================== */
 APP.versi = 'rq-v2.46.1';   // v2.46.1: performa (cache-first kerangka, lencana hemat, CDN pasti)
+APP.versi = 'rq-v2.47';     // v2.47: showreel 10 detik di layar masuk (showreel.js, dimuat hanya bila layar masuk tampil)
 
 const KILAT_DETIK = 5, KILAT_PLG = 4, KILAT_PRS = 2;
 const KILAT = { tunda: null };

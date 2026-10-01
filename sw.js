@@ -3,7 +3,7 @@
 
    Strategi sengaja dibuat sederhana supaya mudah ditelusuri:
      · Kerangka aplikasi (HTML/JS/manifest)  -> CACHE-FIRST dari cache
-       versi ini (v2.46.1). Berkas diunduh SEKALI saat service worker
+       versi ini (v2.47). Berkas diunduh SEKALI saat service worker
        versi baru dipasang, bukan setiap kali aplikasi dibuka (dulu
        network-first: ±516 KB gzip tiap buka, lihat PERFORMA.md).
      · Aset pihak ketiga (font, ikon, pustaka CDN) -> cache-first di
@@ -49,7 +49,7 @@
    hapus singgahan versi lama, lalu beri tahu halaman yang terbuka.
    ===================================================================== */
 
-const VERSI       = 'rq-v2.46.1';
+const VERSI       = 'rq-v2.47';
 const CACHE_INTI  = `${VERSI}-inti`;
 const CACHE_ASET  = 'rq-aset-v1';   // nama tetap: bertahan melewati kenaikan VERSI
 
@@ -57,13 +57,14 @@ const INTI = [
   './',
   './index.html',
   './app.js',
+  './showreel.js',      // v2.47: showreel layar masuk (dimuat lambat oleh index.html)
   './manifest.webmanifest'
 ];
 
 /* Berkas yang TIDAK BOLEH dilayani singgahan HTTP peramban. Inilah
    berkas yang berubah setiap kali aplikasi diperbarui; sisanya (gambar
    lambang, ikon) boleh memakai jalur biasa supaya tetap hemat kuota. */
-const POLA_INTI = /(?:^\/?$|\/$|index\.html$|app\.js$|manifest\.webmanifest$)/i;
+const POLA_INTI = /(?:^\/?$|\/$|index\.html$|app\.js$|showreel\.js$|manifest\.webmanifest$)/i;
 
 const CDN_DIIZINKAN = [
   'https://fonts.googleapis.com',

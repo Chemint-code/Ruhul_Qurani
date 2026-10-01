@@ -6739,6 +6739,35 @@
   }
   @media print { .lp-panggung { display: none; } }
 </style>
+<style id="gayaShowreel">
+  /* =====================================================================
+   * v2.47 — SHOWREEL LAYAR MASUK (pasangan showreel.js)
+   *  Kanvas .rq-reel duduk di z-index 1: di atas foto & .login-wash,
+   *  di bawah kolom kiri (z 2) dan kartu masuk (z 2). Kelas .ada-reel
+   *  hanya dipasang showreel.js; tanpa berkas itu tampilan lama utuh.
+   * ===================================================================== */
+  .rq-reel {
+    position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+    z-index: 1; display: block; pointer-events: none; contain: strict;
+  }
+  /* Foto dayah tinggal bayangan samar; latar gelap menjaga kontras. */
+  #loginScreen.ada-reel .login-wash {
+    background:
+      radial-gradient(120% 90% at 32% 46%, rgb(6 24 38 / .78) 0%, rgb(6 24 38 / .90) 58%, rgb(2 10 18 / .97) 100%);
+  }
+  /* Ayat & judul diwakili adegan klimaks; tetap terbaca pembaca layar. */
+  #loginScreen.ada-reel .login-verse {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  /* Tingkat sedang/ringan: kaca buram dilepas (blur ulang tiap bingkai
+     di atas kanvas bergerak mahal di HP); kartu sedikit lebih pekat. */
+  #loginScreen.ada-reel:is([data-reel="sedang"], [data-reel="ringan"]) .login-card {
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    background: color-mix(in oklab, white 97%, transparent);
+  }
+  @media print { .rq-reel { display: none; } }
+</style>
 </head>
 <body>
 
@@ -6828,6 +6857,30 @@
     </form>
   </div>
 </div>
+
+<!-- v2.47: pemuat showreel — showreel.js baru diunduh & dijalankan saat
+     layar masuk benar-benar tampil (layar muat tertutup, tanpa sesi).
+     Pengguna yang sudah masuk tidak pernah memuatnya. Gagal dimuat →
+     layar masuk lama tetap utuh. -->
+<script>
+(function () {
+  var scr = document.getElementById('loginScreen');
+  if (!scr || !window.MutationObserver || !document.createElement('canvas').getContext) return;
+  var dimuat = false, mo;
+  function periksa() {
+    var lm = document.getElementById('layarMuat');
+    if (dimuat || scr.classList.contains('hidden') || (lm && !lm.classList.contains('tutup'))) return;
+    dimuat = true; mo.disconnect();
+    var s = document.createElement('script'); s.src = 'showreel.js'; s.async = true;
+    document.head.appendChild(s);
+  }
+  mo = new MutationObserver(periksa);
+  mo.observe(scr, { attributes: true, attributeFilter: ['class'] });
+  var lm = document.getElementById('layarMuat');
+  if (lm) mo.observe(lm, { attributes: true, attributeFilter: ['class'] });
+  periksa();
+})();
+</script>
 
 <!-- ======================= SHELL ======================= -->
 <div id="appShell" class="hidden">
