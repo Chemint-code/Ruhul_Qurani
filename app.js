@@ -2166,13 +2166,6 @@ function angkatanDariKelas(kelas) {
   return { '7':'VII','8':'VIII','9':'IX','10':'X','11':'XI','12':'XII' }[num[1]] || '';
 }
 
-/** Rentang 3 bulan terakhir. */
-function rentang3Bulan() {
-  const akhir = new Date(); akhir.setHours(23,59,59,999);
-  const mulai = new Date(); mulai.setHours(0,0,0,0); mulai.setMonth(mulai.getMonth() - 3);
-  return { mulai, akhir };
-}
-
 // ---------------------------------------------------------------------
 // 6. MESIN PANEL SARAN / AUTOCOMPLETE
 //     Menggantikan <datalist> bawaan browser dengan panel kartu bertema.
@@ -2606,7 +2599,9 @@ async function navigateTo(view) {
   // v2.18.1: rangka shimmer langsung tampil saat BERPINDAH menu; view
   // menimpanya begitu siap. Penyegaran menu yang sama (mis. dari realtime)
   // tidak dikosongkan supaya layar tidak berkedip.
-  if (viewLama !== view || !$('viewRoot').children.length) $('viewRoot').innerHTML = rangkaMemuat();
+  // v2.48: penyegaran halaman yang sama → angka bergulir dari nilai lama, bukan dari nol.
+  APP.segarSama = viewLama === view && !!$('viewRoot').children.length;
+  if (!APP.segarSama) $('viewRoot').innerHTML = rangkaMemuat();
   APP.viewTampil = view;
   APP.navSibuk = (APP.navSibuk || 0) + 1;
   const tutupTirai = LayarMuat.tiraiUntuk(j);
@@ -2736,6 +2731,7 @@ const tagIzin = (s) => s === 'Sesuai Waktu' ? 'tag-ok' : s === 'Telat Balik' ? '
 
 function stat(label, nilai, ikon, warna, aksen, kaki) {
   return `<div class="stat rise" style="--accent:${aksen}">
+    <span class="stat-sorot" aria-hidden="true"></span>
     <div class="ico" style="${warna}"><i class="${ikon}"></i></div>
     <p class="k">${esc(label)}</p>
     <p class="v">${nilai}</p>
@@ -2931,7 +2927,10 @@ function lingkupDasbor({ siswaAll, detailAll, izinAll, pembinaanAll }) {
   const pembinaan = filterBinaanUnit(
     saringPeriode(pembinaanAll.filter(aktifPembinaan), 'tanggal_pembinaan')
       .map(p => ({ ...p, kelas: p.siswa?.kelas || '' })), 'kelas');
-  return { siswa, detail, detailTr, izinSemua, izin, pembinaan,
+  // v2.48: lintas periode → dibelah per bulan oleh ringkasanBulan()
+  const pembinaanSemua = filterBinaanUnit(
+    pembinaanAll.filter(aktifPembinaan).map(p => ({ ...p, kelas: p.siswa?.kelas || '' })), 'kelas');
+  return { siswa, detail, detailTr, izinSemua, izin, pembinaan, pembinaanSemua,
     gagal: daftarGagalInti({ siswaAll, detailAll, izinAll, pembinaanAll }) };
 }
 
@@ -2958,31 +2957,49 @@ async function viewDashboard() {
     amanKosong(muatPembinaan, 'pembinaan')
   ]);
 
-  const { siswa, detail, detailTr, izinSemua, izin, pembinaan, gagal: gagalInti } =
-    lingkupDasbor({ siswaAll, detailAll, izinAll, pembinaanAll });
+  const L = lingkupDasbor({ siswaAll, detailAll, izinAll, pembinaanAll });
+  const { siswa, detailTr, izinSemua, izin, pembinaan, gagal: gagalInti } = L;
 
+  // Amanah (pekerjaan yang masih menunggu) mengikuti pemilih periode
+  // seperti sebelumnya: tanpa periode, seluruh tunggakan tampil.
   const izinPending = izin.filter(z => z.status_persetujuan === 'Pending').length;
-  const izinSesuai  = izin.filter(z => z.status_persetujuan === 'Sesuai Waktu').length;
-  const izinTelat   = izin.filter(z => z.status_persetujuan === 'Telat Balik').length;
   const binaProses  = pembinaan.filter(p => p.status_pembinaan !== 'Selesai').length;
    await profilePromise;
 
-  // ---- Agregasi 3 bulan ----
-  const { mulai, akhir } = rentang3Bulan();
-  const angkatanList = ['VII','VIII','IX','X','XI','XII'];
-  const pekanPeta = {}, pekanKunci = [];
-  for (let c = awalPekan(mulai); c <= awalPekan(akhir); c = tambahHari(c, 7)) {
-    const k = kunciTgl(c); pekanKunci.push(k); pekanPeta[k] = 0;
-  }
-  const perKategori = { Ringan:0, Sedang:0, Berat:0 };
-  const perBidang = {}, perJenis = {}, angkatanPekan = {};
-  angkatanList.forEach(a => angkatanPekan[a] = Object.fromEntries(pekanKunci.map(k => [k, 0])));
+  // v2.48 — angka dan grafik Ringkasan = SATU bulan (bulan berjalan, atau
+  // bulan pada pemilih periode), dibandingkan dengan bulan sebelumnya
+  // sampai tanggal yang sama. Peta Perkembangan & IPP di bawah tetap
+  // memakai jendelanya sendiri (lihat blokSebaran).
+  const B = ringkasanBulan(L);
+  const per = B.per;
+  const detail = B.detail.ini;
+  const izinBulan = B.izin.ini;
+  const izinMenunggu = izinBulan.filter(z => z.status_persetujuan === 'Pending').length;
+  const izinSesuai   = izinBulan.filter(z => z.status_persetujuan === 'Sesuai Waktu').length;
+  const izinTelat    = izinBulan.filter(z => z.status_persetujuan === 'Telat Balik').length;
+  const binaBulan    = B.bina.ini;
+  const binaBerproses = binaBulan.filter(p => p.status_pembinaan !== 'Selesai').length;
 
-  detailTr.forEach(r => {
-    const d = tglDari(kunciTgl(r.tanggal));
-    if (!d || d < mulai || d > akhir) return;
-    const wk = kunciTgl(awalPekan(d));
-    if (wk in pekanPeta) pekanPeta[wk]++;
+  // ---- Agregasi bulan ini (per hari) + bulan lalu sebagai pembanding ----
+  const angkatanList = ['VII','VIII','IX','X','XI','XII'];
+  const hariKe = (r, kolom) => Number(kunciBaris(r, kolom, per).slice(8, 10)) || 0;
+  const perHari = (rows, kolom, panjang) => {
+    const a = Array.from({ length: panjang }, () => 0);
+    rows.forEach(r => { const h = hariKe(r, kolom); if (h >= 1 && h <= panjang) a[h - 1]++; });
+    return a;
+  };
+  const hariIniArr  = perHari(detail, 'tanggal', per.hariBulan);
+  const hariLaluArr = perHari(B.detail.laluPenuh, 'tanggal', per.hariLalu);
+  const hariLabel   = Array.from({ length: per.hariBulan }, (_, i) => String(i + 1));
+  // Hari yang belum terjadi dikosongkan (bukan nol) supaya garis berhenti di hari ini.
+  const garisIni  = hariIniArr.map((v, i) => (per.berjalan && i >= per.batas ? null : v));
+  const garisLalu = hariLabel.map((_, i) => (i < per.hariLalu ? hariLaluArr[i] : null));
+
+  const perKategori = { Ringan:0, Sedang:0, Berat:0 };
+  const perBidang = {}, perJenis = {};
+  const angIni  = Object.fromEntries(angkatanList.map(a => [a, 0]));
+  const angLalu = Object.fromEntries(angkatanList.map(a => [a, 0]));
+  detail.forEach(r => {
     const kat = r.kategori;
     if (kat in perKategori) perKategori[kat]++;
     const bid = String(r.bidang || 'Belum Dipetakan').trim() || 'Belum Dipetakan';
@@ -2990,16 +3007,24 @@ async function viewDashboard() {
     const jenis = String(r.nama_pelanggaran || r.kode_pelanggaran || '-').trim();
     perJenis[jenis] = (perJenis[jenis] || 0) + 1;
     const ang = angkatanDariKelas(r.kelas);
-    if (angkatanPekan[ang] && (wk in angkatanPekan[ang])) angkatanPekan[ang][wk]++;
+    if (ang in angIni) angIni[ang]++;
   });
+  B.detail.lalu.forEach(r => { const ang = angkatanDariKelas(r.kelas); if (ang in angLalu) angLalu[ang]++; });
 
   const bidangUrut = Object.entries(perBidang).sort((a,b) => b[1]-a[1]).slice(0, 8);
   const topJenis = Object.entries(perJenis).sort((a,b) => b[1]-a[1]).slice(0, 5);
+  const topMaks = topJenis.length ? topJenis[0][1] : 0;
 
-  // Trend izin 14 hari berdasarkan tanggal_mulai (santri unik per hari)
-  const hari14 = [], petaIzinHari = {};
-  for (let i = 13; i >= 0; i--) { const k = kunciTgl(tambahHari(new Date(), -i)); hari14.push(k); petaIzinHari[k] = new Set(); }
-  izinSemua.forEach(z => { const k = kunciTgl(z.tanggal_mulai); if (petaIzinHari[k]) petaIzinHari[k].add(String(z.nisn)); });
+  // Santri unik yang MULAI izin per hari pada bulan ini; bulan lalu s.d. tanggal yang sama.
+  const izinHari = (bulan, panjang) => {
+    const peta = Array.from({ length: panjang }, () => new Set());
+    izinSemua.forEach(z => { const k = kunciTgl(z.tanggal_mulai);
+      if (bulanDari(k) === bulan) { const h = Number(k.slice(8, 10)); if (h >= 1 && h <= panjang) peta[h - 1].add(String(z.nisn)); } });
+    return peta.map(x => x.size);
+  };
+  const izinHariIni  = izinHari(per.bulan, per.hariBulan);
+  const izinMulaiLalu = izinHari(per.lalu, per.hariLalu).slice(0, per.batas).reduce((a, x) => a + x, 0);
+  const batang = (arr) => arr.map((v, i) => (per.berjalan && i >= per.batas ? null : v));
 
   // Amanah yang belum selesai — sengaja TANPA penyaringan periode: tugas
   // yang belum dikerjakan tidak berhenti menjadi tugas pada tanggal 1.
@@ -3040,37 +3065,41 @@ async function viewDashboard() {
     ${bolehRadar() ? `<div id="radarMini" class="radar-mini" aria-busy="true"><div class="rq-sk radar-mini-sk"></div></div>` : ''}
     ${kartuUnit()}
 
+    ${barisPeriodeRingkasan(per)}
+
     <div class="stats">
       ${stat('Santri Aktif', angka(siswa.length), 'fa-solid fa-user-group',
         'background:#E7F1F7;color:var(--sea)', 'var(--sea)',
         perluFilterKelas() ? 'Kelas binaan Anda' : 'Seluruh dayah')}
       ${stat('Pelanggaran', angka(detail.length), 'fa-solid fa-scale-balanced',
         'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)',
-        `${labelKonteks()} · ${labelPeriode()}`)}
-      ${stat('Izin Menunggu', angka(izinPending), 'fa-solid fa-clock',
-        'background:var(--amber-bg);color:var(--amber)', 'var(--amber)', 'Belum ada keterangan balik')}
-      ${stat('Pembinaan Proses', angka(binaProses), 'fa-solid fa-hands-holding-child',
-        'background:var(--violet-bg);color:var(--violet)', 'var(--violet)', `${angka(pembinaan.length)} total instruksi`)}
+        `${lencanaBanding(detail.length, B.detail.lalu.length, { frasa: per.frasaLalu })}<span class="rb-tren-ket">vs ${esc(per.frasaPendek)}</span>`)}
+      ${stat('Perizinan', angka(izinBulan.length), 'fa-solid fa-clock',
+        'background:var(--amber-bg);color:var(--amber)', 'var(--amber)',
+        `${lencanaBanding(izinBulan.length, B.izin.lalu.length, { frasa: per.frasaLalu, netral: true })}<span class="rb-tren-ket">${angka(izinMenunggu)} menunggu</span>`)}
+      ${stat('Pembinaan', angka(binaBulan.length), 'fa-solid fa-hands-holding-child',
+        'background:var(--violet-bg);color:var(--violet)', 'var(--violet)',
+        `${lencanaBanding(binaBulan.length, B.bina.lalu.length, { frasa: per.frasaLalu, netral: true })}<span class="rb-tren-ket">${angka(binaBerproses)} berproses</span>`)}
     </div>
 
     <div class="grid-2">
-      ${kartu('Gelombang Pelanggaran Mingguan', chartBox('chPekan'),
-        `<span class="tag tag-sea">3 bulan terakhir</span>`,
-        'Jumlah per pekan (Senin sampai Minggu) untuk melihat naik turunnya pelanggaran.')}
+      ${kartu('Gelombang Pelanggaran Harian', chartBox('chPekan'),
+        `<span class="tag tag-sea">${esc(per.label)}</span>`,
+        `Jumlah per hari; garis putus-putus adalah ${per.labelLalu}.`)}
       ${kartu('Proporsi Kategori', chartBox('chKategori'), '',
         'Ringan · Sedang · Berat')}
     </div>
 
     <div class="grid-2">
-      ${kartu('Tren per Angkatan', chartBox('chAngkatan'), '',
-        'Perbandingan kelas VII sampai XII dalam 3 bulan terakhir.')}
+      ${kartu('Pelanggaran per Angkatan', chartBox('chAngkatan'), '',
+        `Kelas VII sampai XII, ${per.label} dibanding ${per.frasaLalu}.`)}
       ${kartu('5 Pelanggaran Terbanyak', `<div class="card-body">
-        ${topJenis.map(([nama, jml], i) => `<div class="rank">
+        ${topJenis.map(([nama, jml], i) => `<div class="rank" style="--porsi:${topMaks ? (jml / topMaks).toFixed(3) : 0};--urut:${i}">
           <span class="n">${String(i+1).padStart(2,'0')}</span>
           <span class="t">${esc(nama)}</span>
           <span class="c">${jml}x</span></div>`).join('')
-          || '<p style="color:var(--text-3);text-align:center;padding:20px 0">Belum ada data.</p>'}
-      </div>`)}
+          || `<p style="color:var(--text-3);text-align:center;padding:20px 0">Belum ada catatan pada ${esc(per.label)}.</p>`}
+      </div>`, '', per.label)}
     </div>
 
     <div class="grid-2">
@@ -3080,13 +3109,16 @@ async function viewDashboard() {
         <div class="minis" style="padding-bottom:16px">
           <div class="mini t"><span>Sesuai Waktu</span><b>${angka(izinSesuai)}</b></div>
           <div class="mini m"><span>Telat Balik</span><b>${angka(izinTelat)}</b></div>
-          <div class="mini a"><span>Menunggu</span><b>${angka(izinPending)}</b></div>
-          <div class="mini s"><span>Total Izin</span><b>${angka(izin.length)}</b></div>
+          <div class="mini a"><span>Menunggu</span><b>${angka(izinMenunggu)}</b></div>
+          <div class="mini s"><span>Total Izin</span><b>${angka(izinBulan.length)}</b></div>
         </div>
-        ${chartBox('chIzin')}`, '', 'Santri unik yang mulai izin, 14 hari terakhir.')}
+        ${chartBox('chIzin')}`, '', `Santri unik yang mulai izin per hari, ${per.label}.`)}
     </div>
 
-    <div id="blokSebaran"></div>`;
+    ${rangkaSebaran()}`;
+
+  // v2.48 — hitung naik, sorot kartu angka, sambutan sekali per sesi.
+  hiasRingkasan();
 
   // v2.25 — monster amanah: angka yang sama dengan butir pembinaan di atas.
   pasangMonster(bolehLaporBina() ? binaBelumLapor : binaProses);
@@ -3108,20 +3140,29 @@ async function viewDashboard() {
   });
 
   // ---- Charts ----
+  const metaCerita = { batas: per.batas, label: per.label, frasaLalu: per.frasaLalu };
+
   buatChart('pekan', 'chPekan', {
     type:'line',
-    data:{ labels: pekanKunci.map(labelPekan), datasets:[{
-      label:'Pelanggaran / minggu', data: pekanKunci.map(k => pekanPeta[k]),
+    cerita: metaCerita,
+    data:{ labels: hariLabel, datasets:[{
+      label: per.label, data: garisIni,
       borderColor:'#14618B', backgroundColor:'rgba(20,97,139,.12)',
-      tension:.38, fill:true, pointRadius:3, borderWidth:2.5, cubicInterpolationMode:'monotone' }]},
+      tension:.38, fill:true, pointRadius:2.5, borderWidth:2.5, cubicInterpolationMode:'monotone' },
+    { label: per.labelLalu, data: garisLalu,
+      borderColor:'#94A3B8', borderDash:[5,5], borderWidth:1.6, tension:.38, fill:false,
+      pointRadius:0, pointHoverRadius:3, cubicInterpolationMode:'monotone' }]},
     options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{display:false}},
-      scales:{ x:{ grid:{display:false}, ticks:{ maxTicksLimit: window.innerWidth < 640 ? 5 : 9, maxRotation:0 } },
+      interaction:{ mode:'index', intersect:false },
+      plugins:{ legend:{ position:'bottom', labels:{ usePointStyle:true, boxWidth:8, padding:12 } },
+        tooltip:{ callbacks:{ title:(it) => `Tanggal ${it[0].label}` } } },
+      scales:{ x:{ grid:{display:false}, ticks:{ maxTicksLimit: window.innerWidth < 640 ? 8 : 16, maxRotation:0 } },
                y:{ beginAtZero:true, ticks:{precision:0} } } }
   });
 
   buatChart('kategori', 'chKategori', {
     type:'doughnut',
+    cerita: metaCerita,
     data:{ labels:['Ringan','Sedang','Berat'],
       datasets:[{ data:[perKategori.Ringan, perKategori.Sedang, perKategori.Berat],
         backgroundColor:['#0F766E','#B45309','#9F1239'], borderWidth:0 }]},
@@ -3130,16 +3171,17 @@ async function viewDashboard() {
   });
 
   buatChart('angkatan', 'chAngkatan', {
-    type:'line',
-    data:{ labels: pekanKunci.map(labelPekan),
-      datasets: angkatanList.map((a, i) => ({
-        label:'Angkatan ' + a, data: pekanKunci.map(k => angkatanPekan[a][k]),
-        borderColor: PALET[i % PALET.length], backgroundColor: PALET[i % PALET.length] + '20',
-        borderWidth:2, tension:.35, pointRadius:0, pointHoverRadius:4, spanGaps:true })) },
+    type:'bar',
+    cerita: metaCerita,
+    data:{ labels: angkatanList,
+      datasets:[
+        { label: per.label, data: angkatanList.map(a => angIni[a]), backgroundColor:'#14618B', borderRadius:6 },
+        { label: per.frasaLalu, data: angkatanList.map(a => angLalu[a]),
+          backgroundColor:'rgba(20,97,139,.16)', borderColor:'rgba(20,97,139,.42)', borderWidth:1, borderRadius:6 }] },
     options:{ responsive:true, maintainAspectRatio:false,
       interaction:{ mode:'index', intersect:false },
       plugins:{legend:{position:'bottom', labels:{usePointStyle:true, boxWidth:8, padding:12}}},
-      scales:{ x:{ grid:{display:false}, ticks:{maxTicksLimit:6, maxRotation:0} },
+      scales:{ x:{ grid:{display:false} },
                y:{ beginAtZero:true, ticks:{precision:0} } } }
   });
 
@@ -3155,12 +3197,14 @@ async function viewDashboard() {
 
   buatChart('izin', 'chIzin', {
     type:'bar',
-    data:{ labels: hari14.map(k => k.slice(8) + '/' + k.slice(5,7)),
-      datasets:[{ label:'Santri mulai izin', data: hari14.map(k => petaIzinHari[k].size),
+    cerita: { ...metaCerita, lalu: izinMulaiLalu },
+    data:{ labels: hariLabel,
+      datasets:[{ label:'Santri mulai izin', data: batang(izinHariIni),
         backgroundColor:'#0F766E', borderRadius:5 }]},
     options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{display:false}},
-      scales:{ x:{grid:{display:false}}, y:{beginAtZero:true, ticks:{precision:0}} } }
+      plugins:{legend:{display:false}, tooltip:{ callbacks:{ title:(it) => `Tanggal ${it[0].label}` } }},
+      scales:{ x:{grid:{display:false}, ticks:{ maxTicksLimit: window.innerWidth < 640 ? 8 : 16, maxRotation:0 }},
+               y:{beginAtZero:true, ticks:{precision:0}} } }
   });
 
   // ---- Peta perkembangan (modul 38) ----------------------------------
@@ -3173,11 +3217,19 @@ async function viewDashboard() {
     RADAR.bahanTerakhir = sebaran.bahan;
     gambarRadarMini(siswa, sebaran.bahan, tokenMini);
     const kotak = $('blokSebaran');
-    if (kotak) { kotak.innerHTML = sebaran.html; sebaran.gambar(); }
+    if (kotak) {
+      usaiRangkaSebaran();
+      kotak.innerHTML = sebaran.html; sebaran.gambar();
+      // Bagian ini sengaja TIDAK ikut bulan berjalan (rumus IPP & peta enam bulan).
+      kotak.querySelector('.sb-judul')?.insertAdjacentHTML('afterend',
+        `<p class="rb-jendela"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+           Bagian ini memakai jendelanya sendiri, bukan bulan berjalan: peta 6 bulan terakhir dan Indeks Peringatan 60 hari.</p>`);
+    }
   } catch (e) {
     gambarRadarMini(siswa, null, tokenMini);
     console.warn('Peta perkembangan tidak dapat ditampilkan:', e.message);
     const kotak = $('blokSebaran');
+    usaiRangkaSebaran();
     if (kotak) kotak.innerHTML = kosong('Peta perkembangan belum dapat dimuat.',
       'Data pendukungnya sedang tidak terbaca. Muat ulang halaman untuk mencoba lagi.',
       'fa-triangle-exclamation');
@@ -3510,12 +3562,14 @@ async function viewPimpinan(opsi = {}) {
       ${kartu('Kondisi Pembinaan', chartBox('pBina'))}
     </div>
 
-    <div id="blokSebaran"></div>
+    ${rangkaSebaran()}
 
     <div class="brankas-grid">
       <div id="brkPrio">${kartuBrankasPrioritas()}</div>
       <div id="brkJenis">${kartuBrankasJenis()}</div>
     </div>`;
+
+  hiasRingkasan();   // v2.48: hitung naik & sorot kartu angka (data tidak berubah)
 
   onKlik((e) => {
     const nav = e.target.closest('[data-nav]');
@@ -3574,10 +3628,11 @@ async function viewPimpinan(opsi = {}) {
       ipp: true, batasIpp: modeBk ? 15 : 10,
       gagal: daftarGagalInti({ siswaAll, detailAll, izinAll, pembinaanAll }) });
     const kotak = $('blokSebaran');
-    if (kotak) { kotak.innerHTML = sebaran.html; sebaran.gambar(); }
+    if (kotak) { usaiRangkaSebaran(); kotak.innerHTML = sebaran.html; sebaran.gambar(); }
   } catch (e) {
     console.warn('Peta perkembangan tidak dapat ditampilkan:', e.message);
     const kotak = $('blokSebaran');
+    usaiRangkaSebaran();
     if (kotak) kotak.innerHTML = kosong('Peta perkembangan belum dapat dimuat.',
       'Data pendukungnya sedang tidak terbaca. Muat ulang halaman untuk mencoba lagi.',
       'fa-triangle-exclamation');
@@ -22377,9 +22432,9 @@ const CERITA = {
       nada: a.nada, sorot: { indeks: n - 2, label: String(lalu) }
     };
   },
-  kategori(labels, data) {
+  kategori(labels, data, rentang = 'tiga bulan terakhir') {
     const t = jumlahkan(data);
-    if (!t) return { teks: 'Belum ada catatan pada tiga bulan terakhir.', nada: 'baik', sorot: null };
+    if (!t) return { teks: `Belum ada catatan pada ${esc(rentang)}.`, nada: 'baik', sorot: null };
     const iMaks = indeksMaks(data), iBerat = labels.indexOf('Berat');
     const berat = iBerat >= 0 ? Number(data[iBerat]) || 0 : 0;
     const teksBerat = berat ? ` Berat: <b>${berat}</b> kasus (${persenDari(berat, t)} %).` : ' Tidak ada kasus berat.';
@@ -22401,6 +22456,35 @@ const CERITA = {
     const a = arahUbah(kini, lalu), puncak = Math.max(...data.map(Number)), i = data.map(Number).lastIndexOf(puncak);   // puncak terbaru bila seri
     return { teks: `Tujuh hari terakhir: <b>${kini}</b> santri mulai izin, ${banding(a, 'tujuh hari sebelumnya')}. Puncak ${esc(labels[i])} (${data[i]}).`,
       nada: 'netral', sorot: { indeks: i, label: String(data[i]) } };
+  },
+  /* ---- v2.48: versi satu bulan. o = { batas, label, frasaLalu } dari periodeRingkasan(). ---- */
+  /** ini/lalu: jumlah per hari (indeks 0 = tanggal 1); hari yang belum terjadi = null. */
+  harian(ini, lalu, o) {
+    const kini = jumlahkan(ini.slice(0, o.batas)), dulu = jumlahkan(lalu.slice(0, o.batas));
+    if (!kini && !dulu) return { teks: `Belum ada catatan pada ${esc(o.label)}.`, nada: 'baik', sorot: null };
+    const a = arahUbah(kini, dulu);
+    if (!kini) return { teks: `${esc(o.label)}: belum ada catatan, ${banding(a, esc(o.frasaLalu))} (${dulu}).`, nada: 'baik', sorot: null };
+    const angkaHari = ini.map(x => Number(x) || 0), puncak = Math.max(...angkaHari), i = angkaHari.lastIndexOf(puncak);   // puncak terbaru bila seri
+    return { teks: `${esc(o.label)}: <b>${kini}</b> catatan, ${banding(a, esc(o.frasaLalu))} (${dulu}). Hari tersibuk tanggal ${i + 1} (${puncak}).`,
+      nada: a.nada, sorot: { indeks: i, label: String(puncak) } };
+  },
+  /** ini/lalu: jumlah per angkatan pada rentang yang sebanding. */
+  angkatanBulan(labels, ini, lalu, o) {
+    const i = indeksMaks(ini), n = Number(ini[i]) || 0;
+    if (n < 3) return { teks: `${esc(o.label)} tenang di semua angkatan.`, nada: 'baik', sorot: null };
+    const a = arahUbah(n, Number(lalu[i]) || 0);
+    return { teks: `Angkatan <b>${esc(labels[i])}</b> terbanyak pada ${esc(o.label)} (${n} catatan), ${banding(a, esc(o.frasaLalu))}.`,
+      nada: a.nada === 'baik' ? 'netral' : a.nada, sorot: { indeks: i, label: String(n) } };
+  },
+  /** data: santri mulai izin per hari; o.lalu = jumlah bulan lalu s.d. tanggal yang sama. */
+  izinBulan(labels, data, o) {
+    const kini = jumlahkan(data.slice(0, o.batas)), dulu = Number(o.lalu) || 0;
+    if (!kini && !dulu) return { teks: `Tidak ada santri yang mulai izin pada ${esc(o.label)}.`, nada: 'netral', sorot: null };
+    const a = arahUbah(kini, dulu);
+    if (!kini) return { teks: `${esc(o.label)}: belum ada santri yang mulai izin, ${banding(a, esc(o.frasaLalu))} (${dulu}).`, nada: 'netral', sorot: null };
+    const angkaHari = data.map(x => Number(x) || 0), puncak = Math.max(...angkaHari), i = angkaHari.lastIndexOf(puncak);
+    return { teks: `${esc(o.label)}: <b>${kini}</b> santri mulai izin, ${banding(a, esc(o.frasaLalu))}. Puncak tanggal ${i + 1} (${puncak}).`,
+      nada: 'netral', sorot: { indeks: i, label: String(puncak) } };
   },
   /** datasets: [{label, data}] per angkatan; bandingkan 4 pekan lengkap terakhir dengan 4 sebelumnya. */
   angkatan(datasets) {
@@ -22494,12 +22578,18 @@ const KUNCI_CERITA = { pekan: 'chPekan', kategori: 'chKategori', angkatan: 'chAn
     try {
       if (APP.view === 'dashboard' && KUNCI_CERITA[key] === canvasId && config && config.data && !$(canvasId)?.closest('.swal2-popup')) {
         const d = config.data, ds = d.datasets || [];
-        const c = key === 'pekan' ? CERITA.pekan(ds[0].data)
-          : key === 'kategori' ? CERITA.kategori(d.labels, ds[0].data)
+        // v2.48: `cerita` = keterangan bulan dari viewDashboard (bukan milik Chart.js → dilepas).
+        const m = config.cerita || null; delete config.cerita;
+        const c = key === 'pekan' ? (m ? CERITA.harian(ds[0].data, ds[1].data, m) : CERITA.pekan(ds[0].data))
+          : key === 'kategori' ? CERITA.kategori(d.labels, ds[0].data, m ? m.label : undefined)
           : key === 'bidang' ? CERITA.bidang(d.labels, ds[0].data)
-          : key === 'izin' ? CERITA.izin(d.labels, ds[0].data)
-          : CERITA.angkatan(ds);
-        terapkanSorot(key, config, c.sorot);
+          : key === 'izin' ? (m ? CERITA.izinBulan(d.labels, ds[0].data, m) : CERITA.izin(d.labels, ds[0].data))
+          : (m ? CERITA.angkatanBulan(d.labels, ds[0].data, ds[1].data, m) : CERITA.angkatan(ds));
+        if (m && key === 'angkatan') {
+          // Dua batang berdampingan: cukup label angka di batang tertinggi, tanpa meredam yang lain.
+          if (c.sorot) { config.options.plugins.sorot = { indeks: c.sorot.indeks, label: c.sorot.label };
+            config.options.layout = { ...(config.options.layout || {}), padding: { top: 18 } }; }
+        } else terapkanSorot(key, config, c.sorot);
         tulisCerita(canvasId, c);
       }
     } catch (e) { console.warn('cerita grafik:', key, e.message); }
@@ -24249,7 +24339,10 @@ function sebagaiProfil(profil, fn) {
  */
 function hitungAngkaMusyrif(profil, b) {
   return sebagaiProfil(profil, () => {
-    // --- viewDashboard(): kartu Pelanggaran, Izin Menunggu, Pembinaan Proses
+    // --- lingkupDasbor(): pelanggaran & amanah (izin menunggu, pembinaan belum
+    //     selesai) pada pemilih periode Admin — periode itu tercetak di pesan.
+    //     Sejak v2.48 kartu angka Ringkasan menampilkan satu bulan, jadi yang
+    //     sebanding dengan pesan ini adalah butir amanah, bukan kartu angkanya.
     const siswa  = filterBinaanUnit((b.siswaAll || []).filter(aktifSantri), 'kelas');
     const detail = lingkupDetail(b.detailAll || []);
     const nisnBoleh = new Set(siswa.map(s => String(s.nisn)));
@@ -27665,4 +27758,259 @@ function selesaiLasso(sisaNisn = []) {
   RADAR.pilih = new Set(sisaNisn);
   RADAR.pilihMode = sisaNisn.length > 0;
   navigateTo('radar');
+}
+
+
+/* =====================================================================
+ * v2.48 — RINGKASAN BULAN INI
+ * ---------------------------------------------------------------------
+ *  Dasar: brief revisi halaman Ringkasan (disetujui 02-10-2026).
+ *
+ *  DATA
+ *  · Kartu angka dan grafik Ringkasan menampilkan SATU bulan: bulan
+ *    berjalan, atau bulan pada pemilih periode bila sedang aktif.
+ *  · Pembandingnya bulan sebelumnya SAMPAI TANGGAL YANG SAMA. Pada
+ *    tanggal 2, dua hari Oktober dibandingkan dengan 1–2 September —
+ *    bukan dengan September utuh, yang akan selalu terbaca "turun".
+ *    Bulan yang sudah lewat dibandingkan utuh dengan utuh.
+ *  · Arah perubahan memakai arahUbah() v2.32: angka kecil tidak
+ *    didramatisasi (2 → 4 bukan "naik 100 %").
+ *  · TIDAK berubah: amanah yang tertunda (mengikuti pemilih periode
+ *    seperti sebelumnya), Peta Perkembangan (6 bulan), IPP & Radar
+ *    (60 hari), dan Dashboard Pimpinan/BK (90 hari kalender).
+ *
+ *  GERAK — kosakata layar masuk (masukJudul, masukGaris, sapuan kilau,
+ *  sorot kursor) di atas sistem gerak yang sudah ada:
+ *  · angka menghitung naik saat kartunya tergulir masuk layar; pada
+ *    penyegaran halaman yang sama angka bergulir dari nilai lama, jadi
+ *    hanya yang berubah yang bergerak;
+ *  · koreografi penuh hanya saat TIBA (halaman dirender di balik layar
+ *    muat/gerbang, atau kunjungan pertama); ia ditahan sampai penutup
+ *    itu terbuka supaya tidak habis tanpa ditonton;
+ *  · mode hemat & prefers-reduced-motion: angka langsung final.
+ *  Database tidak disentuh.
+ * ===================================================================== */
+APP.versi = 'rq-v2.48';
+
+/* ---------- 1 · Periode Ringkasan ----------------------------------- */
+
+/**
+ * Bulan yang ditampilkan Ringkasan dan pembandingnya.
+ *   batas    = tanggal terakhir yang dihitung (hari ini bila bulan berjalan)
+ *   berjalan = bulan itu adalah bulan kalender saat ini
+ */
+function periodeRingkasan(kini = new Date()) {
+  const jalan = bulanDari(kunciTgl(kini));
+  const bulan = APP.periode.aktif && APP.periode.bulan ? APP.periode.bulan : jalan;
+  const [th, bl] = bulan.split('-').map(Number);
+  const thL = bl === 1 ? th - 1 : th, blL = bl === 1 ? 12 : bl - 1;
+  const hariBulan = new Date(th, bl, 0).getDate(), hariLalu = new Date(thL, blL, 0).getDate();
+  const berjalan = bulan === jalan;
+  const batas = berjalan ? kini.getDate() : hariBulan;
+  const namaLalu = BULAN_ID[blL - 1];
+  const rentang = (nama) => (batas >= hariLalu ? nama : batas === 1 ? `1 ${nama}` : `1–${batas} ${nama}`);
+  return {
+    bulan, lalu: `${thL}-${String(blL).padStart(2, '0')}`,
+    hariBulan, hariLalu, batas, berjalan,
+    basis: APP.periode.basis === 'input' ? 'input' : 'kejadian',
+    label: `${BULAN_ID[bl - 1]} ${th}`, labelLalu: `${namaLalu} ${thL}`,
+    frasaLalu: rentang(namaLalu), frasaPendek: rentang(namaLalu.slice(0, 3))
+  };
+}
+
+/** Tanggal ('yyyy-MM-dd') sebuah baris menurut basis periode. */
+function kunciBaris(r, kolom, per) {
+  return per.basis === 'input' ? tglInputBaris(r, kolom) : kunciTgl(r[kolom]);
+}
+
+/**
+ * Belah baris menjadi { ini, lalu, laluPenuh }:
+ *   ini       = seluruh baris bulan Ringkasan
+ *   lalu      = bulan sebelumnya s.d. tanggal `batas` (pembanding yang adil)
+ *   laluPenuh = bulan sebelumnya utuh (garis bayangan pada grafik harian)
+ */
+function belahBulan(rows, kolom, per) {
+  const ini = [], lalu = [], laluPenuh = [];
+  for (const r of rows || []) {
+    const k = kunciBaris(r, kolom, per), b = bulanDari(k);
+    if (b === per.bulan) ini.push(r);
+    else if (b === per.lalu && k) {
+      laluPenuh.push(r);
+      if (Number(k.slice(8, 10)) <= per.batas) lalu.push(r);
+    }
+  }
+  return { ini, lalu, laluPenuh };
+}
+
+/** Perizinan: masuk sebuah bulan bila RENTANGNYA bersinggungan (sejalan izinDalamPeriode). */
+function belahBulanIzin(rows, per) {
+  if (per.basis === 'input') return belahBulan(rows, 'tanggal_mulai', per);
+  const dua = (n) => String(n).padStart(2, '0');
+  const jIni  = [`${per.bulan}-01`, `${per.bulan}-${dua(per.hariBulan)}`];
+  const jLalu = [`${per.lalu}-01`, `${per.lalu}-${dua(Math.min(per.batas, per.hariLalu))}`];
+  const jPenuh = [`${per.lalu}-01`, `${per.lalu}-${dua(per.hariLalu)}`];
+  const ini = [], lalu = [], laluPenuh = [];
+  for (const z of rows || []) {
+    const mulai = kunciTgl(z?.tanggal_mulai), selesai = kunciTgl(z?.tanggal_selesai) || mulai;
+    if (!mulai && !selesai) continue;
+    const a = mulai || selesai, b = selesai || mulai;
+    const kena = (j) => a <= j[1] && b >= j[0];
+    if (kena(jIni)) ini.push(z);
+    if (kena(jPenuh)) { laluPenuh.push(z); if (kena(jLalu)) lalu.push(z); }
+  }
+  return { ini, lalu, laluPenuh };
+}
+
+/** Potongan satu bulan dari lingkup Ringkasan (hasil lingkupDasbor). */
+function ringkasanBulan(L, per = periodeRingkasan()) {
+  return {
+    per,
+    detail: belahBulan(L.detailTr, 'tanggal', per),
+    izin:   belahBulanIzin(L.izinSemua, per),
+    bina:   belahBulan(L.pembinaanSemua, 'tanggal_pembinaan', per)
+  };
+}
+
+/* ---------- 2 · Lencana tren & baris periode ------------------------ */
+
+/**
+ * Lencana kecil arah perubahan terhadap bulan lalu.
+ *   o.frasa  = rentang pembanding ("1–22 Agustus") untuk keterangan
+ *   o.netral = metrik yang naiknya bukan kabar buruk (izin, pembinaan)
+ */
+function lencanaBanding(kini, lalu, o = {}) {
+  const a = arahUbah(kini, lalu);
+  const arah = a.nihil || a.teks.startsWith('naik') ? 'naik' : a.teks.startsWith('turun') ? 'turun' : 'tetap';
+  const teks = a.nihil ? 'dari nol' : arah === 'tetap' ? 'stabil' : a.teks;
+  const ikon = arah === 'naik' ? 'fa-arrow-trend-up' : arah === 'turun' ? 'fa-arrow-trend-down' : 'fa-minus';
+  const ket = `${angka(kini)} dibanding ${angka(lalu)} pada ${o.frasa || 'bulan lalu'}`;
+  return `<span class="rb-tren" data-nada="${o.netral ? 'netral' : a.nada}" data-arah="${arah}" title="${esc(ket)}">`
+    + `<i class="fa-solid ${ikon}" aria-hidden="true"></i>${esc(teks)}<span class="sr-only"> (${esc(ket)})</span></span>`;
+}
+
+function barisPeriodeRingkasan(per) {
+  const cakup = per.berjalan
+    ? (per.batas === 1 ? 'hari pertama bulan ini' : `tanggal 1 sampai hari ini (${per.batas})`)
+    : 'satu bulan penuh';
+  return `<div class="rb-periode" role="note">
+    <span class="rb-bulan"><i class="fa-solid fa-calendar-day" aria-hidden="true"></i>${esc(per.label)}</span>
+    <span class="rule" aria-hidden="true"></span>
+    <span class="rb-ket">${esc(cakup)} · dibanding ${esc(per.frasaLalu)}</span>
+  </div>`;
+}
+
+/**
+ * Wadah Peta Perkembangan + kerangka berkilau selagi dihitung. Kerangka
+ * sengaja SAUDARA #blokSebaran, bukan isinya: wadah itu tetap kosong
+ * sampai petanya siap (kode & uji lama mengandalkan hal itu).
+ */
+function rangkaSebaran() {
+  const kotak = (h, w) => `<div class="rq-sk" style="height:${h}px;${w ? `width:${w}` : ''}"></div>`;
+  return `<div id="blokSebaran" aria-busy="true"></div>
+    <div id="rangkaSebaran" class="rq-rangka-kartu rb-rangka" aria-hidden="true">
+      ${kotak(16, '34%')}${kotak(11, '58%')}${kotak(150)}${kotak(40)}${kotak(40)}</div>`;
+}
+function usaiRangkaSebaran() {
+  $('rangkaSebaran')?.remove();
+  $('blokSebaran')?.removeAttribute('aria-busy');
+}
+
+/* ---------- 3 · Gerak: hitung naik & koreografi tiba ---------------- */
+
+const RB = { gen: 0, nilai: {}, jalan: [], io: null, sudahSambut: false, gerbangBuka: false, TAHAN_MAKS: 15000 };
+document.addEventListener('rq:gerbang-terbuka', () => { RB.gerbangBuka = true; });
+
+/** Layar muat penuh atau gerbang masuk masih menutupi halaman. */
+function layarTertutup() {
+  const l = $('layarMuat');
+  if (l && !l.classList.contains('tutup')) return true;
+  if (!document.querySelector('.rq-gerbang')) { RB.gerbangBuka = false; return false; }
+  return !RB.gerbangBuka;
+}
+
+/** Kartu angka yang isinya bilangan bulat ("1.100"); persen dan teks dilewati. */
+function bacaKartuAngka(akar) {
+  return [...akar.querySelectorAll('.stats > .stat')].map((st, i) => {
+    const el = st.querySelector('.v'), teks = el ? el.textContent.trim() : '';
+    if (!el || !/^\d{1,3}(\.\d{3})*$/.test(teks)) return null;
+    return { el, kartu: st, teks, kunci: st.querySelector('.k')?.textContent.trim() || String(i), akhir: Number(teks.replace(/\./g, '')) };
+  }).filter(Boolean);
+}
+
+/** Satu angka bergulir dari b.awal ke b.akhir, lalu kembali ke teks aslinya. */
+function gulirAngka(b, durasi, jeda, gen) {
+  const t0 = performance.now() + jeda;
+  const langkah = (t) => {
+    if (gen !== RB.gen || !b.el.isConnected || b.usai) return;
+    const p = Math.min(1, Math.max(0, (t - t0) / durasi));
+    if (p >= 1) { b.el.textContent = b.teks; b.usai = true; return; }
+    b.el.textContent = angka(Math.round(b.awal + (b.akhir - b.awal) * (1 - Math.pow(1 - p, 4))));
+    requestAnimationFrame(langkah);
+  };
+  requestAnimationFrame(langkah);
+}
+
+/**
+ * Kartu angka berada di bawah lipatan pada banyak layar, jadi geraknya
+ * dipicu saat kartu TERGULIR MASUK: kelas .rb-tampak (lencana & kilau, CSS)
+ * dan hitung naik. Tanpa IntersectionObserver semuanya langsung berjalan.
+ */
+function amatiKartuAngka(akar, jalan, durasi, gen) {
+  const kartu = [...akar.querySelectorAll('.stats > .stat')];
+  const tampil = (daftar) => daftar.forEach((st, n) => {
+    st.classList.add('rb-tampak');
+    const b = jalan.find(x => x.kartu === st);
+    if (b) gulirAngka(b, durasi, 140 + n * 70, gen);
+  });
+  if (typeof IntersectionObserver !== 'function') return tampil(kartu);
+  RB.io = new IntersectionObserver((entri) => {
+    const masuk = entri.filter(e => e.isIntersecting).map(e => e.target);
+    masuk.forEach(st => RB.io.unobserve(st));
+    tampil(masuk);
+  }, { threshold: .35 });
+  kartu.forEach(st => RB.io.observe(st));
+}
+
+/** Kembalikan semua angka ke nilai akhirnya (cetak, atau gerak dimatikan di tengah jalan). */
+function tuntaskanAngka() {
+  (RB.jalan || []).forEach(b => { if (!b.usai && b.el.isConnected) { b.el.textContent = b.teks; b.usai = true; } });
+}
+window.addEventListener('beforeprint', tuntaskanAngka);
+
+/**
+ * Dipanggil viewDashboard() dan viewPimpinan() tepat sesudah isi dipasang.
+ * Tanpa gerak (hemat / dikurangi) fungsi ini hanya mencatat nilai kartu.
+ */
+function hiasRingkasan() {
+  const akar = $('viewRoot'); if (!akar) return;
+  const gen = ++RB.gen;
+  const segar = !!APP.segarSama, gerak = bolehGerak(), tertutup = layarTertutup();
+  const lama = segar ? RB.nilai : {};
+  const butir = bacaKartuAngka(akar);
+  RB.nilai = Object.fromEntries(butir.map(b => [b.kunci, b.akhir]));
+
+  const sambut = gerak && !segar && APP.view === 'dashboard' && (tertutup || !RB.sudahSambut);
+  if (sambut) RB.sudahSambut = true;
+  akar.classList.toggle('rb-sambut', sambut);
+  akar.classList.toggle('rb-gulir', gerak);
+  akar.classList.remove('rb-tahan');
+  if (RB.io) { RB.io.disconnect(); RB.io = null; }
+  RB.jalan = [];
+  if (!gerak) return;
+
+  const jalan = RB.jalan = butir.filter(b => { b.awal = lama[b.kunci] ?? 0; return b.awal !== b.akhir; });
+  jalan.forEach(b => { b.el.textContent = angka(b.awal); });
+  const mulai = () => { akar.classList.remove('rb-tahan'); amatiKartuAngka(akar, jalan, sambut ? 1100 : 520, gen); };
+  if (!tertutup) return mulai();
+
+  // Dirender di balik layar muat/gerbang: tahan sampai penutupnya terbuka.
+  // Pewaktu (bukan rAF) supaya tab latar pun pasti melepas tahanan.
+  akar.classList.add('rb-tahan');
+  const sejak = Date.now();
+  const tunggu = () => {
+    if (gen !== RB.gen) return;
+    if (!layarTertutup() || Date.now() - sejak > RB.TAHAN_MAKS) return mulai();
+    setTimeout(tunggu, 50);
+  };
+  setTimeout(tunggu, 50);
 }

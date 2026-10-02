@@ -2247,6 +2247,8 @@
         const S = Math.max(innerWidth / Math.max(1, rg.width), innerHeight / Math.max(1, rg.height)) * 2.4;
         return A(kata, [{ transform: 'scale(1)' }, { transform: `scale(${S.toFixed(1)})` }], { duration: 460, easing: 'cubic-bezier(.7,0,.84,0)' })
           .finished.then(() => {
+            // v2.48: aplikasi mulai terlihat → Ringkasan melepas gerak masuk yang ditahannya.
+            document.dispatchEvent(new CustomEvent('rq:gerbang-terbuka'));
             if (app) app.animate([{ transform: 'scale(1.03)', filter: 'brightness(1.12)' }, { transform: 'none', filter: 'none' }], { duration: 640, easing: 'cubic-bezier(.16,1,.3,1)' });
             return A(el, [{ clipPath: 'polygon(0% 0%, 130% 0%, 130% 100%, -22% 100%)' },
               { clipPath: 'polygon(152% 0%, 130% 0%, 130% 100%, 130% 100%)' }], { duration: 520, easing: 'cubic-bezier(.65,0,.35,1)' }).finished;
