@@ -49,7 +49,7 @@
    hapus singgahan versi lama, lalu beri tahu halaman yang terbuka.
    ===================================================================== */
 
-const VERSI       = 'rq-v2.51';
+const VERSI       = 'rq-v2.52';
 const CACHE_INTI  = `${VERSI}-inti`;
 const CACHE_ASET  = 'rq-aset-v1';   // nama tetap: bertahan melewati kenaikan VERSI
 
@@ -59,6 +59,7 @@ const INTI = [
   './app.js',
   './showreel.js',      // v2.47: showreel layar masuk (dimuat lambat oleh index.html)
   './panggung.js',      // v2.51: panggung grafik Ringkasan (dimuat lambat oleh app.js)
+  './meja.js',          // v2.52: gerak Meja Pimpinan & Meja BK (dimuat lambat oleh app.js)
   './manifest.webmanifest'
 ];
 

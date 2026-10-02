@@ -2624,6 +2624,7 @@ async function navigateTo(view) {
     else if (view === 'radar')       await viewRadar();
     else if (view === 'pimpinan')    await viewPimpinan();
     else if (view === 'bk')          await viewBk();
+    else if (view === 'keterlibatan') await viewKeterlibatan();
     else if (view === 'pesan')       await viewPesan();
     else if (view === 'siswa')       await viewSiswa();
     else if (view === 'pelanggaran') await viewPelanggaran();
@@ -3365,7 +3366,7 @@ const stPrio = { cari: '', tier: 'Semua' };
  *                 "Pesan Tindak Lanjut" (10 santri prioritas -> guru).
  * Semua kartu, grafik, dan jendela onclick-nya identik.
  */
-async function viewPimpinan(opsi = {}) {
+async function viewPimpinanLama(opsi = {}) {   // v2.52: diganti Lembar Mizan (lihat akhir berkas)
   const modeBk = opsi.bk === true;
   const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
     amanKosong(muatSiswa, 'santri'),
@@ -14642,7 +14643,7 @@ const stBk    = { santri: [], guru: [], utas: [] };
 const stPesan = { rows: [], utas: [], aktif: null, filter: 'Semua', cari: '' };
 
 /** Dashboard Guru BK = dashboard pimpinan tanpa panel kinerja guru. */
-async function viewBk() { await viewPimpinan({ bk: true }); }
+async function viewBkLama() { await viewPimpinanLama({ bk: true }); }   // v2.52: diganti Meja Pendampingan
 
 const idSaya = () => APP.profil?.id || '';
 
@@ -28666,4 +28667,1131 @@ window.RQ_PANGGUNG = {
     return navAsli.apply(this, arguments);
   };
   window.addEventListener('beforeprint', () => lepasSemuaPanggung());
+})();
+
+
+/* =====================================================================
+ * v2.52 — DUA MEJA
+ * ---------------------------------------------------------------------
+ *  Rancangan: claude/rancangan-v2.52-dasbor-pimpinan-bk.md (disetujui
+ *  pemilik 2 Okt 2026). Dashboard Pimpinan dan Dashboard Guru BK tidak
+ *  lagi satu halaman yang sama. Masing-masing menjawab satu pertanyaan:
+ *
+ *    Pimpinan → "Bagaimana keadaan dayah bulan ini, dan apa yang perlu
+ *                saya putuskan?"            (Lembar Mizan)
+ *    Guru BK  → "Siapa yang saya temui hari ini, dan sudah sampai mana?"
+ *                                           (Meja Pendampingan)
+ *
+ *  Empat aturan rancangan:
+ *    1. Satu jam dinding — semua angka memakai LEMBAR BULAN (sejalan
+ *       v2.50). Pembanding = lembar sebelumnya; bila pencatatan belum
+ *       mencakup lembar pembanding, persen perubahan TIDAK ditampilkan
+ *       (memperbaiki alarm palsu "+1.297%" pada kartu lama).
+ *    2. Satu tangga — Indeks Peringatan Pembinaan (IPP) satu-satunya
+ *       ukuran "perlu perhatian". Tangga Kritis…Observasi tidak tampil.
+ *    3. Setiap angka punya kata kerja — angka yang tidak berujung pada
+ *       keputusan pindah ke laci "Analisis rinci".
+ *    4. Kesimpulan dulu, bukti kemudian.
+ *
+ *  Kinerja Guru (peringkat medali) dipindah ke halaman sendiri
+ *  "Keterlibatan Pencatat" dan diubah menjadi pertanyaan "siapa yang
+ *  belum mencatat". Tidak ada perubahan database.
+ *
+ *  Gerak (motion) ada di meja.js (dimuat lambat). Data selalu utuh bila
+ *  berkas itu gagal, terlambat, mode kurang gerak, atau dicetak.
+ * ===================================================================== */
+APP.versi = 'rq-v2.52';
+
+MENU_ROLE.keterlibatan = ['Admin','Pimpinan'];
+JUDUL.pimpinan     = { lat:'Kabar Dayah',       ar:'كشف الحساب',      teks:'Dashboard Pimpinan' };
+JUDUL.bk           = { lat:'Meja Pendampingan', ar:'مكتب الإرشاد',    teks:'Dashboard Guru BK' };
+JUDUL.keterlibatan = { lat:'Keterlibatan',      ar:'مشاركة المعلمين', teks:'Keterlibatan Pencatat' };
+
+/* ---------- Lembar bulan: alat bantu --------------------------------- */
+
+const MZ_HARI_KABAR = 7;          // hari 1–7: kabar bulan lalu menjadi isi utama
+const MZ = { bulan: '', data: null, gen: 0 };
+
+function bulanGeser(bulan, n) {
+  const [th, bl] = String(bulan).split('-').map(Number);
+  const d = new Date(th, bl - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function hariDalamBulan(bulan) {
+  const [th, bl] = String(bulan).split('-').map(Number);
+  return new Date(th, bl, 0).getDate();
+}
+function rentangLembar(bulan, batas) {
+  const n = Math.min(batas || 31, hariDalamBulan(bulan));
+  return { dari: `${bulan}-01`, sampai: `${bulan}-${String(n).padStart(2, '0')}`, hari: n };
+}
+const dalamLembar = (k, r) => !!k && k >= r.dari && k <= r.sampai;
+const namaBulanPendek = (bulan) => BULAN_ID[Number(String(bulan).slice(5, 7)) - 1]?.slice(0, 3) || bulan;
+
+/** "Rabiulawal – Rabiulakhir 1448 H" untuk satu bulan Masehi. */
+function bulanHijriah(bulan) {
+  try {
+    const [th, bl] = String(bulan).split('-').map(Number);
+    const f = new Intl.DateTimeFormat('id-TN-u-ca-islamic-umalqura', { month: 'long', year: 'numeric' });
+    const bersih = (d) => String(f.format(d)).replace(/\s*H\.?$/i, '').trim();
+    const a = bersih(new Date(th, bl - 1, 1)), z = bersih(new Date(th, bl, 0));
+    if (!a || !z) return '';
+    if (a === z) return `${a} H`;
+    const pa = a.split(' '), pz = z.split(' ');
+    const thA = pa.pop(), thZ = pz.pop();
+    return thA === thZ ? `${pa.join(' ')} – ${pz.join(' ')} ${thZ} H` : `${a} – ${z} H`;
+  } catch (e) { return ''; }
+}
+
+/** Satu objek periode bergaya periodeRingkasan() untuk IPP pada bulan tertentu. */
+function perLembar(bulan) {
+  const berjalan = bulan === bulanIni();
+  return { bulan, berjalan, label: labelBulan(bulan), lalu: bulanGeser(bulan, -1) };
+}
+
+/** Tanggal pertama pencatatan pelanggaran (yyyy-MM-dd) — penentu sahnya pembanding. */
+function awalPencatatan(detail) {
+  let m = '';
+  detail.forEach(d => { const k = kunciTgl(d.tanggal); if (k && (!m || k < m)) m = k; });
+  return m;
+}
+
+/**
+ * Ukuran satu lembar. `batas` = hari terakhir yang dihitung (lembar
+ * berjalan dibandingkan dengan hari yang sama pada lembar sebelumnya).
+ */
+function ukurLembar({ siswa, detail, pembinaan, izin, prestasi, tahfiz, bulan, batas }) {
+  const r = rentangLembar(bulan, batas);
+  const nis = new Set(siswa.map(s => String(s.nisn)));
+  const kelasDari = Object.fromEntries(siswa.map(s => [String(s.nisn), s.kelas]));
+  const URUT = ['VII','VIII','IX','X','XI','XII'];
+  const ang = Object.fromEntries(URUT.map(a => [a, { angkatan: a, santri: 0, kasus: 0, berat: 0, kelas: {}, bidang: {} }]));
+  siswa.forEach(s => { const a = angkatanDariKelas(s.kelas); if (ang[a]) ang[a].santri++; });
+
+  const plg = detail.filter(d => nis.has(String(d.nisn)) && dalamLembar(kunciTgl(d.tanggal), r));
+  const bidang = {}, jenis = {}, santriPlg = new Set(), beratRows = [];
+  plg.forEach(d => {
+    const b = String(d.bidang || 'Belum Dipetakan').trim() || 'Belum Dipetakan';
+    bidang[b] = (bidang[b] || 0) + 1;
+    const j = String(d.nama_pelanggaran || d.kode_pelanggaran || '-').trim();
+    jenis[j] = (jenis[j] || 0) + 1;
+    if (d.kategori === 'Berat') beratRows.push(d);
+    santriPlg.add(String(d.nisn));
+    const kls = kelasDari[String(d.nisn)] || d.kelas || '-';
+    const a = ang[angkatanDariKelas(kls)];
+    if (a) {
+      a.kasus++; if (d.kategori === 'Berat') a.berat++;
+      a.kelas[kls] = (a.kelas[kls] || 0) + 1; a.bidang[b] = (a.bidang[b] || 0) + 1;
+    }
+  });
+
+  const pbn = pembinaan.filter(p => nis.has(String(p.nisn)) && dalamLembar(kunciTgl(p.tanggal_pembinaan), r));
+  const terbukaKelas = {};
+  let selesai = 0;
+  pbn.forEach(p => {
+    if (String(p.status_pembinaan) === 'Selesai') { selesai++; return; }
+    const k = kelasDari[String(p.nisn)] || '-';
+    terbukaKelas[k] = (terbukaKelas[k] || 0) + 1;
+  });
+
+  const prs = prestasi.filter(p => nis.has(String(p.nisn)) && dalamLembar(kunciTgl(p.tanggal), r));
+  const thf = tahfiz.filter(p => nis.has(String(p.nisn)) && dalamLembar(kunciTgl(p.tanggal), r));
+  const santriBaik = new Set([...prs, ...thf].map(x => String(x.nisn)));
+
+  let telat = 0, sesuai = 0;
+  izin.forEach(z => {
+    if (!nis.has(String(z.nisn)) || !dalamLembar(kunciTgl(z.tanggal_mulai), r)) return;
+    const s = String(z.status_persetujuan || '').trim();
+    if (s === 'Telat Balik') telat++; else if (s === 'Sesuai Waktu') sesuai++;
+  });
+
+  const n = siswa.length;
+  const per100 = (x, d) => (d ? Math.round(x / d * 1000) / 10 : 0);
+  return {
+    bulan, rentang: r, santri: n,
+    kasus: plg.length, per100: per100(plg.length, n), berat: beratRows.length, beratRows,
+    santriPlg: santriPlg.size,
+    bidang: Object.entries(bidang).sort((a, b) => b[1] - a[1]),
+    jenis: Object.entries(jenis).sort((a, b) => b[1] - a[1]),
+    angkatan: URUT.map(a => ({ ...ang[a], per100: per100(ang[a].kasus, ang[a].santri) })),
+    pbnTotal: pbn.length, pbnSelesai: selesai, pbnTerbuka: pbn.length - selesai,
+    tuntasPct: pbn.length ? Math.round(selesai / pbn.length * 100) : null,
+    terbukaKelas: Object.entries(terbukaKelas).sort((a, b) => b[1] - a[1]),
+    prestasi: prs.length, setoran: thf.length,
+    santriBaik: santriBaik.size, baikPct: n ? Math.round(santriBaik.size / n * 1000) / 10 : 0,
+    telat, izinSelesai: telat + sesuai, telatPct: (telat + sesuai) ? Math.round(telat / (telat + sesuai) * 100) : 0
+  };
+}
+
+/* ---------- Mizan (timbangan) ----------------------------------------- */
+
+const MIZAN = { PX: 150, PY: 60, L: 104, GANTUNG: 46, MAKS_SUDUT: 15 };
+
+/** Sudut balok (derajat). Positif = lengan kanan (pelanggaran) turun. */
+function sudutMizan(kiri, kanan) {
+  const r = (kanan - kiri) / Math.max(1, kanan + kiri);
+  return Math.round(r * MIZAN.MAKS_SUDUT * 10) / 10;
+}
+/** Jumlah pemberat yang digambar di piringan (0–9), sebanding nilainya. */
+function pemberatMizan(nilai, maks) {
+  if (!nilai) return 0;
+  return Math.max(1, Math.min(9, Math.round(nilai / Math.max(1, maks) * 9)));
+}
+const MIZAN_SLOT = [[-15,-6],[-5,-6],[5,-6],[15,-6],[-10,-15],[0,-15],[10,-15],[-5,-24],[5,-24]];
+
+function svgMizan(kiri, kanan, opsi = {}) {
+  const { PX, PY, GANTUNG } = MIZAN;
+  const maks = Math.max(kiri, kanan);
+  const nL = pemberatMizan(kiri, maks), nR = pemberatMizan(kanan, maks);
+  const piring = (sisi, n, warna, isi, lbl, nilai) => `
+    <g class="mz-pan mz-pan-${sisi}" data-sisi="${sisi}">
+      <path class="mz-tali" d="M0 0 L-26 ${GANTUNG} M0 0 L26 ${GANTUNG}"/>
+      <g class="mz-w-grup">${Array.from({ length: n }, (_, i) => {
+        const [x, y] = MIZAN_SLOT[i];
+        return sisi === 'kiri'
+          ? `<path class="mz-w" data-i="${i}" transform="translate(${x} ${GANTUNG + y})" d="M0 -5.6 Q0.9 -0.9 5.6 0 Q0.9 0.9 0 5.6 Q-0.9 0.9 -5.6 0 Q-0.9 -0.9 0 -5.6Z" fill="${isi}"/>`
+          : `<circle class="mz-w" data-i="${i}" cx="${x}" cy="${GANTUNG + y}" r="5.2" fill="${isi}"/>`;
+      }).join('')}</g>
+      <path class="mz-mangkuk" d="M-33 ${GANTUNG} H33 Q27 ${GANTUNG + 19} 0 ${GANTUNG + 19} Q-27 ${GANTUNG + 19} -33 ${GANTUNG}Z" style="--w:${warna}"/>
+      <text class="mz-nilai" x="0" y="${GANTUNG + 41}" data-akhir="${nilai}" style="--w:${warna}">${angka(nilai)}</text>
+      <text class="mz-lbl-svg" x="0" y="${GANTUNG + 55}">${esc(lbl)}</text>
+    </g>`;
+  return `<svg class="mz-svg" viewBox="0 0 300 236" role="img" data-kiri="${kiri}" data-kanan="${kanan}"
+      aria-label="Timbangan: ${angka(kiri)} catatan kebaikan, ${angka(kanan)} catatan pelanggaran">
+    <rect class="mz-tiang" x="${PX - 4}" y="${PY}" width="8" height="${222 - PY}" rx="3"/>
+    <rect class="mz-alas" x="${PX - 44}" y="216" width="88" height="11" rx="5"/>
+    <g class="mz-balok"><line x1="${PX - MIZAN.L}" y1="${PY}" x2="${PX + MIZAN.L}" y2="${PY}"/>
+      <circle cx="${PX - MIZAN.L}" cy="${PY}" r="3.4"/><circle cx="${PX + MIZAN.L}" cy="${PY}" r="3.4"/></g>
+    <circle class="mz-poros" cx="${PX}" cy="${PY}" r="7"/>
+    ${piring('kiri', nL, 'var(--teal)', 'var(--teal)', opsi.lblKiri || 'kebaikan tercatat', kiri)}
+    ${piring('kanan', nR, 'var(--maroon)', 'var(--maroon)', opsi.lblKanan || 'pelanggaran', kanan)}
+  </svg>`;
+}
+
+/** Atur kemiringan balok; piringan tetap tegak, menggantung di ujung balok. */
+function aturMizan(svg, sudut) {
+  if (!svg) return;
+  const { PX, PY, L } = MIZAN, rad = sudut * Math.PI / 180;
+  const dx = Math.cos(rad) * L, dy = Math.sin(rad) * L;
+  svg.querySelector('.mz-balok')?.setAttribute('transform', `rotate(${sudut} ${PX} ${PY})`);
+  svg.querySelector('.mz-pan-kiri')?.setAttribute('transform', `translate(${(PX - dx).toFixed(2)} ${(PY - dy).toFixed(2)})`);
+  svg.querySelector('.mz-pan-kanan')?.setAttribute('transform', `translate(${(PX + dx).toFixed(2)} ${(PY + dy).toFixed(2)})`);
+  svg.dataset.sudut = String(sudut);
+}
+
+/** Isi piringan p (0..1): pemberat muncul berurutan, angka bergulir. */
+function isiPiringMizan(svg, sisi, p) {
+  const g = svg && svg.querySelector(`.mz-pan-${sisi}`); if (!g) return;
+  const w = g.querySelectorAll('.mz-w'), n = w.length;
+  w.forEach((el, i) => el.classList.toggle('mz-w-tampak', p >= (i + 1) / Math.max(1, n) - 1e-6 || p >= 1));
+  const t = g.querySelector('.mz-nilai'), akhir = Number(t?.dataset.akhir || 0);
+  if (t) t.textContent = angka(Math.round(akhir * Math.max(0, Math.min(1, p))));
+}
+
+function kalimatMizan(M) {
+  const L = M.L, kiri = L.prestasi + L.setoran, kanan = L.kasus;
+  if (!kiri && !kanan) return 'Belum ada catatan pada lembar ini.';
+  if (L.baikPct < 15 && kiri < kanan * .25)
+    return `Berat sebelah karena kebaikan belum dicatat: baru ${angka(L.santriBaik)} dari ${angka(L.santri)} santri punya catatan apresiasi atau setoran.`;
+  const s = sudutMizan(kiri, kanan);
+  if (s > 4) return 'Pelanggaran yang tercatat masih lebih berat daripada kebaikan yang tercatat.';
+  if (s < -4) return 'Kebaikan yang tercatat sudah melampaui pelanggaran. Pertahankan.';
+  return 'Timbangan hampir seimbang antara kebaikan dan pelanggaran yang tercatat.';
+}
+
+/* ---------- Keputusan untuk pimpinan --------------------------------- */
+
+const MZ_NANTI = 'rq-mz-nanti';
+function bacaNanti() { try { return JSON.parse(bacaLS(MZ_NANTI) || '{}') || {}; } catch (e) { return {}; } }
+function tundaKeputusan(kunci) {
+  const n = bacaNanti(); n[kunci] = Date.now();
+  try { localStorage.setItem(MZ_NANTI, JSON.stringify(n)); } catch (e) {}
+}
+const ditunda = (kunci) => { const t = bacaNanti()[kunci]; return !!t && Date.now() - t < 7 * 864e5; };
+
+function susunKeputusan(M) {
+  const { L, P, trenSah, ubah, labelP, tutup } = M;
+  const daftar = [];
+  const rata = L.per100;
+
+  // 1 · Angkatan yang menjauh dari rata-rata dayah
+  const kand = L.angkatan.filter(a => a.santri >= 10 && a.kasus >= 10).sort((a, b) => b.per100 - a.per100)[0];
+  if (kand && rata > 0 && kand.per100 / rata >= 1.5) {
+    const kali = Math.round(kand.per100 / rata * 10) / 10;
+    const kls = Object.entries(kand.kelas).sort((a, b) => b[1] - a[1])[0];
+    const bdg = Object.entries(kand.bidang).sort((a, b) => b[1] - a[1])[0];
+    daftar.push({ kode: 'angkatan', tingkat: kali >= 2 ? 'bad' : 'warn', skor: 50 + kali * 10, subjek: `Angkatan ${kand.angkatan}`,
+      teks: `Angkatan ${kand.angkatan}: ${angka(kand.per100)} kasus per 100 santri, ${String(kali).replace('.', ',')}× rata-rata dayah.`,
+      kecil: [kls ? `Kelas penyumbang terbesar ${kls[0]} (${angka(kls[1])} kasus)` : '', bdg ? `bidang dominan ${bdg[0]}` : ''].filter(Boolean).join(' · ') + '.',
+      aksi: [{ label: 'Salin untuk agenda rapat', kerja: 'agenda', arg: kand.angkatan, utama: true }, { label: 'Rincian', kerja: 'angkatan', arg: kand.angkatan }] });
+  }
+
+  // 2 · Pembinaan yang tidak/ belum tuntas
+  if (L.pbnTerbuka >= 10 && (L.tuntasPct ?? 100) < 80) {
+    const tiga = L.terbukaKelas.slice(0, 3).map(([k, n]) => `${k} (${angka(n)})`).join(', ');
+    daftar.push({ kode: 'pembinaan', tingkat: (L.tuntasPct ?? 100) < 60 ? 'bad' : 'warn', skor: 40 + (100 - (L.tuntasPct ?? 100)) / 2,
+      subjek: 'Pembinaan',
+      teks: tutup
+        ? `${angka(L.pbnTerbuka)} pembinaan ${labelBulan(L.bulan)} tidak tuntas dan menjadi bahan evaluasi.`
+        : `${angka(L.pbnTerbuka)} pembinaan ${labelBulan(L.bulan)} belum tuntas (${L.tuntasPct}% tuntas).`,
+      kecil: tiga ? `Terbanyak di kelas ${tiga}.` : '',
+      aksi: [{ label: 'Lihat per kelas', kerja: 'pembinaan', utama: true }] });
+  }
+
+  // 3 · Kebaikan belum tercatat merata
+  if (L.baikPct < 15) {
+    daftar.push({ kode: 'kebaikan', tingkat: L.baikPct < 8 ? 'bad' : 'warn', skor: 30 + (15 - L.baikPct) * 2, subjek: 'Kebaikan',
+      teks: `Hanya ${String(L.baikPct).replace('.', ',')}% santri punya catatan kebaikan pada lembar ${labelBulan(L.bulan)}.`,
+      kecil: `${angka(L.prestasi)} apresiasi dan ${angka(L.setoran)} setoran tercatat. Usul: satu apresiasi per rayon setiap pekan.`,
+      aksi: [{ label: 'Salin arahan untuk guru', kerja: 'arahan', utama: true }, { label: 'Nanti', kerja: 'nanti' }] });
+  }
+
+  // 4 · Tren naik (hanya bila pembanding sah)
+  if (trenSah && ubah !== null && ubah > 10) {
+    const naik = L.bidang.map(([b, n]) => [b, n - ((P.bidang.find(x => x[0] === b) || [, 0])[1])]).sort((a, b) => b[1] - a[1])[0];
+    daftar.push({ kode: 'tren', tingkat: ubah > 25 ? 'bad' : 'warn', skor: 45 + ubah / 2, subjek: 'Kenaikan pelanggaran',
+      teks: `Pelanggaran naik ${String(ubah).replace('.', ',')}% dari ${labelP}.`,
+      kecil: naik && naik[1] > 0 ? `Kenaikan terbesar pada bidang ${naik[0]} (+${angka(naik[1])}).` : '',
+      aksi: [{ label: 'Rincian bidang', kerja: 'bidang', utama: true }] });
+  }
+
+  // 5 · Pelanggaran berat
+  if (L.berat >= 5) {
+    const santri = new Set(L.beratRows.map(r => String(r.nisn))).size;
+    daftar.push({ kode: 'berat', tingkat: 'bad', skor: 35 + L.berat, subjek: 'Pelanggaran berat',
+      teks: `${angka(L.berat)} pelanggaran berat oleh ${angka(santri)} santri.`,
+      kecil: 'Pastikan setiap kasus berat sudah dibicarakan dengan wali santri.',
+      aksi: [{ label: 'Lihat kasusnya', kerja: 'berat', utama: true }] });
+  }
+
+  // 6 · Telat balik izin
+  if (L.izinSelesai >= 10 && L.telatPct >= 20) {
+    daftar.push({ kode: 'izin', tingkat: 'warn', skor: 25 + L.telatPct / 2, subjek: 'Izin',
+      teks: `${L.telatPct}% izin kembali terlambat (${angka(L.telat)} dari ${angka(L.izinSelesai)}).`,
+      kecil: 'Tinjau pola pemberian izin bersama bagian perizinan.', aksi: [] });
+  }
+
+  return daftar.filter(k => !ditunda(`${k.kode}|${L.bulan}`)).sort((a, b) => b.skor - a.skor).slice(0, 3);
+}
+
+function vonisMizan(M) {
+  const { L, trenSah, ubah, labelP, berjalan, keputusan } = M;
+  let a;
+  if (!trenSah) a = berjalan
+    ? (M.batas < 8 ? `Lembar ${labelBulan(M.bulan)} baru berjalan ${M.batas} hari.` : 'Lembar berjalan, pembandingnya belum tersedia.')
+    : 'Bulan pertama yang tercatat penuh.';
+  else if (ubah <= -10) a = `Pelanggaran turun ${String(Math.abs(ubah)).replace('.', ',')}% dari ${labelP}.`;
+  else if (ubah >= 10) a = `Pelanggaran naik ${String(ubah).replace('.', ',')}% dari ${labelP}.`;
+  else a = `Pelanggaran setara dengan ${labelP}.`;
+  const k = keputusan[0];
+  const b = !k ? 'Tidak ada yang menunggu keputusan.'
+    : k.kode === 'angkatan' ? `${k.subjek} perlu dibicarakan.`
+    : k.kode === 'pembinaan' ? 'Banyak pembinaan belum dituntaskan.'
+    : k.kode === 'kebaikan' ? 'Kebaikan santri belum banyak tercatat.'
+    : k.kode === 'tren' ? 'Kenaikannya perlu ditinjau.'
+    : k.kode === 'berat' ? 'Kasus berat perlu ditindaklanjuti.'
+    : 'Ada yang perlu ditinjau.';
+  if (!L.kasus && !L.prestasi && !L.setoran) return { kalimat: 'Lembar ini belum berisi catatan.', kode: 'ok', label: 'Belum ada catatan' };
+  const rasio3 = M.ipp ? M.ipp.tier3 / Math.max(1, L.santri) : 0;
+  let kode = 'ok', label = 'Terkendali';
+  if ((trenSah && ubah > 20) || rasio3 >= .1 || (keputusan[0] && keputusan[0].tingkat === 'bad' && keputusan.length >= 2)) { kode = 'danger'; label = 'Perlu perhatian'; }
+  else if ((trenSah && ubah > 5) || keputusan.length) { kode = 'warn'; label = 'Perlu penguatan'; }
+  return { kalimat: `${a} ${b}`, kode, label };
+}
+
+/* ---------- Meja Pimpinan: Lembar Mizan ------------------------------- */
+
+async function viewPimpinan() {
+  const gen = ++MZ.gen;
+  const [siswaAll, detailAll, izinAll, pembinaanAll, kunci] = await Promise.all([
+    amanKosong(muatSiswa, 'santri'),
+    amanKosong(muatDetail, 'pelanggaran'),
+    amanKosong(muatIzin, 'perizinan'),
+    amanKosong(muatPembinaan, 'pembinaan'),
+    muatKunciBulan().catch(() => new Map())
+  ]);
+  const siswa = siswaAll.filter(aktifSantri);
+  const detail = detailAll.filter(aktifDetail);
+  const pembinaan = pembinaanAll.filter(aktifPembinaan);
+  const gagal = daftarGagalInti({ siswaAll, detailAll, izinAll, pembinaanAll });
+  const b = await bahanIpp({ siswa, detail, izin: izinAll, pembinaan, gagal });
+  if (gen !== MZ.gen || APP.view !== 'pimpinan') return;
+
+  const jalan = bulanIni(), hari = new Date().getDate();
+  const lalu = bulanGeser(jalan, -1);
+  const adaLalu = detail.some(d => bulanDari(kunciTgl(d.tanggal)) === lalu);
+  // Pemilih periode di bilah atas (bila aktif) menang; lalu pilihan pita; lalu aturan hari 1–7.
+  const bulanGlobal = APP.periode && APP.periode.aktif && APP.periode.bulan ? APP.periode.bulan : '';
+  const bulan = bulanGlobal || MZ.bulan || (hari <= MZ_HARI_KABAR && adaLalu ? lalu : jalan);
+  const berjalan = bulan === jalan;
+  const batas = berjalan ? hari : 31;
+  const pembanding = bulanGeser(bulan, -1);
+  const sumber = { siswa, detail, pembinaan, izin: izinAll, prestasi: b.prestasi, tahfiz: b.tahfiz };
+  const L = ukurLembar({ ...sumber, bulan, batas });
+  const P = ukurLembar({ ...sumber, bulan: pembanding, batas });
+  const awal = awalPencatatan(detail);
+  // Pembanding sah bila pencatatan sudah mencakup lembar pembanding, dan lembar
+  // berjalan sudah ≥ 8 hari (dua hari pertama terlalu bising untuk persen).
+  const trenSah = !!awal && awal <= `${pembanding}-03` && P.kasus > 0 && (!berjalan || batas >= 8);
+  const ubah = trenSah ? Math.round((L.kasus - P.kasus) / P.kasus * 1000) / 10 : null;
+  const k = kunci && kunci.get(bulan);
+  const tutup = !!(k && k.terkunci);
+  const ipp = ippDariBahan(siswa, b, perLembar(bulan));
+  const labelP = berjalan ? `1–${batas} ${BULAN_ID[Number(pembanding.slice(5)) - 1]}` : labelBulan(pembanding);
+
+  const M = MZ.data = { L, P, bulan, berjalan, batas, pembanding, trenSah, ubah, tutup, ipp, labelP, kunci,
+    jalan, lalu, hari, sumber, bahan: b, siswa, detail, gagal };
+  M.keputusan = susunKeputusan(M);
+  M.vonis = vonisMizan(M);
+
+  $('viewRoot').innerHTML = htmlMejaPimpinan(M);
+  aturMizan($('mzSvg')?.querySelector('svg'), sudutMizan(L.prestasi + L.setoran, L.kasus));
+
+  onKlik((e) => {
+    const a = e.target.closest('[data-mz]');
+    if (a) return aksiMejaPimpinan(a.dataset.mz, a.dataset.arg, a);
+    const ang = e.target.closest('[data-mz-ang]');
+    if (ang) return rincianAngkatan(ang.dataset.mzAng);
+    const nav = e.target.closest('[data-nav]');
+    if (nav) return navigateTo(nav.dataset.nav);
+    const d = e.target.closest('[data-detail]');
+    if (d) return bukaDetailSantri(d.dataset.detail);
+  });
+  $('mzLaci')?.addEventListener('toggle', (e) => { if (e.target.open) isiLaciAnalisis(); });
+
+  const paksa = !!MZ.gantiLembar; MZ.gantiLembar = false;
+  mainkanMeja('mizan', { paksa });
+}
+
+function htmlMejaPimpinan(M) {
+  const { L, vonis, keputusan, ipp, berjalan, tutup, bulan, jalan, lalu, hari } = M;
+  const kiri = L.prestasi + L.setoran, kanan = L.kasus;
+  const ket = berjalan ? `lembar berjalan · hari ke-${hari}` : tutup ? 'lembar sudah ditutup' : 'lembar belum ditutup';
+  const hij = bulanHijriah(bulan);
+  const pita = berjalan
+    ? (bulan !== lalu && M.detail.some(d => bulanDari(kunciTgl(d.tanggal)) === lalu)
+        ? `<button type="button" class="mz-pita" data-mz="lembar" data-arg="${esc(lalu)}">
+             <i class="fa-solid fa-book-bookmark"></i><span>Buka kabar ${esc(labelBulan(lalu))}</span><i class="fa-solid fa-chevron-right"></i></button>` : '')
+    : `<button type="button" class="mz-pita" data-mz="lembar" data-arg="${esc(jalan)}">
+         <i class="fa-solid fa-feather-pointed"></i><span>Lembar ${esc(labelBulan(jalan))} berjalan: hari ke-${hari},
+         ${angka(M.detail.filter(d => bulanDari(kunciTgl(d.tanggal)) === jalan).length)} catatan</span><i class="fa-solid fa-chevron-right"></i></button>`;
+
+  const vital = (judul, nilai, status, kelas, info) => `<div class="mz-vital">
+      <small>${esc(judul)}</small><b data-mz-angka>${nilai}</b>
+      <span class="mz-st ${kelas}">${esc(status)}</span>${info ? `<em>${esc(info)}</em>` : ''}</div>`;
+
+  const vDisiplin = M.trenSah
+    ? vital('Kasus per 100 santri', angka(L.per100),
+        M.ubah >= 10 ? `▲ ${String(M.ubah).replace('.', ',')}%` : M.ubah <= -10 ? `▼ ${String(Math.abs(M.ubah)).replace('.', ',')}%` : 'Setara',
+        M.ubah >= 10 ? 'bad' : M.ubah <= -10 ? 'ok' : 'netral', `dibanding ${M.labelP}`)
+    : vital('Kasus per 100 santri', angka(L.per100), 'Pembanding belum ada', 'baru',
+        berjalan && M.batas < 8 ? 'pembanding tampil mulai hari ke-8' : `pencatatan dimulai ${tgl(awalPencatatan(M.detail))}`);
+  const vTuntas = L.tuntasPct === null
+    ? vital('Pembinaan tuntas', '—', 'Belum ada pembinaan', 'netral')
+    : vital('Pembinaan tuntas', `${L.tuntasPct}%`,
+        berjalan ? `${angka(L.pbnTerbuka)} berjalan` : `${angka(L.pbnTerbuka)} terbawa`,
+        L.tuntasPct < 60 ? 'bad' : L.tuntasPct < 80 ? 'warn' : 'ok', `${angka(L.pbnSelesai)} dari ${angka(L.pbnTotal)}`);
+  const vBaik = vital('Santri punya catatan baik', `${String(L.baikPct).replace('.', ',')}%`,
+    L.baikPct < 15 ? 'Sangat tipis' : L.baikPct < 40 ? 'Tipis' : 'Merata',
+    L.baikPct < 15 ? 'bad' : L.baikPct < 40 ? 'warn' : 'ok', `${angka(L.santriBaik)} dari ${angka(L.santri)} santri`);
+
+  const maksAng = Math.max(1, ...L.angkatan.map(a => a.per100));
+  const sorot = keputusan.find(k => k.kode === 'angkatan')?.subjek?.replace('Angkatan ', '') || '';
+  const batang = L.angkatan.map(a => `<button type="button" class="mz-ang${a.angkatan === sorot ? ' hi' : ''}" data-mz-ang="${esc(a.angkatan)}"
+        title="Angkatan ${esc(a.angkatan)}: ${angka(a.kasus)} kasus, ${angka(a.santri)} santri">
+      <span class="mz-ang-n">${esc(a.angkatan)}</span>
+      <span class="mz-ang-tr"><i style="--p:${(a.per100 / maksAng * 100).toFixed(1)}%"></i></span>
+      <b>${angka(a.per100)}</b></button>`).join('');
+  const posRata = (L.per100 / maksAng * 100).toFixed(1);
+
+  const kartuKeputusan = keputusan.length
+    ? keputusan.map((k, i) => `<article class="mz-dec ${k.tingkat}" data-mz-dec="${i}">
+        <p>${esc(k.teks)}${k.kecil ? `<small>${esc(k.kecil)}</small>` : ''}</p>
+        ${k.aksi.length ? `<div class="mz-dec-aksi">${k.aksi.map(a => `<button type="button" class="btn btn-sm ${a.utama ? 'btn-primary' : 'btn-ghost'}"
+          data-mz="${esc(a.kerja)}" data-arg="${esc(a.arg || k.kode)}">${esc(a.label)}</button>`).join('')}</div>` : ''}
+      </article>`).join('')
+    : `<div class="mz-dec ok"><p>Tidak ada yang menunggu keputusan Anda pada lembar ini.
+        <small>Daftar ini terisi sendiri bila ada angkatan yang menjauh dari rata-rata, pembinaan menumpuk, atau kebaikan belum tercatat.</small></p></div>`;
+
+  const tier = ipp
+    ? `<div class="mz-tier"><span><b>${angka(ipp.tier3)}</b> santri Tier 3</span><span><b>${angka(ipp.tier2)}</b> Tier 2</span>
+        <button type="button" class="btn btn-ghost btn-sm" data-mz="tier">Lihat daftar</button></div>
+       <p class="mz-kaki">Tier 3 didampingi Guru BK. Tier 2 dipantau wali kelas. Ukuran: Indeks Peringatan Pembinaan.</p>`
+    : `<p class="mz-kaki">${esc(kalimatGagal(M.gagal, 'ipp') || 'Indeks Peringatan belum dapat dihitung untuk lembar ini.')}</p>`;
+
+  return `
+  <section class="mz-surat mz-${vonis.kode}">
+    <div class="mz-kop">
+      <span class="ar">كشف الحساب</span>
+      <span class="mz-tgl">Kabar Dayah · ${esc(labelBulan(bulan))}${hij ? ` · ${esc(hij)}` : ''} · ${esc(ket)}</span>
+    </div>
+    <h2 class="mz-vonis">${esc(vonis.kalimat)}</h2>
+    <div class="mz-kop-bawah"><span class="tag ${vonis.kode === 'danger' ? 'tag-berat' : vonis.kode === 'warn' ? 'tag-sedang' : 'tag-ok'}">${esc(vonis.label)}</span>
+      <span class="mz-meta"><i class="fa-solid fa-user-tie"></i>${esc(APP.profil?.nama || '')}</span></div>
+  </section>
+  ${pita}
+
+  <div class="mz-grid">
+    <section class="card mz-timbang" id="mzKartu">
+      <div class="card-head"><div><h3>Timbangan lembar ini</h3>
+        <p class="sub">Catatan kebaikan (apresiasi + setoran) dan catatan pelanggaran</p></div>
+        <div class="actions"><button type="button" class="btn btn-ghost btn-sm mz-ulang" data-mz="ulang" title="Putar ulang gerak timbangan">
+          <i class="fa-solid fa-play"></i><span>Putar</span></button></div></div>
+      <div class="mz-svg-wrap" id="mzSvg">${svgMizan(kiri, kanan)}</div>
+      <p class="mz-cap" id="mzCap">${esc(kalimatMizan(M))}</p>
+    </section>
+
+    <div class="mz-kanan">
+      <div class="mz-vitals">${vDisiplin}${vTuntas}${vBaik}</div>
+      <section class="mz-decs" id="mzKeputusan">
+        <div class="mz-lbl"><i class="fa-solid fa-gavel"></i>Menunggu keputusan Anda</div>
+        ${kartuKeputusan}
+      </section>
+    </div>
+  </div>
+
+  <div class="mz-grid mz-grid-b">
+    <section class="card mz-angkatan" id="mzAngkatan">
+      <div class="card-head"><div><h3>Kasus per 100 santri, per angkatan</h3>
+        <p class="sub">Garis putus emas = rata-rata dayah (${angka(L.per100)}). Ketuk batang untuk rincian kelas.</p></div></div>
+      <div class="mz-ang-wrap" style="--rata:${posRata}%">${batang}</div>
+    </section>
+    <section class="card mz-santri">
+      <div class="card-head"><div><h3>Santri yang perlu perhatian</h3>
+        <p class="sub">${esc(labelBulan(bulan))}${berjalan ? ` · 1–${hari}` : ''}</p></div></div>
+      <div class="card-body">${tier}
+        <button type="button" class="btn-link mz-ke-kt" data-nav="keterlibatan"><i class="fa-solid fa-user-clock"></i>Siapa yang belum mencatat?</button></div>
+    </section>
+  </div>
+
+  <details class="mz-laci" id="mzLaci">
+    <summary><i class="fa-solid fa-box-archive"></i><span>Analisis rinci<small>Gelombang mingguan, bidang, peta perkembangan, matriks kamar, jenis terbanyak</small></span>
+      <i class="fa-solid fa-chevron-down mz-laci-panah"></i></summary>
+    <div id="mzLaciIsi"><div class="ac-loading"><i class="fa-solid fa-circle-notch fa-spin"></i>Menyiapkan analisis…</div></div>
+  </details>`;
+}
+
+async function aksiMejaPimpinan(kerja, arg, el) {
+  const M = MZ.data; if (!M) return;
+  const L = M.L;
+  if (kerja === 'lembar') { MZ.bulan = arg; MZ.gantiLembar = true; return navigateTo('pimpinan'); }
+  if (kerja === 'ulang') return mainkanMeja('mizan', { paksa: true });
+  if (kerja === 'angkatan') return rincianAngkatan(arg);
+  if (kerja === 'tier') return daftarTierMizan();
+  if (kerja === 'nanti') {
+    tundaKeputusan(`kebaikan|${L.bulan}`);
+    toast('info', 'Disembunyikan selama 7 hari.');
+    return navigateTo('pimpinan');
+  }
+  if (kerja === 'agenda') {
+    const a = L.angkatan.find(x => x.angkatan === arg); if (!a) return;
+    const kls = Object.entries(a.kelas).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([k, n]) => `${k} (${n})`).join(', ');
+    const bdg = Object.entries(a.bidang).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([k, n]) => `${k} (${n})`).join(', ');
+    const teks = `Agenda rapat pengasuhan — ${labelBulan(L.bulan)}
+Angkatan ${a.angkatan}: ${a.kasus} kasus dari ${a.santri} santri (${String(a.per100).replace('.', ',')} per 100 santri; rata-rata dayah ${String(L.per100).replace('.', ',')}).
+Pelanggaran berat: ${a.berat}.
+Kelas penyumbang: ${kls || '-'}.
+Bidang dominan: ${bdg || '-'}.
+Yang perlu diputuskan: pola pengawasan dan pembinaan bersama wali kelas/musyrif angkatan ${a.angkatan}.`;
+    return aiSalin(teks, 'Agenda rapat');
+  }
+  if (kerja === 'arahan') {
+    const teks = `Assalamu'alaikum warahmatullahi wabarakatuh.
+
+Bapak/Ibu Ustadz/Ustadzah, pada lembar ${labelBulan(L.bulan)} baru ${String(L.baikPct).replace('.', ',')}% santri yang memiliki catatan kebaikan di chemint (${L.prestasi} apresiasi, ${L.setoran} setoran). Timbangan santri kita jadi berat sebelah karena kebaikan mereka belum dicatat.
+
+Mohon setiap musyrif dan wali kelas mencatat paling sedikit satu apresiasi per rayon/kelas setiap pekan, dan setoran hafalan dicatat rutin.
+
+Jazakumullahu khairan.`;
+    return aiSalin(teks, 'Arahan untuk guru');
+  }
+  if (kerja === 'pembinaan') {
+    const guru = await muatGuruAktif().catch(() => []);
+    const baris = L.terbukaKelas.map(([k, n]) => {
+      const pb = (guru || []).filter(g => (g.kelas_binaan || []).includes(k)).map(g => g.nama);
+      return `<tr><td><b>${esc(k)}</b></td><td class="num center">${angka(n)}</td><td>${pb.length ? pb.map(x => `<span class="tag tag-off">${esc(x)}</span>`).join(' ') : '<span class="tag tag-wait">Belum ada pembina kelas</span>'}</td></tr>`;
+    }).join('');
+    return Swal.fire({ title: `Pembinaan ${labelBulan(L.bulan)} yang belum tuntas`, width: 760, showConfirmButton: false, showCloseButton: true,
+      customClass: { popup: 'dft-popup' },
+      html: `<div class="dft"><p class="mz-kaki" style="text-align:left">${angka(L.pbnTerbuka)} dari ${angka(L.pbnTotal)} pembinaan. ${M.tutup ? 'Lembar ini sudah dikunci; pembinaannya menjadi bahan evaluasi di box amanah guru.' : ''}</p>
+        <div class="tbl"><table><thead><tr><th>Kelas</th><th class="center">Belum tuntas</th><th>Pembina kelas</th></tr></thead><tbody>${baris || barisKosong(3, 'Tidak ada.')}</tbody></table></div></div>` });
+  }
+  if (kerja === 'bidang') {
+    const semua = [...new Set([...L.bidang.map(x => x[0]), ...M.P.bidang.map(x => x[0])])];
+    const baris = semua.map(bd => {
+      const a = (L.bidang.find(x => x[0] === bd) || [, 0])[1], p = (M.P.bidang.find(x => x[0] === bd) || [, 0])[1];
+      return [bd, a, p, a - p];
+    }).sort((x, y) => y[3] - x[3]).map(([bd, a, p, s]) => `<tr><td>${esc(bd)}</td><td class="num center">${angka(p)}</td><td class="num center">${angka(a)}</td>
+      <td class="num center" style="color:${s > 0 ? 'var(--maroon)' : 'var(--teal)'}">${s > 0 ? '+' : ''}${angka(s)}</td></tr>`).join('');
+    return Swal.fire({ title: 'Perubahan per bidang', width: 680, showConfirmButton: false, showCloseButton: true, customClass: { popup: 'dft-popup' },
+      html: `<div class="dft"><div class="tbl"><table><thead><tr><th>Bidang</th><th class="center">${esc(M.labelP)}</th><th class="center">${esc(labelBulan(L.bulan))}</th><th class="center">Selisih</th></tr></thead><tbody>${baris}</tbody></table></div></div>` });
+  }
+  if (kerja === 'berat') {
+    const nama = Object.fromEntries(M.siswa.map(s => [String(s.nisn), s]));
+    const baris = L.beratRows.slice().sort((a, b) => String(b.tanggal).localeCompare(String(a.tanggal))).map(r => {
+      const s = nama[String(r.nisn)] || {};
+      return `<tr data-detail="${esc(r.nisn)}" style="cursor:pointer"><td>${tgl(r.tanggal)}</td><td><b>${esc(s.nama_siswa || r.nama_siswa || '-')}</b><div class="secondary">${esc(s.kelas || r.kelas || '-')}</div></td><td>${esc(r.nama_pelanggaran || r.kode_pelanggaran || '-')}</td></tr>`;
+    }).join('');
+    return Swal.fire({ title: `Pelanggaran berat · ${labelBulan(L.bulan)}`, width: 760, showConfirmButton: false, showCloseButton: true, customClass: { popup: 'dft-popup' },
+      html: `<div class="dft"><div class="tbl"><table><thead><tr><th>Tanggal</th><th>Santri</th><th>Pelanggaran</th></tr></thead><tbody>${baris}</tbody></table></div></div>`,
+      didOpen: () => Swal.getHtmlContainer()?.addEventListener('click', (e) => { const t = e.target.closest('[data-detail]'); if (t) { Swal.close(); bukaDetailSantri(t.dataset.detail); } }) });
+  }
+}
+
+function rincianAngkatan(ang) {
+  const M = MZ.data; if (!M) return;
+  const a = M.L.angkatan.find(x => x.angkatan === ang); if (!a) return;
+  const santriKelas = {};
+  M.siswa.forEach(s => { if (angkatanDariKelas(s.kelas) === ang) santriKelas[s.kelas] = (santriKelas[s.kelas] || 0) + 1; });
+  const baris = Object.keys(santriKelas).sort().map(k => {
+    const n = a.kelas[k] || 0, s = santriKelas[k];
+    return `<tr><td><b>${esc(k)}</b></td><td class="num center">${angka(s)}</td><td class="num center">${angka(n)}</td><td class="num center">${angka(Math.round(n / s * 1000) / 10)}</td></tr>`;
+  }).join('');
+  const bdg = Object.entries(a.bidang).sort((x, y) => y[1] - x[1]).slice(0, 5)
+    .map(([k, n]) => `<span class="tag tag-sea">${esc(k)} · ${angka(n)}</span>`).join(' ');
+  Swal.fire({ title: `Angkatan ${ang} · ${labelBulan(M.L.bulan)}`, width: 700, showConfirmButton: false, showCloseButton: true, customClass: { popup: 'dft-popup' },
+    html: `<div class="dft"><p class="mz-kaki" style="text-align:left">${angka(a.kasus)} kasus, ${angka(a.berat)} berat, ${angka(a.per100)} per 100 santri (rata-rata dayah ${angka(M.L.per100)}).</p>
+      <div style="margin:8px 0 12px;text-align:left">${bdg}</div>
+      <div class="tbl"><table><thead><tr><th>Kelas</th><th class="center">Santri</th><th class="center">Kasus</th><th class="center">Per 100</th></tr></thead><tbody>${baris}</tbody></table></div></div>` });
+}
+
+function daftarTierMizan() {
+  const M = MZ.data; if (!M || !M.ipp) return;
+  Swal.fire({ title: `Santri Tier 3 & 2 · ${labelBulan(M.bulan)}`, width: 1000, showConfirmButton: false, showCloseButton: true,
+    customClass: { popup: 'dft-popup' }, html: `<div class="dft">${panelIpp(M.ipp, { batas: 80 })}</div>`,
+    didOpen: () => Swal.getHtmlContainer()?.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-detail]'); if (t) { Swal.close(); bukaDetailSantri(t.dataset.detail); } }) });
+}
+
+/** Laci: grafik & panel lama, dimuat hanya saat dibuka. */
+async function isiLaciAnalisis() {
+  const M = MZ.data, kotak = $('mzLaciIsi');
+  if (!M || !kotak || kotak.dataset.isi === '1') return;
+  kotak.dataset.isi = '1';
+  const L = M.L;
+
+  const akhir = new Date(); akhir.setHours(23, 59, 59, 999);
+  const mulai90 = tambahHari(akhir, -89); mulai90.setHours(0, 0, 0, 0);
+  const wkKunci = [], wkPeta = {};
+  for (let c = awalPekan(mulai90); c <= awalPekan(akhir); c = tambahHari(c, 7)) { const k = kunciTgl(c); wkKunci.push(k); wkPeta[k] = 0; }
+  M.detail.forEach(r => { const d = tglDari(kunciTgl(r.tanggal)); if (!d || d < mulai90 || d > akhir) return;
+    const k = kunciTgl(awalPekan(d)); if (k in wkPeta) wkPeta[k]++; });
+
+  const jenis = L.jenis.slice(0, 10), maksJ = jenis[0]?.[1] || 1;
+  const admin = isAdmin() ? `<div class="ai-actions">
+      <button class="btn btn-ghost btn-sm" data-ai="payload-pimpinan"><i class="fa-solid fa-file-code"></i>Salin ringkasan untuk analisis</button>
+      <button class="btn btn-ghost btn-sm" data-ai="prompt-pimpinan"><i class="fa-solid fa-wand-magic-sparkles"></i>Salin instruksi AI</button></div>` : '';
+
+  kotak.innerHTML = `
+    <div class="grid-2">
+      ${kartu('Gelombang pelanggaran mingguan', chartBox('mzWeek'), '', '90 hari terakhir')}
+      ${kartu('Bidang dominan', chartBox('mzBidang'), '', labelBulan(L.bulan))}
+    </div>
+    <div class="grid-half">
+      ${kartu('Jenis pelanggaran terbanyak', `<div class="card-body mz-jenis">${jenis.map(([n, j]) => `<div><span>${esc(n)}</span>
+        <i style="--p:${(j / maksJ * 100).toFixed(1)}%"></i><b>${angka(j)}</b></div>`).join('') || kosong('Belum ada catatan.')}</div>`, '', labelBulan(L.bulan))}
+      ${kartu('Izin & kepulangan', `<div class="card-body"><div class="minis">
+          <div class="mini m"><span>Telat balik</span><b>${angka(L.telat)}</b></div>
+          <div class="mini s"><span>Izin selesai</span><b>${angka(L.izinSelesai)}</b></div>
+          <div class="mini a"><span>Persen telat</span><b>${L.telatPct}%</b></div>
+          <div class="mini t"><span>Pelanggaran berat</span><b>${angka(L.berat)}</b></div></div></div>`, '', labelBulan(L.bulan))}
+    </div>
+    ${rangkaSebaran()}
+    ${admin}`;
+
+  buatChart('mzWeek', 'mzWeek', { type: 'line',
+    data: { labels: wkKunci.map(labelPekan), datasets: [{ label: 'Pelanggaran', data: wkKunci.map(k => wkPeta[k]),
+      borderColor: '#14618B', backgroundColor: 'rgba(20,97,139,.14)', tension: .35, fill: true, borderWidth: 2.5, pointRadius: 3 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8, maxRotation: 0 } }, y: { beginAtZero: true, ticks: { precision: 0 } } } } });
+  buatChart('mzBidang', 'mzBidang', { type: 'bar',
+    data: { labels: L.bidang.slice(0, 7).map(x => x[0]), datasets: [{ label: 'Kasus', data: L.bidang.slice(0, 7).map(x => x[1]), backgroundColor: '#1B7AAD', borderRadius: 6 }] },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { x: { beginAtZero: true, ticks: { precision: 0 } }, y: { grid: { display: false } } } } });
+
+  try {
+    const sebaran = await blokSebaran({ siswa: M.siswa, detail: M.detail, izin: M.sumber.izin, pembinaan: M.sumber.pembinaan,
+      ipp: false, gagal: M.gagal });
+    const k = $('blokSebaran');
+    if (k) { usaiRangkaSebaran(); k.innerHTML = sebaran.html; sebaran.gambar(); }
+  } catch (e) {
+    console.warn('laci analisis:', e.message);
+    usaiRangkaSebaran();
+    const k = $('blokSebaran'); if (k) k.innerHTML = kosong('Peta perkembangan belum dapat dimuat.', 'Muat ulang halaman untuk mencoba lagi.', 'fa-triangle-exclamation');
+  }
+  tandaiTabelBisaGeser();
+}
+
+/* ---------- Meja Pendampingan (Guru BK) ------------------------------- */
+
+const MJ = { gen: 0, kartu: new Map(), lajur: null, buka: {}, guru: [], utas: [], ipp: null, ippLalu: null, data: null };
+const MJ_LAJUR = [
+  { k: 'panggil',  judul: 'Perlu dipanggil',   ikon: 'fa-bell' },
+  { k: 'dipanggil', judul: 'Dipanggil',        ikon: 'fa-paper-plane' },
+  { k: 'damping',  judul: 'Didampingi',        ikon: 'fa-hands-holding-child' },
+  { k: 'tuntas',   judul: 'Tuntas, dipantau',  ikon: 'fa-circle-check' }
+];
+const MJ_TAMPIL = 8;              // kartu per lajur sebelum "lainnya"
+const MJ_JENDELA_UTAS = 60;       // hari — utas lebih tua dianggap sudah lewat
+
+async function viewBk() {
+  const gen = ++MJ.gen;
+  const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
+    amanKosong(muatSiswa, 'santri'),
+    amanKosong(muatDetail, 'pelanggaran'),
+    amanKosong(muatIzin, 'perizinan'),
+    amanKosong(muatPembinaan, 'pembinaan')
+  ]);
+  const siswa = siswaAll.filter(aktifSantri);
+  const detail = detailAll.filter(aktifDetail);
+  const pembinaan = pembinaanAll.filter(aktifPembinaan);
+  const gagal = daftarGagalInti({ siswaAll, detailAll, izinAll, pembinaanAll });
+  const [b, guru, pesan] = await Promise.all([
+    bahanIpp({ siswa, detail, izin: izinAll, pembinaan, gagal }),
+    muatGuruAktif().catch(() => []),
+    muatPesanSaya().catch((e) => { console.warn('[meja bk] pesan:', e.message); return Object.assign([], { gagal: true }); })
+  ]);
+  if (gen !== MJ.gen || APP.view !== 'bk') return;
+
+  const jalan = bulanIni(), hari = new Date().getDate(), lalu = bulanGeser(jalan, -1);
+  MJ.siswa = siswa; MJ.guru = guru || []; MJ.pesanGagal = !!pesan.gagal;
+  MJ.utas = kelompokUtas(pesan || []).filter(u => u.jenis !== 'pembinaan');
+  MJ.ipp = ippDariBahan(siswa, b, perLembar(jalan));
+  MJ.ippLalu = hari <= MZ_HARI_KABAR ? ippDariBahan(siswa, b, perLembar(lalu)) : null;
+  MJ.lembar = { jalan, lalu, hari };
+  MJ.gagal = gagal;
+  susunMejaBk();
+  gambarMejaBk();
+  mainkanMeja('bk');
+}
+
+/** Bagi santri ke empat lajur. Tanpa kolom baru di database. */
+function susunMejaBk() {
+  const peta = new Map();
+  const sw = Object.fromEntries((MJ.siswa || []).map(s => [String(s.nisn), s]));
+  const tierKini = new Map((MJ.ipp?.daftar || []).map(x => [String(x.nisn), x]));
+  const tambah = (x, asal) => {
+    const n = String(x.nisn);
+    if (!peta.has(n)) peta.set(n, { ...x, nisn: n, asal, kamar: sw[n]?.nomor_kamar ?? null, kelas: x.kelas || sw[n]?.kelas || '-' });
+  };
+  (MJ.ipp?.daftar || []).filter(x => x.tingkat === 3).forEach(x => tambah(x, 'kini'));
+  (MJ.ippLalu?.daftar || []).filter(x => x.tingkat === 3).forEach(x => tambah(x, 'lalu'));
+
+  const batasUtas = kunciTgl(tambahHari(new Date(), -MJ_JENDELA_UTAS));
+  const utasPer = new Map();
+  MJ.utas.forEach(u => {
+    if (kunciTgl(u.waktu) < batasUtas) return;
+    if (!utasPer.has(String(u.nisn))) utasPer.set(String(u.nisn), u);        // kelompokUtas sudah urut terbaru
+  });
+  utasPer.forEach((u, n) => {
+    if (peta.has(n)) return;
+    const x = tierKini.get(n);
+    if (x) tambah(x, 'kini');
+    else if (sw[n]) tambah({ nisn: n, nama: sw[n].nama_siswa, kelas: sw[n].kelas, tingkat: 1, sebab: 'Tidak ada indikasi pada lembar berjalan', beban: 0, ikatan: 0, putus: 0, respons: null }, 'kini');
+  });
+
+  const lajur = { panggil: [], dipanggil: [], damping: [], tuntas: [] };
+  peta.forEach((x, n) => {
+    const u = utasPer.get(n) || null;
+    const kini = tierKini.get(n);
+    const tierNow = kini ? kini.tingkat : (x.asal === 'lalu' ? 1 : x.tingkat);
+    x.utas = u; x.tierNow = tierNow;
+    x.pembina = guruPembina(MJ.guru, x.kelas);
+    if (!u) lajur.panggil.push(x);
+    else if (!u.selesai) lajur.dipanggil.push(x);
+    else if (tierNow >= 2) lajur.damping.push(x);
+    else lajur.tuntas.push(x);
+  });
+  const urut = (a, b) => (a.asal === b.asal ? 0 : a.asal === 'kini' ? -1 : 1) || (b.tingkat - a.tingkat) || ((b.beban || 0) - (a.beban || 0));
+  Object.values(lajur).forEach(l => l.sort(urut));
+  lajur.dipanggil.sort((a, b) => (b.utas.belum - a.utas.belum) || String(a.utas.waktu).localeCompare(String(b.utas.waktu)));
+  MJ.lajur = lajur;
+  MJ.kartu = peta;
+}
+
+function umurTeks(iso) {
+  const h = Math.floor((Date.now() - new Date(iso).getTime()) / 864e5);
+  return h <= 0 ? 'hari ini' : h === 1 ? 'kemarin' : `${h} hari lalu`;
+}
+
+function htmlKartuMeja(x, lajurK) {
+  const ipp = MJ.ipp || MJ.ippLalu;
+  const maks = ipp ? ipp.maks : { beban: 1, ikatan: 1, putus: 1 };
+  const pct = (v, m) => Math.max(0, Math.min(100, Math.round((Number(v) || 0) / Math.max(1, m) * 100)));
+  const batang = [
+    ['merah', pct(x.beban, maks.beban), `Beban: ${x.beban || 0} poin`],
+    ['hijau', pct(x.ikatan, maks.ikatan), `Ikatan: ${x.ikatan || 0} catatan baik`],
+    ['kuning', pct(x.putus, maks.putus), `Keterputusan: ${x.putus || 0} izin keluar`],
+    ['biru', x.respons == null ? 0 : x.respons, `Respons: ${x.respons == null ? '—' : x.respons + '% pembinaan tuntas'}`],
+    ['ungu', x.kh ? Math.round(x.kh.hadirPct) : 0, x.kh ? `Kehadiran: ${Math.round(x.kh.hadirPct)}%` : 'Kehadiran: belum terbaca']
+  ].map(([w, p, t]) => `<i class="${w}" style="--p:${p}%" title="${esc(t)}"></i>`).join('');
+
+  const u = x.utas;
+  const guru1 = x.pembina[0];
+  const namaPendek = (n) => String(n || '').split(',')[0].trim();
+  let catatan = '', aksi = '';
+  if (lajurK === 'panggil') {
+    catatan = x.asal === 'lalu' ? `Tier 3 pada ${labelBulan(MJ.lembar.lalu)}.` : '';
+    aksi = `<button type="button" class="btn btn-primary btn-sm" data-bk-kirim="${esc(x.nisn)}"><i class="fa-solid fa-paper-plane"></i>
+      ${guru1 ? `Kirim pesan ke ${esc(namaPendek(guru1.nama))}` : 'Kirim pesan ke guru'}</button>`;
+  } else if (lajurK === 'dipanggil') {
+    const akhir = u.terakhir || {};
+    catatan = u.belum
+      ? `${esc(namaPendek(akhir.pengirim_nama))} membalas: “${esc(String(akhir.isi || '').slice(0, 90))}${String(akhir.isi || '').length > 90 ? '…' : ''}”`
+      : `Pesan ke ${esc(namaPendek(u.lawan?.nama))} terkirim ${umurTeks(u.waktu)}${u.saya ? ', belum dibalas' : ''}.`;
+    aksi = `<button type="button" class="btn ${u.belum ? 'btn-primary' : 'btn-ghost'} btn-sm" data-bk-utas="${esc(u.utas)}"><i class="fa-solid fa-comments"></i>${u.belum ? `Buka balasan (${u.belum})` : 'Lihat utas'}</button>
+      ${u.belum ? '' : `<button type="button" class="btn btn-ghost btn-sm" data-bk-kirim="${esc(x.nisn)}">Ingatkan ulang</button>`}`;
+  } else if (lajurK === 'damping') {
+    catatan = `Sudah diantar ke BK ${umurTeks(u.waktu)}. Masih Tier ${x.tierNow} pada lembar berjalan.`;
+    aksi = `<button type="button" class="btn btn-primary btn-sm" data-mj-bina="${esc(x.nisn)}"><i class="fa-solid fa-hands-praying"></i>Catat pembinaan</button>`;
+  } else {
+    catatan = 'Turun ke Tier 1. Dipantau sampai akhir lembar.';
+  }
+  return `<article class="mj-kartu t${x.tingkat}${lajurK === 'tuntas' ? ' usai' : ''}" data-mj-nisn="${esc(x.nisn)}">
+    <header><button type="button" class="btn-link" data-detail="${esc(x.nisn)}">${esc(x.nama)}</button>
+      <small>${esc(x.kelas || '-')}${x.kamar != null && x.kamar !== '' ? ` · Kamar ${esc(x.kamar)}` : ''}</small></header>
+    <div class="mj-ipp">${batang}</div>
+    <p class="mj-sebab">${esc(x.sebab || '')}</p>
+    ${catatan ? `<p class="mj-catatan">${catatan}</p>` : ''}
+    ${aksi ? `<div class="mj-aksi">${aksi}</div>` : ''}
+  </article>`;
+}
+
+function gambarMejaBk() {
+  const root = $('viewRoot'); if (!root || APP.view !== 'bk' || !MJ.lajur) return;
+  const L = MJ.lajur, kini = new Date();
+  const hij = tanggalHijriah(kini);
+  const belum = L.dipanggil.reduce((a, x) => a + (x.utas?.belum || 0), 0);
+  const tier2 = (MJ.ipp?.daftar || []).filter(x => x.tingkat === 2).length;
+
+  const lajurHtml = MJ_LAJUR.map(({ k, judul, ikon }) => {
+    const isi = L[k], buka = MJ.buka[k];
+    const tampil = buka ? isi : isi.slice(0, MJ_TAMPIL);
+    return `<section class="mj-lajur" data-lajur="${k}">
+      <header class="mj-lajur-h"><span><i class="fa-solid ${ikon}"></i>${esc(judul)}</span><em data-mj-jml>${angka(isi.length)}</em></header>
+      <div class="mj-tumpuk">${tampil.map(x => htmlKartuMeja(x, k)).join('') || `<p class="mj-kosong">${k === 'panggil' ? 'Tidak ada santri Tier 3 yang belum dipanggil.' : 'Kosong.'}</p>`}
+      ${isi.length > tampil.length ? `<button type="button" class="btn btn-ghost btn-sm mj-lagi" data-mj-lagi="${k}">+${angka(isi.length - tampil.length)} lainnya</button>` : ''}</div>
+    </section>`;
+  }).join('');
+
+  const catatanGagal = MJ.pesanGagal ? `<div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>Utas pesan tidak terbaca; semua santri tampil di lajur pertama.</div>` : '';
+  const ippCat = !MJ.ipp ? `<div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>${esc(kalimatGagal(MJ.gagal || [], 'ipp') || 'Indeks Peringatan belum dapat dihitung.')}</div>` : '';
+
+  root.innerHTML = `
+  <section class="mj-meja" id="mjMeja">
+    <div class="mj-atas">
+      <div><small>${esc(kini.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }))}${hij ? ` · ${esc(hij)} H` : ''}</small>
+        <h2>Meja Pendampingan</h2></div>
+      <div class="mj-hari">
+        <button type="button" class="mj-chip bad" data-mj-ke="panggil"><b>${angka(L.panggil.length)}</b> Tier 3 belum dipanggil</button>
+        <button type="button" class="mj-chip sea" data-mj-ke="dipanggil"><b>${angka(belum)}</b> balasan guru baru</button>
+        <button type="button" class="mj-chip amb" data-mj-ke="damping"><b>${angka(L.damping.length)}</b> sedang didampingi</button>
+      </div>
+    </div>
+    ${catatanGagal}${ippCat}
+    <div class="mj-papan-gulir"><div class="mj-papan" id="mjPapan">${lajurHtml}</div></div>
+    <footer class="mj-bawah">
+      <span class="mj-kunci"><i class="merah"></i>Beban<i class="hijau"></i>Ikatan<i class="kuning"></i>Keterputusan<i class="biru"></i>Respons<i class="ungu"></i>Kehadiran</span>
+      <span>${angka(tier2)} santri Tier 2 dipantau wali kelas · <button type="button" class="btn-link" data-mj-tier2>lihat</button></span>
+      <button type="button" class="btn btn-ghost btn-sm" data-nav="pesan"><i class="fa-solid fa-inbox"></i>Semua percakapan</button>
+      <button type="button" class="btn btn-ghost btn-sm mz-ulang" data-mj-ulang title="Putar ulang gerak meja"><i class="fa-solid fa-play"></i><span>Putar</span></button>
+    </footer>
+  </section>`;
+
+  onKlik((e) => {
+    const lagi = e.target.closest('[data-mj-lagi]');
+    if (lagi) { MJ.buka[lagi.dataset.mjLagi] = true; return gambarMejaBk(); }
+    const ke = e.target.closest('[data-mj-ke]');
+    if (ke) { const l = document.querySelector(`.mj-lajur[data-lajur="${ke.dataset.mjKe}"]`); l?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' }); l?.classList.add('mj-sorot'); setTimeout(() => l?.classList.remove('mj-sorot'), 1200); return; }
+    const bina = e.target.closest('[data-mj-bina]');
+    if (bina) { stBina.cari = bina.dataset.mjBina; stBina.status = ''; stBina.page = 1; return navigateTo('pembinaan'); }
+    if (e.target.closest('[data-mj-tier2]')) return daftarTier2Bk();
+    if (e.target.closest('[data-mj-ulang]')) return mainkanMeja('bk', { paksa: true });
+    const nav = e.target.closest('[data-nav]');
+    if (nav) return navigateTo(nav.dataset.nav);
+    const d = e.target.closest('[data-detail]');
+    if (d) return bukaDetailSantri(d.dataset.detail);
+  });
+}
+
+function daftarTier2Bk() {
+  if (!MJ.ipp) return;
+  const ipp = { ...MJ.ipp, daftar: MJ.ipp.daftar.filter(x => x.tingkat === 2) };
+  Swal.fire({ title: `Santri Tier 2 · ${labelBulan(MJ.lembar.jalan)}`, width: 1000, showConfirmButton: false, showCloseButton: true,
+    customClass: { popup: 'dft-popup' }, html: `<div class="dft">${panelIpp(ipp, { batas: 120 })}</div>`,
+    didOpen: () => Swal.getHtmlContainer()?.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-detail]'); if (t) { Swal.close(); bukaDetailSantri(t.dataset.detail); } }) });
+}
+
+/** Muat ulang utas saja lalu pindahkan kartu (FLIP) — dipakai sesudah kirim & realtime. */
+async function segarMejaBk(opsi = {}) {
+  if (APP.view !== 'bk' || !MJ.lajur) return;
+  const sebelum = new Map();
+  document.querySelectorAll('.mj-kartu[data-mj-nisn]').forEach(el => sebelum.set(el.dataset.mjNisn, el.getBoundingClientRect()));
+  const lajurLama = new Map();
+  Object.entries(MJ.lajur).forEach(([k, l]) => l.forEach(x => lajurLama.set(x.nisn, k)));
+  try {
+    cacheHapus('pesan_bk');
+    MJ.utas = kelompokUtas(await muatPesanSaya()).filter(u => u.jenis !== 'pembinaan');
+  } catch (e) { console.warn('[meja bk] segar:', e.message); }
+  susunMejaBk();
+  const y = scrollY;
+  gambarMejaBk();
+  scrollTo({ top: y, behavior: 'auto' });
+  // FLIP: kartu yang pindah lajur meluncur dari tempat lamanya.
+  const pindah = [];
+  document.querySelectorAll('.mj-kartu[data-mj-nisn]').forEach(el => {
+    const n = el.dataset.mjNisn, r0 = sebelum.get(n); if (!r0) return;
+    const kini = Object.entries(MJ.lajur).find(([, l]) => l.some(x => x.nisn === n))?.[0];
+    if (!kini || kini === lajurLama.get(n)) return;
+    const r1 = el.getBoundingClientRect();
+    pindah.push({ el, r0, r1, nisn: n });
+  });
+  if (!pindah.length || MULUS.kurangGerak) return;
+  pindah.forEach(({ el, r0, r1 }) => {
+    el.style.transition = 'none';
+    el.style.transform = `translate(${r0.left - r1.left}px, ${r0.top - r1.top}px)`;
+    el.classList.add('mj-terbang');
+  });
+  requestAnimationFrame(() => requestAnimationFrame(() => pindah.forEach(({ el }) => {
+    el.style.transition = 'transform .9s cubic-bezier(.22,1,.36,1)';
+    el.style.transform = '';
+    setTimeout(() => { el.classList.remove('mj-terbang'); el.style.transition = ''; }, 950);
+  })));
+  if (opsi.antar && window.RQMeja) try { window.RQMeja.antar(pindah.map(p => ({ dari: p.r0, ke: p.r1 }))); } catch (e) {}
+}
+
+/* Realtime pesan_bk & panel lama → meja baru. */
+gambarPanelPesanBk = function () { segarMejaBk(); };
+muatPanelPesanBk = function () { return segarMejaBk(); };
+
+/** Naskah pesan BK — memakai alasan IPP pada lembar berjalan. */
+templatePesanBk = function (s) {
+  const saya = APP.profil?.nama || 'Guru BK';
+  return `Assalamu'alaikum warahmatullahi wabarakatuh.
+
+Mohon bantuan Ustadz/Ustadzah selaku pembina kelas ${s.kelas || '-'}.
+
+Ananda ${s.nama} (NISN ${s.nisn}) termasuk santri Tier ${s.tingkat || '-'} pada Indeks Peringatan Pembinaan ${s.asal === 'lalu' ? labelBulan(MJ.lembar?.lalu || bulanIni()) : 'bulan ini'}: ${s.sebab || 'perlu pendampingan'}.
+
+Mohon ananda disampaikan agar MENEMUI GURU BK di ruang BK pada waktu istirahat atau jam lain yang memungkinkan, untuk pendampingan lanjutan. Setelah disampaikan, mohon utas ini ditandai "Sudah diantar ke BK".
+
+Jazakumullahu khairan katsiran.
+— ${saya} (Guru BK)`;
+};
+
+modalPesanBk = async function (nisn) {
+  const s = MJ.kartu.get(String(nisn));
+  if (!s) return toast('error', 'Data santri tidak ditemukan di meja.');
+  const semua = MJ.guru.length ? MJ.guru : await muatGuruAktif();
+  const pembina = guruPembina(semua, s.kelas);
+  const lain = semua.filter(g => ROLE_PENERIMA.includes(g.role) && g.id !== idSaya() && !pembina.some(p => p.id === g.id));
+  const opsi = (arr, label) => arr.length ? `<optgroup label="${esc(label)}">${arr.map(g =>
+    `<option value="${esc(g.id)}">${esc(g.nama)} — ${esc(g.role)}${(g.kelas_binaan || []).length ? ' · ' + esc((g.kelas_binaan || []).join(', ')) : ''}</option>`).join('')}</optgroup>` : '';
+  if (!pembina.length && !lain.length) return toast('error', 'Belum ada guru aktif yang bisa dijadikan penerima.');
+
+  const res = await Swal.fire({
+    title: 'Kirim Pesan ke Guru', width: 660, showCancelButton: true, confirmButtonText: 'Kirim', cancelButtonText: 'Batal',
+    confirmButtonColor: '#14618B', showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
+    html: `<div class="stack">
+      <div class="pgs-pick on"><div class="ico"><i class="fa-solid fa-user-graduate"></i></div>
+        <div><small>Santri</small><b>${esc(s.nama)}</b>
+          <div class="secondary">${esc(s.nisn)} · ${esc(s.kelas || '-')} · Tier ${esc(s.tingkat)} · ${esc(s.sebab || '')}</div></div></div>
+      <div class="field"><label class="label">Guru Penerima</label>
+        <select id="pbGuru" class="input">${opsi(pembina, `Pembina kelas ${s.kelas || '-'}`)}${opsi(lain, 'Guru lain')}</select>
+        <p class="hint">${pembina.length ? `Terisi otomatis dengan pembina kelas ${esc(s.kelas || '-')} — boleh diganti.`
+          : `Kelas ${esc(s.kelas || '-')} belum punya guru pembina terdaftar. Silakan pilih guru sendiri.`}</p></div>
+      ${pembina.length > 1 ? `<label class="ctx-note" style="cursor:pointer"><input type="checkbox" id="pbSemua" style="accent-color:var(--sea)">
+        Kirim sekaligus ke semua pembina kelas ${esc(s.kelas || '-')} (${pembina.length} guru)</label>` : ''}
+      <div class="field"><label class="label">Isi Pesan</label>
+        <textarea id="pbIsi" class="input" rows="11">${esc(templatePesanBk(s))}</textarea>
+        <p class="hint">Inti pesan: guru diminta menyuruh ananda menemui Guru BK.</p></div></div>`,
+    didOpen: () => { if (pembina.length) $('pbGuru').value = pembina[0].id; },
+    preConfirm: async () => {
+      const isi = $('pbIsi').value.trim();
+      if (isi.length < 10) { Swal.showValidationMessage('Isi pesan terlalu pendek.'); return false; }
+      const ids = $('pbSemua')?.checked ? pembina.map(g => g.id) : [$('pbGuru').value];
+      if (!ids.filter(Boolean).length) { Swal.showValidationMessage('Penerima belum dipilih.'); return false; }
+      const p = APP.profil;
+      const rows = ids.map(id => {
+        const g = semua.find(x => x.id === id) || {};
+        return { utas: kunciUtas(s.nisn, p.id, id), nisn: String(s.nisn), nama_santri: s.nama, kelas: s.kelas || null,
+          tier: `Tier ${s.tingkat}`, pengirim_id: p.id, pengirim_nama: p.nama, pengirim_role: p.role,
+          penerima_id: id, penerima_nama: g.nama || '-', penerima_role: g.role || '-', isi, status: 'Terkirim' };
+      });
+      try { await sisipkanPesan(rows); return rows.length; }
+      catch (e) { Swal.showValidationMessage(e.message || 'Gagal mengirim pesan.'); return false; }
+    }
+  });
+  if (res.isConfirmed) {
+    sync('done', 'Pesan terkirim');
+    toast('success', `Pesan terkirim ke ${res.value} guru`);
+    if (APP.view === 'bk') await segarMejaBk({ antar: true });
+  }
+};
+
+/* ---------- Keterlibatan Pencatat (pengganti peringkat kinerja) -------- */
+
+const PENCATAT = ['Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'];
+const KT = { hari: 30 };
+
+async function viewKeterlibatan() {
+  const sampai = hariIni(), dari = kunciTgl(tambahHari(new Date(), -(KT.hari - 1)));
+  let data;
+  try {
+    const r = await q(db.rpc('dashboard_kinerja_guru_rpc', { p_dari: dari, p_sampai: sampai, p_role: null, p_jenjang: 'Semua', p_cari: null }), 'keterlibatan');
+    data = r.data || {};
+  } catch (err) {
+    $('viewRoot').innerHTML = kartu('Keterlibatan Pencatat', `<div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
+      Data keterlibatan tidak dapat dimuat: <b>${esc(err?.message || String(err))}</b></div>`);
+    return;
+  }
+  const siswa = (await amanKosong(muatSiswa, 'santri')).filter(aktifSantri);
+  const semua = (data.ranking || []).filter(g => g.aktif !== false && PENCATAT.includes(g.role));
+  const tujuh = kunciTgl(tambahHari(new Date(), -7));
+  const diam = semua.filter(g => !Number(g.total_aktivitas));
+  const renggang = semua.filter(g => Number(g.total_aktivitas) && String(g.aktivitas_terakhir || '') < tujuh);
+  const aktif = semua.filter(g => Number(g.total_aktivitas) && String(g.aktivitas_terakhir || '') >= tujuh);
+
+  // Kelas yang semua pembinanya diam/renggang → titik buta pencatatan.
+  const kelasAda = [...new Set(siswa.map(s => s.kelas).filter(Boolean))].sort();
+  const pembinaKelas = (k) => semua.filter(g => (g.kelas_binaan || []).includes(k));
+  const buta = kelasAda.filter(k => { const p = pembinaKelas(k); return !p.length || p.every(g => !aktif.includes(g)); })
+    .map(k => ({ k, p: pembinaKelas(k) }));
+
+  const orang = (g, ket) => `<div class="kt-orang">
+      <b>${esc(g.nama)}</b><small>${esc(g.role)}${(g.kelas_binaan || []).length ? ' · ' + esc(g.kelas_binaan.join(', ')) : ''}</small>
+      <span>${esc(ket)}</span></div>`;
+  const kelompok = (judul, kelas, isi, kosongTeks) => `<section class="kt-kel ${kelas}">
+      <header><h3>${esc(judul)}</h3><em>${angka(isi.length)}</em></header>
+      <div class="kt-daftar">${isi.join('') || `<p class="mj-kosong">${esc(kosongTeks)}</p>`}</div></section>`;
+
+  $('viewRoot').innerHTML = `
+    <section class="mz-surat mz-${diam.length ? 'warn' : 'ok'}">
+      <div class="mz-kop"><span class="ar">مشاركة المعلمين</span><span class="mz-tgl">Keterlibatan pencatat · ${KT.hari} hari terakhir · ${tgl(dari)} – ${tgl(sampai)}</span></div>
+      <h2 class="mz-vonis">${diam.length
+        ? `${angka(diam.length)} dari ${angka(semua.length)} pencatat belum mencatat apa pun dalam ${KT.hari} hari terakhir.`
+        : `Semua ${angka(semua.length)} pencatat mencatat dalam ${KT.hari} hari terakhir.`}</h2>
+      <div class="mz-kop-bawah"><span class="mz-meta">Halaman ini tidak membuat peringkat. Jumlah catatan bukan ukuran mutu pembinaan.</span></div>
+    </section>
+    ${buta.length ? `<section class="card kt-buta"><div class="card-head"><div><h3>Kelas tanpa pencatat aktif pekan ini</h3>
+        <p class="sub">Semua pembina kelasnya belum mencatat dalam 7 hari terakhir, atau kelasnya belum punya pembina.</p></div></div>
+      <div class="card-body kt-chips">${buta.map(({ k, p }) => `<span class="tag ${p.length ? 'tag-sedang' : 'tag-berat'}" title="${esc(p.map(g => g.nama).join(', ') || 'Belum ada pembina')}">${esc(k)}</span>`).join('')}</div></section>` : ''}
+    <div class="kt-grid">
+      ${kelompok('Belum mencatat', 'diam', diam.map(g => orang(g, 'Tidak ada catatan')), 'Tidak ada.')}
+      ${kelompok('Terakhir mencatat lebih dari 7 hari lalu', 'renggang', renggang.map(g => orang(g, `Terakhir ${tgl(g.aktivitas_terakhir)}`)), 'Tidak ada.')}
+      ${kelompok('Mencatat pekan ini', 'aktif', aktif.map(g => orang(g, `${angka(g.hari_aktif)} hari aktif · terakhir ${tgl(g.aktivitas_terakhir)}`)), 'Belum ada.')}
+    </div>`;
+}
+
+/* ---------- Gerak: pemuat meja.js ------------------------------------ */
+
+const MEJA = { muat: null, gagal: false, BATAS_MUAT: 3500, tLepas: 0, tMaks: 0, main: null, MAKS_MS: 16000 };
+
+function gerakMejaBoleh() {
+  if (MULUS.kurangGerak || matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+  return bacaLS('rq-meja') !== 'mati';
+}
+function kunciSesiMeja(jenis) { return `rq-meja-${jenis}-${jenis === 'mizan' ? (MZ.data?.bulan || '') : hariIni()}-${APP.profil?.id || ''}`; }
+
+/** Tahan tampilan (balok datar, piringan kosong, kartu tersembunyi) sampai gerak dimulai. */
+function tahanMeja(jenis) {
+  if (jenis === 'mizan') {
+    const svg = $('mzSvg')?.querySelector('svg'); if (!svg) return false;
+    aturMizan(svg, 0); isiPiringMizan(svg, 'kiri', 0); isiPiringMizan(svg, 'kanan', 0);
+    $('mzKartu')?.classList.add('mz-tahan'); $('mzAngkatan')?.classList.add('mz-tahan');
+    return true;
+  }
+  const papan = $('mjPapan'); if (!papan) return false;
+  papan.classList.add('mj-tahan');
+  return true;
+}
+/** Lepas semua tahanan — keadaan akhir yang benar (data utuh). */
+function lepasMeja(jenis, sebab) {
+  if (sebab) console.warn('gerak meja dilepas:', sebab);
+  if (!jenis || jenis === 'mizan') {
+    const svg = $('mzSvg')?.querySelector('svg');
+    if (svg) { aturMizan(svg, sudutMizan(Number(svg.dataset.kiri), Number(svg.dataset.kanan))); isiPiringMizan(svg, 'kiri', 1); isiPiringMizan(svg, 'kanan', 1); }
+    $('mzKartu')?.classList.remove('mz-tahan'); $('mzAngkatan')?.classList.remove('mz-tahan');
+    document.querySelectorAll('.mz-sorot').forEach(el => el.classList.remove('mz-sorot'));
+  }
+  if (!jenis || jenis === 'bk') {
+    const papan = $('mjPapan');
+    if (papan) { papan.classList.remove('mj-tahan'); papan.querySelectorAll('.mj-lajur').forEach(l => l.classList.add('mj-buka')); }
+  }
+  clearTimeout(MEJA.tLepas); clearTimeout(MEJA.tMaks);
+}
+
+function mainkanMeja(jenis, opsi = {}) {
+  const view = jenis === 'mizan' ? 'pimpinan' : 'bk';
+  if (APP.view !== view) return;
+  const kunci = kunciSesiMeja(jenis);
+  let sudah = false; try { sudah = sessionStorage.getItem(kunci) === '1'; } catch (e) {}
+  if (!gerakMejaBoleh() || MEJA.gagal || (!opsi.paksa && (sudah || APP.segarSama))) return lepasMeja(jenis);
+  if (!tahanMeja(jenis)) return;
+  try { sessionStorage.setItem(kunci, '1'); } catch (e) {}
+  MEJA.main = jenis;
+  clearTimeout(MEJA.tMaks);
+  const jalan = () => { try { window.RQMeja.mainkan(jenis); } catch (e) { lepasMeja(jenis, 'galat: ' + e.message); } };
+  if (window.RQMeja) return jalan();
+  if (!MEJA.muat) {
+    MEJA.muat = new Promise((ok) => {
+      const s = document.createElement('script');
+      s.src = 'meja.js'; s.async = true;
+      s.onload = () => ok(true);
+      s.onerror = () => { MEJA.gagal = true; ok(false); };
+      document.head.appendChild(s);
+    });
+  }
+  clearTimeout(MEJA.tLepas);
+  MEJA.tLepas = setTimeout(() => { if (!window.RQMeja) lepasMeja(jenis, 'meja.js terlambat'); }, MEJA.BATAS_MUAT);
+  MEJA.muat.then(ok => { if (!ok) return lepasMeja(jenis, 'meja.js gagal dimuat'); if (APP.view === view && MEJA.main === jenis) jalan(); });
+}
+
+// Satu-satunya pintu meja.js ke halaman.
+window.RQ_MEJA = {
+  hemat: () => modeHemat(), view: () => APP.view, tertutup: () => (typeof layarTertutup === 'function' ? layarTertutup() : false),
+  lepas: lepasMeja,
+  /** Pertunjukan benar-benar dimulai (bagiannya sudah tampak) → batas waktu mulai dihitung. */
+  mulai: (jenis) => { clearTimeout(MEJA.tMaks); MEJA.tMaks = setTimeout(() => lepasMeja(jenis, 'batas waktu pertunjukan'), MEJA.MAKS_MS); },
+  mizan: {
+    svg: () => $('mzSvg')?.querySelector('svg') || null,
+    kartu: () => $('mzKartu'), keputusan: () => document.querySelector('#mzKeputusan .mz-dec'),
+    angkatan: () => $('mzAngkatan'), batangSorot: () => document.querySelector('#mzAngkatan .mz-ang.hi') || document.querySelector('#mzAngkatan .mz-ang'),
+    atur: (s) => aturMizan($('mzSvg')?.querySelector('svg'), s),
+    isi: (sisi, p) => isiPiringMizan($('mzSvg')?.querySelector('svg'), sisi, p),
+    sudutAkhir: () => { const s = $('mzSvg')?.querySelector('svg'); return s ? sudutMizan(Number(s.dataset.kiri), Number(s.dataset.kanan)) : 0; },
+    /** Titik penting (koordinat dokumen) — dari geometri SVG yang sedang tampil. */
+    titik: () => {
+      const svg = $('mzSvg')?.querySelector('svg'); if (!svg) return null;
+      const m = svg.getScreenCTM(); if (!m) return null;
+      const pt = (x, y) => { const p = new DOMPoint(x, y).matrixTransform(m); return { x: p.x + scrollX, y: p.y + scrollY }; };
+      const s = Number(svg.dataset.sudut || 0) * Math.PI / 180, { PX, PY, L, GANTUNG } = MIZAN;
+      const ujungK = { x: PX - Math.cos(s) * L, y: PY - Math.sin(s) * L }, ujungN = { x: PX + Math.cos(s) * L, y: PY + Math.sin(s) * L };
+      return { poros: pt(PX, PY - 7), alas: pt(PX + 30, 216), alasKiri: pt(PX - 30, 216),
+        ujungKiri: pt(ujungK.x, ujungK.y), ujungKanan: pt(ujungN.x, ujungN.y),
+        piringKiri: pt(ujungK.x, ujungK.y + GANTUNG), piringKanan: pt(ujungN.x, ujungN.y + GANTUNG),
+        skala: m.a };
+    },
+    sorot: (el) => { if (el) { el.classList.remove('mz-sorot'); void el.offsetWidth; el.classList.add('mz-sorot'); } },
+    lepasAngkatan: () => $('mzAngkatan')?.classList.remove('mz-tahan'),
+    lepasKartu: () => $('mzKartu')?.classList.remove('mz-tahan')
+  },
+  bk: {
+    papan: () => $('mjPapan'), meja: () => $('mjMeja'),
+    lajur: () => [...document.querySelectorAll('#mjPapan .mj-lajur')],
+    buka: (i) => { const l = document.querySelectorAll('#mjPapan .mj-lajur')[i]; if (l) { l.classList.add('mj-buka'); const e = l.querySelector('[data-mj-jml]'); if (e) { e.classList.remove('mj-pop'); void e.offsetWidth; e.classList.add('mj-pop'); } } },
+    selesai: () => { const p = $('mjPapan'); if (p) p.classList.remove('mj-tahan'); }
+  }
+};
+
+/* Pindah halaman → gerak berhenti; cetak → keadaan akhir. */
+(function bungkusNavigasiMeja() {
+  const navAsli = navigateTo;
+  navigateTo = async function (view) {
+    try { window.RQMeja && window.RQMeja.hentikan(); } catch (e) {}
+    MEJA.main = null;
+    return navAsli.apply(this, arguments);
+  };
+  window.addEventListener('beforeprint', () => lepasMeja());
 })();
