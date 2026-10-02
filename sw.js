@@ -49,7 +49,7 @@
    hapus singgahan versi lama, lalu beri tahu halaman yang terbuka.
    ===================================================================== */
 
-const VERSI       = 'rq-v2.50';
+const VERSI       = 'rq-v2.51';
 const CACHE_INTI  = `${VERSI}-inti`;
 const CACHE_ASET  = 'rq-aset-v1';   // nama tetap: bertahan melewati kenaikan VERSI
 
@@ -58,13 +58,14 @@ const INTI = [
   './index.html',
   './app.js',
   './showreel.js',      // v2.47: showreel layar masuk (dimuat lambat oleh index.html)
+  './panggung.js',      // v2.51: panggung grafik Ringkasan (dimuat lambat oleh app.js)
   './manifest.webmanifest'
 ];
 
 /* Berkas yang TIDAK BOLEH dilayani singgahan HTTP peramban. Inilah
    berkas yang berubah setiap kali aplikasi diperbarui; sisanya (gambar
    lambang, ikon) boleh memakai jalur biasa supaya tetap hemat kuota. */
-const POLA_INTI = /(?:^\/?$|\/$|index\.html$|app\.js$|showreel\.js$|manifest\.webmanifest$)/i;
+const POLA_INTI = /(?:^\/?$|\/$|index\.html$|app\.js$|showreel\.js$|panggung\.js$|manifest\.webmanifest$)/i;
 
 const CDN_DIIZINKAN = [
   'https://fonts.googleapis.com',

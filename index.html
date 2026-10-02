@@ -7083,6 +7083,41 @@
     background: color-mix(in oklab, var(--maroon, #8B1E2D) 6%, var(--surface, #fff)); }
   @media print { .detail-arsip { display: none !important; } }
 </style>
+<style id="gayaPanggung">
+  /* =====================================================================
+   * v2.51 — PANGGUNG GRAFIK (pasangan panggung.js) · KUNCI BULAN · AMANAH
+   * ===================================================================== */
+  /* Kanvas aktor: di atas kartu, di bawah bilah atas (30) & tab bawah (45). */
+  .pg-kanvas { position: fixed; left: 0; top: 0; pointer-events: none; z-index: 26; contain: strict; }
+
+  /* Tabir kelabu di atas grafik yang belum disihir Si Payung. Warna merekah
+     dari titik sihir: lubang topeng radial membesar (--r ditulis panggung.js). */
+  .pg-tabir {
+    position: absolute; inset: 0; z-index: 2; pointer-events: none; border-radius: inherit;
+    -webkit-backdrop-filter: grayscale(1) contrast(.9) brightness(1.06);
+            backdrop-filter: grayscale(1) contrast(.9) brightness(1.06);
+    -webkit-mask-image: radial-gradient(circle at var(--mx, 50%) var(--my, 40%), transparent var(--r, -40px), #000 calc(var(--r, -40px) + 36px));
+            mask-image: radial-gradient(circle at var(--mx, 50%) var(--my, 40%), transparent var(--r, -40px), #000 calc(var(--r, -40px) + 36px));
+    transition: opacity .55s ease;
+  }
+  .pg-tabir.pudar { opacity: 0; }
+  @supports not ((backdrop-filter: grayscale(1)) or (-webkit-backdrop-filter: grayscale(1))) {
+    .pg-tabir { background: color-mix(in oklab, var(--surface, #fff) 55%, transparent); }
+  }
+  @media print { .pg-kanvas, .pg-tabir { display: none !important; } }
+
+  /* Kunci bulan */
+  .tag-kunci { display: inline-flex; align-items: center; gap: 5px; color: #5B4A1A;
+    background: color-mix(in oklab, var(--brass, #C9A227) 16%, var(--surface, #fff));
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brass, #C9A227) 38%, transparent); }
+  .tag-kunci i { font-size: .85em; }
+  .tbl-bina tr.terkunci > td { background: color-mix(in oklab, var(--paper, #F6F4EE) 70%, transparent); }
+  .tbl-bina tr.terkunci .primary { color: var(--text-2); }
+
+  /* Amanah: evaluasi bulan lalu tampil lebih tenang dari tugas bulan ini */
+  .sapa .amanah.amanah-evaluasi { opacity: .86; }
+  .sapa .amanah.amanah-evaluasi .ikon { background: color-mix(in oklab, var(--brass, #C9A227) 22%, transparent); }
+</style>
 </head>
 <body>
 
