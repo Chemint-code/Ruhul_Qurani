@@ -7052,6 +7052,37 @@
   @media (prefers-reduced-motion: reduce) { .stat-sorot { display: none; } }
   @media print { .stat-sorot, .rb-rangka { display: none !important; } }
 </style>
+<style id="gayaLembarBaru">
+  /* =====================================================================
+   * v2.50 — LEMBAR BARU (pasangan app.js v2.50)
+   *  · keterangan kecil "bulan ini" di kepala kolom Poin Data Santri
+   *  · Tutup Buku: nama santri bisa diklik; kolom Rincian lengket di kanan
+   *    saat tabel digeser (HP), supaya tombol Detail selalu terjangkau
+   *  · pita "Lembar … · ditutup …" di jendela rincian santri
+   * ===================================================================== */
+  .sub-th { display: block; font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none; opacity: .75; }
+  .tb-nama {
+    border: 0; background: none; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer;
+    text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--sea) 35%, transparent); text-underline-offset: 3px;
+  }
+  .tb-nama:hover, .tb-nama:focus-visible { color: var(--sea); text-decoration-color: currentColor; }
+  .adm-tbl :is(th, td).tb-rinci {
+    position: sticky; right: 0; z-index: 1; white-space: nowrap;
+    background: var(--surface, #fff);
+    box-shadow: -10px 0 12px -12px color-mix(in oklab, var(--navy, #0B2B45) 45%, transparent);
+  }
+  .detail-arsip {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-top: 10px; padding: 10px 13px;
+    border-radius: var(--r, 12px); font-size: 12.5px; line-height: 1.5; color: var(--text-2);
+    border: 1px solid color-mix(in oklab, var(--brass, #C9A227) 35%, var(--line, #e2e8f0));
+    background: color-mix(in oklab, var(--brass, #C9A227) 7%, var(--surface, #fff));
+  }
+  .detail-arsip > i { color: var(--brass-teks, var(--brass, #8A6D0B)); }
+  .detail-arsip > span { flex: 1 1 220px; }
+  .detail-arsip.berubah { border-color: color-mix(in oklab, var(--maroon, #8B1E2D) 35%, var(--line, #e2e8f0));
+    background: color-mix(in oklab, var(--maroon, #8B1E2D) 6%, var(--surface, #fff)); }
+  @media print { .detail-arsip { display: none !important; } }
+</style>
 </head>
 <body>
 
