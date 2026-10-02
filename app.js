@@ -1517,6 +1517,20 @@ function tglInputBaris(r, fallback) {
 const bulanDari = (k) => String(k || '').slice(0, 7);
 const bulanIni  = () => bulanDari(hariIni());
 
+/**
+ * v2.50 — LEMBAR BARU. "Poin santri" = poin pelanggaran bulan kalender
+ * berjalan (siswa.poin_bulan_ini, dijaga trigger + cron rq-lembar-baru).
+ * Bila poin_bulan bukan bulan ini (cache melewati tanggal 1) → 0.
+ * Bila kolomnya belum ada (database belum dimigrasi) → jatuh ke total
+ * seumur, supaya angka tidak mendadak nol. Akumulasi seluruh riwayat tetap
+ * di total_poin_pelanggaran (laporan, laboratorium, ekspor).
+ */
+function poinSantri(s) {
+  if (!s) return 0;
+  if (!('poin_bulan_ini' in s)) return Number(s.total_poin_pelanggaran) || 0;
+  return bulanDari(s.poin_bulan) === bulanIni() ? (Number(s.poin_bulan_ini) || 0) : 0;
+}
+
 function labelPeriode() {
   if (!APP.periode.aktif || !APP.periode.bulan) return 'Semua Periode';
   const [th, bl] = APP.periode.bulan.split('-');
@@ -3599,6 +3613,7 @@ async function viewPimpinan(opsi = {}) {
     </div>`;
 
   hiasRingkasan();   // v2.48: hitung naik & sorot kartu angka (data tidak berubah)
+  umumkanLembarBaru();   // v2.50: sekali per bulan per perangkat
 
   onKlik((e) => {
     const nav = e.target.closest('[data-nav]');
@@ -3698,7 +3713,7 @@ async function viewSiswa() {
     </div>
     <div class="tbl"><table>
       <thead><tr><th>NISN</th><th>Nama Santri</th><th>Kelas</th><th>Status</th>
-        <th class="center">Poin</th><th class="right">Aksi</th></tr></thead>
+        <th class="center" title="Poin pelanggaran bulan ini. Setiap awal bulan kembali ke nol.">Poin <small class="sub-th">bulan ini</small></th><th class="right">Aksi</th></tr></thead>
       <tbody id="tbSiswa"><tr><td colspan="6" style="padding:26px;text-align:center;color:var(--text-3)">Memuat…</td></tr></tbody>
     </table></div>
     <div class="scroll-hint"><i class="fa-solid fa-arrows-left-right"></i>Geser ke samping untuk kolom lainnya.</div>
@@ -3726,10 +3741,10 @@ async function viewSiswa() {
     unduhCsv(`santri-${hariIni()}.csv`, [
       // v2.17: 'Asrama' tetap kolom GEDUNG apa adanya; kamar dan peran
       // menjadi kolom tersendiri supaya keduanya tidak lagi tertukar.
-      ['NISN','Nama','Kelas','Jenjang','Asrama (gedung)','Kamar','Peran Kamar','Status Keberadaan','Total Poin'],
+      ['NISN','Nama','Kelas','Jenjang','Asrama (gedung)','Kamar','Peran Kamar','Status Keberadaan','Poin Bulan Ini','Poin Seluruh Riwayat'],
       ...rows.map(s => [s.nisn, s.nama_siswa, s.kelas, s.jenjang, s.asrama,
         nomorKamar(s) ?? '', isMudabbir(s) ? 'Mudabbir' : '',
-        s.status_keberadaan, s.total_poin_pelanggaran])
+        s.status_keberadaan, poinSantri(s), s.total_poin_pelanggaran])
     ]);
   });
 
@@ -3843,7 +3858,7 @@ async function muatTabelSiswa() {
     <td><div class="primary">${esc(s.nama_siswa)}</div></td>
     <td>${esc(s.kelas||'-')}${subKelasSantri(s)}</td>
     <td><span class="tag ${s.status_keberadaan==='Hadir'?'tag-ok':'tag-wait'}">${esc(s.status_keberadaan||'Hadir')}</span></td>
-    <td class="num center" style="color:${Number(s.total_poin_pelanggaran)>=50?'var(--maroon)':'var(--text)'}">${s.total_poin_pelanggaran||0}</td>
+    <td class="num center" style="color:${poinSantri(s)>=50?'var(--maroon)':'var(--text)'}" title="Seluruh riwayat: ${Number(s.total_poin_pelanggaran)||0} poin">${poinSantri(s)}</td>
     <td class="right"><button class="btn-link" data-detail="${esc(s.nisn)}">
       <i class="fa-solid fa-eye"></i> Detail</button></td>
   </tr>`).join('') || barisKosong(6, 'Tidak ada santri yang cocok.', 'Ubah kata kunci atau reset filter.');
@@ -3860,12 +3875,28 @@ async function muatTabelSiswa() {
  * tersebut; tabel Cermin di dalamnya menampilkan enam lembar santri ini
  * dan bisa dipakai berpindah bulan. opsi.semua = seluruh riwayat.
  */
+/**
+ * v2.50 — pita "Lembar … · ditutup …" di rincian santri yang dibuka dari
+ * Tutup Buku. arsip = { bulan, ditutup_pada, berubah }. Hanya tampil bila
+ * lembar yang sedang dibuka memang bulan yang ditutup itu.
+ */
+function pitaArsipLembar(arsip, lembar) {
+  if (!arsip || !lembar || arsip.bulan !== lembar) return '';
+  return `<div class="detail-arsip${arsip.berubah ? ' berubah' : ''}" role="note">
+    <i class="fa-solid fa-book-bookmark" aria-hidden="true"></i>
+    <span>Lembar <b>${esc(labelBulan(lembar))}</b> · ditutup ${esc(tgl(arsip.ditutup_pada))}.${arsip.berubah
+      ? ' Ada catatan yang berubah sesudah buku ditutup; angka rekap bisa berbeda dengan rincian ini.' : ''}</span>
+    ${arsip.berubah && isAdmin() ? `<button type="button" class="btn-link" data-arsip-susun="${esc(lembar)}">Susun ulang</button>` : ''}
+  </div>`;
+}
+
 async function bukaDetailSantri(nisn, opsi = {}) {
   loading(true);
   try {
     const { data } = await q(db.rpc('laporan_santri_aman', { p_nisn: nisn }), 'laporan_santri_aman');
     const s = data.siswa || {};
-    const lembar = opsi.semua ? '' : (opsi.bulan || (APP.periode.aktif ? APP.periode.bulan : ''));
+    // v2.50 LEMBAR BARU: tanpa pilihan lain, rincian dibuka pada lembar bulan berjalan.
+    const lembar = opsi.semua ? '' : (opsi.bulan || (APP.periode.aktif ? APP.periode.bulan : bulanIni()));
     const diLembar = (v) => !lembar || bulanDari(kunciTgl(v)) === lembar;
     const riwayatSemua = data.perkembangan || [];
     const izinSemua = data.perizinan || [];
@@ -3891,7 +3922,7 @@ async function bukaDetailSantri(nisn, opsi = {}) {
     const poinPrestasi = prestasi.reduce((a, r) => a + (Number(r.poin) || 0), 0);
     // Di lembar bulan, poin = jumlah poin catatan bulan itu (mulai dari nol);
     // tanpa lembar tetap total yang tersimpan.
-    const poinPlg = lembar ? riwayat.reduce((a, r) => a + (Number(r.poin) || 0), 0) : (Number(s.total_poin_pelanggaran) || 0);
+    const poinPlg = lembar ? riwayat.reduce((a, r) => a + (Number(r.poin) || 0), 0) : (Number(s.total_poin_pelanggaran) || 0); // v2.50-total: seluruh riwayat
     const skorNet = Math.max(0, poinPlg - poinPrestasi);
     const halTahfiz = tahfiz.reduce((a, r) => a + (Number(r.capaian_halaman) || 0), 0);
     const cermin = cerminBulanan({ detail: riwayatSemua, izin: izinSemua, bina: binaSemua, tahfiz: tahfizSemua, prestasi: prestasiSemua },
@@ -4000,6 +4031,7 @@ async function bukaDetailSantri(nisn, opsi = {}) {
             ? `<button type="button" class="btn-link" data-dl="semua">Seluruh riwayat</button>`
             : `<button type="button" class="btn-link" data-dl="${esc(opsi.bulan || (APP.periode.aktif ? APP.periode.bulan : bulanIni()))}">Buka lembar ${esc(labelBulan(opsi.bulan || (APP.periode.aktif ? APP.periode.bulan : bulanIni())))}</button>`}
         </div>
+        ${pitaArsipLembar(opsi.arsip, lembar)}
 
         <div class="tbl cm-tbl cm-santri"><table>
           <thead><tr><th>Bulan</th><th class="right">Pelanggaran</th><th class="right">Poin</th><th class="right">Izin</th>
@@ -4057,7 +4089,10 @@ async function bukaDetailSantri(nisn, opsi = {}) {
         Swal.getHtmlContainer()?.addEventListener('click', (ev) => {
           // v2.48: pindah lembar / seluruh riwayat
           const dl = ev.target.closest('[data-dl]');
-          if (dl) { ev.preventDefault(); return bukaLagi(dl.dataset.dl === 'semua' ? { ...opsi, semua: true } : { bulan: dl.dataset.dl }); }
+          if (dl) { ev.preventDefault(); return bukaLagi(dl.dataset.dl === 'semua' ? { ...opsi, semua: true } : { ...opsi, semua: false, bulan: dl.dataset.dl }); }
+          // v2.50: dari pita arsip (Admin) → susun ulang rekap bulan itu
+          const su = ev.target.closest('[data-arsip-susun]');
+          if (su) { ev.preventDefault(); Swal.close(); return setTimeout(() => tbSusunUlang(su.dataset.arsipSusun), 220); }
           const baru = ev.target.closest('[data-goal-baru]');
           const eval2 = ev.target.closest('[data-goal-eval]');
           if (!baru && !eval2) return;
@@ -4561,7 +4596,7 @@ async function modalCatatPelanggaran(prefill) {
 
   sync('done', 'Pelanggaran tersimpan');
   cacheHapus('detail','siswa','pembinaan');
-  toast('success', `Tersimpan. Total poin santri: ${hasil?.poin_baru ?? '-'}`);
+  toast('success', `Tersimpan. Poin bulan ini: ${hasil?.poin_bulan_baru ?? hasil?.poin_baru ?? '-'}`);
   if (APP.view === 'pelanggaran') muatTabelPlg();
 }
 
@@ -4576,7 +4611,7 @@ async function arsipkanPelanggaran(idLog) {
     const { data } = await q(db.rpc('arsipkan_pelanggaran', { p_id_log: idLog }), 'arsip');
     cacheHapus('detail','siswa','pembinaan');
     sync('done', 'Catatan diarsipkan');
-    toast('success', `Diarsipkan. Poin sekarang: ${data?.poin_baru ?? '-'}`);
+    toast('success', `Diarsipkan. Poin bulan ini: ${data?.poin_bulan_baru ?? data?.poin_baru ?? '-'}`);
     muatTabelPlg();
   } catch (err) { sync('warn', 'Gagal mengarsipkan'); fireError(err); }
 }
@@ -5129,6 +5164,27 @@ function kategoriBina(r, peta) {
 const JENDELA_TAHAP_BULAN = 6;
 
 /**
+ * v2.50 — LEMBAR BARU: kebijakan dayah sejak Oktober 2026 — tahap pembinaan
+ * kembali ke ke-1 setiap bulan kalender. Catatan sebelum bulan ini tetap
+ * memakai jendela 6 bulan di atas, supaya nomor tahap dan surat yang sudah
+ * diterima wali tidak bergeser. (Trigger trg_pembinaan_otomatis memakai
+ * batas tanggal yang sama.)
+ */
+const LEMBAR_TAHAP_SEJAK = '2026-10';
+
+/** Batas bawah jendela tahap untuk catatan bertanggal `k` ('yyyy-MM-dd'). */
+function awalJendelaTahap(k) {
+  const b = String(k || '').slice(0, 7);
+  return b >= LEMBAR_TAHAP_SEJAK ? `${b}-01` : mundurBulan(k, JENDELA_TAHAP_BULAN);
+}
+
+/** Kelompok hitungan tahap: bulannya (sejak lembar baru) atau 'lama'. */
+function kunciLembarTahap(k) {
+  const b = String(k || '').slice(0, 7);
+  return b >= LEMBAR_TAHAP_SEJAK ? b : 'lama';
+}
+
+/**
  * Kunci tanggal N bulan sebelum `kunci`, dengan pengaman akhir bulan:
  * 31 Agustus dikurangi 6 bulan jatuh pada 28/29 Februari, bukan melompat
  * ke 3 Maret sebagaimana perilaku bawaan `Date.setMonth`.
@@ -5182,7 +5238,7 @@ async function petaTahapPelanggaran() {
     daftar.sort((a, b) => a.k.localeCompare(b.k) || a.id.localeCompare(b.id));
     let kepala = 0;                                  // batas bawah jendela
     daftar.forEach((r, i) => {
-      const batas = mundurBulan(r.k, JENDELA_TAHAP_BULAN);
+      const batas = awalJendelaTahap(r.k);           // v2.50: lembar bulan sejak Okt 2026
       while (kepala < i && daftar[kepala].k < batas) kepala++;
       peta.set(r.id, { n: i - kepala + 1, nSeumur: i + 1, kategori: r.kat, nisn: r.nisn });
     });
@@ -5223,7 +5279,7 @@ function nomorkanBina(rows, petaTahap) {
       r.tahap_hitung = ref.n;
       r.tahap_seumur = ref.nSeumur;                       // pembanding untuk tinjauan
       r.tahap_perkiraan = false;
-      const kunci = `${r.nisn}|${r.kategori_bina}`;
+      const kunci = `${r.nisn}|${r.kategori_bina}|${kunciLembarTahap(kunciTgl(r.tanggal_pembinaan))}`;
       maks[kunci] = Math.max(maks[kunci] || 0, ref.n);
     } else {
       sisa.push(r);
@@ -5235,7 +5291,7 @@ function nomorkanBina(rows, petaTahap) {
     if (t) return t;
     return String(a.id_pembinaan || '').localeCompare(String(b.id_pembinaan || ''));
   }).forEach(r => {
-    const kunci = `${r.nisn}|${r.kategori_bina}`;
+    const kunci = `${r.nisn}|${r.kategori_bina}|${kunciLembarTahap(kunciTgl(r.tanggal_pembinaan))}`;
     r.tahap_hitung = (maks[kunci] = (maks[kunci] || 0) + 1);
     r.tahap_perkiraan = true;
   });
@@ -5482,7 +5538,7 @@ async function tinjauAmbangBerat(idPembinaan) {
     .sort((a, b) => String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal))));
 
   const batas = riwayat.length
-    ? mundurBulan(kunciTgl(r.tanggal_pembinaan) || hariIni(), JENDELA_TAHAP_BULAN) : '';
+    ? awalJendelaTahap(kunciTgl(r.tanggal_pembinaan) || hariIni()) : '';
   const luar = riwayat.filter(p => kunciTgl(p.tanggal) < batas).length;
 
   await Swal.fire({
@@ -5493,7 +5549,7 @@ async function tinjauAmbangBerat(idPembinaan) {
       <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin:0 0 10px">
         <tr><td style="padding:5px 0">Tahap menurut sistem (urutan input)</td>
             <td style="padding:5px 0;text-align:right"><b>ke-${esc(r.pengulangan_ke)}</b></td></tr>
-        <tr><td style="padding:5px 0">Nomor tahap hasil hitung ulang (${JENDELA_TAHAP_BULAN} bulan berjalan)</td>
+        <tr><td style="padding:5px 0">Nomor tahap hasil hitung ulang (${kunciLembarTahap(kunciTgl(r.tanggal_pembinaan) || hariIni()) === 'lama' ? `${JENDELA_TAHAP_BULAN} bulan berjalan` : 'lembar bulan ini'})</td>
             <td style="padding:5px 0;text-align:right"><b>ke-${esc(r.tahap_hitung)}</b></td></tr>
         <tr><td style="padding:5px 0;border-top:1px solid #e2e8f0">Catatan kategori ${esc(kategori)} seluruhnya</td>
             <td style="padding:5px 0;text-align:right;border-top:1px solid #e2e8f0">
@@ -5565,8 +5621,8 @@ async function viewPembinaan() {
           title="Isi hukuman hasil musyawarah untuk pelanggaran yang tersisa">
           <i class="fa-solid fa-people-group"></i>Pembinaan Manual</button>` : ''}
        <button class="btn btn-ghost btn-sm" id="pbRefresh"><i class="fa-solid fa-rotate"></i>Muat Ulang</button>`,
-      `Tahap dihitung dari pelanggaran ${JENDELA_TAHAP_BULAN} bulan terakhir per kategori; `
-      + `bentuk mengikuti Master Pembinaan.`)}`;
+      `Lembar baru: sejak Oktober 2026 tahap dihitung per bulan per kategori dan kembali ke ke-1 setiap awal bulan `
+      + `(catatan sebelumnya memakai ${JENDELA_TAHAP_BULAN} bulan berjalan). Bentuk mengikuti Master Pembinaan.`)}`;
 
   ['pbKategori','pbStatus','pbMode'].forEach(id => $(id).addEventListener('change', e => {
     stBina[{pbKategori:'kategori', pbStatus:'status', pbMode:'mode'}[id]] = e.target.value;
@@ -10415,7 +10471,7 @@ async function mdSimpanAtribut() {
   }, $('atrSimpan'), 'Menyimpan Pemeriksaan…');
 
   if (!hasil) return;
-  toast('success', `Pemeriksaan tersimpan. Total poin santri: ${hasil.poin_baru ?? '-'}`);
+  toast('success', `Pemeriksaan tersimpan. Poin bulan ini: ${hasil.poin_bulan_baru ?? hasil.poin_baru ?? '-'}`);
   navigateTo('madrasah');
 }
 
@@ -10518,7 +10574,7 @@ async function mdSimpanPelanggaranUmum() {
   }, $('mpSimpan'), 'Menyimpan Pelanggaran…');
 
   if (!hasil) return;
-  toast('success', `Tersimpan. Total poin santri: ${hasil.poin_baru ?? '-'}`);
+  toast('success', `Tersimpan. Poin bulan ini: ${hasil.poin_bulan_baru ?? hasil.poin_baru ?? '-'}`);
   navigateTo('madrasah');
 }
 
@@ -12218,7 +12274,7 @@ async function pgsSimpan() {
   }, $('pgSimpan'), 'Menyimpan Pelanggaran…');
 
   if (!hasil) return;
-  toast('success', `Tersimpan. Total poin santri: ${hasil.poin_baru ?? '-'}`);
+  toast('success', `Tersimpan. Poin bulan ini: ${hasil.poin_bulan_baru ?? hasil.poin_baru ?? '-'}`);
   navigateTo('pengasuhan');
 }
 
@@ -12801,7 +12857,9 @@ async function aiPayloadBulk(opsi) {
         nama_siswa: s ? s.nama_siswa : null,
         kelas: s ? (s.kelas || null) : null,
         jenjang: s ? (s.jenjang || null) : null,
-        total_poin_pelanggaran: s ? (Number(s.total_poin_pelanggaran) || 0) : 0
+        total_poin_pelanggaran: s ? (Number(s.total_poin_pelanggaran) || 0) : 0,
+        // v2.50: poin lembar bulan ikut dibawa supaya poinSantri() di pemeriksaan tidak jatuh ke total
+        ...(s && 'poin_bulan_ini' in s ? { poin_bulan_ini: Number(s.poin_bulan_ini) || 0, poin_bulan: s.poin_bulan || null } : {})
       };
     }),
     riwayat_90h: riwayat
@@ -12880,20 +12938,25 @@ function aiValidasiBulk(p) {
         pesan:`${s.nama_siswa} sudah memiliki catatan jenis yang sama pada tanggal ${tgl(inp.tanggal)}.` });
     }
 
-    const sejenis = milik.filter(r => r.kode_pelanggaran === m.kode_pelanggaran).length + 1;
+    // v2.50 LEMBAR BARU: hitungan sejenis & poin dihitung dalam bulan kejadian.
+    const bulanInp = bulanDari(inp.tanggal);
+    const milikBulan = milik.filter(r => bulanDari(kunciTgl(r.tanggal)) === bulanInp);
+    const sejenis = milikBulan.filter(r => r.kode_pelanggaran === m.kode_pelanggaran).length + 1;
     if (['Ringan','Sedang'].includes(m.kategori) && sejenis % AI_AMBANG.kaskade === 0) {
       const naik = m.kategori === 'Ringan' ? 'Sedang' : 'Berat';
       peringatan.push({ nisn:n, jenis:'kaskade',
-        pesan:`${s.nama_siswa} sudah ${sejenis} kali untuk jenis ini, sehingga rekap naik menjadi ${naik}.` });
+        pesan:`${s.nama_siswa} sudah ${sejenis} kali untuk jenis ini pada bulan ini, sehingga rekap naik menjadi ${naik}.` });
     }
 
-    const poinBaru = (s.total_poin_pelanggaran || 0) + m.bobot_poin;
-    if (s.total_poin_pelanggaran < AI_AMBANG.poinKritis && poinBaru >= AI_AMBANG.poinKritis) {
+    const poinLama = bulanInp === bulanIni() ? poinSantri(s)
+      : milikBulan.reduce((a, r) => a + (Number(r.bobot_pelanggaran) || 0), 0);
+    const poinBaru = poinLama + m.bobot_poin;
+    if (poinLama < AI_AMBANG.poinKritis && poinBaru >= AI_AMBANG.poinKritis) {
       peringatan.push({ nisn:n, jenis:'ambang_poin',
-        pesan:`${s.nama_siswa} mencapai ${AI_AMBANG.poinKritis} poin dan masuk tier Kritis.` });
-    } else if (s.total_poin_pelanggaran < AI_AMBANG.poinPerhatian && poinBaru >= AI_AMBANG.poinPerhatian) {
+        pesan:`${s.nama_siswa} mencapai ${AI_AMBANG.poinKritis} poin bulan ini dan masuk tier Kritis.` });
+    } else if (poinLama < AI_AMBANG.poinPerhatian && poinBaru >= AI_AMBANG.poinPerhatian) {
       peringatan.push({ nisn:n, jenis:'ambang_poin',
-        pesan:`${s.nama_siswa} mencapai ${AI_AMBANG.poinPerhatian} poin dan masuk tier Perhatian Tinggi.` });
+        pesan:`${s.nama_siswa} mencapai ${AI_AMBANG.poinPerhatian} poin bulan ini dan masuk tier Perhatian Tinggi.` });
     }
   });
 
@@ -12956,7 +13019,7 @@ async function aiJalankanBulk(hasil) {
       const { data, error } = await db.rpc('catat_pelanggaran', p.params);
       if (error) laporan.gagal.push({ ...p, pesan: error.message });
       else if (data?.conflict) laporan.konflik.push({ ...p, pesan: data.message || 'Santri memiliki izin sesuai waktu.' });
-      else laporan.berhasil.push({ ...p, poin_baru: data?.poin_baru ?? null });
+      else laporan.berhasil.push({ ...p, poin_baru: data?.poin_bulan_baru ?? data?.poin_baru ?? null });
     } catch (err) {
       laporan.gagal.push({ ...p, pesan: err?.message || String(err) });
     }
@@ -12983,7 +13046,7 @@ async function aiJalankanBulk(hasil) {
       for (const x of laporan.konflik.slice()) {
         const r2 = await db.rpc('catat_pelanggaran', { ...x.params, p_force: true });
         if (r2.error) laporan.gagal.push({ ...x, pesan: r2.error.message });
-        else laporan.berhasil.push({ ...x, poin_baru: r2.data?.poin_baru ?? null, dipaksa:true });
+        else laporan.berhasil.push({ ...x, poin_baru: r2.data?.poin_bulan_baru ?? r2.data?.poin_baru ?? null, dipaksa:true });
       }
       laporan.konflik = [];
       cacheHapus('detail','siswa','pembinaan');
@@ -20346,6 +20409,7 @@ async function viewTutupBuku() {
           <th class="right" title="Emas / Perak / Perunggu">Prestasi E/P/P</th><th class="right">Poin prestasi</th>
           <th class="right">Setoran</th><th class="right" title="Ziyadah / Murajaah">Halaman Z/M</th>
           <th class="right">Target</th><th>Kelancaran akhir</th>
+          <th class="right tb-rinci">Rincian</th>
         </tr></thead>
         <tbody id="tbBody"></tbody>
       </table></div>
@@ -20380,6 +20444,9 @@ async function viewTutupBuku() {
         return tbMuatRekap().then(tbGambar);
       }
     }
+    // v2.50: rincian santri pada lembar bulan yang ditutup
+    const dt = e.target.closest('[data-tb-detail]');
+    if (dt) return tbDetail(dt.dataset.tbDetail);
     const p = e.target.closest('[data-pg]');
     if (p && p.dataset.pg.startsWith('tb:')) { stTb.page = Number(p.dataset.pg.split(':')[1]); tbGambarRekap(); }
   });
@@ -20459,6 +20526,18 @@ function tbGambarStatus() {
     'Rekap pertama disusun otomatis tanggal 1 bulan depan, atau tekan Tutup Buku.');
 }
 
+/**
+ * v2.50 — buka rincian santri pada lembar bulan rekap yang sedang dilihat.
+ * Isinya dibaca dari data hidup (laporan_santri_aman); pita di atasnya
+ * menyebut kapan buku ditutup, dan memberi tahu bila sesudah itu ada
+ * catatan bulan tersebut yang berubah.
+ */
+function tbDetail(nisn) {
+  const st = (stTb.status || []).find(r => String(r.periode).slice(0, 7) === stTb.periode);
+  const arsip = st ? { bulan: stTb.periode, ditutup_pada: st.ditutup_pada, berubah: !!st.berubah } : null;
+  return bukaDetailSantri(nisn, { bulan: stTb.periode, arsip });
+}
+
 function tbSaring() {
   let out = stTb.rekap || [];
   if (stTb.kelas) out = out.filter(r => String(r.kelas) === stTb.kelas);
@@ -20507,7 +20586,7 @@ function tbGambarRekap() {
     : 'Rekap bulan ini belum disusun.';
   $('tbBody').innerHTML = hal2.map(r => `
     <tr>
-      <td><b>${esc(r.nama_siswa)}</b><div class="secondary">${esc(r.nisn)} · ${esc(r.unit_gender || '-')}</div></td>
+      <td><button type="button" class="tb-nama" data-tb-detail="${esc(r.nisn)}" title="Buka rincian lembar ${esc(tbLabelBulan(stTb.periode))}"><b>${esc(r.nama_siswa)}</b></button><div class="secondary">${esc(r.nisn)} · ${esc(r.unit_gender || '-')}</div></td>
       <td>${esc(r.kelas || '-')}</td>
       <td class="right">${redup(r.plg_ringan)} / ${redup(r.plg_sedang)} / ${redup(r.plg_berat)}</td>
       <td class="right">${redup(r.plg_poin)}</td>
@@ -20521,7 +20600,8 @@ function tbGambarRekap() {
       <td class="right">${redup(r.tahfiz_ziyadah_hal)} / ${redup(r.tahfiz_murajaah_hal)}</td>
       <td class="right">${r.tahfiz_target_hal == null ? '—' : angka(r.tahfiz_target_hal)}</td>
       <td>${esc(r.tahfiz_kelancaran_terakhir || '—')}</td>
-    </tr>`).join('') || barisKosong(14, semua.length ? 'Tidak ada santri yang cocok.' : 'Rekap belum disusun.',
+      <td class="right tb-rinci"><button type="button" class="btn-link" data-tb-detail="${esc(r.nisn)}"><i class="fa-solid fa-eye"></i> Detail</button></td>
+    </tr>`).join('') || barisKosong(15, semua.length ? 'Tidak ada santri yang cocok.' : 'Rekap belum disusun.',
       semua.length ? '' : (isAdmin() ? 'Tekan Tutup Buku untuk menyusun rekap bulan ini.' : 'Rekap disusun otomatis tanggal 1.'));
   $('tbPager').innerHTML = pager('tb', stTb.page, rows.length, stTb.size);
 }
@@ -20928,7 +21008,7 @@ async function segarkanMonster() {
 /* =====================================================================
  * v2.26 — (A) NAMA 10 BESAR DIKERUBUNGI MONSTER
  * ---------------------------------------------------------------------
- * Sepuluh santri aktif dengan total_poin_pelanggaran tertinggi (dalam
+ * Sepuluh santri aktif dengan poin BULAN INI tertinggi (v2.50; dalam
  * lingkup kelas & unit yang dilihat akun ini) dikerubungi tiga monster
  * kecil DI MANA PUN namanya tampil: tabel, kartu, jendela detail, dsb.
  *
@@ -20964,8 +21044,8 @@ async function segarkanTopMonster() {
     if (!APP.profil) return;
     const semua = await amanKosong(muatSiswa, 'santri');
     const urut = filterBinaanUnit(semua.filter(aktifSantri), 'kelas')
-      .filter(s => Number(s.total_poin_pelanggaran) > 0 && String(s.nama_siswa || '').trim().length > 2)
-      .sort((a, b) => (Number(b.total_poin_pelanggaran) || 0) - (Number(a.total_poin_pelanggaran) || 0)
+      .filter(s => poinSantri(s) > 0 && String(s.nama_siswa || '').trim().length > 2)
+      .sort((a, b) => poinSantri(b) - poinSantri(a)
                       || String(a.nisn).localeCompare(String(b.nisn)))
       .slice(0, 10);
     const peta = new Map();
@@ -22055,7 +22135,8 @@ function getar(pola) { try { if (bolehGetar()) navigator.vibrate(pola); } catch 
 
 const TERIMA = { MAKS: 3, rpc: null, wadah: null };
 const POLA_SYUKURI = /^(Apresiasi \+|Setoran tahfiz tercatat|Pembinaan disahkan selesai|Status pembinaan: Selesai$)|pembinaan disahkan$/;
-const POLA_CATAT   = /^(?:Tersimpan|Pemeriksaan tersimpan)\. Total poin santri: (.+)$/;
+// v2.50: teks toast kini "Poin bulan ini: …"; pola lama tetap dikenali.
+const POLA_CATAT   = /^(?:Tersimpan|Pemeriksaan tersimpan)\. (?:Total poin santri|Poin bulan ini): (.+)$/;
 
 /* Nama santri direkam SAAT rpc dipanggil — sesudahnya cache siswa dihapus. */
 (function rekamRpcCatat() {
@@ -22148,7 +22229,7 @@ function tandaTerima({ judul, sub = '', nada = 'akui', aksi = null, lama = 0 }) 
         kartu = {
           nada: 'catat',
           judul: r && r.santri ? `Tercatat untuk ${r.santri}` : 'Catatan tersimpan',
-          sub: `Total poin santri kini ${m[1]}`,
+          sub: `Poin bulan ini kini ${m[1]}`,
           aksi: r ? { label: 'Lihat', jalan: () => bukaDetailSantri(r.nisn) } : null
         };
         TERIMA.rpc = null;
@@ -25548,11 +25629,15 @@ async function optArsipPelanggaran(idLog) {
       const nisn = baris?.nisn ?? res?.data?.nisn;
       const poin = res?.data?.poin_baru;
       const s = nisn != null ? optBaris('siswa', 'nisn', nisn) : null;
-      if (s && poin != null) { s.total_poin_pelanggaran = poin; simpanLokalNanti('siswa'); }
+      if (s && poin != null) {
+        s.total_poin_pelanggaran = poin;
+        if (res?.data?.poin_bulan_baru != null) { s.poin_bulan_ini = res.data.poin_bulan_baru; s.poin_bulan = `${bulanIni()}-01`; }
+        simpanLokalNanti('siswa');
+      }
       else if (nisn != null) await optRekonsiliasi('siswa', nisn);
       await optRekonsiliasi('detail', idLog);
     },
-    teksOk: (res) => `Diarsipkan · poin kini ${res?.data?.poin_baru ?? '-'}`,
+    teksOk: (res) => `Diarsipkan · poin bulan ini ${res?.data?.poin_bulan_baru ?? res?.data?.poin_baru ?? '-'}`,
     teksGagal: 'Catatan gagal diarsipkan'
   });
 }
@@ -27615,7 +27700,7 @@ async function kirimKilat(t) {
   const h = await simpanPelanggaranAman(t.payload, { lewatiDuplikat: true });
   if (h.ok) {
     catatRiwayatKilat('plg', t.kode);
-    toastKilat('success', `Tersimpan. Total poin ${t.nama}: ${h.data?.poin_baru ?? '-'}.`);
+    toastKilat('success', `Tersimpan. Poin ${t.nama} bulan ini: ${h.data?.poin_bulan_baru ?? h.data?.poin_baru ?? '-'}.`);
     segarkanRadarKilat();
     return true;
   }
@@ -27885,7 +27970,24 @@ function selesaiLasso(sisaNisn = []) {
  *    prefers-reduced-motion: tanpa gerak, angka langsung final.
  *  Database tidak disentuh.
  * ===================================================================== */
-APP.versi = 'rq-v2.48.1';   // v2.48.1: lembar baru (IPP bulanan, cermin) + gerak di mode hemat
+APP.versi = 'rq-v2.50';   // v2.50: lembar baru — poin & tahap pembinaan nol tiap bulan; rincian Tutup Buku
+
+/**
+ * v2.50 — pengumuman LEMBAR BARU: sekali per bulan per perangkat, saat
+ * Ringkasan pertama kali dibuka pada bulan itu. Tidak tampil bila jendela
+ * lain sedang terbuka (tur sambut, dialog) — dicoba lagi kunjungan berikutnya.
+ */
+function umumkanLembarBaru() {
+  const kunci = 'rq_lembar_umum', bulan = bulanIni();
+  if (bacaLS(kunci) === bulan) return;
+  setTimeout(() => {
+    if (APP.view !== 'dashboard' || (window.Swal && Swal.isVisible())) return;
+    tulisLS(kunci, bulan);
+    Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false, timer: 8000, timerProgressBar: true })
+      .fire({ icon: 'info', title: `Lembar baru · ${labelBulan(bulan)}`,
+              text: 'Lembar baru. Poin dan tahap pembinaan dihitung dari nol setiap awal bulan. Catatan bulan lalu tetap tersimpan di Tutup Buku.' });
+  }, 1600);
+}
 
 /* ---------- 1 · Periode Ringkasan ----------------------------------- */
 
