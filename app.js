@@ -3158,6 +3158,7 @@ async function viewDashboard() {
 
   // v2.48 — hitung naik, sorot kartu angka, sambutan sekali per sesi.
   hiasRingkasan();
+  umumkanLembarBaru();   // v2.50: sekali per bulan per perangkat
 
   // v2.25 — monster amanah: angka yang sama dengan butir pembinaan di atas.
   pasangMonster(bolehLaporBina() ? binaBelumLapor : binaProses);
@@ -3613,7 +3614,6 @@ async function viewPimpinan(opsi = {}) {
     </div>`;
 
   hiasRingkasan();   // v2.48: hitung naik & sorot kartu angka (data tidak berubah)
-  umumkanLembarBaru();   // v2.50: sekali per bulan per perangkat
 
   onKlik((e) => {
     const nav = e.target.closest('[data-nav]');
