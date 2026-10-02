@@ -2867,7 +2867,7 @@ function panelSapaan(amanah) {
   const butir = (amanah || []).filter(a => a.jumlah > 0);
   const isi = butir.length
     ? `<div class="sapa-amanah">${butir.map(a => `
-        <button class="amanah" data-nav="${esc(a.view)}">
+        <button class="amanah${a.kelas ? ' ' + esc(a.kelas) : ''}" data-nav="${esc(a.view)}"${a.bulan ? ` data-bina-bulan="${esc(a.bulan)}"` : ''}>
           <span class="ikon"><i class="fa-solid ${a.ikon}"></i></span>
           <span class="teks"><b>${angka(a.jumlah)}</b>${esc(a.label)}</span>
           <i class="fa-solid fa-arrow-right go"></i>
@@ -2978,6 +2978,13 @@ async function viewDashboard() {
   // seperti sebelumnya: tanpa periode, seluruh tunggakan tampil.
   const izinPending = izin.filter(z => z.status_persetujuan === 'Pending').length;
   const binaProses  = pembinaan.filter(p => p.status_pembinaan !== 'Selesai').length;
+  // v2.51 — amanah pembinaan dibelah dua: yang TIDAK diselesaikan bulan lalu
+  // (sudah dikunci Tutup Buku → bahan evaluasi) dan yang masih berjalan
+  // bulan ini. Bulan-bulan yang lebih lama tidak lagi ditampilkan di sini.
+  const blnIniA = bulanIni(), blnLaluA = bulanSebelum(blnIniA);
+  const pbnTerbukaA = (L.pembinaanSemua || pembinaan).filter(p => p.status_pembinaan !== 'Selesai');
+  const binaEvaluasi = pbnTerbukaA.filter(p => bulanDari(kunciTgl(p.tanggal_pembinaan)) === blnLaluA).length;
+  const binaBulanIni = pbnTerbukaA.filter(p => bulanDari(kunciTgl(p.tanggal_pembinaan)) === blnIniA).length;
    await profilePromise;
 
   // v2.48 — angka dan grafik Ringkasan = SATU bulan (bulan berjalan, atau
@@ -3085,9 +3092,12 @@ async function viewDashboard() {
     ${panelSapaan([
       { jumlah: izinPending, label: 'izin menunggu keputusan', ikon: 'fa-clock', view: 'perizinan' },
       { jumlah: binaMenungguSah, label: 'laporan pembinaan menunggu pengesahan Anda', ikon: 'fa-file-signature', view: 'pesan' },
-      bolehLaporBina()
-        ? { jumlah: binaBelumLapor, label: 'pembinaan belum dilaporkan ke guru', ikon: 'fa-paper-plane', view: 'pembinaan' }
-        : { jumlah: binaProses,  label: 'pembinaan belum diselesaikan', ikon: 'fa-hands-holding-child', view: 'pembinaan' },
+      ...(bolehLaporBina()
+        ? [{ jumlah: binaBelumLapor, label: 'pembinaan belum dilaporkan ke guru', ikon: 'fa-paper-plane', view: 'pembinaan' }]
+        : [{ jumlah: binaBulanIni, label: `pembinaan ${labelBulan(blnIniA).split(' ')[0]} masih berjalan`,
+             ikon: 'fa-hands-holding-child', view: 'pembinaan', bulan: blnIniA },
+           { jumlah: binaEvaluasi, label: `pembinaan ${labelBulan(blnLaluA).split(' ')[0]} tidak diselesaikan · bahan evaluasi`,
+             ikon: 'fa-clipboard-list', view: 'pembinaan', bulan: blnLaluA, kelas: 'amanah-evaluasi' }]),
       { jumlah: perluWali,   label: 'wali santri perlu dikabari', ikon: 'fa-comment-dots', view: 'pembinaan' }
     ])}
     ${bolehRadar() ? `<div id="radarMini" class="radar-mini" aria-busy="true"><div class="rq-sk radar-mini-sk"></div></div>` : ''}
@@ -3161,7 +3171,7 @@ async function viewDashboard() {
   umumkanLembarBaru();   // v2.50: sekali per bulan per perangkat
 
   // v2.25 — monster amanah: angka yang sama dengan butir pembinaan di atas.
-  pasangMonster(bolehLaporBina() ? binaBelumLapor : binaProses);
+  pasangMonster(bolehLaporBina() ? binaBelumLapor : binaBulanIni);   // v2.51: monster = pembinaan bulan ini yang masih berjalan
 
   onKlik(async (e) => {
     if (e.target.closest('[data-radar-ulang-mini]')) {
@@ -3169,7 +3179,7 @@ async function viewDashboard() {
       return navigateTo('dashboard');
     }
     const n = e.target.closest('[data-nav]');
-    if (n) return navigateTo(n.dataset.nav);
+    if (n) { if (n.dataset.binaBulan) stBina.bulanBerikut = n.dataset.binaBulan; return navigateTo(n.dataset.nav); }
     // v2.48: buka lembar bulan lain dari Cermin; '' = kembali ke bulan berjalan.
     const lb = e.target.closest('[data-lembar]');
     if (lb) return setPeriode(lb.dataset.lembar || bulanIni(), APP.periode.basis, !!lb.dataset.lembar && lb.dataset.lembar !== bulanIni());
@@ -5108,7 +5118,7 @@ async function modalPerpanjangIzin(idIzin) {
 //     pembinaan melalui id_log_pelanggaran. Bentuk pembinaan diambil dari
 //     master_pembinaan berdasarkan nomor hasil hitungan itu.
 // ---------------------------------------------------------------------
-const stBina = { cari:'', kategori:'', status:'', mode:'', page:1, size:30, pilih: new Set() };
+const stBina = { cari:'', kategori:'', status:'', mode:'', page:1, size:30, pilih: new Set(), bulan: '', bulanBerikut: '' };
 
 /** Nomor tahap yang dipakai UI: hasil hitung ulang, bukan angka database. */
 function tahapBina(r) {
@@ -5583,6 +5593,8 @@ function urutkanBina(rows) {
 }
 
 async function viewPembinaan() {
+  // v2.51: halaman dibuka pada bulan berjalan; dari butir amanah → bulan yang diklik.
+  stBina.bulan = stBina.bulanBerikut || bulanIni(); stBina.bulanBerikut = ''; stBina.page = 1;
   const lapor = bolehLaporBina();
   const nKol  = lapor ? 10 : 9;
   $('viewRoot').innerHTML = `
@@ -5597,6 +5609,7 @@ async function viewPembinaan() {
     ${kartu('Instruksi Pembinaan', `
       <div class="filters">
         <input id="pbCari" class="input grow" placeholder="Cari santri, instrumen, atau pemicu…" value="${esc(stBina.cari)}">
+        <select id="pbBulan" class="input" aria-label="Bulan pembinaan"><option value="${esc(stBina.bulan)}">${esc(labelBulan(stBina.bulan))}</option></select>
         <select id="pbKategori" class="input"><option value="">Semua Kategori</option>
           ${['Ringan','Sedang','Berat'].map(k => `<option ${k===stBina.kategori?'selected':''}>${k}</option>`).join('')}</select>
         <select id="pbStatus" class="input"><option value="">Semua Status</option>
@@ -5624,9 +5637,9 @@ async function viewPembinaan() {
       `Lembar baru: sejak Oktober 2026 tahap dihitung per bulan per kategori dan kembali ke ke-1 setiap awal bulan `
       + `(catatan sebelumnya memakai ${JENDELA_TAHAP_BULAN} bulan berjalan). Bentuk mengikuti Master Pembinaan.`)}`;
 
-  ['pbKategori','pbStatus','pbMode'].forEach(id => $(id).addEventListener('change', e => {
-    stBina[{pbKategori:'kategori', pbStatus:'status', pbMode:'mode'}[id]] = e.target.value;
-    stBina.page = 1; gambarBina();
+  ['pbKategori','pbStatus','pbMode','pbBulan'].forEach(id => $(id).addEventListener('change', e => {
+    stBina[{pbKategori:'kategori', pbStatus:'status', pbMode:'mode', pbBulan:'bulan'}[id]] = e.target.value;
+    stBina.page = 1; if (id === 'pbBulan') stBina.pilih.clear(); gambarBina();
   }));
   $('pbCari').addEventListener('input', debounce(e => {
     stBina.cari = e.target.value.trim(); stBina.page = 1; gambarBina(); }, 220));
@@ -5722,7 +5735,10 @@ async function bahanBina() {
 }
 
 async function gambarBina() {
-  const [semua, lap] = await Promise.all([bahanBina(), petaLaporanBina()]);
+  const [semuaBulan, lap, kunciBln] = await Promise.all([bahanBina(), petaLaporanBina(), muatKunciBulan()]);
+  // v2.51: satu bulan (bawaan bulan berjalan); "Semua bulan" = '*'.
+  isiPilihanBulanBina(semuaBulan, kunciBln);
+  const semua = saringBulanBina(semuaBulan);
   const lapor = bolehLaporBina();
   const nKol  = lapor ? 10 : 9;
   const laporanDari = (r) => lap.get(String(r.id_pembinaan)) || null;
@@ -5735,7 +5751,7 @@ async function gambarBina() {
   const belumLapor = lapor ? semua.filter(r => r.status_pembinaan !== 'Selesai' && !laporanDari(r)).length : 0;
   const nMusyawarah = semua.filter(r => r.menunggu).length;
   $('binaKpi').innerHTML =
-    stat('Total Instruksi', angka(total), 'fa-solid fa-list', 'background:#EFF3F6;color:var(--text-2)', 'var(--text-3)', labelPeriode()) +
+    stat('Total Instruksi', angka(total), 'fa-solid fa-list', 'background:#EFF3F6;color:var(--text-2)', 'var(--text-3)', labelBulanBina(kunciBln)) +
     stat('Dalam Proses', angka(proses), 'fa-solid fa-hourglass-half', 'background:var(--amber-bg);color:var(--amber)', 'var(--amber)',
       lapor ? `${angka(belumLapor)} belum dilaporkan`
             : (nMusyawarah ? `${angka(nMusyawarah)} menunggu musyawarah` : '')) +
@@ -5779,7 +5795,9 @@ async function gambarBina() {
     const selesai = String(r.status_pembinaan) === 'Selesai';
     const L = laporanDari(r);
     const tunggu = L && !selesai;
-    const bisaDipilih = lapor && !selesai && !L && !r.menunggu;
+    const terkunciR = barisBinaTerkunci(r, kunciBln);          // v2.51: bulan sudah Tutup Buku
+    const editableR = editable && !terkunciR;
+    const bisaDipilih = lapor && !selesai && !L && !r.menunggu && !terkunciR;
     const dipilih = bisaDipilih && stBina.pilih.has(id);
     const tahap = tahapBina(r);
     const catatan = String(r.catatan_pembinaan || '').trim();
@@ -5787,7 +5805,7 @@ async function gambarBina() {
     const idLog = String(r.id_log_pelanggaran || '');
     // v2.43: hukuman boleh diisi/diganti manual bila menunggu musyawarah
     // atau tahapnya melewati instrumen, selama belum Selesai.
-    const bisaManual = editable && !selesai && !!idLog && (!!r.menunggu || (r.overflow && !r.manual));
+    const bisaManual = editableR && !selesai && !!idLog && (!!r.menunggu || (r.overflow && !r.manual));
 
     const aksi = [];
     if (bolehKabarWali() && perluKabarWali(r)) aksi.push(`<button class="btn btn-wa btn-sm" data-wa-wali="${esc(id)}"
@@ -5798,13 +5816,14 @@ async function gambarBina() {
          title="Buka percakapan laporan"><i class="fa-solid fa-comments"></i>Utas</button>`);
     if (bisaManual) aksi.push(`<button class="btn btn-primary btn-sm" data-bina-manual="${esc(idLog)}"
          title="Isi hukuman sesuai hasil musyawarah"><i class="fa-solid fa-people-group"></i>Isi Hasil Musyawarah</button>`);
-    if (editable && !r.menunggu) aksi.push(`<button class="btn ${selesai ? 'btn-ghost' : tunggu ? 'btn-sah' : 'btn-ok'} btn-sm"
+    if (editableR && !r.menunggu) aksi.push(`<button class="btn ${selesai ? 'btn-ghost' : tunggu ? 'btn-sah' : 'btn-ok'} btn-sm"
          data-pbn="${esc(id)}|${selesai ? 'Dalam Proses' : 'Selesai'}">
          <i class="fa-solid ${selesai ? 'fa-arrow-rotate-left' : tunggu ? 'fa-file-signature' : 'fa-circle-check'}"></i>${
            selesai ? 'Buka Lagi' : tunggu ? 'Sahkan Selesai' : 'Selesaikan'}</button>`);
+    if (terkunciR) aksi.unshift(`<span class="tag tag-kunci" title="Bulan ini sudah Tutup Buku. Admin dapat membuka kuncinya di menu Tutup Buku."><i class="fa-solid fa-lock"></i>Terkunci</span>`);
     if (!aksi.length) aksi.push('<span class="tag tag-off">Hanya baca</span>');
 
-    return `<tr class="${tunggu ? 'menunggu' : ''}${dipilih ? ' dipilih' : ''}">
+    return `<tr class="${tunggu ? 'menunggu' : ''}${dipilih ? ' dipilih' : ''}${terkunciR ? ' terkunci' : ''}">
       ${lapor ? `<td class="center pilih-kol">${bisaDipilih
         ? `<input type="checkbox" class="cek" data-pilih="${esc(id)}" ${dipilih ? 'checked' : ''}
              aria-label="Pilih pembinaan ${esc(r.nama_siswa)}">` : ''}</td>` : ''}
@@ -20438,6 +20457,7 @@ async function viewTutupBuku() {
       if (aksi === 'tandai')   return tbTandaiAudit(bulan);
       if (aksi === 'pulihkan') return tbPulihkanAudit(bulan);
       if (aksi === 'unduh')    return tbUnduhArsip(bulan);
+      if (aksi === 'kunci' || aksi === 'bukakunci') return tbAturKunci(bulan, aksi === 'kunci');
       if (aksi === 'lihat') {
         stTb.periode = bulan; stTb.rekap = null; stTb.page = 1; stTb.kelas = '';
         $('tbBulan').value = bulan; $('tbJudulBulan').textContent = tbLabelBulan(bulan);
@@ -20456,8 +20476,9 @@ async function viewTutupBuku() {
 }
 
 async function tbMuatStatus() {
-  const { data } = await q(db.rpc('status_tutup_buku'), 'status_tutup_buku');
+  const [{ data }, kunci] = await Promise.all([q(db.rpc('status_tutup_buku'), 'status_tutup_buku'), muatKunciBulan(true)]);
   stTb.status = data || [];
+  stTb.kunci = kunci;                                 // v2.51
 }
 
 async function tbMuatRekap() {
@@ -20504,13 +20525,22 @@ function tbGambarStatus() {
       ? `<span class="tag tag-berat" title="Ada catatan bulan ini yang berubah setelah rekap disusun">Berubah</span>`
       : `<span class="tag tag-ok">Cocok</span>`;
     const audit = `${angka(r.audit_hidup)} aktif${Number(r.audit_ditandai) ? `<div class="secondary">${angka(r.audit_ditandai)} ditandai hapus</div>` : ''}`;
+    // v2.51: pembinaan bulan yang ditutup terkunci (database); Admin bisa membuka sementara.
+    const kb = stTb.kunci && stTb.kunci.get(bulan);
+    const terkunci = !kb || kb.terkunci !== false;
+    const tagKunci = terkunci
+      ? `<div class="secondary"><span class="tag tag-kunci"><i class="fa-solid fa-lock"></i>Pembinaan terkunci</span></div>`
+      : `<div class="secondary"><span class="tag tag-sedang"><i class="fa-solid fa-lock-open"></i>Kunci dibuka</span></div>`;
     const aksi = [
       `<button class="btn-link" data-tb="lihat:${bulan}"><i class="fa-solid fa-table"></i> Rekap</button>`,
       r.path_arsip ? `<button class="btn-link" data-tb="unduh:${bulan}"><i class="fa-solid fa-download"></i> Arsip</button>` : '',
       admin && r.berubah ? `<button class="btn-link" data-tb="susun:${bulan}"><i class="fa-solid fa-rotate"></i> Susun ulang</button>` : '',
       admin && !r.path_arsip ? `<button class="btn-link" data-tb="arsip:${bulan}"><i class="fa-solid fa-box-archive"></i> Arsipkan</button>` : '',
       admin && r.path_arsip && Number(r.audit_hidup) ? `<button class="btn-link" data-tb="tandai:${bulan}"><i class="fa-solid fa-eraser"></i> Tandai audit</button>` : '',
-      admin && Number(r.audit_ditandai) ? `<button class="btn-link" data-tb="pulihkan:${bulan}"><i class="fa-solid fa-trash-arrow-up"></i> Pulihkan</button>` : ''
+      admin && Number(r.audit_ditandai) ? `<button class="btn-link" data-tb="pulihkan:${bulan}"><i class="fa-solid fa-trash-arrow-up"></i> Pulihkan</button>` : '',
+      admin ? (terkunci
+        ? `<button class="btn-link" data-tb="bukakunci:${bulan}"><i class="fa-solid fa-lock-open"></i> Buka kunci</button>`
+        : `<button class="btn-link" data-tb="kunci:${bulan}"><i class="fa-solid fa-lock"></i> Kunci lagi</button>`) : ''
     ].filter(Boolean).join(' ');
     return `<tr>
       <td><b>${esc(tbLabelBulan(bulan))}</b><div class="secondary">disusun ${esc(tgl(r.ditutup_pada))}</div></td>
@@ -20519,7 +20549,7 @@ function tbGambarStatus() {
       <td class="right">${angka(r.jml_izin)}</td>
       <td class="right">${angka(r.jml_prestasi)}</td>
       <td class="right">${angka(r.jml_tahfiz)}</td>
-      <td>${rekap}</td><td>${arsip}</td><td>${audit}</td>
+      <td>${rekap}${tagKunci}</td><td>${arsip}</td><td>${audit}</td>
       <td class="right">${aksi}</td>
     </tr>`;
   }).join('') || barisKosong(10, 'Belum ada bulan yang ditutup.',
@@ -28317,3 +28347,323 @@ function hiasRingkasan() {
   };
   setTimeout(tunggu, 50);
 }
+
+
+/* =====================================================================
+ * v2.51 — PANGGUNG GRAFIK · SAKURA UNTUK SEMUA · KUNCI BULAN · AMANAH
+ * ---------------------------------------------------------------------
+ *  Permintaan pemilik (2 Okt 2026):
+ *  1. Ringkasan: Si Peci ninja & Si Payung berlari ke setiap grafik,
+ *     menarik datanya, meloncat ke grafik lain, tergelincir ke grafik
+ *     berikutnya; Si Payung menyihir grafik sehingga berwarna.
+ *     → di sini hanya PENAHAN (grafik ditahan di dasar & kelabu) dan
+ *       PEMUAT; pertunjukannya ada di panggung.js (dimuat lambat).
+ *       Bila panggung.js gagal/terlambat, semua grafik dilepas utuh.
+ *  2. Monster jatuh & berguguran dihilangkan; kelopak sakura untuk
+ *     semua (putra maupun putri).
+ *  3. Pembinaan: halaman dibuka pada bulan berjalan; bulan yang sudah
+ *     Tutup Buku terkunci (database, trigger trg_pbn_kunci_bulan).
+ *  4. Amanah: pembinaan bulan lalu yang tidak diselesaikan (evaluasi)
+ *     + pembinaan bulan ini yang masih berjalan (lihat viewDashboard).
+ * ===================================================================== */
+APP.versi = 'rq-v2.51';
+
+/* ---------- 3 · Kunci bulan (Tutup Buku) ---------------------------- */
+
+/** Map 'yyyy-MM' → { ditutup_pada, terkunci }. Gagal dibaca → Map kosong. */
+async function muatKunciBulan(segar = false) {
+  if (!segar) { const c = cacheGet('kunciBulan'); if (c) return c; }
+  try {
+    const { data, error } = await db.rpc('bulan_terkunci');
+    if (error) throw error;
+    return cacheSet('kunciBulan', new Map((data || []).map(r => [r.bulan, { ditutup_pada: r.ditutup_pada, terkunci: r.terkunci !== false }])));
+  } catch (e) {
+    console.warn('status kunci bulan tidak terbaca:', e.message);
+    return new Map();
+  }
+}
+
+/** Baris pembinaan termasuk isi buku yang sudah dikunci? (cermin trg_pbn_kunci_bulan) */
+function barisBinaTerkunci(r, kunci) {
+  const k = kunci && kunci.get(bulanDari(kunciTgl(r.tanggal_pembinaan)));
+  if (!k || !k.terkunci) return false;
+  if (!r.dibuat_pada) return true;
+  return new Date(r.dibuat_pada).getTime() <= new Date(k.ditutup_pada).getTime();
+}
+
+/** Pemilih periode global aktif → halaman ikut bulan itu (pilihan bulan dikunci). */
+function bulanBinaEfektif() {
+  return APP.periode && APP.periode.aktif && APP.periode.bulan ? APP.periode.bulan : (stBina.bulan || bulanIni());
+}
+function saringBulanBina(rows) {
+  const b = bulanBinaEfektif();
+  return b === '*' ? rows : rows.filter(r => bulanDari(kunciTgl(r.tanggal_pembinaan)) === b);
+}
+function labelBulanBina(kunci) {
+  const b = bulanBinaEfektif();
+  if (b === '*') return 'Semua bulan';
+  const k = kunci && kunci.get(b);
+  return `${labelBulan(b)}${b === bulanIni() ? ' · berjalan' : k && k.terkunci ? ' · terkunci' : ''}`;
+}
+function isiPilihanBulanBina(rows, kunci) {
+  const sel = $('pbBulan'); if (!sel) return;
+  const kini = bulanIni(), b = bulanBinaEfektif();
+  const ada = new Set(rows.map(r => bulanDari(kunciTgl(r.tanggal_pembinaan))).filter(Boolean));
+  ada.add(kini); if (b !== '*') ada.add(b);
+  const urut = [...ada].sort().reverse();
+  sel.innerHTML = urut.map(m => {
+    const k = kunci && kunci.get(m);
+    const ket = m === kini ? ' · berjalan' : k && k.terkunci ? ' · terkunci 🔒' : k ? ' · kunci dibuka' : '';
+    return `<option value="${esc(m)}"${m === b ? ' selected' : ''}>${esc(labelBulan(m) + ket)}</option>`;
+  }).join('') + `<option value="*"${b === '*' ? ' selected' : ''}>Semua bulan</option>`;
+  sel.disabled = !!(APP.periode && APP.periode.aktif);
+  sel.title = sel.disabled ? 'Mengikuti pemilih periode di bilah atas' : 'Bulan pembinaan';
+}
+
+/** Tutup Buku: Admin membuka / mengunci lagi pembinaan sebuah bulan. */
+async function tbAturKunci(bulan, kunci) {
+  if (!isAdmin()) return;
+  const r = await Swal.fire({
+    icon: kunci ? 'question' : 'warning',
+    title: kunci ? `Kunci lagi pembinaan ${tbLabelBulan(bulan)}?` : `Buka kunci pembinaan ${tbLabelBulan(bulan)}?`,
+    text: kunci
+      ? 'Pembinaan bulan ini kembali tidak bisa diubah atau dihapus oleh siapa pun.'
+      : 'Selama kunci dibuka, pembinaan bulan ini bisa diubah lagi dan rekapnya bisa berstatus Berubah. Kunci kembali setelah selesai.',
+    showCancelButton: true, confirmButtonText: kunci ? 'Kunci' : 'Buka kunci', cancelButtonText: 'Batal',
+    confirmButtonColor: kunci ? '#14618B' : '#B45309' });
+  if (!r.isConfirmed) return;
+  try {
+    loading(true);
+    await q(db.rpc('atur_kunci_bulan', { p_periode: tbTanggal(bulan), p_kunci: kunci }), 'atur_kunci_bulan');
+    cacheHapus('kunciBulan');
+    toast('success', kunci ? `Pembinaan ${tbLabelBulan(bulan)} dikunci.` : `Kunci ${tbLabelBulan(bulan)} dibuka.`);
+    await tbMuatStatus(); tbGambar();
+  } catch (e) { fireError(e); }
+  finally { loading(false); }
+}
+
+/* ---------- 2 · Tanpa monster jatuh; sakura untuk semua -------------- */
+
+// Hujan & guguran monster (v2.26/v2.27/v2.36) tidak lagi dijalankan di mana pun.
+hujanMonster = function () { try { hentikanHujan(); } catch (e) {} };
+
+// Kelopak sakura di Ringkasan untuk SEMUA akun & unit. Tema warna sakura
+// (data-sakura) tetap hanya untuk konteks putri & peran v2.40.
+mulaiSakuraDasbor = function (view, paksa = false) {
+  tandaiTemaSakura();
+  if (!SAKURA.aktif || !APP.profil || !SAKURA.VIEW.includes(view)) return false;
+  const k = view + '|' + (APP.profil?.id || '') + '|' + (normalUnit(APP.ctx?.gender) || '');
+  const kini = Date.now();
+  if (!paksa && SAKURA.terakhir[k] && kini - SAKURA.terakhir[k] < SAKURA.ULANG_MS) return false;
+  SAKURA.terakhir[k] = kini;
+  setelahLayarMuat(() => { if (APP.view === view) guguranSakura(); });
+  return true;
+};
+document.addEventListener('click', (e) => {
+  if (document.documentElement.dataset.sakura) return;        // tema sakura punya pendengarnya sendiri
+  const sapa = e.target.closest && e.target.closest('#viewRoot .sapa');
+  if (!sapa || e.target.closest('button, a, input, select, label')) return;
+  const r = sapa.getBoundingClientRect();
+  guguranSakura({ n: 16, lahirMs: 900, asal: { x: r.right - 90, y: r.top + 10 } });
+});
+
+/* ---------- 1 · Panggung Grafik: penahan & pemuat -------------------- */
+
+const PGR = {
+  items: [], peta: new WeakMap(), sudah: new Set(),
+  muat: null, tCek: 0, gagal: false,
+  BATAS_MUAT: 3500                 // panggung.js belum siap → grafik dilepas utuh
+};
+
+function panggungBoleh() {
+  if (APP.view !== 'dashboard' || MULUS.kurangGerak) return false;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+  return bacaLS('rq-panggung') !== 'mati';
+}
+
+/** Tahan grafik di dasar (sumbu sudah final) sebelum Chart.js membangunnya. */
+function tahanPanggung(key, canvasId, config) {
+  if (!config || !config.data || !TIPE_TARIK[config.type] || PGR.gagal) return false;
+  const kanvas = $(canvasId);
+  if (!kanvas || kanvas.closest('.laporan, #printArea, #pdfStage, [data-tanpa-monster]')) return false;
+  const ds = config.data.datasets || [];
+  if (!ds.length || ds.some(d => !Array.isArray(d.data) || d.data.some(v => v != null && typeof v === 'object'))) return false;
+  const maks = Math.max(0, ...ds.flatMap(d => d.data.map(v => Number(v) || 0)));
+  const id = `${APP.view}:${key}`;
+  if (maks <= 0 || PGR.sudah.has(id)) return false;
+  const mode = modeTarik(config);
+  config.options = config.options || {};
+  kunciSumbu(config, mode);
+  config.options.plugins = config.options.plugins || {};
+  const it = {
+    id, key, canvasId, mode, asli: ds.map(d => d.data.slice()),
+    lingkar: config.options.circumference ?? 360,
+    tooltip: config.options.plugins.tooltip ? config.options.plugins.tooltip.enabled : undefined,
+    animAsli: Object.prototype.hasOwnProperty.call(config.options, 'animation') ? config.options.animation : undefined,
+    status: 'tahan', lahir: performance.now()
+  };
+  if (mode === 'putar') config.options.circumference = 0.001;
+  else ds.forEach(d => { d.data = d.data.map(v => (v == null ? v : 0)); });
+  config.options.plugins.tooltip = { ...(config.options.plugins.tooltip || {}), enabled: false };
+  PGR.peta.set(config.data, it);
+  PGR.items.push(it);
+  muatPanggung();
+  return true;
+}
+
+function pasangTabir(it) {
+  const wadah = it.chart && it.chart.canvas && it.chart.canvas.parentElement;
+  if (!wadah) return;
+  if (getComputedStyle(wadah).position === 'static') wadah.style.position = 'relative';
+  const t = document.createElement('div');
+  t.className = 'pg-tabir';
+  t.setAttribute('aria-hidden', 'true');
+  wadah.appendChild(t);
+  it.tabir = t;
+}
+
+const PLUGIN_PANGGUNG = {
+  id: 'panggungGrafik',
+  afterInit(chart) {
+    const it = PGR.peta.get(chart.config.data);
+    if (!it || it.chart) return;
+    it.chart = chart;
+    it.kartu = chart.canvas.closest('.card') || chart.canvas.parentElement;
+    pasangTabir(it);
+    try { window.RQPanggung && window.RQPanggung.daftar(it); } catch (e) { console.warn('panggung:', e.message); }
+  },
+  afterDestroy(chart) {
+    const it = PGR.peta.get(chart.config.data);
+    if (!it) return;
+    it.mati = true;
+    if (it.tabir) it.tabir.remove();
+    PGR.items = PGR.items.filter(x => x !== it);
+  }
+};
+try { Chart.register(PLUGIN_PANGGUNG); } catch (e) { console.warn('plugin panggung:', e.message); }
+
+/** Satu tahap tarikan: data → p × nilai asli, dianimasikan Chart.js. */
+function tahapPanggung(it, p, durasi = 420, easing = 'easeOutBack') {
+  const ch = it.chart; if (!ch || it.mati) return;
+  ch.config.options.animation = { duration: durasi, easing };
+  if (it.mode === 'putar') ch.options.circumference = Math.max(0.001, it.lingkar * p);
+  else ch.data.datasets.forEach((d, i) => {
+    const a = it.asli[i]; if (!a) return;
+    for (let k = 0; k < a.length; k++) d.data[k] = a[k] == null ? a[k] : p >= 1 ? a[k] : (Number(a[k]) || 0) * p;
+  });
+  ch.update();
+}
+
+/** Grafik kembali persis seperti aslinya (data, putaran, tooltip, animasi). */
+function tuntasPanggung(it, opsi = {}) {
+  if (!it) return;
+  const ch = it.chart;
+  if (it.status !== 'selesai' && ch && !it.mati) {
+    const o = ch.config.options;
+    if (it.animAsli === undefined) delete o.animation; else o.animation = it.animAsli;
+    if (it.mode === 'putar') ch.options.circumference = it.lingkar;
+    else ch.data.datasets.forEach((d, i) => { if (it.asli[i]) d.data = it.asli[i].slice(); });
+    if (o.plugins && o.plugins.tooltip) o.plugins.tooltip.enabled = it.tooltip !== false;
+    ch.update(opsi.animasi ? undefined : 'none');
+  }
+  it.status = 'selesai';
+  PGR.sudah.add(it.id);
+  if (it.tabir && !opsi.simpanTabir) { const t = it.tabir; it.tabir = null; t.classList.add('pudar'); setTimeout(() => t.remove(), 600); }
+}
+
+/** Jari-jari sihir warna (px dari titik mx,my di dalam kanvas). */
+function warnaPanggung(it, r, mx, my) {
+  const t = it.tabir; if (!t) return;
+  t.style.setProperty('--r', `${(r - 40).toFixed(1)}px`);      // r = 0 → kelabu penuh
+  if (mx != null) { t.style.setProperty('--mx', `${mx.toFixed(1)}px`); t.style.setProperty('--my', `${my.toFixed(1)}px`); }
+}
+
+/** Ujung data terbesar (koordinat layar). */
+function jangkarPanggung(it) {
+  const ch = it.chart; if (!ch || it.mati) return null;
+  const rk = ch.canvas.getBoundingClientRect();
+  if (it.mode === 'putar') {
+    const busur = ch.getDatasetMeta(0).data.filter(Boolean);
+    if (!busur.length) return null;
+    const a = busur.reduce((m, e) => (e.endAngle > m.endAngle ? e : m), busur[0]);
+    return { x: rk.left + a.x + Math.cos(a.endAngle) * a.outerRadius, y: rk.top + a.y + Math.sin(a.endAngle) * a.outerRadius,
+             cx: rk.left + a.x, cy: rk.top + a.y };
+  }
+  if (it.di == null) {
+    // Utamakan seri pertama (bulan ini); seri pembanding (bulan lalu) hanya bila seri pertama kosong.
+    let t = { d: 0, i: 0, v: -Infinity };
+    const pilih = (d) => (it.asli[d] || []).forEach((v, i) => { const n = Number(v) || 0; if (n > t.v && !ch.getDatasetMeta(d).hidden) t = { d, i, v: n }; });
+    pilih(0);
+    if (!(t.v > 0)) it.asli.forEach((_, d) => d && pilih(d));
+    it.di = t;
+  }
+  const el = ch.getDatasetMeta(it.di.d).data[it.di.i];
+  if (!el) return null;
+  return { x: rk.left + el.x, y: rk.top + el.y };
+}
+
+function lepasSemuaPanggung(sebab) {
+  if (sebab) console.warn('panggung grafik dilepas:', sebab);
+  PGR.items.slice().forEach(it => tuntasPanggung(it));
+}
+
+function muatPanggung() {
+  if (window.RQPanggung || PGR.muat) { if (window.RQPanggung) PGR.items.forEach(it => it.chart && window.RQPanggung.daftar(it)); return; }
+  PGR.muat = new Promise((ok) => {
+    const s = document.createElement('script');
+    s.src = 'panggung.js'; s.async = true;
+    s.onload = () => ok(true);
+    s.onerror = () => { PGR.gagal = true; lepasSemuaPanggung('panggung.js gagal dimuat'); ok(false); };
+    document.head.appendChild(s);
+  });
+  clearTimeout(PGR.tCek);
+  PGR.tCek = setTimeout(() => { if (!window.RQPanggung) { PGR.gagal = true; lepasSemuaPanggung('panggung.js terlambat'); } }, PGR.BATAS_MUAT);
+}
+
+// Dipakai panggung.js — satu-satunya pintu ke grafik.
+window.RQ_PANGGUNG = {
+  items: () => PGR.items.filter(it => it.chart && !it.mati && it.chart.canvas.isConnected),
+  tahap: tahapPanggung, tuntas: tuntasPanggung, warna: warnaPanggung, jangkar: jangkarPanggung,
+  lepasSemua: lepasSemuaPanggung, hemat: () => modeHemat(), view: () => APP.view,
+  unit: () => { try { return unitAktif(); } catch (e) { return null; } }
+};
+
+/* Di Ringkasan, monster penghuni grafik (v2.27) & penarik (v2.35) digantikan panggung. */
+(function bungkusPenghuniUntukPanggung() {
+  const penghuniAsli = pasangPenghuniGrafik;
+  pasangPenghuniGrafik = function (canvasId) {
+    if (panggungBoleh()) return;
+    return penghuniAsli.apply(this, arguments);
+  };
+  const tahanAsli = tahanGrafik;
+  tahanGrafik = function () {
+    if (panggungBoleh()) return false;
+    return tahanAsli.apply(this, arguments);
+  };
+})();
+
+/* Pembungkus buatChart PALING LUAR: tahan SETELAH pembungkus lain membaca angka asli. */
+(function bungkusGrafikPanggung() {
+  const asli = buatChart;
+  buatChart = function (key, canvasId, config) {
+    const hasil = asli.apply(this, arguments);
+    try {
+      const wakil = APP.charts[key];
+      if (panggungBoleh() && wakil && wakil._tertunda) tahanPanggung(key, canvasId, config);
+    } catch (e) { console.warn('tahan panggung:', key, e.message); }
+    return hasil;
+  };
+})();
+
+/* Pindah halaman → panggung berhenti; cetak → semua grafik utuh. */
+(function bungkusNavigasiPanggung() {
+  const navAsli = navigateTo;
+  navigateTo = async function (view) {
+    // Setiap gambar ulang (termasuk Ringkasan ke Ringkasan) membangun grafik baru;
+    // pertunjukan lama dihentikan, grafik baru mendaftar ulang lewat plugin.
+    try { window.RQPanggung && window.RQPanggung.hentikan(); } catch (e) {}
+    PGR.items = [];
+    return navAsli.apply(this, arguments);
+  };
+  window.addEventListener('beforeprint', () => lepasSemuaPanggung());
+})();
