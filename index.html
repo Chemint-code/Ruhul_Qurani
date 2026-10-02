@@ -6840,7 +6840,10 @@
    *  ditumpangkan pada sistem gerak yang sudah ada. Hanya transform, opacity
    *  dan filter satu lapis. Blok ini sengaja di luar @layer supaya menang
    *  atas animasi masuk lama tanpa !important.
-   *    .rb-sambut = koreografi penuh saat TIBA (dipasang app.js)
+   *  Mode hemat (otomatis di perangkat ≤ 4 inti & layar sentuh) tetap bergerak,
+   *  hanya tanpa kabur, kilau dan sorot; yang mematikan gerak sepenuhnya
+   *  hanyalah prefers-reduced-motion.
+   *    .rb-sambut = koreografi penuh saat TIBA (dipasang app.js; tidak di mode hemat)
    *    .rb-tahan  = halaman masih tertutup layar muat/gerbang → ditahan
    * ===================================================================== */
 
@@ -6916,6 +6919,58 @@
   .rank[style*="--porsi"] .t { transition: transform .3s var(--lengkung); }
   .rank[style*="--porsi"]:hover .t { transform: translateX(3px); }
   @keyframes rbPorsi { from { transform: scaleX(0); } }
+  @keyframes rbPorsiKanan { from { transform: scaleX(0); } }
+
+  /* ---------- 4b · Cermin Muhasabah (antarbulan) & Cermin per Santri ---------- */
+  .cm-tbl table { width: 100%; }
+  .cm-tbl :is(th, td) { padding-left: 8px; padding-right: 8px; }
+  .cm-tbl :is(th, td):first-child { padding-left: var(--pad); }
+  .cm-tbl :is(th, td):last-child { padding-right: var(--pad); }
+  .cm-tbl td:first-child { white-space: nowrap; }
+  .cm-tbl td:first-child b { font-weight: 600; margin-right: 8px; }
+  .cm-tbl td:first-child .tag { vertical-align: 1px; }
+  .cm-tbl td.right { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+  .cm-tbl tr.cm-ini > td { background: color-mix(in oklab, var(--sea) 6%, transparent); font-weight: 600; }
+  .cm-sel { position: relative; display: inline-block; min-width: 3.2em; padding: 2px 6px; text-align: right; isolation: isolate; }
+  .cm-sel::before {
+    content: ''; position: absolute; inset: 0; z-index: -1; border-radius: 6px; transform-origin: right;
+    transform: scaleX(var(--porsi, 0));
+    background: color-mix(in oklab, var(--sea) 13%, transparent);
+  }
+  .cm-santri { margin: 14px 0 4px; border: 1px solid var(--line); border-radius: var(--r); }
+  .detail-lembar {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-top: 14px; padding: 10px 13px;
+    border-radius: var(--r); border: 1px solid var(--line); background: var(--paper);
+    font-size: 12.5px; line-height: 1.5; color: var(--text-2);
+  }
+  .detail-lembar.on { border-color: color-mix(in oklab, var(--sea) 28%, var(--line)); background: color-mix(in oklab, var(--sea) 6%, var(--surface)); }
+  .detail-lembar > i { color: var(--sea); }
+  .detail-lembar > span { flex: 1 1 220px; }
+
+  /* Dua kolom hanya bila kartunya cukup lebar; di kolom sempit bertumpuk. */
+  .cs { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px 22px; }
+  .cs-judul {
+    display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 11px; font-weight: 700;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--text-2);
+  }
+  .cs-judul span { margin-left: auto; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text-3-teks, var(--text-2)); }
+  .cs-kolom.turun .cs-judul i { color: var(--teal); }
+  .cs-kolom.naik .cs-judul i { color: var(--maroon); }
+  .cs-baris {
+    display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; margin: 0 -10px;
+    border: 0; border-radius: 10px; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer;
+    transition: background var(--sedang), transform var(--sedang);
+  }
+  .cs-baris:hover, .cs-baris:focus-visible { background: color-mix(in oklab, var(--sea) 7%, transparent); transform: translateX(2px); }
+  .cs-nm { flex: 1 1 auto; min-width: 0; }
+  .cs-nm b { display: block; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cs-nm small { display: block; font-size: 11px; color: var(--text-3-teks, var(--text-2)); }
+  .cs-angka { flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; white-space: nowrap; color: var(--text-2); }
+  .cs-angka i { font-size: 9px; opacity: .6; margin: 0 2px; }
+  .cs-angka small { margin-left: 4px; font-family: 'Inter Tight', system-ui, sans-serif; font-size: 10.5px; }
+  .cs-kolom.turun .cs-angka b { color: var(--teal); }
+  .cs-kolom.naik .cs-angka b { color: var(--maroon); }
+  .cs-kosong { margin: 4px 0; font-size: 12.5px; color: var(--text-3-teks, var(--text-2)); }
 
   /* ---------- 5 · Gerak ---------- */
   @keyframes rbTren {
@@ -6926,9 +6981,9 @@
 
   @media (prefers-reduced-motion: no-preference) {
     /* garis digambar: sapaan, baris periode, hero pimpinan/BK */
-    :root:not(.hemat) #viewRoot[data-view="dashboard"] .sapa .eyebrow .rule,
-    :root:not(.hemat) #viewRoot .rb-periode .rule,
-    :root:not(.hemat) #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .hero .eyebrow .rule {
+    #viewRoot[data-view="dashboard"] .sapa .eyebrow .rule,
+    #viewRoot .rb-periode .rule,
+    #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .hero .eyebrow .rule {
       transform-origin: left; animation: masukGaris .9s var(--lengkung) .28s both;
     }
 
@@ -6936,20 +6991,28 @@
        pengamat tersedia; .rb-tampak saat kartunya terlihat). Hanya di layar —
        cetakan selalu utuh. */
     @media screen {
-      :root:not(.hemat) #viewRoot.rb-gulir .stat:not(.rb-tampak) :is(.rb-tren, .rb-tren-ket) { opacity: 0; }
+      #viewRoot.rb-gulir .stat:not(.rb-tampak) :is(.rb-tren, .rb-tren-ket) { opacity: 0; }
     }
-    :root:not(.hemat) #viewRoot .stat.rb-tampak .rb-tren {
+    #viewRoot .stat.rb-tampak .rb-tren {
       animation: rbTren .55s var(--pegas, var(--lengkung)) .46s both;
     }
-    :root:not(.hemat) #viewRoot .stat.rb-tampak .rb-tren-ket { animation: rbPudar .5s ease .6s both; }
+    #viewRoot .stat.rb-tampak .rb-tren-ket { animation: rbPudar .5s ease .6s both; }
+
+    /* Cermin: batang sel tumbuh, baris per santri masuk berjenjang */
+    #viewRoot .cm-sel::before { animation: rbPorsiKanan .7s var(--lengkung) .15s backwards; }
+    #viewRoot .cs-baris { animation: masukNaik .5s var(--lengkung) backwards; }
+    #viewRoot .cs-baris:nth-of-type(2) { animation-delay: .05s; }
+    #viewRoot .cs-baris:nth-of-type(3) { animation-delay: .1s; }
+    #viewRoot .cs-baris:nth-of-type(4) { animation-delay: .15s; }
+    #viewRoot .cs-baris:nth-of-type(5) { animation-delay: .2s; }
 
     /* batang porsi tumbuh saat barisnya masuk layar (compositor); tanpa
        dukungan view() ia tumbuh sekali berdasarkan waktu */
-    :root:not(.hemat) .rank[style*="--porsi"]::before {
+    .rank[style*="--porsi"]::before {
       animation: rbPorsi .8s var(--lengkung) calc(var(--urut, 0) * 60ms + .2s) backwards;
     }
     @supports (animation-timeline: view()) {
-      :root:not(.hemat) .rank[style*="--porsi"]::before {
+      .rank[style*="--porsi"]::before {
         animation: rbPorsi linear backwards; animation-timeline: view(); animation-range: entry 0% cover 30%;
       }
     }
@@ -6969,13 +7032,14 @@
 
     /* Pimpinan & BK: hero memakai urutan yang sama; catatan analisis berjenjang */
     :root:not(.hemat) #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .hero h2 { animation: masukJudul 1s var(--lengkung) .16s both; }
-    :root:not(.hemat) #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .hero > p { animation: masukNaik .8s var(--lengkung) .36s both; }
-    :root:not(.hemat) #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .hero .meta { animation: masukNaik .8s var(--lengkung) .48s both; }
-    :root:not(.hemat) #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .exec .note { animation: masukNaik .6s var(--lengkung) .2s both; }
-    :root:not(.hemat) #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .exec .note:nth-child(2) { animation-delay: .27s; }
-    :root:not(.hemat) #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .exec .note:nth-child(3) { animation-delay: .34s; }
-    :root:not(.hemat) #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .exec .note:nth-child(4) { animation-delay: .41s; }
-    :root:not(.hemat) #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .exec .note:nth-child(n+5) { animation-delay: .48s; }
+    :root.hemat #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .hero h2 { animation: masukNaik .6s var(--lengkung) .1s both; }
+    #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .hero > p { animation: masukNaik .8s var(--lengkung) .36s both; }
+    #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .hero .meta { animation: masukNaik .8s var(--lengkung) .48s both; }
+    #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .exec .note { animation: masukNaik .6s var(--lengkung) .2s both; }
+    #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .exec .note:nth-child(2) { animation-delay: .27s; }
+    #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .exec .note:nth-child(3) { animation-delay: .34s; }
+    #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .exec .note:nth-child(4) { animation-delay: .41s; }
+    #viewRoot:is([data-view="pimpinan"], [data-view="bk"]) .exec .note:nth-child(n+5) { animation-delay: .48s; }
 
     /* Halaman masih di balik layar muat/gerbang → semua gerak masuk ditahan.
        app.js melepas kelas ini begitu penutup terbuka (paling lama 15 dtk). */

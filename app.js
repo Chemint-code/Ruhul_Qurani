@@ -2970,8 +2970,22 @@ async function viewDashboard() {
   // bulan pada pemilih periode), dibandingkan dengan bulan sebelumnya
   // sampai tanggal yang sama. Peta Perkembangan & IPP di bawah tetap
   // memakai jendelanya sendiri (lihat blokSebaran).
-  const B = ringkasanBulan(L);
+  const [prestasiAll, tahfizAll] = await Promise.all([
+    amanKosong(muatPrestasi, 'prestasi'), amanKosong(muatTahfiz, 'tahfiz')]);
+  const nisnAktif = new Set(siswa.map(s => String(s.nisn)));
+  const positif = {
+    prestasi: prestasiAll.filter(aktifPrestasi).filter(r => nisnAktif.has(String(r.nisn))),
+    tahfiz:   tahfizAll.filter(aktifTahfiz).filter(r => nisnAktif.has(String(r.nisn)))
+  };
+  const B = ringkasanBulan(L, periodeRingkasan(), positif);
   const per = B.per;
+  const poinDari = (rows) => rows.reduce((a, r) => a + (Number(r.bobot_pelanggaran) || 0), 0);
+  const halDari  = (rows) => Math.round(rows.reduce((a, r) => a + (Number(r.capaian_halaman) || 0), 0) * 10) / 10;
+  const poinIni = poinDari(B.detail.ini), poinLalu = poinDari(B.detail.lalu);
+  const halIni = halDari(B.tahfiz.ini), halLalu = halDari(B.tahfiz.lalu);
+  // Cermin: enam lembar terakhir (berakhir pada bulan yang sedang dibuka) + per santri.
+  const cermin = cerminBulanan({ detail: detailTr, izin: izinSemua, bina: L.pembinaanSemua, ...positif }, bulanMundur(per.bulan, 6), per);
+  const cerminSantri = cerminPerSantri(B, siswa);
   const detail = B.detail.ini;
   const izinBulan = B.izin.ini;
   const izinMenunggu = izinBulan.filter(z => z.status_persetujuan === 'Pending').length;
@@ -3067,19 +3081,30 @@ async function viewDashboard() {
 
     ${barisPeriodeRingkasan(per)}
 
-    <div class="stats">
+    <div class="stats six">
       ${stat('Santri Aktif', angka(siswa.length), 'fa-solid fa-user-group',
         'background:#E7F1F7;color:var(--sea)', 'var(--sea)',
         perluFilterKelas() ? 'Kelas binaan Anda' : 'Seluruh dayah')}
       ${stat('Pelanggaran', angka(detail.length), 'fa-solid fa-scale-balanced',
         'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)',
         `${lencanaBanding(detail.length, B.detail.lalu.length, { frasa: per.frasaLalu })}<span class="rb-tren-ket">vs ${esc(per.frasaPendek)}</span>`)}
+      ${stat('Poin Pelanggaran', angka(poinIni), 'fa-solid fa-coins',
+        'background:var(--maroon-bg);color:var(--maroon)', 'var(--maroon)',
+        `${lencanaBanding(poinIni, poinLalu, { frasa: per.frasaLalu })}<span class="rb-tren-ket">mulai dari nol tiap bulan</span>`)}
       ${stat('Perizinan', angka(izinBulan.length), 'fa-solid fa-clock',
         'background:var(--amber-bg);color:var(--amber)', 'var(--amber)',
         `${lencanaBanding(izinBulan.length, B.izin.lalu.length, { frasa: per.frasaLalu, netral: true })}<span class="rb-tren-ket">${angka(izinMenunggu)} menunggu</span>`)}
       ${stat('Pembinaan', angka(binaBulan.length), 'fa-solid fa-hands-holding-child',
         'background:var(--violet-bg);color:var(--violet)', 'var(--violet)',
         `${lencanaBanding(binaBulan.length, B.bina.lalu.length, { frasa: per.frasaLalu, netral: true })}<span class="rb-tren-ket">${angka(binaBerproses)} berproses</span>`)}
+      ${stat('Tahfiz (halaman)', angka(halIni), 'fa-solid fa-book-quran',
+        'background:var(--teal-bg);color:var(--teal)', 'var(--teal)',
+        `${lencanaBanding(halIni, halLalu, { frasa: per.frasaLalu, naikBaik: true })}<span class="rb-tren-ket">${angka(B.tahfiz.ini.length)} setoran</span>`)}
+    </div>
+
+    <div class="grid-2">
+      ${kartuCermin(cermin, per)}
+      ${kartuCerminSantri(cerminSantri, per)}
     </div>
 
     <div class="grid-2">
@@ -3130,8 +3155,12 @@ async function viewDashboard() {
     }
     const n = e.target.closest('[data-nav]');
     if (n) return navigateTo(n.dataset.nav);
+    // v2.48: buka lembar bulan lain dari Cermin; '' = kembali ke bulan berjalan.
+    const lb = e.target.closest('[data-lembar]');
+    if (lb) return setPeriode(lb.dataset.lembar || bulanIni(), APP.periode.basis, !!lb.dataset.lembar && lb.dataset.lembar !== bulanIni());
+    // Rincian santri dibuka pada lembar yang sama dengan halaman ini.
     const dt = e.target.closest('[data-detail]');
-    if (dt) return bukaDetailSantri(dt.dataset.detail);
+    if (dt) return bukaDetailSantri(dt.dataset.detail, { bulan: per.bulan });
     const c = e.target.closest('[data-ctx]');
     if (c) {
       const [u, j] = c.dataset.ctx.split('|');
@@ -3223,7 +3252,7 @@ async function viewDashboard() {
       // Bagian ini sengaja TIDAK ikut bulan berjalan (rumus IPP & peta enam bulan).
       kotak.querySelector('.sb-judul')?.insertAdjacentHTML('afterend',
         `<p class="rb-jendela"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>
-           Bagian ini memakai jendelanya sendiri, bukan bulan berjalan: peta 6 bulan terakhir dan Indeks Peringatan 60 hari.</p>`);
+           Peta di bawah membentang 6 bulan terakhir sebagai cermin; Indeks Peringatan dihitung dari lembar ${esc(per.label)} saja.</p>`);
     }
   } catch (e) {
     gambarRadarMini(siswa, null, tokenMini);
@@ -3823,26 +3852,51 @@ async function muatTabelSiswa() {
   tandaiTabelBisaGeser();
 }
 
-async function bukaDetailSantri(nisn) {
+/**
+ * v2.48 — LEMBAR: rincian santri dibuka pada SATU bulan bila
+ *   opsi.bulan diberikan (Ringkasan, Cermin), atau pemilih periode aktif
+ *   (mis. guru membuka Rekap bulan lalu lalu menekan Detail).
+ * Di lembar itu poin, apresiasi, tahfiz, dan linimasa hanya milik bulan
+ * tersebut; tabel Cermin di dalamnya menampilkan enam lembar santri ini
+ * dan bisa dipakai berpindah bulan. opsi.semua = seluruh riwayat.
+ */
+async function bukaDetailSantri(nisn, opsi = {}) {
   loading(true);
   try {
     const { data } = await q(db.rpc('laporan_santri_aman', { p_nisn: nisn }), 'laporan_santri_aman');
     const s = data.siswa || {};
-    const riwayat = data.perkembangan || [];
-    const izin = data.perizinan || [];
-    const bina = data.pembinaan || [];
+    const lembar = opsi.semua ? '' : (opsi.bulan || (APP.periode.aktif ? APP.periode.bulan : ''));
+    const diLembar = (v) => !lembar || bulanDari(kunciTgl(v)) === lembar;
+    const riwayatSemua = data.perkembangan || [];
+    const izinSemua = data.perizinan || [];
+    const binaSemua = data.pembinaan || [];
+    const riwayat = riwayatSemua.filter(r => diLembar(r.tanggal));
+    const bina = binaSemua.filter(b => diLembar(b.tanggal_pembinaan));
+    // Izin masuk lembar bila rentangnya menyinggung bulan itu.
+    const izin = !lembar ? izinSemua : izinSemua.filter(z => {
+      const mulai = kunciTgl(z.tanggal_mulai), selesai = kunciTgl(z.tanggal_selesai) || mulai;
+      const a = mulai || selesai, b = selesai || mulai;
+      return !!a && a <= `${lembar}-31` && b >= `${lembar}-01`;
+    });
 
     // Data modul baru (prestasi, tahfiz, target) — tidak menggagalkan
     // tampilan bila tabelnya belum dipasang di database.
-    const [prestasi, tahfiz, goals] = await Promise.all([
+    const [prestasiSemua, tahfizSemua, goals] = await Promise.all([
       muatPrestasi().then(r => r.filter(aktifPrestasi).filter(x => String(x.nisn) === String(nisn))).catch(() => []),
       muatTahfiz().then(r => r.filter(aktifTahfiz).filter(x => String(x.nisn) === String(nisn))).catch(() => []),
       muatGoalSantri(nisn)
     ]);
+    const prestasi = prestasiSemua.filter(r => diLembar(r.tanggal));
+    const tahfiz = tahfizSemua.filter(r => diLembar(r.tanggal));
     const poinPrestasi = prestasi.reduce((a, r) => a + (Number(r.poin) || 0), 0);
-    const poinPlg = Number(s.total_poin_pelanggaran) || 0;
+    // Di lembar bulan, poin = jumlah poin catatan bulan itu (mulai dari nol);
+    // tanpa lembar tetap total yang tersimpan.
+    const poinPlg = lembar ? riwayat.reduce((a, r) => a + (Number(r.poin) || 0), 0) : (Number(s.total_poin_pelanggaran) || 0);
     const skorNet = Math.max(0, poinPlg - poinPrestasi);
     const halTahfiz = tahfiz.reduce((a, r) => a + (Number(r.capaian_halaman) || 0), 0);
+    const cermin = cerminBulanan({ detail: riwayatSemua, izin: izinSemua, bina: binaSemua, tahfiz: tahfizSemua, prestasi: prestasiSemua },
+      bulanMundur(lembar || bulanIni(), 6));
+    const bukaLagi = (o) => { Swal.close(); setTimeout(() => bukaDetailSantri(nisn, o), 220); };
 
     // Timeline gabungan, urut dari yang terbaru
     const timeline = [
@@ -3931,11 +3985,30 @@ async function bukaDetailSantri(nisn) {
               <p class="k">Skor Net</p>
             </div>
             <div class="poin-badge" style="background:var(--teal-bg);border-color:#c5dedc">
-              <p class="v" style="color:var(--teal)">${juzDari(halTahfiz)}</p>
-              <p class="k">Juz Hafal</p>
+              <p class="v" style="color:var(--teal)">${lembar ? angka(Math.round(halTahfiz * 10) / 10) : juzDari(halTahfiz)}</p>
+              <p class="k">${lembar ? 'Hlm Tahfiz' : 'Juz Hafal'}</p>
             </div>
           </div>
         </div>
+
+        <div class="detail-lembar${lembar ? ' on' : ''}">
+          <i class="fa-solid ${lembar ? 'fa-calendar-day' : 'fa-layer-group'}" aria-hidden="true"></i>
+          <span>${lembar
+            ? `Lembar <b>${esc(labelBulan(lembar))}</b>. Poin, apresiasi, tahfiz, dan linimasa di bawah hanya milik bulan ini.`
+            : `Menampilkan <b>seluruh riwayat</b>. Poin pelanggaran adalah akumulasi yang tersimpan.`}</span>
+          ${lembar
+            ? `<button type="button" class="btn-link" data-dl="semua">Seluruh riwayat</button>`
+            : `<button type="button" class="btn-link" data-dl="${esc(opsi.bulan || (APP.periode.aktif ? APP.periode.bulan : bulanIni()))}">Buka lembar ${esc(labelBulan(opsi.bulan || (APP.periode.aktif ? APP.periode.bulan : bulanIni())))}</button>`}
+        </div>
+
+        <div class="tbl cm-tbl cm-santri"><table>
+          <thead><tr><th>Bulan</th><th class="right">Pelanggaran</th><th class="right">Poin</th><th class="right">Izin</th>
+            <th class="right">Pembinaan</th><th class="right">Tahfiz (hlm)</th><th class="right">Apresiasi</th></tr></thead>
+          <tbody>${[...cermin].reverse().map(m => `<tr class="${m.bulan === lembar ? 'cm-ini' : ''}">
+            <td><b>${esc(labelBulan(m.bulan))}</b>${m.bulan === lembar ? '<span class="tag tag-sea">lembar ini</span>'
+              : `<button type="button" class="btn-link" data-dl="${m.bulan}">Buka</button>`}</td>
+            ${['plg', 'poin', 'izin', 'bina', 'thf', 'prs'].map(k => `<td class="right">${angka(m[k])}</td>`).join('')}
+          </tr>`).join('')}</tbody></table></div>
 
         ${bolehLaporan ? `<div class="detail-periode${APP.periode.aktif ? ' on' : ''}">
           <i class="fa-regular fa-calendar-days"></i>
@@ -3959,10 +4032,10 @@ async function bukaDetailSantri(nisn) {
 
         <div id="dGoalBox">${goalPanelHTML(goals, nisn)}</div>
 
-        <p class="label" style="margin:18px 0 8px">Linimasa Lengkap</p>
+        <p class="label" style="margin:18px 0 8px">${lembar ? 'Linimasa ' + esc(labelBulan(lembar)) : 'Linimasa Lengkap'}</p>
         <div class="tl">
           ${timeline.map(item).join('') ||
-            '<p style="text-align:center;color:var(--text-3);padding:28px 0">Belum ada riwayat.</p>'}
+            `<p style="text-align:center;color:var(--text-3);padding:28px 0">${lembar ? 'Lembar ini masih bersih: belum ada catatan.' : 'Belum ada riwayat.'}</p>`}
         </div></div>`,
       didOpen: () => {
         pasangPilihKertas();
@@ -3973,7 +4046,7 @@ async function bukaDetailSantri(nisn) {
         // kembali setelah selesai — pola yang sama dengan target pembinaan.
         $('dKamar')?.addEventListener('click', () => {
           Swal.close();
-          setTimeout(async () => { await modalAturKamar(nisn, s); bukaDetailSantri(nisn); }, 220);
+          setTimeout(async () => { await modalAturKamar(nisn, s); bukaDetailSantri(nisn, opsi); }, 220);
         });
 
         // Grafik tren — hanya di layar, tidak ikut tercetak.
@@ -3982,13 +4055,16 @@ async function bukaDetailSantri(nisn) {
         // Target pembinaan: SweetAlert tidak bisa bertumpuk, jadi jendela
         // detail ditutup dulu, lalu dibuka kembali setelah selesai.
         Swal.getHtmlContainer()?.addEventListener('click', (ev) => {
+          // v2.48: pindah lembar / seluruh riwayat
+          const dl = ev.target.closest('[data-dl]');
+          if (dl) { ev.preventDefault(); return bukaLagi(dl.dataset.dl === 'semua' ? { ...opsi, semua: true } : { bulan: dl.dataset.dl }); }
           const baru = ev.target.closest('[data-goal-baru]');
           const eval2 = ev.target.closest('[data-goal-eval]');
           if (!baru && !eval2) return;
           ev.preventDefault();
           const kerja = baru ? () => modalGoalBaru(nisn) : () => modalGoalEvaluasi(eval2.dataset.goalEval);
           Swal.close();
-          setTimeout(async () => { await kerja(); bukaDetailSantri(nisn); }, 220);
+          setTimeout(async () => { await kerja(); bukaDetailSantri(nisn, opsi); }, 220);
         });
       },
       willClose: () => { try { APP.charts.trenSantri?.destroy(); } catch (e) {} }
@@ -17850,9 +17926,13 @@ const IPP_ATURAN_BAKU = Object.freeze({
  * simulasi kebijakan cukup menghimpun sekali lalu menerapkan aturan
  * berkali-kali.
  */
-function hitungUnsurIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presensi, hari = IPP_JENDELA }) {
-  const akhir = new Date(); akhir.setHours(23, 59, 59, 999);
-  const mulai = tambahHari(akhir, -(hari - 1)); mulai.setHours(0, 0, 0, 0);
+function hitungUnsurIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presensi, hari = IPP_JENDELA,
+                          mulai: mulaiIn = null, akhir: akhirIn = null, lembar = null }) {
+  // v2.48: dasbor memberi `mulai`/`akhir` = satu lembar bulan (lihat ippDariBahan).
+  // Tanpa keduanya (Laboratorium Kebijakan) jendelanya tetap `hari` terakhir.
+  const akhir = akhirIn ? new Date(akhirIn) : new Date(); akhir.setHours(23, 59, 59, 999);
+  const mulai = mulaiIn ? new Date(mulaiIn) : tambahHari(akhir, -(hari - 1)); mulai.setHours(0, 0, 0, 0);
+  if (mulaiIn) hari = Math.round((akhir - mulai) / 864e5);
   const dalam = (v) => { const d = tglDari(kunciTgl(v)); return !!d && d >= mulai && d <= akhir; };
 
   const peta = {};
@@ -17910,7 +17990,7 @@ function hitungUnsurIpp({ siswa, detail, prestasi, tahfiz, izin, pembinaan, pres
     it.alpa = it.kh ? it.kh.alpa : 0;
   });
   return {
-    daftar, mulai, akhir, hari,
+    daftar, mulai, akhir, hari, lembar,
     punyaIkatan: daftar.filter(x => x.ikatan > 0).length,
     teramati: daftar.filter(x => x.kh).length,
     hadirTerkunci: !!presensi?.terkunci
@@ -17969,7 +18049,7 @@ function terapkanAturanIpp(unsur, aturanIn) {
   return {
     daftar, maks, ikatanAktif, aturan: A,
     punyaIkatan: unsur.punyaIkatan, teramati: unsur.teramati,
-    mulai: unsur.mulai, akhir: unsur.akhir, hari: unsur.hari,
+    mulai: unsur.mulai, akhir: unsur.akhir, hari: unsur.hari, lembar: unsur.lembar || null,
     hadirTerkunci: unsur.hadirTerkunci,
     tier3, tier2, tier1
   };
@@ -18739,13 +18819,13 @@ function panelIpp(ipp, { batas = 10 } = {}) {
     <p class="sb-kaki">${ipp.hadirTerkunci ? 'Unsur-unsur ini' : 'Kelima unsur'} <b>sengaja tidak dijumlahkan</b> menjadi satu skor:
       satu angka menutupi penyebabnya, sedangkan batang yang berdampingan
       menunjukkan ikatan mana yang mengendur. Yang ditampilkan adalah <b>status</b> pada
-      jendela ${ipp.hari} hari berjalan, bukan arah perubahan. Data per santri belum
-      cukup untuk melihat tren masing-masing. ${catatanIkatan}
+      ${ipp.lembar ? `lembar ${esc(ipp.lembar)} (${ipp.hari} hari)` : `jendela ${ipp.hari} hari berjalan`}, bukan arah perubahan.
+      ${ipp.lembar ? 'Setiap bulan dihitung dari nol; bulan-bulan yang lewat dibaca pada Cermin Muhasabah di atas.' : 'Data per santri belum cukup untuk melihat tren masing-masing.'} ${catatanIkatan}
       ${catatanHadir}</p>`,
     `<span class="tag tag-berat">Tier 3: ${angka(ipp.tier3)}</span>
      <span class="tag tag-sedang">Tier 2: ${angka(ipp.tier2)}</span>
      <span class="tag tag-ok">Tier 1: ${angka(ipp.tier1)}</span>`,
-    `${ipp.hari} hari terakhir · ${tgl(kunciTgl(ipp.mulai))} – ${tgl(kunciTgl(ipp.akhir))}`);
+    `${ipp.lembar ? 'Lembar ' + ipp.lembar : ipp.hari + ' hari terakhir'} · ${tgl(kunciTgl(ipp.mulai))} – ${tgl(kunciTgl(ipp.akhir))}`);
 }
 
 /* ---------------------------------------------------------------------
@@ -18803,14 +18883,21 @@ async function bahanIpp({ siswa, detail, izin, pembinaan, gagal = [] }) {
  * (tier dari separuh data lebih berbahaya daripada tidak ada tier). Data
  * positif yang tidak terbaca → kriteria Ikatan nol dimatikan, karena
  * ketiadaan catatan yang tidak terbaca tidak boleh dibaca sebagai fakta.
- * Tanpa galat, hasilnya sama persis dengan hitungIpp().
+ *
+ * v2.48 — LEMBAR BARU: jendelanya bukan lagi 60 hari berjalan, melainkan
+ * SATU BULAN (bulan berjalan sampai hari ini, atau bulan pada pemilih
+ * periode). Poin, izin, setoran, dan pembinaan bulan lalu tidak terbawa.
+ * Ambang aturan baku tidak diubah. Bulan di luar bahan enam bulan → null.
  */
-function ippDariBahan(siswa, b) {
+function ippDariBahan(siswa, b, per = periodeRingkasan()) {
   if (b.gagal.some(g => GAGAL_INTI.includes(g))) return null;
+  if (!b.bulanKunci.includes(per.bulan)) return null;
+  const [th, bl] = per.bulan.split('-').map(Number);
   const unsur = hitungUnsurIpp({ siswa, detail: b.detail6, prestasi: b.prestasi, tahfiz: b.tahfiz,
-    izin: b.izin6, pembinaan: b.bina6, presensi: b.presensiRaw });
+    izin: b.izin6, pembinaan: b.bina6, presensi: b.presensiRaw,
+    mulai: new Date(th, bl - 1, 1), akhir: per.berjalan ? new Date() : new Date(th, bl, 0), lembar: per.label });
   const matikan = b.gagal.some(g => GAGAL_POSITIF.includes(g));
-  return terapkanAturanIpp(unsur, { hari: IPP_JENDELA, ...(matikan ? { pakaiIkatan: false } : {}) });
+  return terapkanAturanIpp(unsur, { hari: unsur.hari, ...(matikan ? { pakaiIkatan: false } : {}) });
 }
 
 /** Kalimat pemberitahuan sumber yang tidak terbaca. '' bila tidak ada. */
@@ -18842,10 +18929,11 @@ async function blokSebaran({ siswa, detail, izin, pembinaan, ipp = true, batasIp
 
   let ippHasil = null, ippHtml = '';
   if (ipp) {
-    // Jendela IPP (60 hari) berada di dalam enam bulan, jadi pemotongan
+    // Lembar IPP (satu bulan) berada di dalam enam bulan, jadi pemotongan
     // di atas tidak menghilangkan satu pun baris yang IPP butuhkan.
     ippHasil = ippDariBahan(siswa, b);
-    const catatan = kalimatGagal(b.gagal, 'ipp');
+    const catatan = kalimatGagal(b.gagal, 'ipp')
+      || (!b.bulanKunci.includes(periodeRingkasan().bulan) ? 'Indeks Peringatan hanya tersedia untuk enam bulan terakhir.' : '');
     ippHtml = ippHasil
       ? panelIpp(ippHasil, { batas: batasIpp }) + (catatan ? `<p class="sb-kaki radar-catatan">${esc(catatan)}</p>` : '')
       : kartu('Indeks Peringatan Pembinaan', kosong(catatan, 'Muat ulang halaman untuk mencoba lagi.', 'fa-triangle-exclamation'));
@@ -27775,9 +27863,15 @@ function selesaiLasso(sisaNisn = []) {
  *    Bulan yang sudah lewat dibandingkan utuh dengan utuh.
  *  · Arah perubahan memakai arahUbah() v2.32: angka kecil tidak
  *    didramatisasi (2 → 4 bukan "naik 100 %").
+ *  · LEMBAR BARU: tiap bulan dihitung dari nol — pelanggaran, poin, izin,
+ *    pembinaan, tahfiz. IPP (dan Radar yang membacanya) ikut memakai
+ *    lembar bulan itu, bukan lagi 60 hari berjalan. Bulan-bulan yang lewat
+ *    dibaca pada Cermin Muhasabah (enam lembar) dan Cermin per Santri;
+ *    rincian santri dibuka pada lembar yang sama. Poin yang tersimpan di
+ *    database TIDAK di-reset — ini cara menghitung dan menampilkan saja.
  *  · TIDAK berubah: amanah yang tertunda (mengikuti pemilih periode
- *    seperti sebelumnya), Peta Perkembangan (6 bulan), IPP & Radar
- *    (60 hari), dan Dashboard Pimpinan/BK (90 hari kalender).
+ *    seperti sebelumnya), Peta Perkembangan (6 bulan), dan analisis
+ *    90 hari kalender di Dashboard Pimpinan/BK.
  *
  *  GERAK — kosakata layar masuk (masukJudul, masukGaris, sapuan kilau,
  *  sorot kursor) di atas sistem gerak yang sudah ada:
@@ -27787,10 +27881,11 @@ function selesaiLasso(sisaNisn = []) {
  *  · koreografi penuh hanya saat TIBA (halaman dirender di balik layar
  *    muat/gerbang, atau kunjungan pertama); ia ditahan sampai penutup
  *    itu terbuka supaya tidak habis tanpa ditonton;
- *  · mode hemat & prefers-reduced-motion: angka langsung final.
+ *  · mode hemat: versi ringan (hitung naik singkat, tanpa kabur/kilau/sorot);
+ *    prefers-reduced-motion: tanpa gerak, angka langsung final.
  *  Database tidak disentuh.
  * ===================================================================== */
-APP.versi = 'rq-v2.48';
+APP.versi = 'rq-v2.48.1';   // v2.48.1: lembar baru (IPP bulanan, cermin) + gerak di mode hemat
 
 /* ---------- 1 · Periode Ringkasan ----------------------------------- */
 
@@ -27862,13 +27957,113 @@ function belahBulanIzin(rows, per) {
 }
 
 /** Potongan satu bulan dari lingkup Ringkasan (hasil lingkupDasbor). */
-function ringkasanBulan(L, per = periodeRingkasan()) {
+function ringkasanBulan(L, per = periodeRingkasan(), positif = {}) {
   return {
     per,
     detail: belahBulan(L.detailTr, 'tanggal', per),
     izin:   belahBulanIzin(L.izinSemua, per),
-    bina:   belahBulan(L.pembinaanSemua, 'tanggal_pembinaan', per)
+    bina:   belahBulan(L.pembinaanSemua, 'tanggal_pembinaan', per),
+    tahfiz:   belahBulan(positif.tahfiz || [], 'tanggal', per),
+    prestasi: belahBulan(positif.prestasi || [], 'tanggal', per)
   };
+}
+
+/* ---------- 1b · Cermin Muhasabah: lembar-lembar yang sudah lewat ---- */
+
+const labelBulan = (bulan) => { const [th, bl] = String(bulan).split('-').map(Number); return `${BULAN_ID[bl - 1] || bl} ${th}`; };
+
+/** n bulan ('yyyy-MM') yang berakhir pada `bulan`, terurut lama → baru. */
+function bulanMundur(bulan, n) {
+  const [th, bl] = String(bulan).split('-').map(Number), out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(th, bl - 1 - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
+
+/**
+ * Satu baris per bulan: { bulan, plg, poin, izin, bina, thf (halaman), prs }.
+ * Setiap bulan dihitung UTUH dan sendiri-sendiri — tidak ada yang terbawa.
+ * Dipakai Ringkasan (seluruh lingkup) dan rincian santri (satu santri;
+ * di sana poin pelanggaran ada di kolom `poin`).
+ */
+function cerminBulanan({ detail, izin, bina, tahfiz, prestasi }, bulanKunci, per = { basis: 'kejadian' }) {
+  const peta = new Map(bulanKunci.map(b => [b, { bulan: b, plg: 0, poin: 0, izin: 0, bina: 0, thf: 0, prs: 0 }]));
+  const ke = (r, kolom) => peta.get(bulanDari(kunciBaris(r, kolom, per)));
+  (detail || []).forEach(r => { const m = ke(r, 'tanggal'); if (m) { m.plg++; m.poin += Number(r.bobot_pelanggaran ?? r.poin) || 0; } });
+  (bina || []).forEach(r => { const m = ke(r, 'tanggal_pembinaan'); if (m) m.bina++; });
+  (tahfiz || []).forEach(r => { const m = ke(r, 'tanggal'); if (m) m.thf += Number(r.capaian_halaman) || 0; });
+  (prestasi || []).forEach(r => { const m = ke(r, 'tanggal'); if (m) m.prs++; });
+  // Izin: masuk setiap bulan yang disinggung rentangnya (sejalan belahBulanIzin).
+  (izin || []).forEach(z => {
+    const mulai = kunciTgl(z?.tanggal_mulai), selesai = kunciTgl(z?.tanggal_selesai) || mulai;
+    if (!mulai && !selesai) return;
+    const a = mulai || selesai, b = selesai || mulai;
+    peta.forEach(m => { if (a <= `${m.bulan}-31` && b >= `${m.bulan}-01`) m.izin++; });
+  });
+  return [...peta.values()].map(m => ({ ...m, thf: Math.round(m.thf * 10) / 10 }));
+}
+
+/**
+ * Poin (dan halaman tahfiz) tiap santri: bulan ini vs bulan lalu sampai
+ * tanggal yang sama. Hanya DUA titik waktu — ini perbandingan, bukan tren;
+ * karena itu yang ditampilkan angkanya, bukan label "membaik/memburuk".
+ */
+function cerminPerSantri(B, siswa) {
+  const peta = new Map((siswa || []).map(s => [String(s.nisn), { nisn: String(s.nisn), nama: s.nama_siswa || '-', kelas: s.kelas || '-', ini: 0, lalu: 0, thfIni: 0, thfLalu: 0 }]));
+  const tambah = (rows, kunci, nilai) => rows.forEach(r => { const it = peta.get(String(r.nisn)); if (it) it[kunci] += nilai(r); });
+  tambah(B.detail.ini, 'ini', r => Number(r.bobot_pelanggaran) || 0);
+  tambah(B.detail.lalu, 'lalu', r => Number(r.bobot_pelanggaran) || 0);
+  tambah(B.tahfiz.ini, 'thfIni', r => Number(r.capaian_halaman) || 0);
+  tambah(B.tahfiz.lalu, 'thfLalu', r => Number(r.capaian_halaman) || 0);
+  const semua = [...peta.values()];
+  const turun = semua.filter(x => x.lalu > x.ini).sort((a, b) => (b.lalu - b.ini) - (a.lalu - a.ini) || a.ini - b.ini);
+  const naik  = semua.filter(x => x.ini > x.lalu).sort((a, b) => (b.ini - b.lalu) - (a.ini - a.lalu) || b.ini - a.ini);
+  return { turun, naik, bersih: semua.filter(x => !x.ini && !x.lalu).length, tetap: semua.filter(x => x.ini === x.lalu && x.ini > 0).length, total: semua.length };
+}
+
+function kartuCermin(cermin, per) {
+  const kolom = [['plg', 'Pelanggaran'], ['poin', 'Poin'], ['izin', 'Izin'], ['bina', 'Pembinaan'], ['thf', 'Tahfiz'], ['prs', 'Apresiasi']];
+  const maks = Object.fromEntries(kolom.map(([k]) => [k, Math.max(1, ...cermin.map(m => m[k]))]));
+  const jalan = bulanIni();
+  const baris = [...cermin].reverse().map(m => {
+    const ini = m.bulan === per.bulan;
+    return `<tr class="${ini ? 'cm-ini' : ''}">
+      <td><b>${esc(labelBulan(m.bulan))}</b>${ini
+        ? `<span class="tag tag-sea">lembar ini${per.berjalan ? ` · s.d. tgl ${per.batas}` : ''}</span>`
+        : `<button type="button" class="btn-link" data-lembar="${m.bulan === jalan ? '' : m.bulan}">Buka</button>`}</td>
+      ${kolom.map(([k]) => `<td class="right"><span class="cm-sel" style="--porsi:${(m[k] / maks[k]).toFixed(3)}">${angka(m[k])}</span></td>`).join('')}
+    </tr>`;
+  }).join('');
+  return kartu('Cermin Muhasabah', `
+    <div class="tbl cm-tbl"><table>
+      <thead><tr><th>Bulan</th>${kolom.map(([, t]) => `<th class="right">${t}</th>`).join('')}</tr></thead>
+      <tbody>${baris}</tbody></table></div>
+    <p class="sb-kaki">Setiap bulan adalah lembar baru: hitungannya mulai dari nol dan tidak membawa bulan sebelumnya. Tahfiz dalam halaman.
+      ${per.berjalan ? 'Bulan berjalan belum genap, jadi wajar bila angkanya masih lebih kecil.' : ''}</p>`,
+    per.bulan !== jalan ? `<button type="button" class="btn btn-ghost btn-sm" data-lembar=""><i class="fa-solid fa-rotate-left"></i>Bulan ini</button>` : '',
+    'Enam lembar terakhir, tiap bulan dihitung sendiri.');
+}
+
+function kartuCerminSantri(c, per) {
+  const hal = (v) => angka(Math.round(v * 10) / 10);
+  const baris = (x) => `<button type="button" class="cs-baris" data-detail="${esc(x.nisn)}">
+      <span class="cs-nm"><b>${esc(x.nama)}</b><small>${esc(x.kelas)}${x.thfIni || x.thfLalu ? ` · tahfiz ${hal(x.thfLalu)} → ${hal(x.thfIni)} hlm` : ''}</small></span>
+      <span class="cs-angka">${angka(x.lalu)} <i class="fa-solid fa-arrow-right" aria-hidden="true"></i> <b>${angka(x.ini)}</b><small>poin</small></span>
+    </button>`;
+  const kolom = (judul, kelas, ikon, daftar, kosongTeks) => `<div class="cs-kolom ${kelas}">
+      <p class="cs-judul"><i class="fa-solid ${ikon}" aria-hidden="true"></i>${judul}<span>${angka(daftar.length)} santri</span></p>
+      ${daftar.slice(0, 5).map(baris).join('') || `<p class="cs-kosong">${kosongTeks}</p>`}
+    </div>`;
+  return kartu('Cermin per Santri', `<div class="card-body">
+      <div class="cs">
+        ${kolom('Poin turun', 'turun', 'fa-arrow-trend-down', c.turun, 'Belum ada santri yang poinnya turun.')}
+        ${kolom('Poin naik', 'naik', 'fa-arrow-trend-up', c.naik, 'Tidak ada santri yang poinnya naik.')}
+      </div>
+      <p class="sb-kaki">${angka(c.bersih)} dari ${angka(c.total)} santri tanpa catatan pelanggaran pada kedua rentang${c.tetap ? `, ${angka(c.tetap)} santri poinnya sama` : ''}.
+        Ini perbandingan dua bulan, bukan tren. Ketuk nama untuk membuka rincian lembarnya.</p>
+    </div>`, '', `Poin ${per.label} dibanding ${per.frasaLalu}.`);
 }
 
 /* ---------- 2 · Lencana tren & baris periode ------------------------ */
@@ -27876,7 +28071,8 @@ function ringkasanBulan(L, per = periodeRingkasan()) {
 /**
  * Lencana kecil arah perubahan terhadap bulan lalu.
  *   o.frasa  = rentang pembanding ("1–22 Agustus") untuk keterangan
- *   o.netral = metrik yang naiknya bukan kabar buruk (izin, pembinaan)
+ *   o.netral   = metrik yang naiknya bukan kabar buruk (izin, pembinaan)
+ *   o.naikBaik = metrik yang naiknya kabar baik (tahfiz)
  */
 function lencanaBanding(kini, lalu, o = {}) {
   const a = arahUbah(kini, lalu);
@@ -27884,7 +28080,9 @@ function lencanaBanding(kini, lalu, o = {}) {
   const teks = a.nihil ? 'dari nol' : arah === 'tetap' ? 'stabil' : a.teks;
   const ikon = arah === 'naik' ? 'fa-arrow-trend-up' : arah === 'turun' ? 'fa-arrow-trend-down' : 'fa-minus';
   const ket = `${angka(kini)} dibanding ${angka(lalu)} pada ${o.frasa || 'bulan lalu'}`;
-  return `<span class="rb-tren" data-nada="${o.netral ? 'netral' : a.nada}" data-arah="${arah}" title="${esc(ket)}">`
+  const balik = { baik: 'waspada', waspada: 'baik', netral: 'netral' };
+  const nada = o.netral ? 'netral' : o.naikBaik ? balik[a.nada] : a.nada;
+  return `<span class="rb-tren" data-nada="${nada}" data-arah="${arah}" title="${esc(ket)}">`
     + `<i class="fa-solid ${ikon}" aria-hidden="true"></i>${esc(teks)}<span class="sr-only"> (${esc(ket)})</span></span>`;
 }
 
@@ -27979,17 +28177,20 @@ window.addEventListener('beforeprint', tuntaskanAngka);
 
 /**
  * Dipanggil viewDashboard() dan viewPimpinan() tepat sesudah isi dipasang.
- * Tanpa gerak (hemat / dikurangi) fungsi ini hanya mencatat nilai kartu.
+ * Bila gerak dikurangi (setelan sistem) fungsi ini hanya mencatat nilai kartu.
  */
 function hiasRingkasan() {
   const akar = $('viewRoot'); if (!akar) return;
   const gen = ++RB.gen;
-  const segar = !!APP.segarSama, gerak = bolehGerak(), tertutup = layarTertutup();
+  // Mode hemat aktif otomatis di perangkat ≤ 4 inti dan layar sentuh — mayoritas
+  // pengguna. Di sana gerak tetap ADA, hanya versi ringannya (tanpa kabur, kilau,
+  // sorot). Yang mematikan gerak sepenuhnya hanya prefers-reduced-motion.
+  const segar = !!APP.segarSama, hemat = modeHemat(), gerak = !MULUS.kurangGerak, tertutup = layarTertutup();
   const lama = segar ? RB.nilai : {};
   const butir = bacaKartuAngka(akar);
   RB.nilai = Object.fromEntries(butir.map(b => [b.kunci, b.akhir]));
 
-  const sambut = gerak && !segar && APP.view === 'dashboard' && (tertutup || !RB.sudahSambut);
+  const sambut = gerak && !hemat && !segar && APP.view === 'dashboard' && (tertutup || !RB.sudahSambut);
   if (sambut) RB.sudahSambut = true;
   akar.classList.toggle('rb-sambut', sambut);
   akar.classList.toggle('rb-gulir', gerak);
@@ -28000,7 +28201,7 @@ function hiasRingkasan() {
 
   const jalan = RB.jalan = butir.filter(b => { b.awal = lama[b.kunci] ?? 0; return b.awal !== b.akhir; });
   jalan.forEach(b => { b.el.textContent = angka(b.awal); });
-  const mulai = () => { akar.classList.remove('rb-tahan'); amatiKartuAngka(akar, jalan, sambut ? 1100 : 520, gen); };
+  const mulai = () => { akar.classList.remove('rb-tahan'); amatiKartuAngka(akar, jalan, sambut ? 1100 : hemat ? 700 : 520, gen); };
   if (!tertutup) return mulai();
 
   // Dirender di balik layar muat/gerbang: tahan sampai penutupnya terbuka.
