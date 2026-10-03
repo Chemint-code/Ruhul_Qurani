@@ -53,7 +53,9 @@ async function buka(browser, url, o = {}) {
     try { localStorage.setItem('rq-efek-pilih', a.hemat ? 'hemat' : 'penuh'); localStorage.setItem('rq.tur.v1.u-admin', '{"t":0}');
           localStorage.setItem('rq-singgah', 'mati'); localStorage.setItem('rq_lembar_umum', '2026-10'); } catch (e) {}
     window.__PERAN = a.peran || 'Admin';
-  }, { hemat, peran: o.peran });
+    try { if (a.tokoh) localStorage.setItem('rq-tokoh', a.tokoh); } catch (e) {}   // v2.53: 'meja' = pertunjukan bertokoh lama
+    try { window.__GETAR = []; navigator.vibrate = (p) => { window.__GETAR.push(p); return true; }; } catch (e) {}
+  }, { hemat, peran: o.peran, tokoh: o.tokoh || process.env.RQTOKOH || '' });
   await page.goto(url);
   await page.waitForFunction(() => typeof APP !== 'undefined' && APP.profil && document.querySelector('#viewRoot .stats'), null, { timeout: 25000 });
   return { ctx, page };

@@ -29795,3 +29795,824 @@ window.RQ_MEJA = {
   };
   window.addEventListener('beforeprint', () => lepasMeja());
 })();
+
+
+/* =====================================================================
+ * v2.53 — BENANG EMAS · TOKOH DI GERBANG · DATA YANG BERAKSI · CAP
+ * ---------------------------------------------------------------------
+ *  Dasar: claude/evaluasi-motion-2026-10-03.md. Pemilik memilih usulan
+ *  1, 2, 3, dan 5 (3 Okt 2026): "maksimalkan kreativitasmu".
+ *
+ *  1  BENANG EMAS — satu-satunya protagonis gerak: satu garis kuningan
+ *     yang hanya muncul di empat tempat bermakna.
+ *       a. Jejak halaman  : benang di bawah bilah atas berjalan selama
+ *                           halaman dimuat, lalu tuntas (penunjuk muat).
+ *       b. Garis bawah    : frasa terpenting vonis Pimpinan; santri
+ *                           pertama yang perlu dipanggil di Meja BK.
+ *       c. Garis rujukan  : rata-rata angkatan dijahit dari atas; alas
+ *                           grafik Ringkasan digelar sebelum data tumbuh.
+ *       d. Jahitan sebab  : asal → akibat (cap → tanda terima; kartu
+ *                           santri → lajur "Dipanggil").
+ *  2  TOKOH DI GERBANG — Si Peci & Si Payung hanya di layar masuk, tur
+ *     sambut, keadaan kosong (pekerjaan tuntas), dan perayaan. Ringkasan,
+ *     Pimpinan, Meja BK, tabel (10 besar), dan bilah profil bawaannya
+ *     tanpa tokoh. Sakelar di Bantuan ("Si Peci & Si Payung tampil di
+ *     meja kerja") mengembalikan semua pertunjukan lama (panggung.js,
+ *     meja.js, monster) tanpa menyentuh kodenya.
+ *  3  DATA YANG BERAKSI — Mizan ≤ 1,6 dtk dan tidak pernah menahan data
+ *     yang sedang terlihat: vonis naik kata demi kata, pemberat menetes,
+ *     angka berhitung, balok jatuh berpegas ke sudut sebenarnya, benang
+ *     menggaris bawahi subjek. Grafik Ringkasan tumbuh saat terlihat.
+ *  5  CAP "TERCATAT" — tanda terima dicap: stempel tinta ditekan di
+ *     titik asal aksi (300 ms, getar 12 ms), lalu dijahit benang ke
+ *     kartu tanda terima. Kata & tinta mengikuti jenis catatan.
+ *
+ *  Semua PEMBUNGKUS; fungsi lama tidak ditimpa. Database tidak disentuh.
+ * ===================================================================== */
+APP.versi = 'rq-v2.53';
+
+/** Gerak data boleh jalan: bukan "kurangi gerak". Mode hemat TETAP boleh (semua di compositor & singkat). */
+const pentasBoleh = () => !MULUS.kurangGerak && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+const K53 = {
+  mantap: 'cubic-bezier(.2,.9,.1,1)',      // masuk tegas tanpa lenting (kata, kartu)
+  tarik:  'cubic-bezier(.65,0,.35,1)',     // benang ditarik: pelan-cepat-pelan
+  jatuh:  'cubic-bezier(.55,0,1,.45)',     // gravitasi
+  lenting: () => Gerak.kurva('lenting'),
+  lembut:  () => Gerak.kurva('lembut')
+};
+const klem53 = (v, a, b) => Math.max(a, Math.min(b, v));
+const NS_SVG = 'http://www.w3.org/2000/svg';
+
+/* ---------- Panggung bersih: tunggu layar muat, tirai, dan gerbang ----- */
+function tungguPanggungBersih(fn, batasMs = 15000) {
+  const t0 = performance.now();
+  const bersih = () => !document.hidden && !(typeof layarTertutup === 'function' && layarTertutup())
+    && !(TIRAI_NY.el && !TIRAI_NY.el.classList.contains('tutup'));
+  const cek = () => {
+    if (bersih() || performance.now() - t0 > batasMs) return fn();
+    setTimeout(cek, 120);
+  };
+  cek();
+}
+
+/* =====================================================================
+ * 1 · BENANG EMAS
+ * ===================================================================== */
+const Benang = {
+  /* a · Jejak halaman ------------------------------------------------- */
+  halaman() {
+    const tb = document.querySelector('.topbar'); if (!tb) return null;
+    let b = tb.querySelector(':scope > .benang-halaman');
+    if (!b) { b = document.createElement('i'); b.className = 'benang-halaman'; b.setAttribute('aria-hidden', 'true'); tb.appendChild(b); }
+    return b;
+  },
+  mulai() {
+    if (!pentasBoleh() || document.hidden) return;
+    const b = this.halaman(); if (!b) return;
+    b.getAnimations().forEach(a => a.cancel());
+    b.animate([{ transform: 'scaleX(0)', opacity: 1 }, { transform: 'scaleX(.22)', opacity: 1, offset: .18 }, { transform: 'scaleX(.8)', opacity: 1 }],
+      { duration: 1800, easing: 'cubic-bezier(.1,.7,.2,1)', fill: 'forwards' });
+  },
+  tuntas() {
+    const b = document.querySelector('.topbar > .benang-halaman'); if (!b) return;
+    let s = 0;
+    try { s = new DOMMatrixReadOnly(getComputedStyle(b).transform).a; } catch (e) {}
+    b.getAnimations().forEach(a => a.cancel());
+    if (!pentasBoleh()) return;
+    b.animate([{ transform: `scaleX(${s || 0})`, opacity: 1 }, { transform: 'scaleX(1)', opacity: 1, offset: .4 }, { transform: 'scaleX(1)', opacity: 0 }],
+      { duration: 680, easing: 'cubic-bezier(.3,.7,.2,1)', fill: 'forwards' });
+    const r = document.querySelector('#pageEyebrow .rule');
+    if (r) r.animate([{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], { duration: 520, delay: 120, easing: K53.tarik, fill: 'backwards' });
+  },
+
+  /* b · Garis bawah ---------------------------------------------------- */
+  garisBawah(sorot, { tunda = 0, statis = false } = {}) {
+    if (!sorot || !sorot.isConnected) return Promise.resolve();
+    // Simpul benang dibuat sekali (saat halaman digambar); geraknya kemudian hanya menganimasikan simpul yang sudah ada.
+    sorot.classList.add('benang-sorot');
+    let u = sorot.querySelector(':scope > .benang-u');
+    if (!u) { u = document.createElement('i'); u.className = 'benang-u'; u.setAttribute('aria-hidden', 'true'); sorot.appendChild(u); }
+    let k = sorot.querySelector(':scope > .benang-kilau');
+    if (!k) { k = document.createElement('i'); k.className = 'benang-kilau'; k.setAttribute('aria-hidden', 'true'); sorot.appendChild(k); }
+    if (statis || !pentasBoleh()) return Promise.resolve();
+    const a = u.animate([{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], { duration: 480, delay: tunda, easing: K53.tarik, fill: 'backwards' });
+    const w = sorot.offsetWidth;
+    k.animate([{ transform: 'translateX(-10px)', opacity: 0 }, { opacity: 1, offset: .12 }, { opacity: 1, offset: .8 }, { transform: `translateX(${w}px)`, opacity: 0 }],
+      { duration: 480, delay: tunda, easing: K53.tarik, fill: 'both' });
+    return a.finished.catch(() => {});
+  },
+
+  /* d · Jahitan sebab → akibat (koordinat layar) ---------------------- */
+  jahit(dari, ke, { durasi = 520, tahan = 240 } = {}) {
+    if (!pentasBoleh() || !dari || !ke || document.hidden) return null;
+    const dx = ke.x - dari.x, dy = ke.y - dari.y, jarak = Math.hypot(dx, dy);
+    if (jarak < 16) return null;
+    // Titik kendali tegak lurus lintasan, selalu melengkung ke atas (seperti benang yang ditarik).
+    let nx = -dy / jarak, ny = dx / jarak;
+    if (ny > 0) { nx = -nx; ny = -ny; }
+    const k = Math.min(150, jarak * .24);
+    const cx = (dari.x + ke.x) / 2 + nx * k, cy = (dari.y + ke.y) / 2 + ny * k;
+    const f = (v) => v.toFixed(1);
+    const d = `M${f(dari.x)} ${f(dari.y)} Q${f(cx)} ${f(cy)} ${f(ke.x)} ${f(ke.y)}`;
+    const svg = document.createElementNS(NS_SVG, 'svg');
+    svg.setAttribute('class', 'benang-jahit');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.innerHTML = `<path class="bj-cahaya" d="${d}" pathLength="1"/><path class="bj-garis" d="${d}" pathLength="1"/>
+      <circle class="bj-kepala" r="3.2" cx="${f(dari.x)}" cy="${f(dari.y)}"/>`;
+    document.body.appendChild(svg);
+    const opsi = { duration: durasi, easing: K53.tarik, fill: 'forwards' };
+    svg.querySelectorAll('.bj-garis, .bj-cahaya').forEach(p => p.animate([{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], opsi));
+    // Kepala benang menyusuri lintasan yang sama (kurva Bézier kuadrat, dihitung ke keyframe).
+    const kepala = svg.querySelector('.bj-kepala');
+    const titik = [];
+    for (let i = 0; i <= 16; i++) {
+      const t = i / 16, a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
+      titik.push({ transform: `translate(${f(a * dari.x + b * cx + c * ke.x - dari.x)}px, ${f(a * dari.y + b * cy + c * ke.y - dari.y)}px)` });
+    }
+    kepala.animate(titik, opsi);
+    const pudar = svg.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 420, delay: durasi + tahan, fill: 'forwards' });
+    pudar.finished.then(() => svg.remove(), () => svg.remove());
+    setTimeout(() => svg.remove(), durasi + tahan + 1200);   // cadangan
+    return svg;
+  }
+};
+
+/* Kata naik dari balik garis (kinetic type) -------------------------- */
+function pecahKata(el, sorot = '') {
+  if (!el || el.dataset.kata === '1') return;
+  const teks = el.textContent.replace(/\s+/g, ' ').trim();
+  if (!teks) return;
+  const kata = (s) => s.split(' ').filter(Boolean).map(w => `<span class="kk"><span class="kk-i">${esc(w)}</span></span>`).join(' ');
+  const i = sorot ? teks.indexOf(sorot) : -1;
+  let html;
+  if (i >= 0) {
+    const pre = teks.slice(0, i).trim(), post = teks.slice(i + sorot.length);
+    html = (pre ? kata(pre) + ' ' : '') + `<span class="benang-sorot">${kata(sorot)}</span>` + (/^\s/.test(post) ? ' ' : '') + kata(post.trim());
+  } else html = kata(teks);
+  el.innerHTML = html;
+  el.dataset.kata = '1';
+}
+function naikKata(el, { tunda = 0, jeda = 30, durasi = 640 } = {}) {
+  if (!el || !pentasBoleh()) return Promise.resolve();
+  const k = [...el.querySelectorAll('.kk-i')];
+  if (!k.length) return Promise.resolve();
+  let akhir = null;
+  k.forEach((w, i) => {
+    akhir = w.animate([
+      { transform: 'translateY(118%) rotate(5deg)', opacity: 0 },
+      { opacity: 1, offset: .35 },
+      { transform: 'none', opacity: 1 }
+    ], { duration: durasi, delay: tunda + i * jeda, easing: K53.mantap, fill: 'backwards' });
+  });
+  return akhir.finished.catch(() => {});
+}
+
+/* Angka berhitung — mempertahankan format Indonesia ("1.100", "48,3%"). */
+function hitungNaik(el, { durasi = 800, tunda = 0 } = {}) {
+  if (!el) return;
+  const asli = el.textContent;
+  const m = asli.match(/^(\D*?)(\d{1,3}(?:\.\d{3})*|\d+)(?:,(\d+))?(\D*)$/);
+  if (!m || !pentasBoleh()) return;
+  const des = m[3] ? m[3].length : 0;
+  const nilai = Number(m[2].replace(/\./g, '') + (des ? '.' + m[3] : ''));
+  if (!Number.isFinite(nilai) || nilai === 0) return;
+  const fmt = (v) => m[1] + v.toLocaleString('id-ID', { minimumFractionDigits: des, maximumFractionDigits: des }) + m[4];
+  const t0 = performance.now() + tunda;
+  el.textContent = fmt(0);
+  const langkah = (t) => {
+    if (!el.isConnected) return;
+    const p = klem53((t - t0) / durasi, 0, 1);
+    const e = 1 - Math.pow(2, -10 * p);
+    if (p >= 1) { el.textContent = asli; return; }
+    el.textContent = fmt(Math.round(nilai * e * Math.pow(10, des)) / Math.pow(10, des));
+    requestAnimationFrame(langkah);
+  };
+  requestAnimationFrame(langkah);
+  setTimeout(() => { if (el.isConnected) el.textContent = asli; }, tunda + durasi + 400);   // cadangan: angka asli pasti kembali
+}
+
+/** Saat elemen terlihat ≥ 25 % → fn. Bila belum terlihat, siaga() menyiapkan keadaan awal di luar layar. */
+const PM = { gen: 0, amatan: [], raf: 0 };
+function saatTampak(el, fn, { siaga = null, lepas = null, batasMs = 25000, ambang = .25 } = {}) {
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const lihat = Math.min(r.bottom, innerHeight) - Math.max(r.top, 0);
+  const tampak = r.width > 0 && r.height > 0 && lihat >= Math.min(r.height * ambang, innerHeight * .5);
+  if (tampak || typeof IntersectionObserver !== 'function') return fn();
+  if (siaga) try { siaga(); } catch (e) {}
+  const gen = PM.gen;
+  let selesai = false;
+  const io = new IntersectionObserver((en) => {
+    if (selesai || !en.some(e => e.isIntersecting)) return;
+    selesai = true; io.disconnect();
+    if (gen === PM.gen) fn();
+  }, { threshold: ambang });
+  io.observe(el);
+  PM.amatan.push(io);
+  setTimeout(() => { if (!selesai) { selesai = true; io.disconnect(); if (lepas) lepas(); } }, batasMs);
+}
+
+/* =====================================================================
+ * 2 · TOKOH DI GERBANG
+ * ===================================================================== */
+const TOKOH = { KUNCI: 'rq-tokoh' };
+const tokohDiMeja = () => bacaLS(TOKOH.KUNCI) === 'meja';
+function tandaiTokoh() { document.documentElement.dataset.tokoh = tokohDiMeja() ? 'meja' : 'gerbang'; }
+tandaiTokoh();
+
+function lepasKerubung() {
+  TOP_MONSTER.pola = null; TOP_MONSTER.kunci = ''; TOP_MONSTER.peta = new Map();
+  document.querySelectorAll('.nama-dikerubungi').forEach(w => w.replaceWith(document.createTextNode(w.dataset.nama || '')));
+}
+
+(function bungkusTokohDiGerbang() {
+  const penghuni = pasangPenghuniGrafik;
+  pasangPenghuniGrafik = function () { if (!tokohDiMeja()) return; return penghuni.apply(this, arguments); };
+  const tahan = tahanGrafik;
+  tahanGrafik = function () { if (!tokohDiMeja()) return false; return tahan.apply(this, arguments); };
+  const sapa = monsterSapaan;
+  monsterSapaan = function () {
+    if (!tokohDiMeja()) {
+      document.querySelectorAll('#viewRoot .sapa .mon-hinggap, #viewRoot .sapa .sapa-mon-jalan').forEach(el => el.remove());
+      document.querySelectorAll('#viewRoot .sapa .amanah.digoda').forEach(b => b.classList.remove('digoda'));
+      return;
+    }
+    return sapa.apply(this, arguments);
+  };
+  const bilah = monsterBilahProfil;
+  monsterBilahProfil = function () {
+    if (!tokohDiMeja()) { const g = $('pbarMon'); if (g) g.hidden = true; return; }
+    return bilah.apply(this, arguments);
+  };
+  const top = segarkanTopMonster;
+  segarkanTopMonster = function () {
+    if (!tokohDiMeja()) { lepasKerubung(); return Promise.resolve(); }
+    return top.apply(this, arguments);
+  };
+})();
+
+/** Tokoh hadir saat pekerjaan TUNTAS (keadaan kosong) — satu-satunya tempat mereka di meja kerja. */
+function htmlTokohKosong(siapa = 'payung') {
+  try {
+    const svg = siapa === 'peci' ? svgSiPeci() : svgSiPayung();
+    return `<span class="lp-aktor tokoh-kosong lp-si-${siapa}" data-ekspresi="senang" aria-hidden="true">${svg}</span>`;
+  } catch (e) { return ''; }
+}
+function pasangTokohKosong(wadah, siapa, posisi = 'afterbegin') {
+  if (!wadah || wadah.querySelector('.tokoh-kosong')) return null;
+  wadah.insertAdjacentHTML(posisi, htmlTokohKosong(siapa));
+  const t = wadah.querySelector('.tokoh-kosong');
+  if (t && pentasBoleh()) t.animate([{ transform: 'translateY(10px) scale(.92)', opacity: 0 }, { transform: 'none', opacity: 1 }],
+    { duration: 520, delay: 260, easing: K53.lenting(), fill: 'backwards' });
+  return t;
+}
+
+/* =====================================================================
+ * 3a · RINGKASAN — PENTAS DATA (pengganti panggung bertokoh)
+ *  Memakai penahan v2.51 (grafik ditahan di dasar, sumbu final) tetapi
+ *  tanpa aktor: grafik yang terlihat tumbuh sendiri di atas benang
+ *  alasnya, berurutan sesuai letaknya. Grafik di luar layar menunggu
+ *  sampai digulir; cetak & pindah halaman melepas semuanya utuh.
+ * ===================================================================== */
+function benangAlas(it) {
+  const ch = it.chart;
+  if (!ch || it.mode === 'putar' || !ch.chartArea || !pentasBoleh()) return 0;
+  // Dipasang di <body> (koordinat halaman), BUKAN di #viewRoot: simpul baru di #viewRoot di luar jendela
+  // pindah halaman langsung dituntaskan animasinya oleh penjaga "segar diam" v2.48.
+  const a = ch.chartArea, rk = ch.canvas.getBoundingClientRect();
+  const datar = ch.options.indexAxis !== 'y';
+  const g = document.createElement('i');
+  g.className = 'benang-alas' + (datar ? '' : ' tegak');
+  g.setAttribute('aria-hidden', 'true');
+  const x = rk.left + scrollX, y = rk.top + scrollY;
+  Object.assign(g.style, datar
+    ? { left: `${x + a.left}px`, top: `${y + a.bottom - 1}px`, width: `${a.right - a.left}px`, height: '2px' }
+    : { left: `${x + a.left - 1}px`, top: `${y + a.top}px`, width: '2px', height: `${a.bottom - a.top}px` });
+  document.body.appendChild(g);
+  g.animate([{ transform: datar ? 'scaleX(0)' : 'scaleY(0)' }, { transform: 'none' }], { duration: 380, easing: K53.tarik, fill: 'backwards' });
+  g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 700, delay: 1300, fill: 'forwards' }).finished.then(() => g.remove(), () => g.remove());
+  setTimeout(() => g.remove(), 3200);
+  return 220;
+}
+
+const PENTAS = {
+  io: null, antre: [], t: 0,
+  daftar(it) {
+    if (!it || it.mati || it.status === 'selesai') return;
+    if (it.tabir) { it.tabir.remove(); it.tabir = null; }
+    if (!pentasBoleh() || !it.chart) return tuntasPanggung(it);
+    if (it.diamati) return;
+    it.diamati = true;
+    if (!this.io) this.io = new IntersectionObserver((en) => en.forEach(e => {
+      if (!e.isIntersecting) return;
+      this.io.unobserve(e.target);
+      const x = e.target.__pentas; if (x) { e.target.__pentas = null; this.jadwal(x); }
+    }), { threshold: .2, rootMargin: '0px 0px -8% 0px' });
+    it.chart.canvas.__pentas = it;
+    this.io.observe(it.chart.canvas);
+  },
+  jadwal(it) { this.antre.push(it); if (!this.t) this.t = setTimeout(() => this.jalan(), 40); },
+  jalan() {
+    this.t = 0;
+    const daftar = this.antre.splice(0).filter(it => !it.mati && it.status !== 'selesai' && it.chart && it.chart.canvas.isConnected);
+    const letak = new Map(daftar.map(it => [it, it.chart.canvas.getBoundingClientRect()]));
+    daftar.sort((a, b) => (Math.round(letak.get(a).top / 40) - Math.round(letak.get(b).top / 40)) || (letak.get(a).left - letak.get(b).left));
+    tungguPanggungBersih(() => daftar.forEach((it, i) => setTimeout(() => this.tumbuh(it), i * 150)));
+  },
+  tumbuh(it) {
+    if (it.mati || it.status === 'selesai' || !it.chart) return;
+    const durasi = modeHemat() ? 640 : 920;
+    const tunda = benangAlas(it);
+    setTimeout(() => {
+      if (it.mati || it.status === 'selesai') return;
+      it.status = 'tumbuh';
+      try { tahapPanggung(it, 1, durasi, it.mode === 'putar' ? 'easeOutCubic' : 'easeOutQuart'); } catch (e) {}
+      setTimeout(() => tuntasPanggung(it), durasi + 80);
+    }, tunda);
+  },
+  hentikan() {
+    if (this.io) this.io.disconnect();
+    this.io = null; clearTimeout(this.t); this.t = 0; this.antre = [];
+  }
+};
+
+(function bungkusPanggungGerbang() {
+  const asli = muatPanggung;
+  muatPanggung = function () {
+    if (tokohDiMeja()) {
+      if (window.RQPanggung === PENTAS) window.RQPanggung = PGR.asli || undefined;
+      return asli.apply(this, arguments);
+    }
+    if (window.RQPanggung && window.RQPanggung !== PENTAS) PGR.asli = window.RQPanggung;
+    window.RQPanggung = PENTAS;
+    clearTimeout(PGR.tCek);
+    PGR.items.forEach(it => it.chart && PENTAS.daftar(it));
+  };
+})();
+
+/* =====================================================================
+ * 3b · MEJA PIMPINAN — MIZAN, DATA YANG BERAKSI (≤ 1,6 dtk)
+ * ===================================================================== */
+function frasaSorotVonis(M) {
+  const k = M && M.keputusan && M.keputusan[0]; if (!k) return '';
+  return ({ angkatan: k.subjek, pembinaan: 'belum dituntaskan', kebaikan: 'belum banyak tercatat', tren: 'Kenaikannya', berat: 'Kasus berat' })[k.kode] || '';
+}
+
+/** Vonis & judul meja dipecah per kata (sekali per gambar). Garis bawah selalu ada; geraknya hanya saat pentas. */
+function siapkanKataMeja(jenis) {
+  if (jenis === 'mizan') {
+    const v = document.querySelector('.mz-vonis');
+    pecahKata(v, frasaSorotVonis(MZ.data));
+    Benang.garisBawah(v && v.querySelector('.benang-sorot'), { statis: true });
+    const ok = document.querySelector('#mzKeputusan .mz-dec.ok');
+    if (ok) pasangTokohKosong(ok, 'peci');
+    siapkanGema(RQ_MEJA.mizan.svg());
+  } else {
+    pecahKata(document.querySelector('.mj-atas h2'));
+  }
+}
+
+function siagaTimbangan() {
+  const svg = RQ_MEJA.mizan.svg(); if (!svg) return;
+  aturMizan(svg, 0);
+  svg.querySelectorAll('.mz-nilai').forEach(t => { t.textContent = '0'; });
+  $('mzKartu')?.classList.add('mz-siaga');
+}
+function lepasSiagaTimbangan() {
+  $('mzKartu')?.classList.remove('mz-siaga');
+  lepasMeja('mizan');
+}
+
+/** Pegas teredam (ζ ≈ 0,45; periode ±640 ms): 0 → 1 dengan sedikit lentingan. */
+function pegas53(t, periode = 560, z = .45) {
+  if (t <= 0) return 0;
+  const w0 = 2 * Math.PI / periode, wd = w0 * Math.sqrt(1 - z * z);
+  return 1 - Math.exp(-z * w0 * t) * (Math.cos(wd * t) + (z * w0 / wd) * Math.sin(wd * t));
+}
+
+function gerakTimbangan(gen) {
+  const svg = RQ_MEJA.mizan.svg(), kartu = $('mzKartu');
+  if (!svg || !kartu) return;
+  const akhir = sudutMizan(Number(svg.dataset.kiri), Number(svg.dataset.kanan));
+  kartu.classList.remove('mz-siaga');
+  isiPiringMizan(svg, 'kiri', 1); isiPiringMizan(svg, 'kanan', 1);      // angka & pemberat ASLI sudah di DOM
+  aturMizan(svg, 0);
+
+  // 1 · Pemberat menetes, selang-seling kiri–kanan (gravitasi, lalu memantul kecil).
+  const kiri = [...svg.querySelectorAll('.mz-pan-kiri .mz-w')], kanan = [...svg.querySelectorAll('.mz-pan-kanan .mz-w')];
+  const urut = [];
+  for (let i = 0; i < Math.max(kiri.length, kanan.length); i++) { if (kiri[i]) urut.push(kiri[i]); if (kanan[i]) urut.push(kanan[i]); }
+  urut.forEach((w, i) => w.animate([
+    { translate: '0 -40px', opacity: 0, easing: K53.jatuh },
+    { translate: '0 0', opacity: 1, offset: .62, easing: 'cubic-bezier(0,0,.3,1)' },
+    { translate: '0 -4px', offset: .8, easing: 'cubic-bezier(.5,0,1,.5)' },
+    { translate: '0 0', opacity: 1 }
+  ], { duration: 460, delay: 40 + i * 32, fill: 'backwards' }));
+
+  // 2 · Angka berhitung.
+  svg.querySelectorAll('.mz-nilai').forEach(t => hitungNaik(t, { durasi: 900, tunda: 60 }));
+
+  // 3 · Balok jatuh berpegas ke sudut sebenarnya; piringan tetap tegak.
+  const t0 = performance.now() + 100, SELESAI = 880;
+  cancelAnimationFrame(PM.raf);
+  const langkah = (now) => {
+    if (gen !== PM.gen || !svg.isConnected) return;
+    const t = now - t0;
+    if (t >= SELESAI) { aturMizan(svg, akhir); gemaPoros(svg); return; }
+    aturMizan(svg, Math.round(akhir * pegas53(t) * 100) / 100);
+    PM.raf = requestAnimationFrame(langkah);
+  };
+  PM.raf = requestAnimationFrame(langkah);
+  setTimeout(() => { if (svg.isConnected && Number(svg.dataset.sudut) !== akhir && gen !== PM.gen) aturMizan(svg, akhir); }, SELESAI + 600);
+
+  // 4 · Kalimat timbangan menyusul setelah balok tenang.
+  const cap = $('mzCap');
+  if (cap) cap.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 380, delay: SELESAI - 120, easing: K53.mantap, fill: 'backwards' });
+}
+
+/** Lingkar gema disiapkan bersama halaman (simpulnya sudah ada sebelum gerak). */
+function siapkanGema(svg) {
+  if (!svg || svg.querySelector('.mz-gema')) return;
+  const { PX, PY } = MIZAN;
+  const c = document.createElementNS(NS_SVG, 'circle');
+  c.setAttribute('class', 'mz-gema'); c.setAttribute('cx', PX); c.setAttribute('cy', PY); c.setAttribute('r', '7');
+  svg.insertBefore(c, svg.querySelector('.mz-poros'));
+}
+/** Saat balok tenang: satu gema kuningan dari poros. */
+function gemaPoros(svg) {
+  if (!pentasBoleh() || !svg) return;
+  siapkanGema(svg);
+  svg.querySelector('.mz-gema').animate([{ transform: 'scale(1)', opacity: .75 }, { transform: 'scale(3.4)', opacity: 0 }], { duration: 440, easing: 'cubic-bezier(.2,.8,.2,1)' });
+}
+
+function gerakVital() {
+  document.querySelectorAll('.mz-vital').forEach((v, i) => {
+    v.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 480, delay: 80 + i * 60, easing: K53.mantap, fill: 'backwards' });
+    hitungNaik(v.querySelector('[data-mz-angka]'), { durasi: 820, tunda: 120 + i * 60 });
+  });
+  document.querySelectorAll('#mzKeputusan .mz-lbl, #mzKeputusan .mz-dec').forEach((d, i) =>
+    d.animate([{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: 520, delay: 260 + i * 70, easing: K53.mantap, fill: 'backwards' }));
+}
+
+function gerakAngkatan() {
+  const baris = [...document.querySelectorAll('#mzAngkatan .mz-ang')];
+  baris.forEach((b, i) => {
+    const i_ = b.querySelector('.mz-ang-tr i'), tr = b.querySelector('.mz-ang-tr');
+    if (i_) i_.animate([{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], { duration: 680, delay: i * 55, easing: K53.lembut(), fill: 'backwards' });
+    const n = b.querySelector('b');
+    if (n) n.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, delay: 260 + i * 55, fill: 'backwards' });
+    // Garis rata-rata dijahit dari atas ke bawah, baris demi baris — satu benang utuh.
+    try {
+      if (tr) tr.animate([{ transform: 'scaleY(0)', opacity: 1 }, { transform: 'scaleY(1)', opacity: 1 }],
+        { pseudoElement: '::after', duration: 130, delay: 420 + i * 110, easing: 'linear', fill: 'backwards' });
+    } catch (e) {}
+  });
+  const hi = document.querySelector('#mzAngkatan .mz-ang.hi');
+  if (hi) setTimeout(() => { if (hi.isConnected) RQ_MEJA.mizan.sorot(hi); }, 520 + baris.length * 110);
+}
+
+function pentasMizan() {
+  const gen = ++PM.gen;
+  // Keadaan awal dipasang SEKETIKA (sinkron) — bila tirai muat masih menutup, gerak menunggu di baliknya.
+  const surat = document.querySelector('.mz-surat'), kanan = document.querySelector('.mz-kanan'), ang = $('mzAngkatan');
+  surat?.classList.add('pentas-siaga');
+  siagaTimbangan();
+  kanan?.classList.add('pentas-tunggu'); ang?.classList.add('pentas-tunggu');
+  const lepasSemua = () => { surat?.classList.remove('pentas-siaga'); kanan?.classList.remove('pentas-tunggu'); ang?.classList.remove('pentas-tunggu'); lepasSiagaTimbangan(); };
+  PM.lepas = lepasSemua;
+  tungguPanggungBersih(() => {
+    if (gen !== PM.gen || APP.view !== 'pimpinan') { surat?.classList.remove('pentas-siaga'); return; }
+    // Vonis: naik kata demi kata, lalu benang menggaris bawahi subjeknya.
+    const v = document.querySelector('.mz-vonis');
+    document.querySelectorAll('.mz-kop > *, .mz-kop-bawah').forEach((el, i) =>
+      el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 420, delay: i * 70, easing: K53.mantap, fill: 'backwards' }));
+    naikKata(v, { tunda: 60, jeda: 28, durasi: 560 });
+    // Benang dijadwalkan SEKARANG dengan jeda = saat kata terakhir mendarat (tidak tampak lebih dulu).
+    const nKata = v ? v.querySelectorAll('.kk-i').length : 0;
+    Benang.garisBawah(v && v.querySelector('.benang-sorot'), { tunda: 60 + Math.max(0, nKata - 1) * 28 + 480 });
+    surat?.classList.remove('pentas-siaga');
+    saatTampak(RQ_MEJA.mizan.svg() || $('mzKartu'), () => gen === PM.gen && gerakTimbangan(gen), { lepas: lepasSiagaTimbangan, ambang: .6 });
+    saatTampak(kanan, () => { if (gen !== PM.gen) return; gerakVital(); kanan.classList.remove('pentas-tunggu'); },
+      { lepas: () => kanan?.classList.remove('pentas-tunggu') });
+    saatTampak(ang, () => { if (gen !== PM.gen) return; gerakAngkatan(); ang.classList.remove('pentas-tunggu'); },
+      { lepas: () => ang?.classList.remove('pentas-tunggu') });
+  });
+}
+
+/* =====================================================================
+ * 3c · MEJA BK — kartu berdatangan per lajur; benang pada santri pertama
+ * ===================================================================== */
+function pentasBk() {
+  const gen = ++PM.gen;
+  const meja = $('mjMeja');
+  meja?.classList.add('pentas-siaga');
+  PM.lepas = () => meja?.classList.remove('pentas-siaga');
+  tungguPanggungBersih(() => {
+    if (gen !== PM.gen || APP.view !== 'bk') return meja?.classList.remove('pentas-siaga');
+    naikKata(document.querySelector('.mj-atas h2'), { tunda: 40 });
+    document.querySelectorAll('#mjMeja .mj-chip').forEach((c, i) => {
+      c.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 420, delay: 160 + i * 60, easing: K53.mantap, fill: 'backwards' });
+      hitungNaik(c.querySelector('b'), { durasi: 700, tunda: 200 + i * 60 });
+    });
+    document.querySelectorAll('#mjPapan .mj-lajur').forEach((l, li) => {
+      l.querySelectorAll(':scope .mj-tumpuk > *').forEach((k, ki) => k.animate([{ opacity: 0, transform: 'translateY(14px)' }, { opacity: 1, transform: 'none' }],
+        { duration: 440, delay: 140 + li * 80 + Math.min(ki, 6) * 45, easing: K53.mantap, fill: 'backwards' }));
+      const em = l.querySelector('[data-mj-jml]');
+      if (em) em.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.35)', offset: .4 }, { transform: 'scale(1)' }], { duration: 460, delay: 180 + li * 80, easing: K53.lembut() });
+    });
+    meja?.classList.remove('pentas-siaga');
+    // Hari ini mulai dari dia: santri teratas di "Perlu dipanggil".
+    Benang.garisBawah(document.querySelector('.mj-lajur[data-lajur="panggil"] .mj-kartu header .btn-link'), { tunda: 720 });
+  });
+}
+
+(function bungkusGambarMejaBk() {
+  const asli = gambarMejaBk;
+  gambarMejaBk = function () {
+    const h = asli.apply(this, arguments);
+    try {
+      pecahKata(document.querySelector('.mj-atas h2'));
+      Benang.garisBawah(document.querySelector('.mj-lajur[data-lajur="panggil"] .mj-kartu header .btn-link'), { statis: true });
+      const kosong = document.querySelector('.mj-lajur[data-lajur="panggil"] .mj-kosong');
+      if (kosong) pasangTokohKosong(kosong, 'payung');
+    } catch (e) {}
+    return h;
+  };
+})();
+
+/* Satu pintu: meja bertokoh (meja.js) hanya bila sakelar tokoh menyala. */
+(function bungkusMejaGerbang() {
+  const asli = mainkanMeja;
+  mainkanMeja = function (jenis, opsi = {}) {
+    try { siapkanKataMeja(jenis); } catch (e) { console.warn('kata meja:', e.message); }
+    if (tokohDiMeja()) return asli.apply(this, arguments);
+    const view = jenis === 'mizan' ? 'pimpinan' : 'bk';
+    if (APP.view !== view) return;
+    try { window.RQMeja && window.RQMeja.hentikan(); } catch (e) {}
+    lepasMeja(jenis);                                   // keadaan akhir yang benar — data utuh lebih dulu
+    const kunci = kunciSesiMeja(jenis);
+    let sudah = false; try { sudah = sessionStorage.getItem(kunci) === '1'; } catch (e) {}
+    if (!pentasBoleh() || (!opsi.paksa && (sudah || APP.segarSama))) return;
+    try { sessionStorage.setItem(kunci, '1'); } catch (e) {}
+    return jenis === 'mizan' ? pentasMizan() : pentasBk();
+  };
+})();
+
+/* Kirim pesan BK → kartu meluncur ke "Dipanggil", benang menjahit jejaknya, cap mendarat di kartu. */
+(function bungkusSegarMejaBk() {
+  const asli = segarMejaBk;
+  segarMejaBk = async function (opsi = {}) {
+    if (tokohDiMeja() || APP.view !== 'bk' || !MJ.lajur) return asli.apply(this, arguments);
+    const sebelum = new Map();
+    document.querySelectorAll('.mj-kartu[data-mj-nisn]').forEach(el => sebelum.set(el.dataset.mjNisn, el.getBoundingClientRect()));
+    const lajurLama = new Map();
+    Object.entries(MJ.lajur).forEach(([k, l]) => l.forEach(x => lajurLama.set(x.nisn, k)));
+    const h = await asli.call(this, { ...opsi, antar: false });
+    if (!opsi.antar || !pentasBoleh() || !MJ.lajur) return h;
+    Object.entries(MJ.lajur).forEach(([k, l]) => l.forEach(x => {
+      const r0 = sebelum.get(x.nisn);
+      if (!r0 || lajurLama.get(x.nisn) === k) return;
+      const el = document.querySelector(`.mj-kartu[data-mj-nisn="${CSS.escape(String(x.nisn))}"]`); if (!el) return;
+      const tr = el.style.transform; el.style.transform = '';
+      const r1 = el.getBoundingClientRect();
+      el.style.transform = tr;
+      Benang.jahit({ x: r0.left + r0.width / 2, y: r0.top + 18 }, { x: r1.left + r1.width / 2, y: r1.top + 18 }, { durasi: 860, tahan: 300 });
+      setTimeout(() => capPadaKartu(x.nisn, k === 'dipanggil' ? 'kirim' : 'akui'), 940);
+    }));
+    return h;
+  };
+})();
+
+/* =====================================================================
+ * 5 · CAP "TERCATAT"
+ * ===================================================================== */
+const CAP = { titik: null, terakhir: -1e9, n: 0, JEDA: 1200, LEMBAGA: 'DAYAH RUHUL QURANI', defs: false };
+document.addEventListener('pointerdown', (e) => { CAP.titik = { x: e.clientX, y: e.clientY, t: performance.now() }; }, { capture: true, passive: true });
+
+/** Kata, huruf Arab, dan tinta cap — dari nada & teks tanda terima. */
+function jenisCap(nada, teks = '') {
+  const t = String(teks || '');
+  if (nada === 'catat') return { kata: 'TERCATAT', ar: 'سُجِّلَ', tinta: 'var(--cap-ungu)' };
+  if (nada === 'syukuri') {
+    if (/Apresiasi/i.test(t)) return { kata: 'APRESIASI', ar: 'بارك الله', tinta: 'var(--cap-emas)' };
+    if (/setoran|tahfiz/i.test(t)) return { kata: 'SETORAN', ar: 'ما شاء الله', tinta: 'var(--cap-emas)' };
+    return { kata: 'TUNTAS', ar: 'الحمد لله', tinta: 'var(--cap-emas)' };
+  }
+  if (nada === 'kirim' || /terkirim/i.test(t)) return { kata: 'TERKIRIM', ar: 'أُرْسِلَ', tinta: 'var(--cap-biru)' };
+  return { kata: 'TERSIMPAN', ar: 'حُفِظَ', tinta: 'var(--cap-biru)' };
+}
+
+/** Filter tinta (tepi kasar + bintik) — dipasang sekali, dipakai semua cap. */
+function pasangDefsCap() {
+  if (CAP.defs && document.getElementById('capKasar')) return;
+  const s = document.createElementNS(NS_SVG, 'svg');
+  s.setAttribute('width', '0'); s.setAttribute('height', '0'); s.setAttribute('aria-hidden', 'true');
+  s.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden';
+  s.innerHTML = `<defs><filter id="capKasar" x="-8%" y="-8%" width="116%" height="116%" color-interpolation-filters="sRGB">
+    <feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" seed="7" result="n"/>
+    <feDisplacementMap in="SourceGraphic" in2="n" scale="1.7" xChannelSelector="R" yChannelSelector="G" result="d"/>
+    <feTurbulence type="fractalNoise" baseFrequency="1.9" numOctaves="1" seed="3" result="b"/>
+    <feColorMatrix in="b" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -3.2 0 0 0 2.95" result="bintik"/>
+    <feComposite in="d" in2="bintik" operator="in"/></filter></defs>`;
+  document.body.appendChild(s);
+  CAP.defs = true;
+}
+
+function svgCap(j, { kasar = true } = {}) {
+  const id = 'capJalur' + (++CAP.n);
+  const tgl = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '·');
+  if (kasar) pasangDefsCap();
+  const panjangKata = j.kata.length > 9 ? ' textLength="46" lengthAdjust="spacingAndGlyphs"' : '';
+  const ukurAr = j.ar.replace(/[ً-ْ]/g, '').length >= 10 ? 12.5 : j.ar.length >= 8 ? 15 : 17;
+  // Cincin atas dibaca searah jarum jam; cincin bawah tetap tegak (seperti stempel sungguhan).
+  return `<svg class="cap-svg" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+    <defs><path id="${id}a" d="M10.8 50 A39.2 39.2 0 0 1 89.2 50"/><path id="${id}b" d="M6.4 50 A43.6 43.6 0 0 0 93.6 50"/></defs>
+    <g${kasar ? ' filter="url(#capKasar)"' : ''} fill="currentColor" stroke="currentColor">
+      <circle cx="50" cy="50" r="47" fill="none" stroke-width="3.2"/>
+      <circle cx="50" cy="50" r="35" fill="none" stroke-width="1.1"/>
+      <text class="cap-cincin" stroke="none" text-anchor="middle"><textPath href="#${id}a" startOffset="50%">${esc(CAP.LEMBAGA)}</textPath></text>
+      <text class="cap-cincin" stroke="none" text-anchor="middle"><textPath href="#${id}b" startOffset="50%">${esc(tgl)}</textPath></text>
+      <text class="cap-bintang" x="7.6" y="52.4" stroke="none">✦</text><text class="cap-bintang" x="88" y="52.4" stroke="none">✦</text>
+      <text class="cap-ar" x="50" y="50.5" text-anchor="middle" stroke="none" direction="rtl" style="font-size:${ukurAr}px">${esc(j.ar)}</text>
+      <path d="M32 57.5 H68" fill="none" stroke-width="1"/>
+      <text class="cap-kata" x="50" y="68.5" text-anchor="middle" stroke="none"${panjangKata}>${esc(j.kata)}</text>
+    </g></svg>`;
+}
+
+/** Hentakan cap (300 ms): turun dari udara, menekan, memantul kecil. */
+function kfTekan(rot, dasar = 'translate(-50%, -50%) ', blur = true) {
+  return [
+    { transform: `${dasar}scale(1.9) rotate(${rot - 11}deg)`, opacity: 0, ...(blur ? { filter: 'blur(3px)' } : {}) },
+    { transform: `${dasar}scale(.93) rotate(${rot}deg)`, opacity: 1, offset: .58, ...(blur ? { filter: 'blur(0px)' } : {}) },
+    { transform: `${dasar}scale(1.035) rotate(${rot}deg)`, opacity: 1, offset: .8 },
+    { transform: `${dasar}scale(1) rotate(${rot}deg)`, opacity: 1, ...(blur ? { filter: 'blur(0px)' } : {}) }
+  ];
+}
+
+/** Cap besar di titik asal aksi → dijahit benang ke kartu tanda terima. */
+function tekanCapBesar(j, mini, polaGetar = 12) {
+  CAP.terakhir = performance.now();
+  const p = CAP.titik && performance.now() - CAP.titik.t < 6000 ? CAP.titik : null;
+  const ukur = innerWidth < 600 ? 92 : 112;
+  const x = klem53(p ? p.x : innerWidth / 2, ukur / 2 + 10, innerWidth - ukur / 2 - 10);
+  const y = klem53(p ? p.y : innerHeight * .42, ukur / 2 + 10, innerHeight - ukur / 2 - 10);
+  const hemat = modeHemat();
+  const cap = document.createElement('div');
+  cap.className = 'cap-tekan';
+  cap.setAttribute('aria-hidden', 'true');
+  cap.style.cssText = `left:${x}px;top:${y}px;width:${ukur}px;height:${ukur}px;--tinta:${j.tinta}`;
+  cap.innerHTML = `<span class="cap-bayang"></span><span class="cap-kertas"></span><span class="cap-luber"></span>${svgCap(j, { kasar: !hemat })}`;
+  document.body.appendChild(cap);
+  const rot = -5 - Math.round(Math.random() * 8);
+  cap.animate(kfTekan(rot, 'translate(-50%, -50%) ', !hemat), { duration: 300, easing: 'cubic-bezier(.35,0,.25,1)', fill: 'forwards' });
+  cap.querySelector('.cap-bayang').animate([{ opacity: 0 }, { opacity: .9, offset: .5 }, { opacity: 0 }], { duration: 520, delay: 90, fill: 'both' });
+  cap.querySelector('.cap-luber').animate([{ transform: 'scale(.86)', opacity: 0 }, { transform: 'scale(.92)', opacity: .55, offset: .12 }, { transform: 'scale(1.4)', opacity: 0 }],
+    { duration: 600, delay: 170, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'both' });
+  setTimeout(() => getar(polaGetar || 12), 170);
+  const pulang = () => { cap.remove(); if (mini) mini.style.opacity = ''; };
+  setTimeout(() => {
+    const r = mini && mini.isConnected ? mini.getBoundingClientRect() : null;
+    if (!r || !r.width) {
+      cap.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 380, fill: 'forwards' }).finished.then(pulang, pulang);
+      return;
+    }
+    const tx = r.left + r.width / 2, ty = r.top + r.height / 2, s = r.width / ukur;
+    Benang.jahit({ x, y }, { x: tx, y: ty }, { durasi: 440, tahan: 160 });
+    cap.animate([
+      { transform: `translate(-50%, -50%) scale(1) rotate(${rot}deg)`, opacity: 1 },
+      { transform: `translate(calc(-50% + ${(tx - x).toFixed(1)}px), calc(-50% + ${(ty - y).toFixed(1)}px)) scale(${s.toFixed(3)}) rotate(-8deg)`, opacity: 1 }
+    ], { duration: 440, easing: K53.tarik, fill: 'forwards' }).finished.then(() => {
+      pulang();
+      if (mini && mini.isConnected) mini.animate([{ scale: 1.35 }, { scale: 1 }], { duration: 280, easing: K53.lenting() });
+    }, pulang);
+  }, 300 + 380);
+  setTimeout(pulang, 3000);                        // cadangan: cap tidak pernah tertinggal di layar
+}
+
+/** Cap pada kartu (Meja BK sesudah pesan terkirim) — sementara, lalu pudar.
+ *  Dipasang di <body> pada koordinat halaman kartu (lihat catatan benangAlas). */
+function capPadaKartu(nisn, nada = 'kirim') {
+  const el = document.querySelector(`.mj-kartu[data-mj-nisn="${CSS.escape(String(nisn))}"]`);
+  if (!el || !pentasBoleh()) return;
+  const r = el.getBoundingClientRect(); if (!r.width) return;
+  const j = jenisCap(nada);
+  const c = document.createElement('span');
+  c.className = 'cap-kartu';
+  c.setAttribute('aria-hidden', 'true');
+  c.style.cssText = `left:${(r.right + scrollX - 58).toFixed(1)}px;top:${(r.top + scrollY - 16).toFixed(1)}px;color:${j.tinta};--tinta:${j.tinta}`;
+  c.innerHTML = svgCap({ ...j, kata: nada === 'kirim' ? 'DIPANGGIL' : j.kata }, { kasar: !modeHemat() });
+  document.body.appendChild(c);
+  c.animate(kfTekan(-10, '', !modeHemat()), { duration: 300, easing: 'cubic-bezier(.35,0,.25,1)', fill: 'forwards' });
+  setTimeout(() => getar(12), 170);
+  c.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 500, delay: 1900, fill: 'forwards' }).finished.then(() => c.remove(), () => c.remove());
+  setTimeout(() => c.remove(), 3400);
+}
+
+/* Getar saat kartu tanda terima muncul diredam bila cap besar akan menekan; polanya dipakai cap. */
+(function bungkusGetarCap() {
+  const asli = getar;
+  getar = function (pola) {
+    if (CAP.redam) { CAP.polaGetar = pola; return; }
+    return asli.apply(this, arguments);
+  };
+})();
+
+/* Tanda terima v2.31 kini DICAP. */
+(function bungkusTandaTerima() {
+  const asli = tandaTerima;
+  tandaTerima = function (kartu = {}) {
+    // Getar dipindah ke detik cap menekan (bukan saat kartu muncul) — sekali saja.
+    CAP.besar = pentasBoleh() && performance.now() - CAP.terakhir > CAP.JEDA && !document.hidden
+      && !(APP.view === 'bk' && /Pesan terkirim/i.test(String(kartu.judul || '')));
+    CAP.polaGetar = null; CAP.redam = CAP.besar;
+    let el;
+    try { el = asli.apply(this, arguments); } finally { CAP.redam = false; }
+    let ditekan = false;
+    try { (() => {
+      if (!el) return;
+      const nada = kartu.nada || 'akui';
+      const j = jenisCap(nada, `${kartu.judul || ''} ${kartu.sub || ''}`);
+      el.style.setProperty('--tinta', j.tinta);
+      const ikon = el.querySelector('.terima-ikon');
+      const centang = ikon && ikon.querySelector('.centang');
+      if (!ikon || !centang) return;
+      const mini = document.createElement('span');
+      mini.className = 'cap-mini';
+      mini.innerHTML = svgCap(j, { kasar: !modeHemat() });
+      centang.replaceWith(mini);
+      if (!pentasBoleh()) return;
+      if (CAP.besar) { mini.style.opacity = '0'; ditekan = true; tekanCapBesar(j, mini, CAP.polaGetar); }
+      else mini.animate(kfTekan(0, '', false).map(k => ({ ...k, transform: k.transform.replace(/rotate\([^)]*\)/, '') })), { duration: 300, easing: 'cubic-bezier(.35,0,.25,1)' });
+    })(); } catch (e) { console.warn('cap:', e.message); }
+    if (CAP.besar && !ditekan && CAP.polaGetar) getar(CAP.polaGetar);   // getar yang diredam tidak boleh hilang
+    return el;
+  };
+})();
+
+/* =====================================================================
+ * Navigasi: jejak benang, pembatalan pentas, cetak
+ * ===================================================================== */
+(function bungkusNavigasiBenang() {
+  const navAsli = navigateTo;
+  navigateTo = async function () {
+    PM.gen++;
+    cancelAnimationFrame(PM.raf);
+    PM.amatan.splice(0).forEach(io => { try { io.disconnect(); } catch (e) {} });
+    try { PENTAS.hentikan(); } catch (e) {}
+    Benang.mulai();
+    try { return await navAsli.apply(this, arguments); }
+    finally { Benang.tuntas(); }
+  };
+  window.addEventListener('beforeprint', () => {
+    PM.gen++;
+    try { PM.lepas && PM.lepas(); } catch (e) {}
+    try { lepasSiagaTimbangan(); } catch (e) {}
+    document.querySelectorAll('.cap-tekan, .benang-jahit').forEach(el => el.remove());
+  });
+})();
+
+/* =====================================================================
+ * Bantuan: sakelar "Si Peci & Si Payung tampil di meja kerja"
+ * ===================================================================== */
+function terapkanTokoh() {
+  tandaiTokoh();
+  try { TOP_MONSTER.kunci = ''; segarkanTopMonster(); } catch (e) {}
+  try { segarkanMonster(); } catch (e) {}
+}
+bukaBantuan = function () {
+  const adaGetar = 'vibrate' in navigator;
+  let berubah = false;
+  Swal.fire({
+    title: 'Bantuan',
+    html: `<div class="bantuan">
+      <button type="button" class="btn btn-primary btn-block" id="bnTur"><i class="fa-solid fa-route"></i>Ulangi tur singkat</button>
+      ${adaGetar ? `<label class="bn-sakelar"><input type="checkbox" id="bnGetar" ${bacaLS('rq.getar') !== 'mati' ? 'checked' : ''}>
+        <span>Getar singkat saat catatan tersimpan</span></label>` : ''}
+      <label class="bn-sakelar"><input type="checkbox" id="bnTokoh" ${tokohDiMeja() ? 'checked' : ''}>
+        <span>Si Peci &amp; Si Payung tampil di meja kerja
+        <small>Ringkasan, Dashboard Pimpinan, Meja BK, dan tabel. Bila mati, keduanya hanya hadir di layar masuk, tur, dan saat pekerjaan tuntas.</small></span></label>
+      <p class="bn-cat">chemint · ${esc(APP.versi || '')}</p></div>`,
+    showConfirmButton: false, showCloseButton: true,
+    didOpen: (p) => {
+      p.querySelector('#bnTur').addEventListener('click', () => { Swal.close(); setTimeout(() => turMulai(true), 250); });
+      const g = p.querySelector('#bnGetar');
+      if (g) g.addEventListener('change', () => { tulisLS('rq.getar', g.checked ? null : 'mati'); if (g.checked) getar(12); });
+      const t = p.querySelector('#bnTokoh');
+      t.addEventListener('change', () => { tulisLS(TOKOH.KUNCI, t.checked ? 'meja' : null); berubah = true; terapkanTokoh(); });
+    },
+    didClose: () => {
+      if (berubah && ['dashboard', 'pimpinan', 'bk'].includes(APP.view)) {
+        try { sessionStorage.removeItem(kunciSesiMeja(APP.view === 'pimpinan' ? 'mizan' : 'bk')); } catch (e) {}
+        setTimeout(() => navigateTo(APP.view), 60);
+      }
+    }
+  });
+};
+(function pasangUlangTombolBantuan() {
+  // Tombol yang sudah terpasang memegang fungsi lama; ganti simpulnya agar memakai yang baru.
+  const b = document.getElementById('btnBantuan');
+  if (!b) return;
+  const baru = b.cloneNode(true);
+  baru.addEventListener('click', () => bukaBantuan());
+  b.replaceWith(baru);
+})();

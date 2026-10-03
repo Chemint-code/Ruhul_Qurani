@@ -7363,6 +7363,125 @@
     .mz-ulang { display: none !important; }
   }
 </style>
+<style id="gayaBenang">
+  /* =====================================================================
+   * v2.53 — BENANG EMAS · TOKOH DI GERBANG · DATA BERAKSI · CAP TERCATAT
+   *  Satu protagonis gerak: benang kuningan. Ia hanya muncul di empat
+   *  tempat bermakna — jejak halaman, garis bawah vonis, garis rujukan,
+   *  dan jahitan sebab-akibat. Tidak ada animasi tak berujung di sini.
+   * ===================================================================== */
+  :root {
+    --benang: linear-gradient(90deg, color-mix(in oklab, var(--brass) 70%, transparent), var(--brass) 22%, var(--brass-hi) 78%, #FFF4C8);
+    --benang-cahaya: color-mix(in oklab, var(--brass-hi) 55%, transparent);
+    --cap-ungu: #3B3486;          /* tinta stempel ungu — pencatatan */
+    --cap-emas: #8A6A06;          /* tinta emas tua — apresiasi, setoran, tuntas */
+    --cap-biru: #1D4E89;          /* tinta biru — tersimpan, terkirim */
+  }
+
+  /* ---------- a · Jejak halaman (penunjuk muat di bawah bilah atas) ---------- */
+  .benang-halaman {
+    position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; z-index: 2;
+    transform: scaleX(0); transform-origin: left center; pointer-events: none;
+    background: var(--benang); border-radius: 0 2px 2px 0;
+    box-shadow: 0 0 10px var(--benang-cahaya);
+  }
+  #pageEyebrow .rule { transform-origin: center; }
+
+  /* ---------- b · Kata naik & garis bawah ---------- */
+  .kk { display: inline-block; overflow: clip; overflow-clip-margin: .22em; vertical-align: top; }
+  .kk-i { display: inline-block; transform-origin: 0 100%; will-change: auto; }
+  .benang-sorot { position: relative; white-space: nowrap; }
+  .benang-u {
+    position: absolute; left: -.05em; right: -.05em; bottom: -.04em; height: 2px; border-radius: 2px;
+    background: var(--benang); box-shadow: 0 0 9px var(--benang-cahaya);
+    transform-origin: left center; pointer-events: none;
+  }
+  .mz-surat .benang-u { height: 2.5px; bottom: -.06em; }
+  .benang-kilau {
+    position: absolute; left: 0; bottom: calc(-.04em - 5px); width: 14px; height: 12px; pointer-events: none; opacity: 0;
+    border-radius: 50%; background: radial-gradient(closest-side, #FFF9DD, color-mix(in oklab, var(--brass-hi) 60%, transparent) 55%, transparent);
+  }
+  .mj-kartu header .benang-sorot { white-space: normal; }
+  .mj-kartu header .benang-sorot .benang-u { bottom: -3px; }
+
+  /* ---------- c · Garis rujukan: rata-rata angkatan dijahit dari atas ---------- */
+  .mz-ang-tr::after { transform-origin: 50% 0; }
+  .mz-ang-tr i { transform-origin: left center; }
+  .mz-gema { fill: none; stroke: var(--brass); stroke-width: 1.6; transform-box: fill-box; transform-origin: center; opacity: 0; pointer-events: none; }
+  .mz-siaga .mz-w, .mz-siaga .mz-cap { opacity: 0; }
+
+  /* Keadaan awal pentas — hanya selama tirai muat masih menutup atau bagian itu belum terlihat. */
+  .mz-surat.pentas-siaga :is(.kk-i, .mz-kop > *, .mz-kop-bawah) { opacity: 0; }
+  #mjMeja.pentas-siaga :is(.kk-i, .mj-tumpuk > *, .mj-chip) { opacity: 0; }
+  .pentas-tunggu :is(.mz-vital, .mz-lbl, .mz-dec) { opacity: 0; }
+  #mzAngkatan.pentas-tunggu .mz-ang-tr i { transform: scaleX(0); }
+  #mzAngkatan.pentas-tunggu .mz-ang-tr::after { transform: scaleY(0); }
+  #mzAngkatan.pentas-tunggu .mz-ang b { opacity: 0; }
+  @media print {
+    .pentas-siaga :is(.kk-i, .mz-kop > *, .mz-kop-bawah, .mj-tumpuk > *, .mj-chip), .pentas-tunggu :is(.mz-vital, .mz-lbl, .mz-dec, .mz-ang b) { opacity: 1 !important; }
+    .pentas-tunggu .mz-ang-tr i, .pentas-tunggu .mz-ang-tr::after { transform: none !important; }
+    .mz-siaga .mz-w, .mz-siaga .mz-cap { opacity: 1 !important; }
+  }
+
+  /* ---------- Benang di alas grafik Ringkasan ---------- */
+  .benang-alas {
+    position: absolute; z-index: 5; pointer-events: none; border-radius: 2px;
+    background: var(--benang); box-shadow: 0 0 8px var(--benang-cahaya); transform-origin: left center;
+  }
+  .benang-alas.tegak { background: linear-gradient(180deg, var(--brass), var(--brass-hi)); transform-origin: center top; }
+
+  /* ---------- d · Jahitan sebab → akibat ---------- */
+  .benang-jahit { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 1240; pointer-events: none; overflow: visible; }
+  .benang-jahit .bj-garis { fill: none; stroke: var(--brass); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; }
+  .benang-jahit .bj-cahaya { fill: none; stroke: var(--brass-hi); stroke-width: 7; stroke-linecap: round; opacity: .22; stroke-dasharray: 1; stroke-dashoffset: 1; filter: blur(3px); }
+  .benang-jahit .bj-kepala { fill: #FFF6D2; filter: drop-shadow(0 0 4px var(--brass-hi)); }
+  html.hemat .benang-jahit .bj-cahaya { display: none; }
+
+  /* ---------- Cap "Tercatat" ---------- */
+  .cap-tekan {
+    position: fixed; z-index: 1250; pointer-events: none; color: var(--tinta, var(--cap-ungu));
+    transform: translate(-50%, -50%); opacity: 0;
+  }
+  .cap-tekan > .cap-svg { position: relative; display: block; width: 100%; height: 100%; }
+  .cap-luber { position: absolute; inset: -4%; border-radius: 50%; opacity: 0;
+    background: radial-gradient(closest-side, transparent 72%, color-mix(in oklab, currentColor 40%, transparent) 86%, transparent); }
+  .cap-bayang { position: absolute; inset: 6%; border-radius: 50%; opacity: 0;
+    background: radial-gradient(closest-side, rgb(6 24 38 / .28), transparent); }
+  .cap-svg { overflow: visible; }
+  .cap-svg .cap-cincin { font: 700 6.4px/1 'Inter Tight', system-ui, sans-serif; letter-spacing: 1.15px; }
+  .cap-svg .cap-bintang { font: 700 5px/1 system-ui, sans-serif; }
+  .cap-kertas { position: absolute; inset: 1%; border-radius: 50%; background: color-mix(in oklab, #FFFDF5 94%, transparent); box-shadow: 0 1px 2px rgb(6 24 38 / .12); }
+  .cap-svg .cap-ar { font: 700 17px/1 'Amiri', serif; }
+  .cap-svg .cap-kata { font: 800 7.6px/1 'Inter Tight', system-ui, sans-serif; letter-spacing: 1.3px; }
+  .terima-ikon .cap-mini { display: block; width: 36px; height: 36px; rotate: -8deg; color: var(--tinta, var(--cap-ungu)); }
+  .terima-ikon .cap-mini .cap-svg { display: block; width: 100%; height: 100%; }
+  .terima.nada-catat   { --tinta: var(--cap-ungu); }
+  .terima.nada-syukuri { --tinta: var(--cap-emas); }
+  .terima.nada-akui    { --tinta: var(--cap-biru); }
+  .cap-kartu { position: absolute; z-index: 25; width: 66px; height: 66px; pointer-events: none;
+    color: var(--cap-biru); border-radius: 50%; background: color-mix(in oklab, #FFFDF5 90%, transparent); }
+  .cap-kartu .cap-svg { width: 100%; height: 100%; }
+  @media print { .cap-tekan, .cap-kartu, .benang-jahit, .benang-halaman { display: none !important; } }
+
+  /* ---------- Tokoh di gerbang ---------- */
+  html[data-tokoh="gerbang"] :is(.kerubung, #pbarMon, .mon-hinggap, .sapa-mon-jalan, .penghuni, .pg-tabir) { display: none !important; }
+  html[data-tokoh="gerbang"] .amanah.digoda { animation: none !important; }
+  .lp-aktor.tokoh-kosong {
+    --lp-s: .5; position: relative; left: auto; bottom: auto; opacity: 1; will-change: auto;
+    display: block; margin: 2px auto 8px;
+  }
+  .lp-aktor.tokoh-kosong.lp-si-peci   { width: 62px; height: 68px; }
+  .lp-aktor.tokoh-kosong.lp-si-payung { width: 58px; height: 75px; }
+  .lp-aktor.tokoh-kosong .lp-svg { filter: drop-shadow(-2px 4px 4px rgb(2 12 24 / .18)); }
+  .mz-dec.ok .tokoh-kosong { float: right; margin: -2px 0 0 12px; }
+  .bn-sakelar small { display: block; margin-top: 2px; font-size: 12px; line-height: 1.4; color: var(--text-2); }
+  .bn-sakelar { align-items: flex-start; text-align: left; }
+  .bn-sakelar input { flex: none; margin-top: 2px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .benang-halaman, .benang-jahit, .cap-tekan, .benang-kilau { display: none !important; }
+  }
+</style>
 </head>
 <body>
 
