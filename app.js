@@ -2625,6 +2625,8 @@ async function navigateTo(view) {
     else if (view === 'pimpinan')    await viewPimpinan();
     else if (view === 'bk')          await viewBk();
     else if (view === 'keterlibatan') await viewKeterlibatan();
+    else if (view === 'asatidz')     await viewAsatidz();      // v2.54
+    else if (view === 'pendidik')    await viewPendidik();     // v2.54
     else if (view === 'pesan')       await viewPesan();
     else if (view === 'siswa')       await viewSiswa();
     else if (view === 'pelanggaran') await viewPelanggaran();
@@ -30615,4 +30617,878 @@ bukaBantuan = function () {
   const baru = b.cloneNode(true);
   baru.addEventListener('click', () => bukaBantuan());
   b.replaceWith(baru);
+})();
+
+
+/* =====================================================================
+ * v2.54 — ASATIDZ · PARA PENDIDIK
+ * ---------------------------------------------------------------------
+ *  Permintaan pemilik (15 Okt 2026): foto profil guru dipajang sebagai
+ *  "tim kami" dengan tampilan modern-profesional dan gerak yang berani;
+ *  wajah yang diketuk membuka progres kelas binaan dan aktivitas guru
+ *  itu. "Maksimalkan kreativitasmu."
+ *
+ *  Keputusan pemilik:
+ *    · Halaman di DALAM aplikasi (foto guru tidak dibuka untuk anon).
+ *    · Yang tampil: para pendidik (bukan OSDA, bukan akun non-pendidik).
+ *    · Semua akun login melihat angka ringkas; nama santri hanya untuk
+ *      Admin, Pimpinan, BK (binaannya), dan pendidik itu sendiri.
+ *      Ditegakkan di RPC tim_pendidik_rpc / profil_pendidik_rpc.
+ *
+ *  Dua halaman:
+ *    asatidz  — Dinding Para Pendidik: panggung navy, potret disinari
+ *               saat disentuh (miring 3D mengikuti kursor), denyut
+ *               catatan 30 hari sebagai benang kuningan di kaki potret.
+ *               Masuk: tirai potret tersingkap berombak diagonal.
+ *    pendidik — Profil: potret MEMEKAR dari dinding ke kepala profil
+ *               (View Transition bersama, satu elemen bernama
+ *               "as-wajah"), vonis kelas naik kata demi kata dan digaris
+ *               bawahi Benang Emas, cincin "santri bersih", tren enam
+ *               lembar, dan peta 12 pekan jejak pencatatan.
+ *
+ *  Aturan gerak v2.53 dipatuhi: ≤ 1,6 dtk, data tidak pernah ditahan
+ *  (angka asli ada di DOM sejak awal), tanpa `infinite`, "kurangi gerak"
+ *  → semuanya diam, simpul beranimasi dibuat saat halaman digambar.
+ *  Semua PEMBUNGKUS / fungsi baru; fungsi lama tidak ditimpa.
+ * ===================================================================== */
+APP.versi = 'rq-v2.54';
+
+MENU_ROLE.asatidz  = [...SEMUA_ROLE];
+MENU_ROLE.pendidik = [...SEMUA_ROLE];
+JUDUL.asatidz  = { lat:'Asatidz', ar:'الأساتذة',     teks:'Para Pendidik' };
+JUDUL.pendidik = { lat:'Asatidz', ar:'سيرة الأستاذ', teks:'Profil Pendidik' };
+
+const AS = {
+  data: null, t: 0, SEGAR_MS: 90000,
+  pilih: null,          // id pendidik yang dibuka
+  dariDinding: false,   // datang dari dinding → potret memekar
+  kembaliKe: null,      // kembali ke dinding → potret menyusut ke tempatnya
+  saring: 'semua', cari: '',
+  io: null
+};
+
+/* ---------- Kelompok & label --------------------------------------- */
+const AS_KELOMPOK = {
+  pimpinan:   { ar:'القيادة',       lat:'Pimpinan',               satu:'المدير' },
+  musyrif:    { ar:'المشرفون',      lat:'Musyrif Asrama Putra',   satu:'المشرف' },
+  musyrifah:  { ar:'المشرفات',      lat:'Musyrifah Asrama Putri', satu:'المشرفة' },
+  bk:         { ar:'الإرشاد',       lat:'Bimbingan & Konseling',  satu:'الإرشاد' },
+  walas:      { ar:'أولياء الفصول', lat:'Wali Kelas',             satu:'ولي الفصل' },
+  pendamping: { ar:'المرافقون',     lat:'Pendamping',             satu:'المرافق' }
+};
+const AS_URUT_KELOMPOK = ['pimpinan', 'musyrif', 'musyrifah', 'bk', 'walas', 'pendamping'];
+
+function asKelompok(g) {
+  if (g.role === 'Pimpinan' || g.role === 'Wakasis') return 'pimpinan';
+  if (g.role === 'Guru BK') return 'bk';
+  if (/musyrifah/i.test(g.korps || '')) return 'musyrifah';
+  if (/musyrif/i.test(g.korps || '')) return 'musyrif';
+  if (g.role === 'Walas') return 'walas';
+  return 'pendamping';
+}
+/** Cermin _pendidik() di database. */
+function asAdalahPendidik(p) {
+  return ['Pimpinan','Wakasis','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z'].includes(p?.role)
+    || (p?.role === 'Admin' && !!String(p?.korps || '').trim());
+}
+function asPeran(g) {
+  const k = asKelompok(g);
+  if (g.role === 'Pimpinan') return 'Pimpinan Dayah';
+  if (g.role === 'Wakasis') return 'Wakil Kesiswaan';
+  if (k === 'bk') return 'Guru BK';
+  if (k === 'musyrifah') return 'Musyrifah';
+  if (k === 'musyrif') return g.role === 'Ustadz GEN-Z' ? 'Musyrif · Ustadz GEN-Z' : 'Musyrif';
+  if (k === 'walas') return 'Wali Kelas';
+  return g.role || 'Pendidik';
+}
+const AS_ROMAWI = { VII: 7, VIII: 8, IX: 9, X: 10, XI: 11, XII: 12 };
+function asKunciKelas(k) {
+  const m = String(k || '').match(/^([IVX]+)-(.*)$/);
+  return m ? `${String(AS_ROMAWI[m[1]] || 99).padStart(2, '0')}-${m[2]}` : `99-${k}`;
+}
+function asUrutKelas(arr) { return [...(arr || [])].sort((a, b) => asKunciKelas(a).localeCompare(asKunciKelas(b))); }
+function asLingkup(g) {
+  const k = asUrutKelas(g.kelas_binaan);
+  if (!k.length) return g.role === 'Pimpinan' ? 'Seluruh dayah' : 'Lintas kelas';
+  if (k.length <= 3) return `Kelas ${k.join(', ')}`;
+  return `${k.length} kelas`;
+}
+/** "Ust. Aldizil Ikram, Lc." → "AI" */
+function asInisial(nama) {
+  let s = String(nama || '').split(',')[0].trim();
+  for (let i = 0; i < 3; i++) s = s.replace(/^(Ust\.?|Ustz\.?|Ustadz|Ustazah|Dr\.?|Drs\.?|Hj?\.|Ibu|Bpk\.?|Tgk\.?)\s+/i, '');
+  const k = s.split(/\s+/).filter(w => /^[A-Za-z]/.test(w));
+  return ((k[0] || '?')[0] + (k.length > 1 ? k[k.length - 1][0] : '')).toUpperCase();
+}
+/** Nama sapaan pendek: "Ust. Aris Mahfud, M.Pd." → "Ust. Aris" */
+function asSapaan(nama) {
+  const s = String(nama || '').split(',')[0].trim();
+  const m = s.match(/^((?:Ust\.?|Ustz\.?|Dr\.?)\s+)?(\S+)/i);
+  return m ? `${m[1] || ''}${m[2]}` : s;
+}
+function asRelatif(ts) {
+  if (!ts) return 'belum pernah';
+  const d = new Date(ts); if (isNaN(d)) return '-';
+  const dtk = (Date.now() - d.getTime()) / 1000;
+  if (dtk < 90) return 'baru saja';
+  if (dtk < 3600) return `${Math.round(dtk / 60)} menit lalu`;
+  const hariIniK = hariIni(), k = kunciTgl(d);
+  if (k === hariIniK) return `${Math.round(dtk / 3600)} jam lalu`;
+  if (k === kunciTgl(tambahHari(new Date(), -1))) return 'kemarin';
+  const h = Math.round((tglDari(hariIniK) - tglDari(k)) / 864e5);
+  if (h < 14) return `${h} hari lalu`;
+  return tgl(d);
+}
+function asPesanGalat(err) {
+  const m = String(err?.message || err || '');
+  if (/function .*(tim_pendidik_rpc|profil_pendidik_rpc).* does not exist|Could not find the function/i.test(m))
+    return 'Fungsi database v2.54 belum dipasang. Jalankan migrasi 20261015_v2_54_asatidz.sql.';
+  return m || 'Galat tidak dikenal.';
+}
+
+/* ---------- Data ---------------------------------------------------- */
+async function asMuatTim(paksa) {
+  if (!paksa && AS.data && performance.now() - AS.t < AS.SEGAR_MS) return AS.data;
+  const r = await q(db.rpc('tim_pendidik_rpc'), 'tim_pendidik');
+  AS.data = r.data || { pendidik: [] };
+  AS.t = performance.now();
+  return AS.data;
+}
+
+/* ---------- Potret --------------------------------------------------- */
+function asFotoHtml(g, { eager = false, kelas = '' } = {}) {
+  const ini = `<span class="as-inisial" aria-hidden="true"><b>${esc(asInisial(g.nama))}</b></span>`;
+  if (!g.foto) return `<span class="as-foto as-tanpa ${kelas}">${ini}</span>`;
+  return `<span class="as-foto ${kelas}">${ini}<img src="${esc(g.foto)}" alt="" draggable="false"
+    ${eager ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="${kelas ? 'sync' : 'async'}" data-as-img></span>`;
+}
+/** Foto gagal dimuat → monogram tetap (ada di bawah gambar sejak awal). */
+function asPasangFoto(akar) {
+  akar.querySelectorAll('img[data-as-img]').forEach(img => {
+    const tandai = () => img.closest('.as-foto')?.classList.add('as-termuat');
+    if (img.complete && img.naturalWidth) tandai();
+    else {
+      img.addEventListener('load', tandai, { once: true });
+      img.addEventListener('error', () => { img.closest('.as-foto')?.classList.add('as-tanpa'); img.remove(); }, { once: true });
+    }
+  });
+}
+
+/** Denyut 30 hari → jalur SVG (0..100 × 0..24). */
+function asJalurDenyut(nilai) {
+  const v = (nilai || []).map(Number);
+  if (!v.length) return { garis: '', area: '' };
+  const maks = Math.max(1, ...v);
+  const x = (i) => (i / Math.max(1, v.length - 1) * 100).toFixed(2);
+  const y = (n) => (22 - Math.sqrt(n / maks) * 18).toFixed(2);   // akar: hari sepi tetap terlihat bernapas
+  const garis = v.map((n, i) => `${i ? 'L' : 'M'}${x(i)} ${y(n)}`).join(' ');
+  return { garis, area: `${garis} L100 24 L0 24 Z` };
+}
+
+function asPanelWajah(g, i) {
+  const d = asJalurDenyut(g.denyut);
+  const hidup = g.terakhir && kunciTgl(new Date(g.terakhir)) === hariIni();
+  const cari = [g.nama, ...(g.kelas_binaan || []), asPeran(g), g.korps || ''].join(' ').toLowerCase();
+  return `<button type="button" class="as-wajah" data-as-id="${esc(g.id)}" data-kel="${asKelompok(g)}" data-cari="${esc(cari)}"
+      aria-label="${esc(g.nama)}, ${esc(asPeran(g))}, ${esc(asLingkup(g))}. Buka profil.">
+    <span class="as-bingkai">
+      ${asFotoHtml(g, { eager: i < 8 })}
+      <span class="as-kilau" aria-hidden="true"></span>
+      ${hidup ? '<span class="as-hidup" title="Mencatat hari ini"><i></i>hari ini</span>' : ''}
+      <span class="as-teks">
+        <span class="as-nama">${esc(g.nama)}</span>
+        <span class="as-peran">${esc(asPeran(g))}</span>
+        <span class="as-lingkup">${esc(asLingkup(g))}${Number(g.santri) ? ` · ${angka(g.santri)} santri` : ''}</span>
+      </span>
+      ${(g.denyut || []).some(Number) ? `<svg class="as-denyut" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">
+        <path class="as-denyut-area" d="${d.area}"/><path class="as-denyut-garis" d="${d.garis}" pathLength="1"/>
+      </svg>` : ''}
+    </span>
+  </button>`;
+}
+
+function asSorotPimpinan(g) {
+  return `<article class="as-sorot" data-kel="pimpinan" data-cari="${esc([g.nama, asPeran(g)].join(' ').toLowerCase())}">
+    <button type="button" class="as-wajah as-wajah-besar" data-as-id="${esc(g.id)}" data-kel="pimpinan"
+        aria-label="${esc(g.nama)}, ${esc(asPeran(g))}. Buka profil.">
+      <span class="as-bingkai">${asFotoHtml(g, { eager: true })}<span class="as-kilau" aria-hidden="true"></span></span>
+    </button>
+    <div class="as-sorot-teks">
+      <span class="ar as-sorot-ar">${AS_KELOMPOK.pimpinan.satu}</span>
+      <h3 class="as-sorot-nama">${esc(g.nama)}</h3>
+      <p class="as-sorot-peran">${esc(asPeran(g))}</p>
+      <p class="as-sorot-isi">Mengasuh ${angka(g.santri)} santri di seluruh kelas, putra dan putri.</p>
+      <button type="button" class="as-tombol" data-as-id="${esc(g.id)}">Lihat keadaan dayah</button>
+    </div>
+  </article>`;
+}
+
+/* =====================================================================
+ * HALAMAN 1 · DINDING PARA PENDIDIK
+ * ===================================================================== */
+async function viewAsatidz() {
+  const root = $('viewRoot');
+  let data;
+  try { data = await asMuatTim(); }
+  catch (err) {
+    console.error('[asatidz]', err);
+    root.innerHTML = kartu('Para Pendidik', `<div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
+      Daftar pendidik tidak dapat dimuat: <b>${esc(asPesanGalat(err))}</b></div>`);
+    return;
+  }
+  if (APP.view !== 'asatidz') return;
+  const semua = (data.pendidik || []).slice();
+  const kel = {};
+  semua.forEach(g => { (kel[asKelompok(g)] = kel[asKelompok(g)] || []).push(g); });
+  Object.values(kel).forEach(a => a.sort((x, y) => {
+    const kx = asUrutKelas(x.kelas_binaan)[0], ky = asUrutKelas(y.kelas_binaan)[0];
+    if (kx && ky && kx !== ky) return asKunciKelas(kx).localeCompare(asKunciKelas(ky));
+    if (!!kx !== !!ky) return kx ? -1 : 1;
+    return String(x.nama).localeCompare(String(y.nama), 'id');
+  }));
+  const ada = AS_URUT_KELOMPOK.filter(k => kel[k]?.length);
+  if (!ada.includes(AS.saring)) AS.saring = 'semua';
+
+  let urutan = 0;
+  const potong = ada.map(k => {
+    const K = AS_KELOMPOK[k], isi = kel[k];
+    const inti = k === 'pimpinan'
+      ? isi.map(asSorotPimpinan).join('')
+      : `<div class="as-kisi">${isi.map(g => asPanelWajah(g, urutan++)).join('')}</div>`;
+    return `<section class="as-kelompok" data-kel="${k}">
+      <header class="as-kel-kepala"><span class="ar">${K.ar}</span><h3>${esc(K.lat)}</h3><em>${angka(isi.length)}</em></header>
+      ${inti}
+    </section>`;
+  });
+  // Kelompok kecil (≤ 2 orang) berbagi satu baris agar dinding tidak berlubang.
+  let bagian = '', antre = [];
+  const tumpah = () => { if (antre.length) bagian += antre.length > 1 ? `<div class="as-baris-kecil">${antre.join('')}</div>` : antre[0]; antre = []; };
+  ada.forEach((k, i) => {
+    if (k !== 'pimpinan' && kel[k].length <= 2) antre.push(potong[i].replace('class="as-kelompok"', `class="as-kelompok as-kecil" style="--n:${kel[k].length}"`));
+    else { tumpah(); bagian += potong[i]; }
+  });
+  tumpah();
+
+  const besar = isAdmin() ? semua.filter(g => g.foto && Number(g.foto_kb) > 700) : [];
+  const totalMb = besar.reduce((s, g) => s + Number(g.foto_kb || 0), 0) / 1024;
+
+  root.innerHTML = `
+    <section class="as-panggung" id="asPanggung">
+      <div class="as-kop">
+        <span class="ar as-kop-ar" aria-hidden="true">الأساتذة</span>
+        <h2 class="as-judul" id="asJudul">Para Pendidik</h2>
+        <i class="as-benang" aria-hidden="true"></i>
+        <p class="as-lede">${angka(semua.length)} pendidik mendampingi ${angka(data.santri_aktif || 0)} santri.
+          Ketuk wajahnya untuk melihat kelas yang ia dampingi dan jejak catatannya.</p>
+      </div>
+      <div class="as-alat">
+        <div class="as-saring" role="group" aria-label="Saring kelompok">
+          <button type="button" class="as-chip${AS.saring === 'semua' ? ' on' : ''}" data-as-saring="semua" aria-pressed="${AS.saring === 'semua'}">Semua</button>
+          ${ada.map(k => `<button type="button" class="as-chip${AS.saring === k ? ' on' : ''}" data-as-saring="${k}" aria-pressed="${AS.saring === k}">${esc(AS_KELOMPOK[k].lat)}</button>`).join('')}
+        </div>
+        <label class="as-cari"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+          <input type="search" id="asCari" placeholder="Cari nama atau kelas" value="${esc(AS.cari)}" autocomplete="off" aria-label="Cari nama atau kelas"></label>
+      </div>
+      ${besar.length ? `<div class="as-catatan-admin" role="note">
+          <i class="fa-solid fa-image" aria-hidden="true"></i>
+          <span>${angka(besar.length)} foto berukuran besar (${totalMb.toLocaleString('id-ID', { maximumFractionDigits: 1 })} MB) memperlambat halaman ini di HP.
+          Hanya Admin yang melihat catatan ini.</span>
+          <button type="button" class="as-tombol as-tombol-kecil" id="asRamping">Rampingkan foto</button></div>` : ''}
+      <div class="as-dinding" id="asDinding">${bagian}</div>
+      <p class="as-kosong hidden" id="asKosong">Tidak ada pendidik yang cocok dengan pencarian ini.</p>
+    </section>`;
+
+  const panggung = $('asPanggung');
+  asPasangFoto(panggung);
+  asTerapkanSaring(false);
+  asPasangDinding(panggung);
+
+  // Kembali dari profil: potret yang tadi dibuka menjadi sasaran susut, dan dinding tidak diputar ulang.
+  const kembali = AS.kembaliKe; AS.kembaliKe = null;
+  if (kembali) {
+    const w = panggung.querySelector(`.as-wajah[data-as-id="${CSS.escape(kembali)}"]`);
+    if (w) {
+      const r = w.getBoundingClientRect();
+      if (r.top < 80 || r.bottom > innerHeight) window.scrollTo({ top: Math.max(0, scrollY + r.top - innerHeight / 2 + r.height / 2), behavior: 'auto' });
+      asNamai(w.querySelector('.as-foto'));
+    }
+    return;
+  }
+  if (!APP.segarSama) asMasukDinding(panggung);
+}
+
+function asTerapkanSaring(gerak = true) {
+  const p = $('asPanggung'); if (!p) return;
+  const cari = AS.cari.trim().toLowerCase();
+  let tampak = 0;
+  p.querySelectorAll('.as-kelompok').forEach(sec => {
+    const kelOk = AS.saring === 'semua' || sec.dataset.kel === AS.saring;
+    let n = 0;
+    sec.querySelectorAll('.as-wajah:not(.as-wajah-besar), .as-sorot').forEach(w => {
+      const ok = kelOk && (!cari || (w.dataset.cari || '').includes(cari));
+      const sebelum = !w.classList.contains('hidden');
+      w.classList.toggle('hidden', !ok);
+      if (ok) { n++; if (gerak && !sebelum && pentasBoleh()) w.animate([{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: K53.mantap }); }
+    });
+    sec.classList.toggle('hidden', !n);
+    tampak += n;
+  });
+  $('asKosong')?.classList.toggle('hidden', tampak > 0);
+  p.querySelectorAll('[data-as-saring]').forEach(b => {
+    const on = b.dataset.asSaring === AS.saring;
+    b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+  });
+}
+
+function asPasangDinding(panggung) {
+  panggung.addEventListener('click', (e) => {
+    const s = e.target.closest('[data-as-saring]');
+    if (s) { AS.saring = s.dataset.asSaring; return asTerapkanSaring(); }
+    if (e.target.closest('#asRamping')) return asRampingkanFoto();
+    const w = e.target.closest('[data-as-id]');
+    if (w) asBukaProfil(w.dataset.asId, w.classList.contains('as-wajah') ? w : panggung.querySelector(`.as-wajah[data-as-id="${CSS.escape(w.dataset.asId)}"]`));
+  });
+  let tunda = 0;
+  $('asCari')?.addEventListener('input', (e) => {
+    clearTimeout(tunda);
+    tunda = setTimeout(() => { AS.cari = e.target.value; asTerapkanSaring(); }, 120);
+  });
+  asPasangMiring($('asDinding'));
+}
+
+/** Potret miring mengikuti kursor (desktop, mode penuh). Satu tulis per bingkai. */
+function asPasangMiring(dinding) {
+  if (!dinding || !matchMedia('(hover: hover) and (pointer: fine)').matches || !pentasBoleh()) return;
+  let el = null, x = 0, y = 0, bingkai = 0;
+  const lepas = (w) => { w.classList.remove('miring'); w.style.removeProperty('--rx'); w.style.removeProperty('--ry'); };
+  const tulis = () => {
+    bingkai = 0; if (!el || modeHemat()) return;
+    const r = el.getBoundingClientRect();
+    const px = (x - r.left) / r.width - .5, py = (y - r.top) / r.height - .5;
+    el.style.setProperty('--rx', `${(-py * 9).toFixed(2)}deg`);
+    el.style.setProperty('--ry', `${(px * 11).toFixed(2)}deg`);
+    el.style.setProperty('--gx', `${((px + .5) * 100).toFixed(1)}%`);
+    el.style.setProperty('--gy', `${((py + .5) * 100).toFixed(1)}%`);
+  };
+  dinding.addEventListener('pointermove', (e) => {
+    const w = e.target.closest('.as-wajah');
+    if (w !== el) { if (el) lepas(el); el = w; if (el) el.classList.add('miring'); }
+    x = e.clientX; y = e.clientY;
+    if (el && !bingkai) bingkai = requestAnimationFrame(tulis);
+  }, { passive: true });
+  dinding.addEventListener('pointerleave', () => { if (el) lepas(el); el = null; });
+}
+
+/** Satu-satunya nama transisi bersama di dokumen: "as-wajah". */
+function asNamai(el) {
+  document.querySelectorAll('.as-vt').forEach(x => { x.style.viewTransitionName = ''; x.classList.remove('as-vt'); });
+  if (!el || !pentasBoleh() || typeof document.startViewTransition !== 'function') return;
+  el.style.viewTransitionName = 'as-wajah';
+  el.classList.add('as-vt');
+  setTimeout(() => { if (el.classList.contains('as-vt')) { el.style.viewTransitionName = ''; el.classList.remove('as-vt'); } }, 2500);
+}
+
+async function asBukaProfil(id, asal) {
+  if (!id || AS.membuka) return;
+  AS.membuka = true;
+  if (asal && pentasBoleh()) asal.animate([{ transform: 'perspective(900px) scale(1)' }, { transform: 'perspective(900px) scale(.96)' }, { transform: 'perspective(900px) scale(1)' }],
+    { duration: 240, easing: K53.mantap });   // tanggapan sentuh seketika
+  try {
+    AS.pilih = id;
+    AS.dariDinding = true;
+    // Potret tujuan harus sudah terurai sebelum transisi memotret halaman baru (VT_TUNGGU 150 ms).
+    const url = (AS.data?.pendidik || []).find(p => p.id === id)?.foto;
+    if (url && pentasBoleh()) {
+      const img = new Image(); img.src = url;
+      await Promise.race([img.decode().catch(() => {}), tundaMs(260)]);
+    }
+    asNamai(asal?.querySelector('.as-foto'));
+    await navigateTo('pendidik');
+  } finally { AS.membuka = false; }
+}
+
+/* ---------- Masuk: tirai potret berombak diagonal -------------------- */
+function asMasukDinding(panggung) {
+  if (!pentasBoleh()) return;
+  const judul = $('asJudul');
+  pecahKata(judul);
+  const wajah = [...panggung.querySelectorAll('.as-wajah:not(.hidden)')];
+  const atasLayar = innerHeight * 1.05;
+  const terlihat = wajah.filter(w => w.getBoundingClientRect().top < atasLayar);
+  const nanti = wajah.filter(w => !terlihat.includes(w));
+  // Tahan hanya yang memang terlihat (di bawah tirai muat / transisi), dilepas oleh animasinya sendiri.
+  terlihat.forEach(w => w.classList.add('as-tahan'));
+  setTimeout(() => terlihat.forEach(w => w.classList.remove('as-tahan')), 2400);   // jaring pengaman
+
+  tungguPanggungBersih(() => {
+    if (!panggung.isConnected) return;
+    naikKata(judul, { jeda: 70, durasi: 760 });
+    const b = panggung.querySelector('.as-benang');
+    b?.animate([{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], { duration: 640, delay: 240, easing: K53.tarik, fill: 'backwards' });
+    panggung.querySelector('.as-lede')?.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }],
+      { duration: 520, delay: 360, easing: K53.mantap, fill: 'backwards' });
+    panggung.querySelectorAll('.as-alat, .as-catatan-admin, .as-kel-kepala').forEach((el, i) => el.animate([{ opacity: 0 }, { opacity: 1 }],
+      { duration: 420, delay: 420 + i * 40, easing: 'ease-out', fill: 'backwards' }));
+    asSingkap(terlihat, 160);
+    asSingkapSaatTerlihat(nanti);
+  }, 6000);
+}
+
+/** Potret tersingkap dari bawah ke atas, berurutan diagonal (baris + kolom). */
+function asSingkap(daftar, mulai = 0) {
+  if (!daftar.length) return;
+  const kotak = daftar.map(w => w.getBoundingClientRect());
+  const tepiKiri = Math.min(...kotak.map(r => r.left)), tepiAtas = Math.min(...kotak.map(r => r.top));
+  const lebar = Math.max(120, Math.min(...kotak.map(r => r.width)));
+  daftar.forEach((w, i) => {
+    const r = kotak[i];
+    const kol = Math.round((r.left - tepiKiri) / lebar), bar = Math.round((r.top - tepiAtas) / (lebar * 1.2));
+    const tunda = mulai + Math.min(520, (kol + bar * 2) * 52);
+    const bingkai = w.querySelector('.as-bingkai'), foto = w.querySelector('.as-foto'), garis = w.querySelector('.as-denyut-garis');
+    const a = bingkai.animate([{ clipPath: 'inset(100% 0 0 0 round 18px)' }, { clipPath: 'inset(0 0 0 0 round 18px)' }],
+      { duration: 640, delay: tunda, easing: K53.mantap, fill: 'backwards' });
+    w.classList.remove('as-tahan');
+    const tanpa = foto?.classList.contains('as-tanpa');
+    foto?.animate(tanpa ? [{ transform: 'scale(1.22) translateY(6%)' }, { transform: 'none' }]
+      : [{ transform: 'scale(1.22) translateY(6%)', filter: 'grayscale(1) brightness(.45)' }, { transform: 'none', filter: 'grayscale(.82) brightness(.82)' }],
+      { duration: 760, delay: tunda, easing: K53.mantap, fill: 'backwards' });
+    w.querySelector('.as-teks')?.animate([{ opacity: 0, transform: 'translateY(14px)' }, { opacity: 1, transform: 'none' }],
+      { duration: 520, delay: tunda + 260, easing: K53.mantap, fill: 'backwards' });
+    garis?.animate([{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], { duration: 560, delay: tunda + 380, easing: K53.tarik, fill: 'backwards' });
+    a.finished.catch(() => {});
+  });
+}
+function asSingkapSaatTerlihat(daftar) {
+  if (!daftar.length || !('IntersectionObserver' in window)) return;
+  const io = new IntersectionObserver((ents) => {
+    const baru = ents.filter(e => e.isIntersecting).map(e => e.target);
+    baru.forEach(el => io.unobserve(el));
+    if (baru.length) asSingkap(baru, 0);
+  }, { rootMargin: '0px 0px -6% 0px', threshold: 0.01 });
+  daftar.forEach(w => io.observe(w));
+}
+
+/* ---------- Admin: rampingkan foto besar ----------------------------- */
+async function asRampingkanFoto() {
+  if (!isAdmin()) return;
+  const besar = (AS.data?.pendidik || []).filter(g => g.foto && Number(g.foto_kb) > 700);
+  if (!besar.length) return;
+  const ok = await Swal.fire({
+    title: 'Rampingkan foto profil?',
+    html: `<p style="text-align:left">${angka(besar.length)} foto akan diperkecil menjadi paling lebar 960 px (JPEG) lalu diunggah ulang
+      sebagai foto aktif. Foto lama dinonaktifkan, tidak dihapus, sehingga masih bisa dipulihkan.</p>`,
+    icon: 'question', showCancelButton: true, confirmButtonText: 'Rampingkan', cancelButtonText: 'Batal'
+  });
+  if (!ok.isConfirmed) return;
+  let berhasil = 0; const gagal = [];
+  for (const [i, g] of besar.entries()) {
+    sync('saving', `Merampingkan foto ${i + 1}/${besar.length}…`);
+    try {
+      const res = await fetch(g.foto, { mode: 'cors', cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const bmp = await createImageBitmap(await res.blob());
+      const skala = Math.min(1, 960 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(bmp.width * skala); c.height = Math.round(bmp.height * skala);
+      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      const blob = await new Promise((r, j) => c.toBlob(b => b ? r(b) : j(new Error('Kanvas gagal')), 'image/jpeg', 0.84));
+      await unggahFoto('profil_guru', g.id, new File([blob], `ramping-${Date.now()}.jpg`, { type: 'image/jpeg' }));
+      berhasil++;
+    } catch (err) { gagal.push(`${g.nama}: ${err?.message || err}`); }
+  }
+  sync(gagal.length ? 'warn' : 'done', gagal.length ? 'Sebagian gagal' : 'Tersimpan');
+  AS.data = null;
+  if (gagal.length) Swal.fire({ icon: 'warning', title: `${berhasil} dari ${besar.length} foto dirampingkan`, html: `<div style="text-align:left;font-size:13px">${gagal.map(esc).join('<br>')}</div>` });
+  else toast('success', `${berhasil} foto dirampingkan.`);
+  navigateTo('asatidz');
+}
+
+/* =====================================================================
+ * HALAMAN 2 · PROFIL PENDIDIK
+ * ===================================================================== */
+const AS_JENIS = {
+  pelanggaran: { ikon: 'fa-scale-balanced',   label: 'Pelanggaran dicatat',  kerja: 'Mencatat pelanggaran' },
+  pembinaan:   { ikon: 'fa-hands-praying',    label: 'Pembinaan dituntaskan', kerja: 'Menuntaskan pembinaan' },
+  prestasi:    { ikon: 'fa-award',            label: 'Apresiasi diberikan',  kerja: 'Memberi apresiasi' },
+  tahfiz:      { ikon: 'fa-book-quran',       label: 'Setoran disimak',      kerja: 'Menyimak setoran' },
+  izin:        { ikon: 'fa-door-open',        label: 'Izin dicatat',         kerja: 'Mencatat izin' },
+  laporan:     { ikon: 'fa-file-lines',       label: 'Laporan diunduh',      kerja: 'Mengunduh laporan' },
+  presensi:    { ikon: 'fa-calendar-check',   label: 'Presensi didata',      kerja: 'Mendata presensi' }
+};
+
+function asKepalaProfil(g, d) {
+  const k = asKelompok(g);
+  const kelas = asUrutKelas(g.kelas_binaan);
+  const a = d?.aktivitas;
+  return `<header class="as-profil-kepala">
+    <button type="button" class="as-kembali" data-as-kembali><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>Para Pendidik</button>
+    <div class="as-potret">${asFotoHtml(g, { eager: true, kelas: 'as-foto-besar' })}</div>
+    <div class="as-identitas">
+      <span class="ar as-id-ar" aria-hidden="true">${AS_KELOMPOK[k].satu}</span>
+      <h2 class="as-id-nama" id="asNamaBesar">${esc(g.nama)}</h2>
+      <p class="as-id-peran">${esc(asPeran(g))}${g.korps && !/^Musyrif/.test(asPeran(g)) ? ` <span>${esc(g.korps)}</span>` : ''}</p>
+      ${kelas.length ? `<div class="as-id-kelas">${kelas.map(x => `<span>${esc(x)}</span>`).join('')}</div>` : ''}
+      <p class="as-vonis" id="asVonis">${d ? esc(asVonis(d).teks) : '<span class="as-rangka" style="width:80%"></span><span class="as-rangka" style="width:56%"></span>'}</p>
+      <dl class="as-fakta">
+        <div><dt>Terakhir mencatat</dt><dd>${d ? esc(asRelatif(a?.terakhir)) : '…'}</dd></div>
+        <div><dt>Hari aktif bulan ini</dt><dd class="as-angka">${d ? angka(a?.hari_aktif_bulan) : '…'}</dd></div>
+        <div><dt>Catatan bulan ini</dt><dd class="as-angka">${d ? angka(a?.bulan) : '…'}</dd></div>
+      </dl>
+    </div>
+  </header>`;
+}
+
+function asRentangPembanding(d) {
+  const a = tglDari(d.pembanding?.dari), z = tglDari(d.pembanding?.sampai);
+  if (!a || !z) return '';
+  return `${a.getDate()}–${z.getDate()} ${BULAN_ID[a.getMonth()]}`;
+}
+/** Persen perubahan; null bila pembanding belum tercakup pencatatan atau nol. */
+function asPersen(kini, lalu, d) {
+  if (!Number(lalu)) return null;
+  const awal = (d.tren || [])[0]?.bulan;
+  if (awal && String(d.pembanding?.dari || '').slice(0, 7) < awal) return null;
+  return Math.round((Number(kini) - Number(lalu)) / Number(lalu) * 100);
+}
+function asVonis(d) {
+  const t = d.total || {}, L = d.lingkup || {};
+  if (L.jenis === 'lintas') return { teks: `${asSapaan(d.pendidik?.nama)} tidak memegang kelas binaan; perannya lintas kelas. Jejak catatannya ada di bawah.`, sorot: '' };
+  const bln = tglDari(`${d.bulan}-01`);
+  const subjek = L.jenis === 'dayah' ? 'Seluruh dayah' : ((L.kelas || []).length <= 3 ? `Kelas ${asUrutKelas(L.kelas).join(', ')}` : `${L.kelas.length} kelas binaan`);
+  let s = `${subjek}: ${angka(t.plg)} pelanggaran sejak 1 ${BULAN_ID[bln.getMonth()]}`;
+  const p = asPersen(t.plg, t.plg_lalu, d), rentang = asRentangPembanding(d);
+  if (p != null) s += p < 0 ? `, turun ${Math.abs(p)}% dibanding ${rentang}` : p > 0 ? `, naik ${p}% dibanding ${rentang}` : `, sama dengan ${rentang}`;
+  s += '. ';
+  s += Number(t.pbn_proses) ? `${angka(t.pbn_proses)} pembinaan masih berjalan.`
+     : Number(t.pbn_selesai) ? 'Semua pembinaan bulan ini tuntas.' : 'Belum ada pembinaan bulan ini.';
+  return { teks: s, sorot: subjek };
+}
+
+/* ---------- Kelas ---------------------------------------------------- */
+function asCincin(nilai, total, ukuran = 112) {
+  const p = total ? nilai / total : 0, r = 46, kel = 2 * Math.PI * r;
+  return `<svg class="as-cincin" viewBox="0 0 112 112" width="${ukuran}" height="${ukuran}" role="img"
+      aria-label="${angka(nilai)} dari ${angka(total)} santri tanpa poin bulan ini">
+    <circle cx="56" cy="56" r="${r}" class="as-cincin-alas"/>
+    <circle cx="56" cy="56" r="${r}" class="as-cincin-isi" stroke-dasharray="${kel.toFixed(1)}"
+      stroke-dashoffset="${(kel * (1 - p)).toFixed(1)}" data-kel="${kel.toFixed(1)}" transform="rotate(-90 56 56)"/>
+    <text x="56" y="54" class="as-cincin-angka">${Math.round(p * 100)}%</text>
+    <text x="56" y="72" class="as-cincin-ket">bersih</text>
+  </svg>`;
+}
+function asUkuranKelas(k, d, judul) {
+  const p = asPersen(k.plg, k.plg_lalu, d);
+  const pbn = Number(k.pbn_selesai) + Number(k.pbn_proses);
+  const arah = p == null ? '' : `<span class="as-arah ${p < 0 ? 'turun' : p > 0 ? 'naik' : ''}">${p < 0 ? '↓' : p > 0 ? '↑' : '='} ${Math.abs(p)}%</span>`;
+  return `<article class="as-kelas">
+    <header><h4>${esc(judul)}</h4><span>${angka(k.santri)} santri${Number(k.putri) ? ` · ${angka(k.putri)} putri` : ''}</span></header>
+    <div class="as-kelas-badan">
+      ${asCincin(Number(k.bersih), Number(k.santri))}
+      <dl class="as-ukuran">
+        <div><dt>Pelanggaran bulan ini</dt><dd><b class="as-angka">${angka(k.plg)}</b>${arah}
+          <small>${Number(k.plg_lalu) || p != null ? `${angka(k.plg_lalu)} pada ${esc(asRentangPembanding(d))}` : ''}${Number(k.berat) ? ` · ${angka(k.berat)} berat` : ''}</small></dd></div>
+        <div><dt>Pembinaan</dt><dd><b class="as-angka">${angka(k.pbn_selesai)}</b><span class="as-dari">/ ${angka(pbn)} tuntas</span>
+          <span class="as-meter" style="--p:${pbn ? (k.pbn_selesai / pbn * 100).toFixed(1) : 0}%"><i></i></span></dd></div>
+        <div><dt>Apresiasi &amp; tahfiz</dt><dd><b class="as-angka">${angka(Number(k.prestasi) + Number(k.tahfiz))}</b>
+          <small>${angka(k.prestasi)} apresiasi · ${angka(k.tahfiz)} setoran${Number(k.halaman) ? ` (${Number(k.halaman).toLocaleString('id-ID')} hlm)` : ''}</small></dd></div>
+        <div><dt>Di luar asrama hari ini</dt><dd><b class="as-angka">${angka(Number(k.izin) + Number(k.sakit))}</b>
+          <small>${angka(k.izin)} izin · ${angka(k.sakit)} sakit</small></dd></div>
+      </dl>
+    </div>
+  </article>`;
+}
+function asBarisKelas(kelas, d) {
+  const maks = Math.max(1, ...kelas.map(k => Number(k.plg)));
+  return `<div class="as-tabel-kelas" role="table" aria-label="Rincian per kelas">
+    <div class="as-tk-baris as-tk-kepala" role="row"><span role="columnheader">Kelas</span><span role="columnheader">Santri</span>
+      <span role="columnheader">Bersih</span><span role="columnheader">Pelanggaran</span><span role="columnheader">Pembinaan berjalan</span><span role="columnheader">Apresiasi &amp; tahfiz</span></div>
+    ${asUrutKelasObj(kelas).map(k => {
+      const p = asPersen(k.plg, k.plg_lalu, d);
+      return `<div class="as-tk-baris" role="row">
+        <b role="cell">${esc(k.kelas)}</b><span role="cell" class="as-angka">${angka(k.santri)}</span>
+        <span role="cell"><span class="as-meter as-meter-kecil" style="--p:${k.santri ? (k.bersih / k.santri * 100).toFixed(1) : 0}%"><i></i></span>${angka(k.bersih)}</span>
+        <span role="cell" class="as-tk-plg"><span class="as-batang" style="--p:${(k.plg / maks * 100).toFixed(1)}%"><i></i></span><span class="as-angka">${angka(k.plg)}</span>${p == null ? '' : `<em class="${p < 0 ? 'turun' : p > 0 ? 'naik' : ''}">${p < 0 ? '↓' : p > 0 ? '↑' : '='}${Math.abs(p)}%</em>`}</span>
+        <span role="cell" class="as-angka">${angka(k.pbn_proses)}</span>
+        <span role="cell" class="as-angka">${angka(Number(k.prestasi) + Number(k.tahfiz))}</span>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+const asUrutKelasObj = (a) => [...(a || [])].sort((x, y) => asKunciKelas(x.kelas).localeCompare(asKunciKelas(y.kelas)));
+
+/* ---------- Tren enam lembar ---------------------------------------- */
+function asTren(tren, lebar) {
+  if (!tren?.length) return '';
+  const W = Math.round(Math.max(300, Math.min(1100, lebar || 560))), H = 200, kiri = 34, bawah = 30, atas = 18;
+  const n = tren.length, lebarKol = (W - kiri - 8) / n;
+  const maks = Math.max(1, ...tren.map(t => Math.max(Number(t.plg), Number(t.baik))));
+  const skala = (v) => (H - bawah) - (v / maks) * (H - bawah - atas);
+  const batang = tren.map((t, i) => {
+    const w = Math.min(64, lebarKol * .44), x = kiri + i * lebarKol + (lebarKol - w) / 2, y = skala(Number(t.plg));
+    return `<rect class="as-tren-batang" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${(H - bawah - y).toFixed(1)}" rx="3"
+        style="--tunda:${i * 70}ms"><title>${esc(labelBulan(t.bulan))}: ${angka(t.plg)} pelanggaran</title></rect>
+      <text class="as-tren-nilai" x="${(x + w / 2).toFixed(1)}" y="${(y - 6).toFixed(1)}">${angka(t.plg)}</text>
+      <text class="as-tren-bulan" x="${(x + w / 2).toFixed(1)}" y="${H - 10}">${esc(namaBulanPendek(t.bulan))}</text>`;
+  }).join('');
+  const titik = tren.map((t, i) => [kiri + i * lebarKol + lebarKol / 2, skala(Number(t.baik))]);
+  const jalur = titik.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
+  const garisAlas = [0, .5, 1].map(f => { const y = skala(maks * f); return `<line x1="${kiri}" x2="${W - 4}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" class="as-tren-alas"/>
+      <text x="${kiri - 6}" y="${(y + 4).toFixed(1)}" class="as-tren-sumbu">${angka(Math.round(maks * f))}</text>`; }).join('');
+  return `<figure class="as-tren">
+    <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Tren pelanggaran dan kebaikan per bulan">
+      ${garisAlas}${batang}
+      ${n > 1 ? `<path class="as-tren-garis" d="${jalur}" pathLength="1"/>` : ''}
+      ${titik.map(([x, y], i) => `<circle class="as-tren-titik" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.5" style="--tunda:${300 + i * 70}ms"><title>${esc(labelBulan(tren[i].bulan))}: ${angka(tren[i].baik)} apresiasi &amp; setoran</title></circle>`).join('')}
+    </svg>
+    <figcaption><span class="as-leg as-leg-plg">Pelanggaran</span><span class="as-leg as-leg-baik">Apresiasi &amp; setoran tahfiz</span></figcaption>
+  </figure>`;
+}
+
+/* ---------- Peta 12 pekan ------------------------------------------- */
+function asPeta(harian, hariK) {
+  const v = (harian || []).map(Number), n = v.length;
+  if (!n) return '';
+  const akhir = tglDari(hariK) || new Date();
+  const awal = tambahHari(akhir, -(n - 1));
+  const geser = (awal.getDay() + 6) % 7;            // Senin = baris 0
+  const kolom = Math.ceil((geser + n) / 7);
+  const tingkat = (x) => x <= 0 ? 0 : x <= 2 ? 1 : x <= 5 ? 2 : x <= 12 ? 3 : 4;
+  let sel = '', bulanLabel = '', bulanLalu = -1;
+  for (let i = 0; i < n; i++) {
+    const d = tambahHari(awal, i), p = geser + i, c = Math.floor(p / 7), r = p % 7;
+    sel += `<i class="t${tingkat(v[i])}" style="grid-column:${c + 1};grid-row:${r + 1};--c:${c};--r:${r}" title="${esc(tgl(d))}: ${angka(v[i])} catatan"></i>`;
+    if (r === 0 || i === 0) {
+      if (d.getMonth() !== bulanLalu && (r === 0 || i === 0)) { bulanLabel += `<span style="grid-column:${c + 1}">${esc(BULAN_ID[d.getMonth()].slice(0, 3))}</span>`; bulanLalu = d.getMonth(); }
+    }
+  }
+  return `<div class="as-peta" style="--kolom:${kolom}">
+    <div class="as-peta-bulan">${bulanLabel}</div>
+    <div class="as-peta-hari"><span>Sen</span><span></span><span>Rab</span><span></span><span>Jum</span><span></span><span></span></div>
+    <div class="as-peta-sel" role="img" aria-label="Peta catatan harian 12 pekan terakhir">${sel}</div>
+    <div class="as-peta-skala" aria-hidden="true">Sepi <i class="t0"></i><i class="t1"></i><i class="t2"></i><i class="t3"></i><i class="t4"></i> Ramai</div>
+  </div>`;
+}
+function asRentetan(harian) {
+  const v = (harian || []).map(Number);
+  let i = v.length - 1;
+  if (i >= 0 && !v[i]) i--;                           // hari ini belum mencatat tidak memutus rentetan
+  let n = 0; while (i >= 0 && v[i] > 0) { n++; i--; }
+  return n;
+}
+
+/* ---------- Isi profil ----------------------------------------------- */
+function asIsiProfil(d) {
+  const lebarIsi = $('asIsi')?.clientWidth || $('viewRoot')?.clientWidth || 560;
+  const L = d.lingkup || {}, t = d.total || {}, a = d.aktivitas || {};
+  const kelas = d.kelas || [];
+  const bln = labelBulan(d.bulan);
+  const hariKe = Number(String(d.hari).slice(8, 10));
+  const blokKelas = L.jenis === 'lintas' ? '' : `
+    <section class="as-bab" id="asBabKelas">
+      <header class="as-bab-kepala"><span class="ar">الفصول</span>
+        <h3>${L.jenis === 'dayah' ? 'Keadaan seluruh dayah' : kelas.length > 1 ? 'Kelas yang didampingi' : 'Kelas yang didampingi'}</h3>
+        <p>Lembar ${esc(bln)}, 1–${hariKe}. Pembanding: ${esc(asRentangPembanding(d))}.</p></header>
+      ${kelas.length <= 2
+        ? `<div class="as-kelas-kisi">${asUrutKelasObj(kelas).map(k => asUkuranKelas(k, d, `Kelas ${k.kelas}`)).join('')}</div>`
+        : `${asUkuranKelas(t, d, L.jenis === 'dayah' ? 'Seluruh dayah' : `${kelas.length} kelas binaan`)}${asBarisKelas(kelas, d)}`}
+      ${(d.tren || []).length ? `<div class="as-tren-wadah"><h4>Lembar demi lembar</h4>${asTren(d.tren, lebarIsi - 42)}</div>` : ''}
+      ${asDaftarNama(d)}
+    </section>`;
+
+  const jenis = Object.entries(a.per_jenis || {}).sort((x, y) => y[1].sepanjang - x[1].sepanjang);
+  const maksJ = Math.max(1, ...jenis.map(([, v]) => v.sepanjang));
+  const rentetan = asRentetan(a.harian);
+  const blokJejak = `
+    <section class="as-bab" id="asBabJejak">
+      <header class="as-bab-kepala"><span class="ar">الأثر</span><h3>Jejak pencatatan</h3>
+        <p>Semua yang dicatat ${esc(asSapaan(d.pendidik?.nama))} di chemint${a.pertama ? ` sejak ${esc(tgl(a.pertama))}` : ''}. Jumlah catatan bukan ukuran mutu pembinaan.</p></header>
+      ${Number(a.sepanjang) ? `
+      <div class="as-jejak-kisi">
+        <div class="as-jejak-peta">
+          ${asPeta(a.harian, d.hari)}
+          <p class="as-jejak-ringkas"><b class="as-angka">${angka(a.sepanjang)}</b> catatan sepanjang waktu${rentetan > 1 ? ` · mencatat <b>${angka(rentetan)} hari</b> berturut-turut` : ''}</p>
+        </div>
+        <ul class="as-jenis">${jenis.map(([k, v]) => {
+          const J = AS_JENIS[k] || { ikon: 'fa-circle', label: k };
+          return `<li><i class="fa-solid ${J.ikon}" aria-hidden="true"></i><span class="as-jenis-label">${esc(J.label)}</span>
+            <span class="as-jenis-batang" style="--p:${(v.sepanjang / maksJ * 100).toFixed(1)}%"><i></i></span>
+            <b class="as-angka">${angka(v.sepanjang)}</b><small>${angka(v.bulan)} bulan ini</small></li>`;
+        }).join('')}</ul>
+      </div>
+      <ol class="as-linimasa">${(d.jejak || []).map(j => {
+        const J = AS_JENIS[j.jenis] || { ikon: 'fa-circle', kerja: j.jenis };
+        const siapa = j.nama ? `${esc(asNamaSantri(j.nama))}${j.kelas ? ` · ${esc(j.kelas)}` : ''}`
+                    : j.kelas ? `kelas ${esc(j.kelas)}` : '';
+        return `<li><i class="fa-solid ${J.ikon}" aria-hidden="true"></i>
+          <div><b>${esc(J.kerja)}</b>${j.ringkas ? ` <span>${esc(j.ringkas)}</span>` : ''}${siapa ? `<small>${siapa}</small>` : ''}</div>
+          <time datetime="${esc(j.waktu)}">${esc(asRelatif(j.waktu))}</time></li>`;
+      }).join('')}</ol>`
+      : `<p class="as-hening">Belum ada catatan dari ${esc(asSapaan(d.pendidik?.nama))}. Catatan pertama akan tampil di sini.</p>`}
+    </section>`;
+  return blokKelas + blokJejak;
+}
+/** Nama santri dari database (huruf kapital) ditampilkan dalam huruf judul. */
+function asNamaSantri(n) {
+  return String(n || '').toLowerCase().replace(/(^|[\s'.-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
+}
+function asDaftarNama(d) {
+  if (!d.boleh_nama) {
+    return `<p class="as-catatan-hak"><i class="fa-solid fa-lock" aria-hidden="true"></i>
+      Nama santri hanya tampil untuk pimpinan, guru BK, Admin, dan pembina kelas ini sendiri.</p>`;
+  }
+  const daftar = (judul, isi, ket, kosong) => `<div class="as-nama-daftar"><h4>${esc(judul)}</h4>
+    ${isi.length ? `<ol>${isi.map(x => `<li><button type="button" class="as-santri" data-detail="${esc(x.nisn)}">${esc(asNamaSantri(x.nama))}</button>
+      <span>${esc(x.kelas)}</span><b class="as-angka">${esc(ket(x))}</b></li>`).join('')}</ol>`
+      : `<p class="as-hening">${esc(kosong)}</p>`}</div>`;
+  return `<div class="as-nama-kisi">
+    ${daftar('Perlu didekati', d.perhatian || [], x => `${angka(x.poin)} poin`, 'Tidak ada santri berpoin bulan ini.')}
+    ${daftar('Kebaikan bulan ini', d.bintang || [], x => `${angka(x.n)}×`, 'Belum ada apresiasi atau setoran tahfiz bulan ini.')}
+  </div>`;
+}
+
+async function viewPendidik() {
+  const root = $('viewRoot');
+  const id = AS.pilih;
+  if (!id) {   // dibuka tanpa pilihan (mis. dari pintasan): tampilkan dinding
+    $('pageTitle').textContent = JUDUL.asatidz.teks;
+    APP.view = 'asatidz'; root.dataset.view = 'asatidz';
+    return viewAsatidz();
+  }
+  const dariDinding = AS.dariDinding; AS.dariDinding = false;
+  const g0 = (AS.data?.pendidik || []).find(p => p.id === id) || { id, nama: '…', kelas_binaan: [] };
+
+  // Kepala langsung digambar dari data dinding (sinkron) → potret bisa memekar dalam transisi.
+  root.innerHTML = `<div class="as-profil" id="asProfil">${asKepalaProfil(g0, null)}
+    <div id="asIsi"><div class="as-bab"><span class="as-rangka" style="width:40%;height:22px"></span>
+      <span class="as-rangka" style="width:100%;height:160px;margin-top:14px"></span></div></div></div>`;
+  const potret = root.querySelector('.as-potret .as-foto');
+  if (dariDinding) asNamai(potret);
+  asPasangFoto(root);
+  asPasangProfil(root);
+
+  let d;
+  try { d = (await q(db.rpc('profil_pendidik_rpc', { p_guru: id }), 'profil_pendidik')).data; }
+  catch (err) {
+    console.error('[pendidik]', err);
+    $('asIsi').innerHTML = `<div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
+      Profil tidak dapat dimuat: <b>${esc(asPesanGalat(err))}</b></div>`;
+    return;
+  }
+  if (APP.view !== 'pendidik' || AS.pilih !== id || !$('asProfil')) return;
+  const g = { ...g0, ...(d.pendidik || {}) };
+
+  // Isi kepala diperbarui DI TEMPAT (potret tidak digambar ulang → transisi tetap utuh).
+  const kepala = root.querySelector('.as-profil-kepala');
+  const baru = document.createElement('div'); baru.innerHTML = asKepalaProfil(g, d);
+  const idBaru = baru.querySelector('.as-identitas');
+  kepala.querySelector('.as-identitas').replaceWith(idBaru);
+  if (!g0.foto && g.foto) { kepala.querySelector('.as-potret').innerHTML = asFotoHtml(g, { eager: true, kelas: 'as-foto-besar' }); asPasangFoto(kepala); }
+  $('asIsi').innerHTML = asIsiProfil(d);
+
+  const v = asVonis(d);
+  const vonis = $('asVonis');
+  if (v.sorot) pecahKata(vonis, v.sorot); else pecahKata(vonis);
+  if (APP.segarSama || !pentasBoleh()) {
+    Benang.garisBawah(vonis.querySelector('.benang-sorot'), { statis: true });
+    return;
+  }
+  asPentasProfil(root, dariDinding);
+}
+
+function asPasangProfil(root) {
+  root.addEventListener('click', (e) => {
+    if (e.target.closest('[data-as-kembali]')) {
+      AS.kembaliKe = AS.pilih;
+      asNamai(root.querySelector('.as-potret .as-foto'));
+      return navigateTo('asatidz');
+    }
+    const s = e.target.closest('[data-detail]');
+    if (s) bukaDetailSantri(s.dataset.detail);
+  });
+}
+
+/* ---------- Pentas profil (≤ 1,6 dtk sejak layar bersih) ------------- */
+function asPentasProfil(root, dariDinding) {
+  const vonis = $('asVonis');
+  const ident = root.querySelector('.as-identitas');
+  tungguPanggungBersih(() => {
+    if (!root.isConnected || APP.view !== 'pendidik') return;
+    const t0 = dariDinding ? 180 : 0;   // biarkan potret selesai memekar lebih dulu
+    if (!dariDinding) root.querySelector('.as-potret')?.animate(
+      [{ clipPath: 'inset(0 0 100% 0 round 22px)', transform: 'scale(1.06)' }, { clipPath: 'inset(0 0 0 0 round 22px)', transform: 'none' }],
+      { duration: 720, easing: K53.mantap, fill: 'backwards' });
+    ident?.querySelectorAll('.as-id-ar, .as-id-nama, .as-id-peran, .as-id-kelas').forEach((el, i) =>
+      el.animate([{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'none' }],
+        { duration: 560, delay: t0 + i * 60, easing: K53.mantap, fill: 'backwards' }));
+    naikKata(vonis, { tunda: t0 + 200, jeda: 22, durasi: 560 }).then(() => Benang.garisBawah(vonis.querySelector('.benang-sorot')));
+    ident?.querySelectorAll('.as-fakta .as-angka').forEach((el, i) => hitungNaik(el, { durasi: 700, tunda: t0 + 300 + i * 60 }));
+    ident?.querySelectorAll('.as-fakta > div').forEach((el, i) => el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 400, delay: t0 + 280 + i * 60, fill: 'backwards' }));
+    // Bab di bawah: dipentaskan saat terlihat.
+    root.querySelectorAll('.as-kelas, .as-tabel-kelas, .as-tren, .as-nama-kisi, .as-jejak-kisi, .as-linimasa').forEach(el => asPentasSaatTerlihat(el));
+  }, 6000);
+}
+function asPentasSaatTerlihat(el) {
+  const main = () => asPentasBagian(el);
+  if (!('IntersectionObserver' in window)) return main();
+  const r = el.getBoundingClientRect();
+  if (r.top < innerHeight * .92 && r.bottom > 0) return main();
+  const io = new IntersectionObserver((ents) => {
+    if (ents.some(e => e.isIntersecting)) { io.disconnect(); main(); }
+  }, { rootMargin: '0px 0px -8% 0px' });
+  io.observe(el);
+}
+function asPentasBagian(el) {
+  if (!el.isConnected || !pentasBoleh()) return;
+  const M = K53.mantap;
+  el.animate([{ opacity: 0, transform: 'translateY(18px)' }, { opacity: 1, transform: 'none' }], { duration: 520, easing: M, fill: 'backwards' });
+  el.querySelectorAll('.as-cincin-isi').forEach(c => {
+    const kel = Number(c.dataset.kel), akhir = c.getAttribute('stroke-dashoffset');
+    c.animate([{ strokeDashoffset: kel }, { strokeDashoffset: akhir }], { duration: 1000, delay: 120, easing: K53.tarik, fill: 'backwards' });
+  });
+  el.querySelectorAll('.as-cincin-angka').forEach(tx => hitungNaik(tx, { durasi: 900, tunda: 120 }));
+  el.querySelectorAll('.as-ukuran .as-angka, .as-jejak-ringkas .as-angka, .as-jenis .as-angka').forEach((n, i) => hitungNaik(n, { durasi: 760, tunda: 160 + i * 40 }));
+  el.querySelectorAll('.as-meter > i, .as-batang > i, .as-jenis-batang > i').forEach((b, i) =>
+    b.animate([{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], { duration: 640, delay: 180 + i * 35, easing: K53.tarik, fill: 'backwards' }));
+  el.querySelectorAll('.as-tren-batang').forEach((b, i) =>
+    b.animate([{ transform: 'scaleY(0)' }, { transform: 'scaleY(1)' }], { duration: 620, delay: 140 + i * 80, easing: K53.mantap, fill: 'backwards' }));
+  el.querySelectorAll('.as-tren-nilai, .as-tren-titik').forEach((b, i) =>
+    b.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, delay: 420 + i * 50, fill: 'backwards' }));
+  el.querySelectorAll('.as-tren-garis').forEach(g =>
+    g.animate([{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], { duration: 760, delay: 380, easing: K53.tarik, fill: 'backwards' }));
+  // Peta 12 pekan: riak dari pojok kiri atas.
+  el.querySelectorAll('.as-peta-sel > i').forEach(c => {
+    const k = Number(c.style.getPropertyValue('--c')) || 0, r = Number(c.style.getPropertyValue('--r')) || 0;
+    c.animate([{ transform: 'scale(0)', opacity: 0 }, { transform: 'none', opacity: 1 }],
+      { duration: 360, delay: 120 + k * 42 + r * 18, easing: K53.mantap, fill: 'backwards' });
+  });
+  el.querySelectorAll(':scope.as-linimasa > li, :scope .as-nama-daftar li').forEach((li, i) =>
+    li.animate([{ opacity: 0, transform: 'translateX(-10px)' }, { opacity: 1, transform: 'none' }], { duration: 380, delay: 80 + i * 34, easing: M, fill: 'backwards' }));
+}
+
+/* ---------- Bilah samping: profil tetap menyalakan "Para Pendidik" --- */
+(function () {
+  const navSebelum = navigateTo;
+  navigateTo = async function (view) {
+    const h = await navSebelum.apply(this, arguments);
+    if (APP.view === 'pendidik') document.querySelectorAll('[data-view="asatidz"]').forEach(b => b.classList.add('active'));
+    return h;
+  };
+})();
+
+/* ---------- Pintasan: foto diri di bilah profil membuka profil sendiri */
+(function pasangPintasanProfilSaya() {
+  const pasang = () => {
+    const el = document.getElementById('pbarNama');
+    if (!el || el.dataset.asPintas) return;
+    el.dataset.asPintas = '1';
+    el.style.cursor = 'pointer';
+    el.title = 'Lihat profil saya di Para Pendidik';
+    el.addEventListener('click', () => {
+      const p = APP.profil, saya = p?.id;
+      if (!saya || !asAdalahPendidik(p)) return;
+      AS.pilih = saya; AS.dariDinding = false;
+      navigateTo('pendidik');
+    });
+  };
+  document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', pasang) : pasang();
 })();
