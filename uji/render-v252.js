@@ -82,7 +82,7 @@ async function buka(browser, url, o = {}) {
   }, { hemat, peran: o.peran, tokoh: o.tokoh || process.env.RQTOKOH || '' });
   await page.goto(url);
   if (!mobile) await page.mouse.move(viewport.width - 40, viewport.height - 40);
-  await page.waitForFunction(() => typeof APP !== 'undefined' && APP.profil && document.querySelector('#viewRoot .mz-surat, #viewRoot .mj-meja, #viewRoot .stats'), null, { timeout: 25000 });
+  await page.waitForFunction(() => typeof APP !== 'undefined' && APP.profil && document.querySelector('#viewRoot .mz-surat, #viewRoot .mj-meja, #viewRoot .stats, #viewRoot .lembar'), null, { timeout: 25000 });
   return { ctx, page };
 }
 module.exports = { buka, H };

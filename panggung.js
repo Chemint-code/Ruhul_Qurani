@@ -967,7 +967,7 @@
 
   function langkah(kini) {
     S.raf = 0;
-    if (!S.hidup || API.view() !== 'dashboard') return hentikan();
+    if (!S.hidup || !['dashboard', 'analisis'].includes(API.view())) return hentikan();   // v2.55: grafik pindah ke Analisis
     if (document.hidden) return;                              // visibilitychange membangunkan lagi
     const dt = Math.min(.05, (kini - S.lalu) / 1000); S.lalu = kini;
     if (S.hemat && kini - S.gambarLalu < 32) { S.raf = requestAnimationFrame(langkah); return; }

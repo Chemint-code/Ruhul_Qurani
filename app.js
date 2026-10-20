@@ -668,6 +668,7 @@ function periksaKamar(kamarMentah, peranMentah, kelas) {
 
 const MENU_ROLE = {
   dashboard:   ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],
+  analisis:    ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Osis'],   // v2.55
   pimpinan:    ['Admin','Pimpinan'],
   bk:          ['Admin','Guru BK'],
   pesan:       ['Admin','Guru','Walas','Guru BK','Guru Piket','Ustadz GEN-Z','Pimpinan'],
@@ -691,6 +692,7 @@ const MENU_ROLE = {
 
 const JUDUL = {
   dashboard:  { lat:'Ringkasan',       ar:'الملخّص',            teks:'Ringkasan' },
+  analisis:   { lat:'Analisis',        ar:'التحليل',            teks:'Grafik & Sebaran' },
   pimpinan:   { lat:'Pimpinan',        ar:'لوحة القيادة',       teks:'Dashboard Pimpinan' },
   bk:         { lat:'Bimbingan',       ar:'لوحة الإرشاد',       teks:'Dashboard Guru BK' },
   pesan:      { lat:'Pesan',           ar:'الرسائل',            teks:'Pesan Tindak Lanjut' },
@@ -1842,14 +1844,9 @@ function terapkanIdentitasPengguna(nama, peran, userId) {
   if (salam) salam.textContent = salamWaktu();
 }
 
-/** Sapaan mengikuti waktu setempat — sentuhan kecil yang membuat bilah terasa hidup. */
-function salamWaktu() {
-  const j = new Date().getHours();
-  if (j < 11) return 'Selamat pagi';
-  if (j < 15) return 'Selamat siang';
-  if (j < 18) return 'Selamat sore';
-  return 'Selamat malam';
-}
+/* v2.55: salamWaktu() kini satu deklarasi saja (lihat di bawah, dekat panelSapaan).
+   Dulu ada dua; yang belakangan menimpa yang ini sehingga bilah atas — yang
+   memanggil tanpa argumen — selalu berbunyi "Selamat malam". */
 
 /** Pasang foto profil (atau placeholder inisial) ke avatar sidebar & bilah atas. */
 function terapkanFotoProfilUI(url, nama, peran) {
@@ -2606,6 +2603,7 @@ async function navigateTo(view) {
   APP.onKlik = null;
   // Dipakai CSS untuk cap air korps pada halaman kosong modul Pengasuhan.
   $('viewRoot').dataset.view = view;
+  document.body.dataset.view = view;   // v2.55: bilah atas tidak menyapa dua kali di Ringkasan
 
   const j = JUDUL[view] || { lat:view, ar:'', teks:view };
   $('pageTitle').textContent = j.teks;
@@ -2632,6 +2630,7 @@ async function navigateTo(view) {
   const tutupTirai = LayarMuat.tiraiUntuk(j);
   try {
     if (view === 'dashboard')        await viewDashboard();
+    else if (view === 'analisis')    await viewAnalisis();     // v2.55
     else if (view === 'radar')       await viewRadar();
     else if (view === 'pimpinan')    await viewPimpinan();
     else if (view === 'bk')          await viewBk();
@@ -2848,7 +2847,8 @@ function unduhCsv(nama, baris) {
 // ---------------------------------------------------------------------
 
 /** Sapaan menurut jam setempat. */
-function salamWaktu(jam) {
+/** Sapaan mengikuti jam setempat; tanpa argumen = jam sekarang. */
+function salamWaktu(jam = new Date().getHours()) {
   if (jam < 4)  return 'Selamat malam';
   if (jam < 11) return 'Selamat pagi';
   if (jam < 15) return 'Selamat siang';
@@ -2968,7 +2968,13 @@ function daftarGagalInti({ siswaAll, detailAll, izinAll, pembinaanAll }) {
     .filter(([, a]) => a && a.gagal).map(([n]) => n);
 }
 
-async function viewDashboard() {
+/**
+ * v2.55 — HALAMAN ANALISIS. Isinya Ringkasan lama (v2.48–v2.54) tanpa
+ * sapaan, amanah, Radar mini, dan pemilih unit: angka bulan, Cermin,
+ * enam grafik, Peta Perkembangan, IPP. Ringkasan sendiri kini satu
+ * lembar (viewDashboard di bawah).
+ */
+async function viewAnalisis() {
 
   // v2.18.1: foto profil sudah diminta saat login — jangan diminta dua kali.
   const profilePromise = APP.janjiProfil || setupProfilUserLogin();
@@ -2988,17 +2994,6 @@ async function viewDashboard() {
   const L = lingkupDasbor({ siswaAll, detailAll, izinAll, pembinaanAll });
   const { siswa, detailTr, izinSemua, izin, pembinaan, gagal: gagalInti } = L;
 
-  // Amanah (pekerjaan yang masih menunggu) mengikuti pemilih periode
-  // seperti sebelumnya: tanpa periode, seluruh tunggakan tampil.
-  const izinPending = izin.filter(z => z.status_persetujuan === 'Pending').length;
-  const binaProses  = pembinaan.filter(p => p.status_pembinaan !== 'Selesai').length;
-  // v2.51 — amanah pembinaan dibelah dua: yang TIDAK diselesaikan bulan lalu
-  // (sudah dikunci Tutup Buku → bahan evaluasi) dan yang masih berjalan
-  // bulan ini. Bulan-bulan yang lebih lama tidak lagi ditampilkan di sini.
-  const blnIniA = bulanIni(), blnLaluA = bulanSebelum(blnIniA);
-  const pbnTerbukaA = (L.pembinaanSemua || pembinaan).filter(p => p.status_pembinaan !== 'Selesai');
-  const binaEvaluasi = pbnTerbukaA.filter(p => bulanDari(kunciTgl(p.tanggal_pembinaan)) === blnLaluA).length;
-  const binaBulanIni = pbnTerbukaA.filter(p => bulanDari(kunciTgl(p.tanggal_pembinaan)) === blnIniA).length;
    await profilePromise;
 
   // v2.48 — angka dan grafik Ringkasan = SATU bulan (bulan berjalan, atau
@@ -3019,7 +3014,7 @@ async function viewDashboard() {
   const poinIni = poinDari(B.detail.ini), poinLalu = poinDari(B.detail.lalu);
   const halIni = halDari(B.tahfiz.ini), halLalu = halDari(B.tahfiz.lalu);
   // Cermin: enam lembar terakhir (berakhir pada bulan yang sedang dibuka) + per santri.
-  const cermin = cerminBulanan({ detail: detailTr, izin: izinSemua, bina: L.pembinaanSemua, ...positif }, bulanMundur(per.bulan, 6), per);
+  const cermin = cerminBulanan({ detail: detailTr, izin: izinSemua, bina: L.pembinaanSemua, ...positif }, jendelaBerdata(bulanMundur(per.bulan, 6)), per);
   const cerminSantri = cerminPerSantri(B, siswa);
   const detail = B.detail.ini;
   const izinBulan = B.izin.ini;
@@ -3075,47 +3070,8 @@ async function viewDashboard() {
   const izinMulaiLalu = izinHari(per.lalu, per.hariLalu).slice(0, per.batas).reduce((a, x) => a + x, 0);
   const batang = (arr) => arr.map((v, i) => (per.berjalan && i >= per.batas ? null : v));
 
-  // Amanah yang belum selesai — sengaja TANPA penyaringan periode: tugas
-  // yang belum dikerjakan tidak berhenti menjadi tugas pada tanggal 1.
-  let perluWali = 0;
-  if (bolehKabarWali()) {
-    try {
-      const { penuh } = await bahanBinaPenuh();
-      perluWali = filterBinaanUnit(penuh, 'kelas')
-        .filter(r => perluKabarWali(r) && String(r.status_pembinaan) !== 'Selesai').length;
-    } catch (e) { console.warn('amanah wali tidak terbaca:', e.message); }
-  }
-
-  // v2.12 — laporan pembinaan: GEN-Z diingatkan yang belum dilaporkan,
-  // guru diingatkan laporan yang menunggu pengesahannya.
-  let binaBelumLapor = 0, binaMenungguSah = 0;
-  if (bolehLaporBina() || bolehPembinaan()) {
-    try {
-      const lap = await petaLaporanBina();
-      const terbuka = filterBinaanUnit(dedupBina(pembinaanAll.filter(aktifPembinaan)
-        .map(p => ({ ...p, kelas: p.siswa?.kelas || '' }))), 'kelas')
-        .filter(p => p.status_pembinaan !== 'Selesai');
-      binaMenungguSah = bolehPembinaan()
-        ? terbuka.filter(p => (lap.get(String(p.id_pembinaan))?.penerima_id || []).includes(idSaya())
-                              || (isAdmin() && lap.has(String(p.id_pembinaan)))).length : 0;
-      binaBelumLapor = bolehLaporBina() ? terbuka.filter(p => !lap.has(String(p.id_pembinaan))).length : 0;
-    } catch (e) { console.warn('amanah laporan pembinaan tidak terbaca:', e.message); }
-  }
-
   $('viewRoot').innerHTML = `
-    ${panelSapaan([
-      { jumlah: izinPending, label: 'izin menunggu keputusan', ikon: 'fa-clock', view: 'perizinan' },
-      { jumlah: binaMenungguSah, label: 'laporan pembinaan menunggu pengesahan Anda', ikon: 'fa-file-signature', view: 'pesan' },
-      ...(bolehLaporBina()
-        ? [{ jumlah: binaBelumLapor, label: 'pembinaan belum dilaporkan ke guru', ikon: 'fa-paper-plane', view: 'pembinaan' }]
-        : [{ jumlah: binaBulanIni, label: `pembinaan ${labelBulan(blnIniA).split(' ')[0]} masih berjalan`,
-             ikon: 'fa-hands-holding-child', view: 'pembinaan', bulan: blnIniA },
-           { jumlah: binaEvaluasi, label: `pembinaan ${labelBulan(blnLaluA).split(' ')[0]} tidak diselesaikan · bahan evaluasi`,
-             ikon: 'fa-clipboard-list', view: 'pembinaan', bulan: blnLaluA, kelas: 'amanah-evaluasi' }]),
-      { jumlah: perluWali,   label: 'wali santri perlu dikabari', ikon: 'fa-comment-dots', view: 'pembinaan' }
-    ])}
-    ${bolehRadar() ? `<div id="radarMini" class="radar-mini" aria-busy="true"><div class="rq-sk radar-mini-sk"></div></div>` : ''}
-    ${kartuUnit()}
+    ${kopAnalisis(per)}
 
     ${barisPeriodeRingkasan(per)}
 
@@ -3182,10 +3138,7 @@ async function viewDashboard() {
 
   // v2.48 — hitung naik, sorot kartu angka, sambutan sekali per sesi.
   hiasRingkasan();
-  umumkanLembarBaru();   // v2.50: sekali per bulan per perangkat
 
-  // v2.25 — monster amanah: angka yang sama dengan butir pembinaan di atas.
-  pasangMonster(bolehLaporBina() ? binaBelumLapor : binaBulanIni);   // v2.51: monster = pembinaan bulan ini yang masih berjalan
 
   onKlik(async (e) => {
     if (e.target.closest('[data-radar-ulang-mini]')) {
@@ -3291,7 +3244,7 @@ async function viewDashboard() {
       // Bagian ini sengaja TIDAK ikut bulan berjalan (rumus IPP & peta enam bulan).
       kotak.querySelector('.sb-judul')?.insertAdjacentHTML('afterend',
         `<p class="rb-jendela"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>
-           Peta di bawah membentang 6 bulan terakhir sebagai cermin; Indeks Peringatan dihitung dari lembar ${esc(per.label)} saja.</p>`);
+           Peta di bawah membentang ${esc(labelJendela(sebaran.bahan.bulanKunci))} sebagai cermin; garis tren memakai bulan yang sudah genap saja. Indeks Peringatan dihitung dari lembar ${esc(per.label)} saja.</p>`);
     }
   } catch (e) {
     gambarRadarMini(siswa, null, tokenMini);
@@ -3301,6 +3254,341 @@ async function viewDashboard() {
     if (kotak) kotak.innerHTML = kosong('Peta perkembangan belum dapat dimuat.',
       'Data pendukungnya sedang tidak terbaca. Muat ulang halaman untuk mencoba lagi.',
       'fa-triangle-exclamation');
+  }
+}
+
+/* =====================================================================
+ * v2.55 — RINGKASAN "SATU LEMBAR"
+ * ---------------------------------------------------------------------
+ *  Halaman pertama hanya menjawab dua pertanyaan:
+ *    1. Apa yang menunggu saya?        → kolom kerja (amanah)
+ *    2. Bagaimana santri bulan ini?    → lembar bulan (Pita Bulan)
+ *  Analitik selengkapnya pindah ke halaman Analisis (viewAnalisis).
+ *
+ *  Setiap butir amanah membawa saringan lengkap ke halaman tujuan, dan
+ *  angkanya dihitung dari sumber yang SAMA dengan halaman itu
+ *  (bahanBinaPenuh untuk pembinaan, saringPeriodeIzin untuk izin),
+ *  sehingga angka di butir = jumlah baris yang tampil sesudah diketuk.
+ *  Database tidak disentuh di sini (catatan kabar wali: muatKabarWali).
+ * ===================================================================== */
+const namaBulan = (b) => labelBulan(b).split(' ')[0];
+
+/** Kop halaman Analisis: jalan pulang ke lembar. */
+function kopAnalisis(per) {
+  return `<div class="analisis-kop">
+    <p>Grafik, Cermin, Peta Perkembangan, dan Indeks Peringatan untuk lembar <b>${esc(per.label)}</b>.</p>
+    <button type="button" class="btn btn-ghost btn-sm" data-nav="dashboard"><i class="fa-solid fa-arrow-left"></i>Kembali ke Ringkasan</button>
+  </div>`;
+}
+
+/** Tiga nama pertama (unik) + "n lainnya". */
+function namaContoh(rows, ambilNama, n = 3) {
+  const nama = [];
+  for (const r of rows) { const x = String(ambilNama(r) || '').trim(); if (x && !nama.includes(x)) nama.push(x); if (nama.length >= n) break; }
+  const sisa = rows.length - nama.length;
+  return sisa > 0 ? [...nama, `${angka(sisa)} lainnya`] : nama;
+}
+
+/** Hitung per bulan ('yyyy-MM' → baris[]), terurut terbaru dahulu. */
+function belahPerBulan(rows, kolom) {
+  const peta = new Map();
+  rows.forEach(r => { const b = bulanDari(kunciTgl(r[kolom])) || '-'; if (!peta.has(b)) peta.set(b, []); peta.get(b).push(r); });
+  return new Map([...peta.entries()].sort((a, b) => b[0].localeCompare(a[0])));
+}
+
+/**
+ * Bahan amanah: semua yang menunggu tindakan, dari sumber yang sama
+ * dengan halaman tujuannya. Tidak pernah melempar galat.
+ */
+async function bahanAmanahLembar(L) {
+  const kini = bulanIni(), lalu = bulanSebelum(kini);
+  const hasil = { kini, lalu, izin: [], binaKini: [], binaLalu: [], wali: new Map(), belumLapor: [], menungguSah: 0, kunci: new Map() };
+  const petaSw = Object.fromEntries((L.siswa || []).map(s => [String(s.nisn), s]));
+  const izinBoleh = (MENU_ROLE.perizinan || []).includes(role());
+  if (izinBoleh) hasil.izin = (L.izin || []).filter(z => z.status_persetujuan === 'Pending')
+    .map(z => ({ ...z, nama_siswa: z.siswa?.nama_siswa || petaSw[String(z.nisn)]?.nama_siswa || '' }));
+  try { hasil.kunci = await muatKunciBulan(); } catch (e) {}
+  if (!(MENU_ROLE.pembinaan || []).includes(role())) return hasil;
+  try {
+    const [{ penuh }, lap, kabar] = await Promise.all([bahanBinaPenuh(), petaLaporanBina(), muatKabarWali()]);
+    const lingkup = filterBinaanUnit(penuh, 'kelas');
+    const terbuka = lingkup.filter(r => String(r.status_pembinaan) !== 'Selesai');
+    const diBulan = (b) => (r) => bulanDari(kunciTgl(r.tanggal_pembinaan)) === b;
+    hasil.binaKini = terbuka.filter(diBulan(kini));
+    hasil.binaLalu = terbuka.filter(diBulan(lalu));
+    if (bolehKabarWali()) hasil.wali = belahPerBulan(lingkup.filter(r => perluKabarWaliTerbuka(r, kabar)), 'tanggal_pembinaan');
+    if (bolehLaporBina()) hasil.belumLapor = terbuka.filter(r => !lap.has(String(r.id_pembinaan)));
+    if (bolehPembinaan()) hasil.menungguSah = terbuka.filter(p => (lap.get(String(p.id_pembinaan))?.penerima_id || []).includes(idSaya())
+      || (isAdmin() && lap.has(String(p.id_pembinaan)))).length;
+  } catch (e) { console.warn('amanah pembinaan tidak terbaca:', e.message); }
+  return hasil;
+}
+
+/**
+ * Butir amanah → { kini: Butir[], sisa: Butir[] }.
+ * Butir = { jumlah, kerja, ket, nama[], merah, tujuan: { view, bulan, status, wali, izin } , jembatan }
+ */
+function amanahLembar(b) {
+  const kini = [], sisa = [];
+  const nm = (r) => r.nama_siswa;
+  if (b.izin.length) {
+    const perBln = [...belahPerBulan(b.izin, 'tanggal_mulai').entries()].map(([m, rows]) => `${namaBulan(m)} ${angka(rows.length)}`);
+    kini.push({ jumlah: b.izin.length, kerja: 'Putuskan izin santri', ket: perBln.join(' · '),
+      nama: namaContoh(b.izin, nm), tujuan: { view: 'perizinan', izin: 'Pending' }, tombol: `Buka ${angka(b.izin.length)} izin` });
+  }
+  const waliKini = b.wali.get(b.kini) || [];
+  if (waliKini.length) kini.push({ jumlah: waliKini.length, merah: true, kerja: 'Kabari wali santri',
+    ket: `${namaBulan(b.kini)} · tahap pembinaan yang wajib sampai ke rumah`, nama: namaContoh(waliKini, nm),
+    tombol: `Buka ${angka(waliKini.length)} santri`,
+    tujuan: { view: 'pembinaan', bulan: b.kini, status: 'terbuka', wali: 'perlu' },
+    jembatan: { judul: `${angka(waliKini.length)} santri, wali belum dikabari — ${labelBulan(b.kini)}`,
+      sub: 'Dibuka dari Ringkasan. Tersaring: bulan ini, belum selesai, tahap yang wajib dikabarkan ke rumah.' } });
+  if (b.menungguSah) kini.push({ jumlah: b.menungguSah, kerja: 'Sahkan laporan pembinaan', ket: 'Laporan pelaksanaan dari Ustadz GEN-Z untuk Anda',
+    nama: [], tujuan: { view: 'pesan' }, tombol: 'Buka pesan' });
+  if (bolehLaporBina()) {
+    if (b.belumLapor.length) kini.push({ jumlah: b.belumLapor.length, kerja: 'Laporkan pembinaan ke guru', ket: 'Sudah dilaksanakan, belum dilaporkan',
+      nama: namaContoh(b.belumLapor, nm), tombol: `Buka ${angka(b.belumLapor.length)}`,
+      tujuan: { view: 'pembinaan', bulan: '*', status: 'belum-lapor' },
+      jembatan: { judul: `${angka(b.belumLapor.length)} pembinaan belum dilaporkan ke guru`, sub: 'Dibuka dari Ringkasan. Tersaring: semua bulan, belum selesai, belum ada laporan.' } });
+  } else if (b.binaKini.length) {
+    const perKat = ['Ringan', 'Sedang', 'Berat'].map(k => [k, b.binaKini.filter(r => r.kategori_bina === k).length]).filter(x => x[1]);
+    kini.push({ jumlah: b.binaKini.length, kerja: 'Tuntaskan pembinaan', ket: `${namaBulan(b.kini)} · masih berjalan, belum ditandai selesai`,
+      nama: perKat.map(([k, n]) => `${k} ${angka(n)}`), tombol: `Buka ${angka(b.binaKini.length)}`,
+      tujuan: { view: 'pembinaan', bulan: b.kini, status: 'terbuka' },
+      jembatan: { judul: `${angka(b.binaKini.length)} pembinaan ${namaBulan(b.kini)} masih berjalan`, sub: 'Dibuka dari Ringkasan. Tersaring: bulan ini, belum selesai.' } });
+  }
+  // ---- Sisa bulan sebelumnya ----
+  if (!bolehLaporBina() && b.binaLalu.length) sisa.push({ jumlah: b.binaLalu.length, kerja: `pembinaan ${namaBulan(b.lalu)} tidak diselesaikan`,
+    ket: 'bahan evaluasi musyawarah', tombol: 'Lihat daftar', nama: [],
+    tujuan: { view: 'pembinaan', bulan: b.lalu, status: 'terbuka' },
+    jembatan: { judul: `${angka(b.binaLalu.length)} pembinaan ${labelBulan(b.lalu)} tidak diselesaikan`, sub: 'Dibuka dari Ringkasan sebagai bahan evaluasi. Tersaring: belum selesai.' } });
+  b.wali.forEach((rows, m) => {
+    if (m === b.kini || !rows.length) return;
+    sisa.push({ jumlah: rows.length, kerja: `wali belum dikabari · ${labelBulan(m)}`, ket: 'pesan masih bisa dikirim', tombol: `Buka ${angka(rows.length)} santri`, nama: [],
+      tujuan: { view: 'pembinaan', bulan: m, status: 'terbuka', wali: 'perlu' },
+      jembatan: { judul: `${angka(rows.length)} santri, wali belum dikabari — ${labelBulan(m)}`, sub: 'Dibuka dari Ringkasan. Tersaring: belum selesai, tahap yang wajib dikabarkan ke rumah.' } });
+  });
+  return { kini, sisa };
+}
+
+/** Pita Bulan: satu kolom per tanggal. jenis 'isi' | 'kosong' (sudah lewat, tanpa catatan) | 'nanti'. */
+function pitaBulan(per, rows) {
+  const n = Array.from({ length: per.hariBulan }, () => 0);
+  (rows || []).forEach(r => { const h = Number(kunciBaris(r, 'tanggal', per).slice(8, 10)); if (h >= 1 && h <= per.hariBulan) n[h - 1]++; });
+  const hari = n.map((x, i) => {
+    const d = i + 1, nanti = per.berjalan && d > per.batas;
+    return { d, n: x, jenis: nanti ? 'nanti' : x ? 'isi' : 'kosong', kini: per.berjalan && d === per.batas };
+  });
+  const maks = Math.max(0, ...n);
+  const puncak = maks ? hari.find(h => h.n === maks).d : null;
+  return { hari, maks, puncak, kosong: hari.filter(h => h.jenis === 'kosong').map(h => h.d) };
+}
+
+/** Tab lembar: hanya bulan yang punya data (jendelaBerdata), maksimal enam. */
+function tabLembar(kunciBln, per) {
+  const kini = bulanIni();
+  return jendelaBerdata(bulanMundur(kini, 6)).map(b => {
+    const k = kunciBln && kunciBln.get(b);
+    return { bulan: b, nama: namaBulan(b), ket: b === kini ? 'berjalan' : k && k.terkunci ? 'ditutup' : 'terbuka', aktif: b === per.bulan };
+  });
+}
+
+/** Kalimat pembuka lembar bulan. */
+function kalimatLembar(per, n, nLalu, pita) {
+  if (!n) return per.berjalan ? `Belum ada catatan pelanggaran pada ${per.label}.` : `Tidak ada catatan pelanggaran sepanjang ${per.label}.`;
+  const rentang = per.berjalan ? (per.batas === 1 ? 'pada hari pertama' : `dalam ${per.batas} hari pertama`) : `sepanjang ${per.label}`;
+  let banding = '';
+  if (nLalu) {
+    const r = n / nLalu;
+    const arah = r < 0.5 ? 'jauh lebih sedikit daripada' : r < 0.9 ? 'lebih sedikit daripada' : r <= 1.1 ? 'hampir sama dengan' : r <= 2 ? 'lebih banyak daripada' : 'jauh lebih banyak daripada';
+    banding = `, ${arah} ${per.frasaLalu} (${angka(nLalu)})`;
+  }
+  const puncak = pita.puncak && pita.hari.filter(h => h.jenis === 'isi').length > 1 ? ` Puncaknya tanggal ${pita.puncak}.` : '';
+  return `${angka(n)} catatan pelanggaran ${rentang}${banding}.${puncak}`;
+}
+
+function htmlButirAmanah(a, i, kelas = '') {
+  return `<button type="button" class="lk-butir${kelas}" data-amanah="${i}" data-jumlah="${a.jumlah}" data-view="${esc(a.tujuan.view)}">
+    <span class="lk-angka${a.merah ? ' merah' : ''}">${angka(a.jumlah)}</span>
+    <span class="lk-isi"><b>${esc(a.kerja)}</b><span class="lk-ket">${esc(a.ket)}</span>
+      ${a.nama.length ? `<span class="lk-nama">${a.nama.map(x => `<span>${esc(x)}</span>`).join('')}</span>` : ''}</span>
+    <span class="lk-tombol">${esc(a.tombol)}</span>
+  </button>`;
+}
+
+function htmlKolomKerja(am, b) {
+  const semua = [...am.kini, ...am.sisa];
+  const terkunci = (b.kunci && b.kunci.get(b.lalu) || {}).terkunci;
+  return `<div class="lembar-kerja">
+    <h3>Yang menunggu Anda</h3>
+    ${am.kini.length
+      ? `<p class="lk-pengantar">Setiap butir membuka daftar santrinya, sudah tersaring.</p>
+         <div class="lk-daftar" id="lkDaftar">${am.kini.map((a, i) => htmlButirAmanah(a, i)).join('')}</div>`
+      : `<p class="lk-lega"><i class="fa-solid fa-circle-check" aria-hidden="true"></i>Tidak ada yang tertunda bulan ini. Semoga tetap begitu esok.</p>
+         <div class="lk-daftar" id="lkDaftar"></div>`}
+    ${am.sisa.length ? `<div class="lk-sisa">
+      <p class="lk-sisa-judul"><i class="fa-solid ${terkunci ? 'fa-lock' : 'fa-clock-rotate-left'}" aria-hidden="true"></i>
+        Sisa bulan sebelumnya</p>
+      <p class="lk-sisa-ket">${terkunci
+        ? `Buku ${esc(labelBulan(b.lalu))} sudah ditutup. Bahan evaluasi musyawarah.`
+        : `Buku ${esc(labelBulan(b.lalu))} belum ditutup; masih bisa diselesaikan.`}</p>
+      ${am.sisa.map((a, j) => `<button type="button" class="lk-sisa-butir" data-amanah="${am.kini.length + j}" data-jumlah="${a.jumlah}" data-view="${esc(a.tujuan.view)}">
+          <span class="lk-angka">${angka(a.jumlah)}</span><span class="lk-isi"><b>${esc(a.kerja)}</b><span class="lk-ket">${esc(a.ket)}</span></span>
+          <span class="lk-tombol">${esc(a.tombol)}</span></button>`).join('')}
+    </div>` : ''}
+  </div>`;
+}
+
+function htmlPita(pita, per) {
+  const tinggi = (n) => pita.maks ? Math.max(6, Math.round(n / pita.maks * 100)) : 0;
+  return `<figure class="pita" aria-label="Catatan pelanggaran per tanggal, ${esc(per.label)}${per.berjalan ? `, hari ini tanggal ${per.batas}` : ''}">
+    <div class="pita-batang" role="img" aria-label="${esc(pita.hari.filter(h => h.jenis === 'isi').map(h => `tanggal ${h.d}: ${h.n}`).join(', ') || 'tidak ada catatan')}">
+      ${pita.hari.map(h => `<span class="pita-hari ${h.jenis}${h.kini ? ' kini' : ''}${h.d === pita.puncak ? ' puncak' : ''}" data-d="${h.d}" style="--i:${h.d}" title="${h.d} ${esc(namaBulan(per.bulan))}: ${h.jenis === 'nanti' ? 'belum tiba' : `${h.n} catatan`}">
+        ${h.d === pita.puncak ? `<i class="pita-puncak">${angka(h.n)}</i>` : ''}<i class="pita-isi" style="--t:${tinggi(h.n)}%"></i></span>`).join('')}
+    </div>
+    <div class="pita-tgl" aria-hidden="true">${pita.hari.map(h => `<span class="${h.kini ? 'kini' : h.jenis === 'nanti' ? 'nanti' : ''}">${h.d}</span>`).join('')}</div>
+    <figcaption class="pita-ket">
+      ${per.berjalan ? `<span><i class="pk-benang" aria-hidden="true"></i>hari ini</span>` : ''}
+      ${pita.kosong.length ? `<span><i class="pk-kosong" aria-hidden="true"></i>${pita.kosong.length > 8
+        ? `${angka(pita.kosong.length)} tanggal tanpa catatan`
+        : `tanggal ${pita.kosong.join(', ').replace(/, (\d+)$/, ' dan $1')} tanpa catatan`}. Libur, atau belum dicatat?</span>` : ''}
+    </figcaption>
+  </figure>`;
+}
+
+function htmlAngkaLembar(B, per) {
+  const poin = (rows) => rows.reduce((a, r) => a + (Number(r.bobot_pelanggaran) || 0), 0);
+  const hal = (rows) => Math.round(rows.reduce((a, r) => a + (Number(r.capaian_halaman) || 0), 0) * 10) / 10;
+  const nada = (kini, lalu, naikBaik) => {
+    const a = arahUbah(kini, lalu);
+    if (a.nada === 'netral') return '';
+    return (a.nada === 'baik') !== !!naikBaik ? 'baik' : 'waspada';
+  };
+  const k = [
+    { nama: 'Poin pelanggaran', nilai: poin(B.detail.ini), lalu: poin(B.detail.lalu), nada: nada(poin(B.detail.ini), poin(B.detail.lalu), false) },
+    { nama: 'Izin keluar', nilai: B.izin.ini.length, lalu: B.izin.lalu.length, nada: '' },
+    { nama: 'Pembinaan', nilai: B.bina.ini.length, lalu: B.bina.lalu.length, nada: '' },
+    { nama: 'Setoran tahfiz', nilai: B.tahfiz.ini.length, lalu: B.tahfiz.lalu.length, nada: nada(B.tahfiz.ini.length, B.tahfiz.lalu.length, true),
+      tambah: `${angka(hal(B.tahfiz.ini))} halaman` }
+  ];
+  return `<dl class="lb-angka">${k.map(x => `<div>
+    <dt>${esc(x.nama)}</dt><dd class="lb-nilai">${angka(x.nilai)}</dd>
+    <dd class="lb-banding${x.nada ? ' ' + x.nada : ''}">${x.tambah ? esc(x.tambah) + ' · ' : ''}${esc(per.frasaPendek)}: ${angka(x.lalu)}</dd>
+  </div>`).join('')}</dl>`;
+}
+
+function htmlSantriBerubah(c, per) {
+  const baris = (x, kls) => `<button type="button" class="lb-santri" data-detail="${esc(x.nisn)}">
+      <span><b>${esc(x.nama)}</b> <small>${esc(x.kelas)}</small></span><span class="lb-poin ${kls}">${angka(x.lalu)} → ${angka(x.ini)}</span></button>`;
+  if (!c.turun.length && !c.naik.length) return '';
+  return `<div class="lb-berubah">
+    <h3>Santri yang paling berubah</h3>
+    <div class="lb-berubah-kisi">
+      <div><p class="lb-sub baik">Poin turun dibanding ${esc(namaBulan(per.lalu))}</p>${c.turun.slice(0, 3).map(x => baris(x, 'baik')).join('') || '<p class="lb-kosong">Belum ada.</p>'}</div>
+      <div><p class="lb-sub waspada">Poin naik dibanding ${esc(namaBulan(per.lalu))}</p>${c.naik.slice(0, 3).map(x => baris(x, 'waspada')).join('') || '<p class="lb-kosong">Tidak ada.</p>'}</div>
+    </div>
+  </div>`;
+}
+
+function htmlKop() {
+  const kini = new Date();
+  const nama = String(APP.profil?.nama || '').split(',')[0].trim();
+  const depan = nama.split(/\s+/).slice(0, 3).join(' ') || 'Ustaz';
+  const hari = kini.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const hijri = tanggalHijriah(kini);
+  return `<div class="lembar-sapa">
+      <p class="ar" lang="ar">السلام عليكم</p>
+      <h2>${esc(salamWaktu(kini.getHours()))}, ${esc(depan)}.</h2>
+      <p class="lembar-tgl">${esc(hari)}${hijri ? ` — ${esc(hijri)} H` : ''}</p>
+    </div>`;
+}
+
+async function viewDashboard() {
+  const profilePromise = APP.janjiProfil || setupProfilUserLogin();
+  const tokenMini = ++RADAR.tokenMini;
+  [muatMasterPembinaan, petaLaporanBina, muatPrestasi, muatTahfiz, muatKunciBulan, muatKabarWali]
+    .forEach(fn => { try { Promise.resolve(fn()).catch(() => {}); } catch (e) {} });
+  const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
+    amanKosong(muatSiswa, 'santri'), amanKosong(muatDetail, 'pelanggaran'),
+    amanKosong(muatIzin, 'perizinan'), amanKosong(muatPembinaan, 'pembinaan')]);
+  const L = lingkupDasbor({ siswaAll, detailAll, izinAll, pembinaanAll });
+  await profilePromise;
+  const [prestasiAll, tahfizAll] = await Promise.all([amanKosong(muatPrestasi, 'prestasi'), amanKosong(muatTahfiz, 'tahfiz')]);
+  const nisnAktif = new Set(L.siswa.map(s => String(s.nisn)));
+  const positif = {
+    prestasi: prestasiAll.filter(aktifPrestasi).filter(r => nisnAktif.has(String(r.nisn))),
+    tahfiz: tahfizAll.filter(aktifTahfiz).filter(r => nisnAktif.has(String(r.nisn)))
+  };
+  const per = periodeRingkasan();
+  const B = ringkasanBulan(L, per, positif);
+  const bahan = await bahanAmanahLembar(L);
+  const am = amanahLembar(bahan);
+  const semuaButir = [...am.kini, ...am.sisa];
+  const pita = pitaBulan(per, B.detail.ini);
+  const tabs = tabLembar(bahan.kunci, per);
+  const cs = cerminPerSantri(B, L.siswa);
+  const gagal = L.gagal && L.gagal.length ? `<p class="lb-gagal" role="status">Sebagian data tidak terbaca (${esc(L.gagal.join(', '))}). Angka lembar ini mungkin belum lengkap; tekan Segarkan untuk mencoba lagi.</p>` : '';
+
+  $('viewRoot').innerHTML = `
+    <div class="lembar-kop" id="lembarKop">
+      ${htmlKop()}
+      <nav class="lembar-tabs" aria-label="Lembar bulan">
+        ${tabs.map(t => `<button type="button" class="lembar-tab${t.aktif ? ' on' : ''}" data-lembar-tab="${t.bulan}" data-lembar="${t.bulan === bulanIni() ? '' : t.bulan}"
+            ${t.aktif ? 'aria-current="page"' : ''}><b>${esc(t.nama)}</b><small>${esc(t.ket)}</small></button>`).join('')}
+      </nav>
+    </div>
+    <section class="lembar" aria-label="Lembar ${esc(per.label)}">
+      ${htmlKolomKerja(am, bahan)}
+      <div class="lembar-bulan">
+        <div class="lembar-judul"><h2>${esc(per.label)}</h2>
+          <span>${per.berjalan ? `lembar berjalan, tanggal 1–${per.batas}` : 'lembar satu bulan penuh'}</span></div>
+        ${gagal}
+        <p class="lb-kalimat">${esc(kalimatLembar(per, B.detail.ini.length, B.detail.lalu.length, pita))}</p>
+        ${htmlPita(pita, per)}
+        ${htmlAngkaLembar(B, per)}
+        ${htmlSantriBerubah(cs, per)}
+      </div>
+      <footer class="lembar-kaki">
+        <p>Grafik, Cermin Muhasabah, peta sebaran per angkatan, Indeks Peringatan, dan matriks kelas × kamar ada di halaman Analisis.</p>
+        <button type="button" class="btn btn-primary btn-sm" data-nav="analisis"><i class="fa-solid fa-chart-column"></i>Buka Analisis</button>
+      </footer>
+    </section>`;
+
+  umumkanLembarBaru();
+  pasangMonster(bolehLaporBina() ? bahan.belumLapor.length : bahan.binaKini.length);
+
+  onKlik((e) => {
+    const a = e.target.closest('[data-amanah]');
+    if (a) {
+      const butir = semuaButir[Number(a.dataset.amanah)]; if (!butir) return;
+      const t = butir.tujuan;
+      if (t.view === 'perizinan') { stIzin.filter = t.izin || 'Semua'; stIzin.page = 1; stIzin.cari = ''; }
+      if (t.view === 'pembinaan') stBina.saringBerikut = { bulan: t.bulan, status: t.status || '', wali: t.wali || '', asal: butir.jembatan || null };
+      return navigateTo(t.view);
+    }
+    const tab = e.target.closest('[data-lembar-tab]');
+    if (tab) { const b = tab.dataset.lembar; return setPeriode(b || bulanIni(), APP.periode.basis, !!b && b !== bulanIni()); }
+    const dt = e.target.closest('[data-detail]');
+    if (dt) return bukaDetailSantri(dt.dataset.detail, { bulan: per.bulan });
+    const n = e.target.closest('[data-nav]');
+    if (n) return navigateTo(n.dataset.nav);
+  });
+
+  // Radar: santri tingkat 3 menjadi satu butir amanah (dulu kartu sendiri).
+  if (bolehRadar()) {
+    try {
+      const bahanIppR = await bahanIpp({ siswa: L.siswa, detail: L.detailTr, izin: L.izinSemua, pembinaan: L.pembinaan, gagal: L.gagal });
+      RADAR.bahanTerakhir = bahanIppR;
+      if (tokenMini !== RADAR.tokenMini || APP.viewTampil !== 'dashboard') return;
+      const d = radarDariBahan(L.siswa, bahanIppR);
+      const n3 = d.radar ? d.radar.titik.filter(t => t.tingkat === 3).length : 0;
+      const daftar = $('lkDaftar');
+      if (n3 && daftar) {
+        const i = semuaButir.push({ jumlah: n3, kerja: 'Perhatikan santri tingkat 3', ket: 'Radar Amanah · perlu pendampingan khusus', nama: [], tujuan: { view: 'radar' }, tombol: 'Buka Radar' }) - 1;
+        daftar.insertAdjacentHTML('beforeend', htmlButirAmanah(semuaButir[i], i));
+        daftar.closest('.lembar-kerja')?.querySelector('.lk-lega')?.remove();
+      }
+    } catch (e) { console.warn('Radar di Ringkasan:', e.message); }
   }
 }
 
@@ -3950,7 +4238,7 @@ async function bukaDetailSantri(nisn, opsi = {}) {
     const skorNet = Math.max(0, poinPlg - poinPrestasi);
     const halTahfiz = tahfiz.reduce((a, r) => a + (Number(r.capaian_halaman) || 0), 0);
     const cermin = cerminBulanan({ detail: riwayatSemua, izin: izinSemua, bina: binaSemua, tahfiz: tahfizSemua, prestasi: prestasiSemua },
-      bulanMundur(lembar || bulanIni(), 6));
+      jendelaBerdata(bulanMundur(lembar || bulanIni(), 6)));
     const bukaLagi = (o) => { Swal.close(); setTimeout(() => bukaDetailSantri(nisn, o), 220); };
 
     // Timeline gabungan, urut dari yang terbaru
@@ -5132,7 +5420,9 @@ async function modalPerpanjangIzin(idIzin) {
 //     pembinaan melalui id_log_pelanggaran. Bentuk pembinaan diambil dari
 //     master_pembinaan berdasarkan nomor hasil hitungan itu.
 // ---------------------------------------------------------------------
-const stBina = { cari:'', kategori:'', status:'', mode:'', page:1, size:30, pilih: new Set(), bulan: '', bulanBerikut: '' };
+const stBina = { cari:'', kategori:'', status:'', mode:'', page:1, size:30, pilih: new Set(), bulan: '', bulanBerikut: '',
+  // v2.55: wali = '' | 'perlu'; saringBerikut dibawa butir amanah; asal = isi pita jembatan.
+  wali: '', saringBerikut: null, asal: null };
 
 /** Nomor tahap yang dipakai UI: hasil hitung ulang, bukan angka database. */
 function tahapBina(r) {
@@ -5609,9 +5899,17 @@ function urutkanBina(rows) {
 async function viewPembinaan() {
   // v2.51: halaman dibuka pada bulan berjalan; dari butir amanah → bulan yang diklik.
   stBina.bulan = stBina.bulanBerikut || bulanIni(); stBina.bulanBerikut = ''; stBina.page = 1;
+  // v2.55: butir amanah membawa saringan lengkap (bulan + status + wali) dan
+  // pita jembatan. Tanpa itu, halaman dibuka polos seperti biasa.
+  const sb = stBina.saringBerikut; stBina.saringBerikut = null;
+  if (sb) {
+    stBina.bulan = sb.bulan || stBina.bulan; stBina.status = sb.status || ''; stBina.wali = sb.wali || '';
+    stBina.kategori = ''; stBina.mode = ''; stBina.cari = ''; stBina.asal = sb.asal || null;
+  } else { stBina.asal = null; stBina.wali = ''; if (['terbuka', 'belum-lapor'].includes(stBina.status)) stBina.status = ''; }
   const lapor = bolehLaporBina();
   const nKol  = lapor ? 10 : 9;
   $('viewRoot').innerHTML = `
+    <div id="binaJembatan"></div>
     <div class="stats" id="binaKpi"></div>
     ${lapor ? `<div class="alur-bina rise">
       <div class="alur-langkah on"><span>1</span><div><b>Laksanakan</b><small>Pembinaan di asrama oleh Ustadz GEN-Z</small></div></div>
@@ -5627,7 +5925,11 @@ async function viewPembinaan() {
         <select id="pbKategori" class="input"><option value="">Semua Kategori</option>
           ${['Ringan','Sedang','Berat'].map(k => `<option ${k===stBina.kategori?'selected':''}>${k}</option>`).join('')}</select>
         <select id="pbStatus" class="input"><option value="">Semua Status</option>
+          <option value="terbuka" ${stBina.status === 'terbuka' ? 'selected' : ''}>Belum selesai</option>
+          ${lapor ? `<option value="belum-lapor" ${stBina.status === 'belum-lapor' ? 'selected' : ''}>Belum dilaporkan</option>` : ''}
           ${['Dalam Proses','Menunggu Musyawarah','Menunggu Pengesahan','Selesai'].map(k => `<option ${k===stBina.status?'selected':''}>${k}</option>`).join('')}</select>
+        ${bolehKabarWali() ? `<select id="pbWali" class="input" aria-label="Kabar wali"><option value="">Kabar wali: semua</option>
+          <option value="perlu" ${stBina.wali === 'perlu' ? 'selected' : ''}>Perlu kabar wali</option></select>` : ''}
         <select id="pbMode" class="input"><option value="">Semua Mode</option>
           ${['Otomatis','Manual'].map(k => `<option ${k===stBina.mode?'selected':''}>${k}</option>`).join('')}</select>
         <span class="sep"></span>
@@ -5651,8 +5953,10 @@ async function viewPembinaan() {
       `Lembar baru: sejak Oktober 2026 tahap dihitung per bulan per kategori dan kembali ke ke-1 setiap awal bulan `
       + `(catatan sebelumnya memakai ${JENDELA_TAHAP_BULAN} bulan berjalan). Bentuk mengikuti Master Pembinaan.`)}`;
 
-  ['pbKategori','pbStatus','pbMode','pbBulan'].forEach(id => $(id).addEventListener('change', e => {
-    stBina[{pbKategori:'kategori', pbStatus:'status', pbMode:'mode', pbBulan:'bulan'}[id]] = e.target.value;
+  ['pbKategori','pbStatus','pbMode','pbBulan','pbWali'].forEach(id => $(id)?.addEventListener('change', e => {
+    // Saringan diubah tangan → pita jembatan tidak lagi menggambarkan daftar ini.
+    if (stBina.asal) { stBina.bulan = bulanBinaEfektif(); stBina.asal = null; }
+    stBina[{pbKategori:'kategori', pbStatus:'status', pbMode:'mode', pbBulan:'bulan', pbWali:'wali'}[id]] = e.target.value;
     stBina.page = 1; if (id === 'pbBulan') stBina.pilih.clear(); gambarBina();
   }));
   $('pbCari').addEventListener('input', debounce(e => {
@@ -5681,6 +5985,11 @@ async function viewPembinaan() {
   }
 
   onKlik(async (e) => {
+    if (e.target.closest('[data-bina-lepas]')) {
+      stBina.bulan = bulanBinaEfektif(); stBina.asal = null; stBina.status = ''; stBina.wali = ''; stBina.page = 1;
+      if ($('pbStatus')) $('pbStatus').value = ''; if ($('pbWali')) $('pbWali').value = '';
+      return gambarBina();
+    }
     const p = e.target.closest('[data-pg]');
     if (p && p.dataset.pg.startsWith('bina:')) {
       stBina.page = Number(p.dataset.pg.split(':')[1]);
@@ -5745,11 +6054,14 @@ async function bahanBinaPenuh() {
 async function bahanBina() {
   const { penuh } = await bahanBinaPenuh();
   // 3. Baru disaring periode & kelas binaan, lalu diurutkan untuk tampilan.
-  return urutkanBina(filterBinaanUnit(saringPeriode(penuh, 'tanggal_pembinaan'), 'kelas'));
+  //    v2.55: dibuka dari butir amanah → bulan butir yang berlaku, bukan pemilih periode.
+  const lingkup = stBina.asal && APP.view === 'pembinaan' ? penuh : saringPeriode(penuh, 'tanggal_pembinaan');
+  return urutkanBina(filterBinaanUnit(lingkup, 'kelas'));
 }
 
 async function gambarBina() {
-  const [semuaBulan, lap, kunciBln] = await Promise.all([bahanBina(), petaLaporanBina(), muatKunciBulan()]);
+  const [semuaBulan, lap, kunciBln, kabar] = await Promise.all([bahanBina(), petaLaporanBina(), muatKunciBulan(), muatKabarWali()]);
+  gambarJembatanBina();
   // v2.51: satu bulan (bawaan bulan berjalan); "Semua bulan" = '*'.
   isiPilihanBulanBina(semuaBulan, kunciBln);
   const semua = saringBulanBina(semuaBulan);
@@ -5777,7 +6089,10 @@ async function gambarBina() {
   const k = stBina.cari.toLowerCase();
   const rows = semua.filter(r => {
     if (stBina.kategori && r.kategori_bina !== stBina.kategori) return false;
-    if (stBina.status === 'Menunggu Pengesahan') { if (!menungguSah(r)) return false; }
+    if (stBina.wali === 'perlu' && !perluKabarWaliTerbuka(r, kabar)) return false;
+    if (stBina.status === 'terbuka') { if (String(r.status_pembinaan) === 'Selesai') return false; }
+    else if (stBina.status === 'belum-lapor') { if (String(r.status_pembinaan) === 'Selesai' || laporanDari(r)) return false; }
+    else if (stBina.status === 'Menunggu Pengesahan') { if (!menungguSah(r)) return false; }
     else if (stBina.status === 'Menunggu Musyawarah') { if (!r.menunggu) return false; }
     else if (stBina.status && String(r.status_pembinaan || 'Dalam Proses') !== stBina.status) return false;
     if (stBina.mode && String(r.mode_pembinaan || 'Manual') !== stBina.mode) return false;
@@ -5822,8 +6137,12 @@ async function gambarBina() {
     const bisaManual = editableR && !selesai && !!idLog && (!!r.menunggu || (r.overflow && !r.manual));
 
     const aksi = [];
-    if (bolehKabarWali() && perluKabarWali(r)) aksi.push(`<button class="btn btn-wa btn-sm" data-wa-wali="${esc(id)}"
-         title="Beri tahu wali santri melalui WhatsApp"><i class="fa-brands fa-whatsapp"></i>Kabari Wali</button>`);
+    const kw = perluKabarWali(r) ? kabar.get(id) : null;   // v2.55: pesan wali sudah pernah dibuka di WhatsApp
+    if (bolehKabarWali() && perluKabarWali(r)) aksi.push(kw
+      ? `<button class="btn btn-ghost btn-sm" data-wa-wali="${esc(id)}"
+           title="Wali sudah dikabari ${esc(tgl(kw.terakhir))}. Kirim lagi bila perlu."><i class="fa-brands fa-whatsapp"></i>Kabari lagi</button>`
+      : `<button class="btn btn-wa btn-sm" data-wa-wali="${esc(id)}"
+           title="Beri tahu wali santri melalui WhatsApp"><i class="fa-brands fa-whatsapp"></i>Kabari Wali</button>`);
     if (lapor && bisaDipilih) aksi.push(`<button class="btn btn-lapor btn-sm" data-lapor="${esc(id)}"
          title="Kirim laporan pelaksanaan ke guru kelas binaan"><i class="fa-solid fa-paper-plane"></i>Laporkan ke Guru</button>`);
     if (L && (lapor || editable)) aksi.push(`<button class="btn btn-ghost btn-sm" data-bina-utas="${esc(L.utas[0])}"
@@ -5844,7 +6163,8 @@ async function gambarBina() {
       <td class="nowrap"><div class="secondary" style="margin:0">${tgl(r.tanggal_pembinaan)}</div>
         <div class="secondary" style="font-size:10px">${esc(id)}</div></td>
       <td><div class="primary">${esc(r.nama_siswa)}</div>
-          <div class="secondary">${esc(r.nisn)} · ${esc(r.kelas)}</div></td>
+          <div class="secondary">${esc(r.nisn)} · ${esc(r.kelas)}</div>
+          ${kw ? `<div class="jejak-sah ok"><i class="fa-brands fa-whatsapp"></i>Wali dikabari ${esc(tgl(kw.terakhir))}${kw.kali > 1 ? ` · ${kw.kali} kali` : ''}</div>` : ''}</td>
       <td><span class="tag ${tagKategori(r.kategori_bina)}">${esc(r.kategori_bina||'-')}</span></td>
       <td class="center">${tahap
         ? `<span class="tag ${r.overflow ? 'tag-berat' : 'tag-sea'}">Ke-${tahap}</span>
@@ -9968,7 +10288,7 @@ const segarkanInti = async (tabel) => {
   if (tabel === 'log_perizinan') {
     cacheHapus('izin'); refreshBadgePending();
     if (APP.view === 'perizinan') gambarIzin();
-    if (['dashboard','pimpinan','bk','pengasuhan'].includes(APP.view)) navigateTo(APP.view);
+    if (['dashboard','analisis','pimpinan','bk','pengasuhan'].includes(APP.view)) navigateTo(APP.view);
   } else if (tabel === 'pesan_bk') {
     cacheHapus('laporan_bina');
     refreshBadgePesan();
@@ -9982,17 +10302,18 @@ const segarkanInti = async (tabel) => {
     catch (e) { console.warn('[realtime] tambal pelanggaran gagal, muat ulang penuh:', e); cacheHapus('detail','siswa'); }
     if (APP.view === 'pelanggaran') muatTabelPlg();
     else if (APP.view === 'rekap') gambarRekap();
-    else if (['dashboard','pimpinan','bk','pengasuhan'].includes(APP.view)) navigateTo(APP.view);
+    else if (['dashboard','analisis','pimpinan','bk','pengasuhan'].includes(APP.view)) navigateTo(APP.view);
   } else if (tabel === 'log_pembinaan') {
     try { await tambalPembinaanRT(); }
     catch (e) { console.warn('[realtime] tambal pembinaan gagal, muat ulang penuh:', e); cacheHapus('pembinaan'); }
     cacheHapus('laporan_bina');
     if (APP.view === 'pembinaan') gambarBina();
     else if (APP.view === 'rekapbina') gambarRb();
+    else if (APP.view === 'dashboard') navigateTo('dashboard');   // v2.55: amanah pembinaan ada di lembar
   } else if (tabel === 'log_prestasi') {
     cacheHapus('prestasi');
     if (APP.view === 'prestasi') gambarPrestasi();
-    else if (['dashboard','pimpinan','bk'].includes(APP.view)) navigateTo(APP.view);
+    else if (['dashboard','analisis','pimpinan','bk'].includes(APP.view)) navigateTo(APP.view);
   } else if (tabel === 'log_tahfiz') {
     cacheHapus('tahfiz');
     if (APP.view === 'tahfiz') thfGambarPanel();
@@ -13109,7 +13430,7 @@ async function aiJalankanBulk(hasil) {
 
   // Segarkan tampilan yang sedang aktif.
   if (APP.view === 'pelanggaran') muatTabelPlg();
-  else if (['dashboard','pimpinan','pengasuhan','madrasah','rekap'].includes(APP.view)) navigateTo(APP.view);
+  else if (['dashboard','analisis','pimpinan','pengasuhan','madrasah','rekap'].includes(APP.view)) navigateTo(APP.view);
 }
 
 // ---------- 24d. Input massal: antarmuka ----------------------------
@@ -14621,6 +14942,65 @@ async function waKabariWali(idPembinaan, btn) {
 
   window.open(`https://wa.me/${nomor}?text=${encodeURIComponent(pesan)}`, '_blank', 'noopener');
   if (!nomor) toast('info', 'Nomor wali belum terisi. Silakan pilih kontak di WhatsApp.');
+  await catatKabarWali(idPembinaan, nomor);
+}
+
+/* ---------- v2.55 · Kabar wali tercatat ------------------------------
+ * Membuka WhatsApp dicatat sebagai "wali sudah dikabari" (tabel
+ * kabar_wali_log, lewat RPC). Pesan yang benar-benar terkirim tidak bisa
+ * dilihat dari sini; yang dicatat adalah niat yang sudah dijalankan musyrif.
+ * RPC belum terpasang → semua fungsi di bawah diam dan aplikasi berjalan
+ * seperti v2.54 (butir wali hanya tidak berkurang).
+ * ------------------------------------------------------------------- */
+const KABAR_WALI = { tersedia: true };
+const rpcHilang = (e) => /PGRST202|Could not find the function/i.test(String(e?.code || '') + ' ' + String(e?.message || ''));
+
+/** Map id_pembinaan → { terakhir, kali }. Tidak pernah melempar galat. */
+async function muatKabarWali() {
+  const c = cacheGet('kabarWali'); if (c) return c;
+  if (!KABAR_WALI.tersedia || !bolehKabarWali()) return cacheSet('kabarWali', new Map());
+  return sekali('kabarWali', async () => {
+    try {
+      const sejak = kunciTgl(tambahHari(new Date(), -120));
+      const { data, error } = await db.rpc('kabar_wali_tercatat', { p_sejak: sejak });
+      if (error) throw error;
+      return cacheSet('kabarWali', new Map((data || []).map(r => [String(r.id_pembinaan), { terakhir: r.terakhir, kali: Number(r.kali) || 1 }])));
+    } catch (e) {
+      if (rpcHilang(e)) KABAR_WALI.tersedia = false;
+      console.warn('kabar wali tercatat tidak terbaca:', e?.message || e);
+      return cacheSet('kabarWali', new Map());
+    }
+  });
+}
+
+/** Baris yang masih perlu dikabarkan: tahap wajib, belum Selesai, belum pernah dikabari. */
+function perluKabarWaliTerbuka(r, peta) {
+  return perluKabarWali(r) && String(r.status_pembinaan) !== 'Selesai'
+    && !(peta && peta.has(String(r.id_pembinaan)));
+}
+
+async function catatKabarWali(idPembinaan, nomor) {
+  if (!KABAR_WALI.tersedia) return;
+  try {
+    const { error } = await db.rpc('catat_kabar_wali', { p_id_pembinaan: String(idPembinaan), p_nomor: nomor || null });
+    if (error) throw error;
+    cacheHapus('kabarWali');
+    if (APP.view === 'pembinaan') gambarBina();
+  } catch (e) {
+    if (rpcHilang(e)) KABAR_WALI.tersedia = false;
+    console.warn('kabar wali tidak tercatat:', e?.message || e);
+  }
+}
+
+/** Pita jembatan di halaman Pembinaan: dari mana daftar ini dibuka. */
+function gambarJembatanBina() {
+  const el = $('binaJembatan'); if (!el) return;
+  const a = stBina.asal;
+  el.innerHTML = a ? `<div class="bina-jembatan" role="status">
+      <span class="bj-benang" aria-hidden="true"></span>
+      <div class="bj-teks"><b>${esc(a.judul)}</b>${a.sub ? `<span>${esc(a.sub)}</span>` : ''}</div>
+      <button type="button" class="btn btn-ghost btn-sm" data-bina-lepas>Tampilkan semua pembinaan</button>
+    </div>` : '';
 }
 
 document.addEventListener('click', async (e) => {
@@ -18213,8 +18593,9 @@ function panelPositif({ siswa, prestasi, tahfiz, bulanKunci }) {
     if (r.nisn) santriTahfiz.add(String(r.nisn));
   });
 
-  const trenPrs = trenLinear(bulanKunci.map(b => prsBulan[b]));
-  const trenThf = trenLinear(bulanKunci.map(b => thfBulan[b]));
+  // v2.55: garis tren hanya dari bulan yang sudah genap.
+  const trenPrs = trenLinear(bulanUtuh(bulanKunci).map(b => prsBulan[b]));
+  const trenThf = trenLinear(bulanUtuh(bulanKunci).map(b => thfBulan[b]));
   const jangkauan = (n) => Math.round(n / jmlSantri * 1000) / 10;
 
   // Ambang tampilan kosong. Di bawah jangkauan ini, grafik bulanan
@@ -18256,10 +18637,10 @@ function panelPositif({ siswa, prestasi, tahfiz, bulanKunci }) {
   const html = `<div class="grid-half">
     ${kartu('Apresiasi & Prestasi', isiPrestasi,
       prsTipis ? '' : lencanaTren(trenPrs, { naikBuruk:false }),
-      `${bulanKunci.length} bulan terakhir · Emas ${perKat.Emas} · Perak ${perKat.Perak} · Perunggu ${perKat.Perunggu}`)}
+      `${labelJendela(bulanKunci)} · Emas ${perKat.Emas} · Perak ${perKat.Perak} · Perunggu ${perKat.Perunggu}`)}
     ${kartu('Setoran Tahfiz', isiTahfiz,
       thfTipis ? '' : lencanaTren(trenThf, { naikBuruk:false }),
-      `${bulanKunci.length} bulan terakhir · konsistensi ibadah`)}
+      `${labelJendela(bulanKunci)} · konsistensi ibadah`)}
   </div>`;
 
   return { html, prsTipis, thfTipis, prsBulan, thfBulan, perKat };
@@ -18352,7 +18733,7 @@ function panelSebaran({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presen
     // Alpa per santri teramati, dalam JP — pembandingnya santri yang
     // benar-benar diamati, bukan seluruh angkatan.
     r.alpaPer = r.khSantri ? Math.round(r.khAlpa / r.khSantri * 10) / 10 : null;
-    r.tren = trenLinear(bulanKunci.map(b => r.perBulan[b]));
+    r.tren = trenLinear(bulanUtuh(bulanKunci).map(b => r.perBulan[b]));   // v2.55: bulan genap saja
   });
 
   const maks = {
@@ -18406,7 +18787,7 @@ function panelSebaran({ siswa, detail, prestasi, tahfiz, izin, pembinaan, presen
       atau turunnya pelanggaran bulanan per angkatan.${hadirTutup ? '' : ` Kolom <b>kehadiran</b> dan <b>alpa</b> hanya
       menghitung pekan presensi yang sudah direkap. Izin kegiatan dihitung hadir.
       Angkatan yang belum punya rekap diberi tanda strip.`}</p>`,
-    '', `${bulanKunci.length} bulan terakhir`);
+    '', labelJendela(bulanKunci));
 
   return { html, isi };
 }
@@ -18937,7 +19318,7 @@ const GAGAL_POSITIF = ['prestasi', 'tahfiz'];
  * sumber yang tidak terbaca, bukan sekadar kosong.
  */
 async function bahanIpp({ siswa, detail, izin, pembinaan, gagal = [] }) {
-  const bulanKunci = bulanTerakhir(6);
+  const bulanKunci = jendelaBerdata(bulanTerakhir(6));   // v2.55: tanpa bulan sebelum chemint dipakai
   const [prestasiAll, tahfizAll, goals, targetThf, presensiAll] = await Promise.all([
     amanKosong(muatPrestasi, 'prestasi'),
     amanKosong(muatTahfiz, 'tahfiz'),
@@ -22300,10 +22681,10 @@ function akunBaru() {
 }
 
 const DAFTAR_TUR = [
-  { id: 'sapa', sel: ['#viewRoot .sapa'], judul: 'Amanah hari ini',
+  { id: 'sapa', sel: ['#viewRoot .lembar-kerja', '#viewRoot .sapa'], judul: 'Amanah hari ini',
     teks: 'Izin, pembinaan, dan kabar wali yang menunggu tindakan Anda selalu muncul di sini. Ketuk salah satunya untuk langsung ke sana.' },
-  { id: 'unit', sel: ['#viewRoot .unit-grid'], judul: 'Mulai mencatat',
-    teks: 'Pilih unit yang sedang Anda kerjakan, lalu catat pelanggaran atau apresiasi dari halaman unit itu.' },
+  { id: 'unit', sel: ['#viewRoot .unit-grid', '#ctxBadge'], judul: 'Mulai mencatat',
+    teks: 'Pilih unit yang sedang Anda kerjakan di sini, lalu catat pelanggaran atau apresiasi dari halaman unit itu.' },
   { id: 'izin', peran: ['Guru Piket', 'Klinik'], sel: ['#tabBar [data-view="perizinan"]', '#sidebar [data-view="perizinan"]'],
     judul: 'Izin keluar-masuk', teks: 'Semua izin santri hari ini: mengajukan, memutuskan, dan menandai sudah kembali.' },
   { id: 'pimpinan', peran: ['Pimpinan'], sel: ['#viewRoot .stats', '#viewRoot .card'], judul: 'Gambaran dayah',
@@ -22541,7 +22922,7 @@ function kartuLangkahPertama() {
       const html = kartuLangkahPertama();
       const root = $('viewRoot');
       if (html && root && !document.getElementById('langkahPertama')) {
-        const sapa = root.querySelector('.sapa');
+        const sapa = root.querySelector('.lembar, .sapa');   // v2.55: di bawah lembar
         sapa ? sapa.insertAdjacentHTML('afterend', html) : root.insertAdjacentHTML('afterbegin', html);
       }
     } catch (e) { console.warn('Langkah Pertama:', e.message); }
@@ -22789,7 +23170,7 @@ const KUNCI_CERITA = { pekan: 'chPekan', kategori: 'chKategori', angkatan: 'chAn
   const asli = buatChart;
   buatChart = function (key, canvasId, config) {
     try {
-      if (APP.view === 'dashboard' && KUNCI_CERITA[key] === canvasId && config && config.data && !$(canvasId)?.closest('.swal2-popup')) {
+      if (['dashboard', 'analisis'].includes(APP.view) && KUNCI_CERITA[key] === canvasId && config && config.data && !$(canvasId)?.closest('.swal2-popup')) {
         const d = config.data, ds = d.datasets || [];
         // v2.48: `cerita` = keterangan bulan dari viewDashboard (bukan milik Chart.js → dilepas).
         const m = config.cerita || null; delete config.cerita;
@@ -22820,8 +23201,9 @@ function binaTertunda3Hari() {
 }
 
 (function pasangTindakLanjut() {
-  const asli = viewDashboard;
-  viewDashboard = async function () {
+  // v2.55: grafik harian pindah ke halaman Analisis.
+  const asli = viewAnalisis;
+  viewAnalisis = async function () {
     const hasil = await asli.apply(this, arguments);
     try {
       if (!(MENU_ROLE.pembinaan || []).includes(role())) return hasil;
@@ -25026,19 +25408,25 @@ function kartuIngatkanMusyrif() {
 }
 
 (function pasangIngatkanMusyrif() {
-  const asli = viewDashboard;
-  viewDashboard = async function () {
-    const hasil = await asli.apply(this, arguments);
+  // v2.55: di Ringkasan hanya tanggal 25 sampai akhir bulan (saat laporan
+  // memang akan dicetak), di bawah lembar. Di halaman Analisis selalu ada.
+  const pasang = (view, syarat) => async function (asli, args) {
+    const hasil = await asli.apply(this, args);
     try {
-      const html = kartuIngatkanMusyrif();          // izin dicek saat render
+      const html = syarat() ? kartuIngatkanMusyrif() : '';   // izin dicek saat render
       const root = $('viewRoot');
-      if (html && root && APP.viewTampil === 'dashboard' && !document.getElementById('ingKartu')) {   // navigasi cepat: jangan menyusup ke halaman lain
-        const jangkar = root.querySelector('#langkahPertama') || root.querySelector('.sapa');
+      if (html && root && APP.viewTampil === view && !document.getElementById('ingKartu')) {   // navigasi cepat: jangan menyusup ke halaman lain
+        const jangkar = root.querySelector('#langkahPertama') || root.querySelector('.lembar, .analisis-kop, .sapa');
         jangkar ? jangkar.insertAdjacentHTML('afterend', html) : root.insertAdjacentHTML('afterbegin', html);
       }
     } catch (e) { console.warn('Ingatkan musyrif:', e.message); }
     return hasil;
   };
+  const diRingkasan = pasang('dashboard', () => new Date().getDate() >= 25);
+  const diAnalisis = pasang('analisis', () => true);
+  const asliR = viewDashboard, asliA = viewAnalisis;
+  viewDashboard = async function () { return diRingkasan.call(this, asliR, arguments); };
+  viewAnalisis = async function () { return diAnalisis.call(this, asliA, arguments); };
   document.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-ingatkan-musyrif]'); if (!b) return;
     e.preventDefault();
@@ -28177,6 +28565,49 @@ function bulanMundur(bulan, n) {
   return out;
 }
 
+/* ---------- v2.55 · Jendela bulan BERDATA --------------------------
+ * Bulan sebelum catatan pertama chemint bukan "bulan tanpa pelanggaran";
+ * bulan itu belum pernah ditulis. Memasukkannya ke tabel atau ke garis
+ * regresi membuat chemint mengukur kurva adopsinya sendiri, bukan
+ * perilaku santri. Semua jendela enam bulan dipotong di sini.
+ * ------------------------------------------------------------------- */
+const MULAI_DATA = { sumber: null, bulan: null };
+
+/** Bulan ('yyyy-MM') tertua yang punya catatan pelanggaran/perizinan; null bila belum termuat. */
+function bulanMulaiData() {
+  const det = CACHE.detail && CACHE.detail.v, izn = CACHE.izin && CACHE.izin.v;
+  if (!Array.isArray(det) && !Array.isArray(izn)) return MULAI_DATA.bulan;
+  if (MULAI_DATA.sumber && MULAI_DATA.sumber[0] === det && MULAI_DATA.sumber[1] === izn) return MULAI_DATA.bulan;
+  let min = null;
+  const lihat = (k) => { const b = bulanDari(k); if (b && (!min || b < min)) min = b; };
+  (det || []).forEach(r => { if (aktifDetail(r)) lihat(kunciTgl(r.tanggal)); });
+  (izn || []).forEach(z => lihat(kunciTgl(z.tanggal_mulai)));
+  MULAI_DATA.sumber = [det, izn]; MULAI_DATA.bulan = min;
+  return min;
+}
+
+/** Buang bulan sebelum bulanMulaiData(); tidak pernah mengembalikan daftar kosong. */
+function jendelaBerdata(bulanKunci) {
+  const daftar = (bulanKunci || []).slice();
+  const mulai = bulanMulaiData();
+  const sisa = mulai ? daftar.filter(b => b >= mulai) : daftar;
+  return sisa.length ? sisa : daftar.slice(-1);
+}
+
+/** Hanya bulan yang sudah genap (tanpa bulan berjalan) — bahan garis tren. */
+function bulanUtuh(bulanKunci) {
+  const kini = bulanIni();
+  return (bulanKunci || []).filter(b => b < kini);
+}
+
+/** "6 bulan terakhir" bila jendela utuh; selain itu "sejak Agustus 2026". */
+function labelJendela(bulanKunci) {
+  const n = (bulanKunci || []).length;
+  if (!n) return 'bulan ini';
+  if (n >= 6) return `${n} bulan terakhir`;
+  return `sejak ${labelBulan(bulanKunci[0])}`;
+}
+
 /**
  * Satu baris per bulan: { bulan, plg, poin, izin, bina, thf (halaman), prs }.
  * Setiap bulan dihitung UTUH dan sendiri-sendiri — tidak ada yang terbawa.
@@ -28238,7 +28669,8 @@ function kartuCermin(cermin, per) {
     <p class="sb-kaki">Setiap bulan adalah lembar baru: hitungannya mulai dari nol dan tidak membawa bulan sebelumnya. Tahfiz dalam halaman.
       ${per.berjalan ? 'Bulan berjalan belum genap, jadi wajar bila angkanya masih lebih kecil.' : ''}</p>`,
     per.bulan !== jalan ? `<button type="button" class="btn btn-ghost btn-sm" data-lembar=""><i class="fa-solid fa-rotate-left"></i>Bulan ini</button>` : '',
-    'Enam lembar terakhir, tiap bulan dihitung sendiri.');
+    cermin.length >= 6 ? 'Enam lembar terakhir, tiap bulan dihitung sendiri.'
+      : `Lembar ${labelJendela(cermin.map(m => m.bulan))}, tiap bulan dihitung sendiri.`);
 }
 
 function kartuCerminSantri(c, per) {
@@ -28456,6 +28888,8 @@ function barisBinaTerkunci(r, kunci) {
 
 /** Pemilih periode global aktif → halaman ikut bulan itu (pilihan bulan dikunci). */
 function bulanBinaEfektif() {
+  // v2.55: dibuka dari butir amanah → bulan butir itu menang atas pemilih periode.
+  if (stBina.asal && stBina.bulan) return stBina.bulan;
   return APP.periode && APP.periode.aktif && APP.periode.bulan ? APP.periode.bulan : (stBina.bulan || bulanIni());
 }
 function saringBulanBina(rows) {
@@ -28479,7 +28913,7 @@ function isiPilihanBulanBina(rows, kunci) {
     const ket = m === kini ? ' · berjalan' : k && k.terkunci ? ' · terkunci 🔒' : k ? ' · kunci dibuka' : '';
     return `<option value="${esc(m)}"${m === b ? ' selected' : ''}>${esc(labelBulan(m) + ket)}</option>`;
   }).join('') + `<option value="*"${b === '*' ? ' selected' : ''}>Semua bulan</option>`;
-  sel.disabled = !!(APP.periode && APP.periode.aktif);
+  sel.disabled = !!(APP.periode && APP.periode.aktif) && !stBina.asal;
   sel.title = sel.disabled ? 'Mengikuti pemilih periode di bilah atas' : 'Bulan pembinaan';
 }
 
@@ -28539,7 +28973,7 @@ const PGR = {
 };
 
 function panggungBoleh() {
-  if (APP.view !== 'dashboard' || MULUS.kurangGerak) return false;
+  if (!['dashboard', 'analisis'].includes(APP.view) || MULUS.kurangGerak) return false;
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
   return bacaLS('rq-panggung') !== 'mati';
 }
@@ -31552,3 +31986,7 @@ function asPentasBagian(el) {
   };
   document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', pasang) : pasang();
 })();
+
+/* v2.55 — Ringkasan satu lembar · halaman Analisis (Grafik & Sebaran) · kabar wali tercatat
+   · jendela bulan berdata · sapaan bilah atas. Lihat perubahan-v2.55-satu-lembar.md. */
+APP.versi = 'rq-v2.55';
