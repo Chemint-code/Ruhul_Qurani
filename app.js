@@ -2359,14 +2359,17 @@ function saranKelas(input, onPilih) {
 $('formLogin').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = $('btnLogin');
-  const u = $('loginUsername').value.trim();
+  // v2.54.1 — keyboard iPhone bisa membesarkan huruf pertama / menyisipkan spasi;
+  // ID akun selalu huruf kecil tanpa spasi, jadi isian dirapikan sebelum dikirim.
+  const u = rapikanIdLogin($('loginUsername').value);
+  if ($('loginUsername').value !== u) $('loginUsername').value = u;
   const p = $('loginPassword').value;
   const email = u.includes('@') ? u : `${u}@${DOMAIN_INTERNAL}`;
 
   // v2.47.2 — singgah: sesi masih aktif & isian belum diubah → lanjutkan sesi
   // tanpa menghubungi server autentikasi (sandi tidak pernah disimpan).
   const form = $('formLogin');
-  const singgah = form.dataset.sesi === 'aktif' && u === SINGGAH.id && p === SINGGAH.SANDI;
+  const singgah = form.dataset.sesi === 'aktif' && u === SINGGAH.id && p === '';   // v2.54.1: kolom sandi dibiarkan kosong
   const asli = { html: btn.innerHTML, disabled: false };
   btn.disabled = true;
   btn.innerHTML = singgah ? '<i class="fa-solid fa-circle-notch fa-spin"></i><span>Melanjutkan…</span>'
@@ -2379,8 +2382,13 @@ $('formLogin').addEventListener('submit', async (e) => {
       if (!(await penggunaSesi())) throw new Error('Sesi sudah berakhir. Silakan masuk dengan kata sandi.');
     } else {
       if (SINGGAH.id && u !== SINGGAH.id) await bersihkanAkunPerangkat();   // ganti akun: data akun lama tidak ditinggal
-      const { error } = await db.auth.signInWithPassword({ email, password: p });
-      if (error) throw new Error('Username atau password salah.');
+      // v2.54.1 — sisa versi lama: pengelola sandi bisa menyimpan nilai tiruan singgah sebagai sandi.
+      if (p === SANDI_TIRUAN_LAMA) throw galatMasuk({ judul: 'Kata sandi terisi otomatis keliru',
+        teks: 'Kata sandi yang terisi otomatis di HP ini berasal dari versi lama chemint, bukan kata sandi Anda. Hapus isian kata sandi, lalu ketik ulang kata sandi Anda.' });
+      let hasil;
+      try { hasil = await db.auth.signInWithPassword({ email, password: p }); }
+      catch (e) { throw galatMasuk(pesanGagalMasuk(e)); }
+      if (hasil?.error) throw galatMasuk(pesanGagalMasuk(hasil.error));
     }
     if (gerbang) await gerbang.tertutup;
     else LayarMuat.bukaAwal(['Menyiapkan akun', 'Mengambil catatan santri', 'Menyusun ringkasan', 'Hampir selesai']);
@@ -2391,8 +2399,11 @@ $('formLogin').addEventListener('submit', async (e) => {
   } catch (err) {
     gerbang?.batal();
     LayarMuat.tutupAwal();
-    if (singgah) { $('loginPassword').value = ''; delete form.dataset.sesi; $('loginSesi')?.remove(); }
-    toast('error', err.message);
+    if (singgah) { $('loginPassword').value = ''; lepasSinggahForm(); }
+    // v2.54.1 — galat jaringan/server tampil sebagai dialog yang bisa dibaca utuh,
+    // bukan toast singkat; sandi salah tetap toast seperti biasa.
+    if (err?.judul) Swal.fire({ icon: 'warning', title: err.judul, text: err.message, confirmButtonColor: '#14618B' });
+    else toast('error', err.message);
   } finally {
     btn.disabled = asli.disabled;
     btn.innerHTML = asli.html;
@@ -26922,7 +26933,56 @@ hidupkanLayarLogin();
  *  · Matikan: SINGGAH.aktif = false, atau per perangkat localStorage
  *    'rq-singgah' = 'mati' (perilaku lama: langsung ke dasbor).
  * ===================================================================== */
-const SINGGAH = { aktif: true, SANDI: 'sesi-aktif-rq', id: '', user: null };
+const SINGGAH = { aktif: true, id: '', user: null };
+/* v2.54.1 — dulu kolom sandi diisi nilai tiruan ini agar tampak terisi. Pengelola
+   sandi (Keychain iPhone, dll.) bisa menyimpannya sebagai "kata sandi" lalu terus
+   mengisikannya → selalu gagal masuk. Kini kolom sandi dibiarkan kosong; konstanta
+   ini hanya dipakai untuk mengenali sisa nilai lama yang terisi otomatis. */
+const SANDI_TIRUAN_LAMA = 'sesi-aktif-rq';
+
+/* v2.54.1 — ID masuk dirapikan: huruf kecil, tanpa spasi (termasuk spasi tak
+   terlihat), bentuk karakter dinormalkan. Semua email akun di auth.users huruf kecil. */
+function rapikanIdLogin(v) {
+  let s = String(v || '');
+  try { s = s.normalize('NFKC'); } catch (e) {}
+  return s.replace(/[\s\u200B-\u200D\u2060\uFEFF]/g, '').toLowerCase();
+}
+
+/* v2.54.1 — dulu SEMUA kegagalan masuk tampil "Username atau password salah",
+   termasuk saat permintaan tidak sampai ke server (jaringan diblokir/putus).
+   Kini pesan dibedakan menurut penyebabnya. */
+function pesanGagalMasuk(err) {
+  const kode = String(err?.code || ''), status = Number(err?.status) || 0;
+  const nama = String(err?.name || ''), pesan = String(err?.message || '');
+  if (kode === 'invalid_credentials' || (status === 400 && /invalid login credentials/i.test(pesan)))
+    return { teks: 'Username atau kata sandi salah.' };
+  if (kode === 'email_not_confirmed')
+    return { judul: 'Akun belum aktif', teks: 'Akun ini belum dikonfirmasi. Mohon hubungi admin dayah.' };
+  if (kode === 'user_banned')
+    return { judul: 'Akun dinonaktifkan', teks: 'Akun ini sedang dinonaktifkan. Mohon hubungi admin dayah.' };
+  if (status === 429 || /rate_limit/i.test(kode))
+    return { judul: 'Terlalu banyak percobaan', teks: 'Terlalu banyak percobaan masuk dari perangkat ini. Tunggu beberapa menit, lalu coba lagi.' };
+  if (status >= 500)
+    return { judul: 'Server sedang sibuk', teks: `Server chemint sedang bermasalah (kode ${status}). Coba lagi beberapa saat lagi.` };
+  const luring = typeof navigator !== 'undefined' && navigator.onLine === false;
+  if (luring || nama === 'AuthRetryableFetchError' || status === 0 || /fetch|network|load failed|jaringan/i.test(pesan))
+    return { judul: 'Tidak dapat terhubung ke server',
+             teks: 'HP ini tidak dapat menghubungi server chemint, jadi kata sandi Anda belum diperiksa. Periksa jaringan internet — coba pindah ke data seluler atau wifi lain — lalu tekan Masuk lagi.' };
+  return { judul: 'Gagal masuk', teks: `Gagal masuk (${kode || status || nama || 'tidak dikenal'}). Coba lagi atau hubungi admin dayah.` };
+}
+function galatMasuk(info) {
+  const e = new Error(info.teks);
+  if (info.judul) e.judul = info.judul;
+  return e;
+}
+
+/* v2.54.1 — keluar dari mode singgah: kolom sandi kembali wajib diisi. */
+function lepasSinggahForm() {
+  const form = $('formLogin'), sandi = $('loginPassword');
+  if (form) delete form.dataset.sesi;
+  $('loginSesi')?.remove();
+  if (sandi) { sandi.required = true; sandi.placeholder = ''; }
+}
 try { if (localStorage.getItem('rq-singgah') === 'mati') SINGGAH.aktif = false; } catch (e) {}   // sakelar per perangkat
 
 async function bersihkanAkunPerangkat() {
@@ -26951,7 +27011,9 @@ function siapkanSinggah(user) {
   if (!form || !idEl || !sandi) return false;
   form.dataset.sesi = 'aktif';
   idEl.value = SINGGAH.id;
-  sandi.value = SINGGAH.SANDI;
+  sandi.value = '';                                  // v2.54.1: tanpa nilai tiruan
+  sandi.required = false;
+  sandi.placeholder = 'Sesi masih aktif — tidak perlu diisi';
   const nama = profilTersimpan(user.id)?.nama;
   const h2 = form.querySelector('h2'), sub = form.querySelector('.sub');
   if (h2) h2.textContent = 'Selamat datang kembali';
@@ -26965,7 +27027,7 @@ function siapkanSinggah(user) {
     info.querySelector('#btnGantiAkun').addEventListener('click', async () => {
       const b = info.querySelector('#btnGantiAkun'); b.disabled = true;
       await bersihkanAkunPerangkat();
-      delete form.dataset.sesi; info.remove();
+      lepasSinggahForm();
       idEl.value = ''; sandi.value = '';
       if (h2) h2.textContent = 'Selamat datang';
       if (sub) sub.textContent = 'Gunakan akun yang diberikan pengurus dayah.';
@@ -26975,11 +27037,9 @@ function siapkanSinggah(user) {
   // Mengubah isian = masuk biasa (akun lain / sandi baru).
   const lepas = (e) => {
     if (form.dataset.sesi !== 'aktif') return;
-    if (e.target === idEl && idEl.value.trim() !== SINGGAH.id && sandi.value === SINGGAH.SANDI) sandi.value = '';
-    if (idEl.value.trim() !== SINGGAH.id || sandi.value !== SINGGAH.SANDI) { delete form.dataset.sesi; $('loginSesi')?.remove(); }
+    if (rapikanIdLogin(idEl.value) !== SINGGAH.id || sandi.value !== '') lepasSinggahForm();
   };
   idEl.addEventListener('input', lepas); sandi.addEventListener('input', lepas);
-  sandi.addEventListener('focus', () => { if (sandi.value === SINGGAH.SANDI) sandi.select(); });
   return true;
 }
 
@@ -30651,7 +30711,7 @@ bukaBantuan = function () {
  *  → semuanya diam, simpul beranimasi dibuat saat halaman digambar.
  *  Semua PEMBUNGKUS / fungsi baru; fungsi lama tidak ditimpa.
  * ===================================================================== */
-APP.versi = 'rq-v2.54';
+APP.versi = 'rq-v2.54.1';
 
 MENU_ROLE.asatidz  = [...SEMUA_ROLE];
 MENU_ROLE.pendidik = [...SEMUA_ROLE];
