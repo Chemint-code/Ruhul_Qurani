@@ -4,6 +4,21 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0B2B45">
+<script>
+/* v2.57 — Langit Meulaboh: pasang html[data-langit] sebelum layar muat & gerbang digambar.
+   Pilihan disimpan app.js (LANGIT) di localStorage 'rq-langit': senja (bawaan) | waktu | klasik. */
+(function () {
+  var r = document.documentElement, w = 'senja';
+  try {
+    var p = localStorage.getItem('rq-langit'), j = new Date().getHours();
+    if (p === 'klasik') w = 'klasik';
+    else if (p === 'waktu') w = j < 4 ? 'malam' : j < 7 ? 'fajar' : j < 15 ? 'siang' : j < 19 ? 'senja' : 'malam';
+  } catch (e) {}
+  r.setAttribute('data-langit', w);
+  var m = document.querySelector('meta[name="theme-color"]');
+  if (m) m.content = { senja: '#22234F', fajar: '#2A2C62', siang: '#0D4FB0', malam: '#0B1435', klasik: '#0B2B45' }[w];
+})();
+</script>
 <meta name="description" content="Sistem Informasi Pengembangan Santri — Dayah Ruhul Qurani">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -7955,6 +7970,256 @@
     .lembar-kaki .btn { width: 100%; justify-content: center; min-height: 44px; }
   }
   @media print { .lembar-tabs, .lembar-kaki, .lk-tombol { display: none; } .lembar { box-shadow: none; } }
+</style>
+<style id="gayaLangit">
+  /* =====================================================================
+   * v2.57 — LANGIT MEULABOH
+   *  Satu palet langit sore pesisir barat Aceh: biru laut, emas matahari,
+   *  merah mawar, ungu malam. Prinsipnya "langit di bingkai, kertas di meja":
+   *  langit hanya mengisi BINGKAI (gerbang masuk, layar muat, bilah atas,
+   *  rel menu, tab lembar aktif). Isi kerja — tabel, angka, grafik, Benang
+   *  Emas — tetap di atas kertas terang, tidak disentuh.
+   *
+   *  html[data-langit] dipasang skrip kecil di <head> (sebelum apa pun
+   *  digambar) lalu dijaga app.js (LANGIT). Nilai:
+   *    senja  — bawaan; palet penuh seperti contoh
+   *    fajar · siang · malam — dipakai bila pengguna memilih "Ikut waktu"
+   *    klasik — tampilan navy lama, semua aturan di bawah tidak berlaku
+   *
+   *  Biaya: gradien statis + paling banyak dua lapisan yang digeser
+   *  (transform saja). Mode hemat & prefers-reduced-motion: diam.
+   * ===================================================================== */
+
+  /* ---------- 1 · Sembilan warna per waktu ---------- */
+  :root, :root[data-langit="senja"] {
+    --l-langit: #1676E4;  --l-awan: #1AAAF3;
+    --l-emas-a: #D9B11E;  --l-emas-b: #EDB616;
+    --l-ungu:   #4B2F66;  --l-mawar: #E3305A;
+    --l-bara:   #E0791C;  --l-dasar: #6E1A2E;  --l-puncak: #2457B5;
+    --l-tinta:  #1A0E24;                       /* tinta paling gelap langit ini */
+    --l-sorot:  #FFE3A3;                       /* kilau matahari */
+  }
+  :root[data-langit="fajar"] {
+    --l-langit: #3657B8;  --l-awan: #86A9E6;
+    --l-emas-a: #F2A65A;  --l-emas-b: #F7C873;
+    --l-ungu:   #2E2459;  --l-mawar: #D9567E;
+    --l-bara:   #F08C5A;  --l-dasar: #1E1A44;  --l-puncak: #2A2F6E;
+    --l-tinta:  #120F2A;  --l-sorot: #FFD9B8;
+  }
+  :root[data-langit="siang"] {
+    --l-langit: #0F62D9;  --l-awan: #2EB6F5;
+    --l-emas-a: #3FA9E0;  --l-emas-b: #F2C230;
+    --l-ungu:   #0B3F8C;  --l-mawar: #1E8FE0;
+    --l-bara:   #4CC0E6;  --l-dasar: #0B2B6B;  --l-puncak: #1468D6;
+    --l-tinta:  #06204A;  --l-sorot: #FFF2B8;
+  }
+  :root[data-langit="malam"] {
+    --l-langit: #1C2D6B;  --l-awan: #2C5AA0;
+    --l-emas-a: #3A2A6A;  --l-emas-b: #8C6E2A;
+    --l-ungu:   #120E2E;  --l-mawar: #4B2457;
+    --l-bara:   #6E1A33;  --l-dasar: #070B1E;  --l-puncak: #0B1638;
+    --l-tinta:  #05081A;  --l-sorot: #C9D8FF;
+  }
+
+  /* ---------- 2 · Tiga susunan: bilah lebar, layar mendatar, layar tegak ---------- */
+  :root {
+    --langit-datar:
+      radial-gradient(40% 150% at 5% 0%,    var(--l-langit), transparent 70%),
+      radial-gradient(24% 120% at 100% 0%,  var(--l-awan),   transparent 70%),
+      radial-gradient(28% 140% at 22% 100%, var(--l-emas-a), transparent 72%),
+      radial-gradient(34% 170% at 42% 30%,  var(--l-ungu),   transparent 72%),
+      radial-gradient(34% 150% at 63% 85%,  var(--l-mawar),  transparent 72%),
+      radial-gradient(24% 140% at 80% 10%,  var(--l-emas-b), transparent 70%),
+      radial-gradient(28% 150% at 95% 100%, var(--l-bara),   transparent 72%),
+      linear-gradient(98deg, var(--l-puncak), var(--l-ungu) 40%, var(--l-mawar) 68%, var(--l-dasar));
+    --langit-luas:
+      radial-gradient(55% 60% at 30% 0%,   var(--l-langit), transparent 70%),
+      radial-gradient(36% 52% at 100% 0%,  var(--l-awan),   transparent 70%),
+      radial-gradient(34% 55% at 0% 36%,   var(--l-emas-a), transparent 70%),
+      radial-gradient(30% 52% at 100% 50%, var(--l-emas-b), transparent 70%),
+      radial-gradient(46% 46% at 52% 38%,  var(--l-ungu),   transparent 72%),
+      radial-gradient(55% 55% at 28% 80%,  var(--l-mawar),  transparent 72%),
+      radial-gradient(40% 52% at 86% 82%,  var(--l-bara),   transparent 72%),
+      radial-gradient(70% 40% at 50% 106%, var(--l-dasar),  transparent 75%),
+      linear-gradient(180deg, var(--l-puncak), var(--l-ungu) 44%, var(--l-mawar) 70%, var(--l-dasar));
+    --langit-tegak:
+      radial-gradient(85% 34% at 50% 0%,   var(--l-langit), transparent 70%),
+      radial-gradient(55% 24% at 100% 6%,  var(--l-awan),   transparent 70%),
+      radial-gradient(62% 30% at 0% 25%,   var(--l-emas-a), transparent 70%),
+      radial-gradient(56% 30% at 100% 44%, var(--l-emas-b), transparent 70%),
+      radial-gradient(72% 24% at 50% 30%,  var(--l-ungu),   transparent 72%),
+      radial-gradient(92% 34% at 20% 64%,  var(--l-mawar),  transparent 72%),
+      radial-gradient(60% 30% at 96% 70%,  var(--l-bara),   transparent 72%),
+      radial-gradient(115% 30% at 50% 102%, var(--l-dasar), transparent 75%),
+      linear-gradient(180deg, var(--l-puncak), var(--l-ungu) 30%, var(--l-mawar) 62%, var(--l-dasar));
+    /* garis cakrawala tipis — pengganti garis kuningan di tepi bilah */
+    --langit-garis: linear-gradient(90deg, transparent, var(--l-emas-b) 18%, var(--l-sorot) 46%,
+      var(--l-mawar) 72%, var(--l-awan) 92%, transparent);
+  }
+
+  /* Semua aturan berikut berlaku untuk empat langit; "klasik" dibiarkan seperti dulu. */
+
+  /* ---------- 3 · Gerak: langit bergeser sangat pelan, matahari melintas ---------- */
+  @keyframes langitHanyut {
+    0%   { transform: translate3d(-3%, -2%, 0) scale(1.04); }
+    100% { transform: translate3d(3%, 2%, 0)  scale(1.10); }
+  }
+  @keyframes matahariMelintas {
+    0%   { transform: translate3d(-38%, 0, 0); opacity: .55; }
+    50%  { opacity: .9; }
+    100% { transform: translate3d(38%, 0, 0);  opacity: .55; }
+  }
+
+  /* ---------- 4 · Bilah profil atas ---------- */
+  :root[data-langit]:not([data-langit="klasik"]) {
+    & .pbar { background: var(--l-tinta); border-bottom-color: transparent; isolation: isolate; }
+    & .pbar::before {
+      content: ''; position: absolute; inset: -18% -8%; z-index: 0; pointer-events: none;
+      background: var(--langit-datar);
+      animation: langitHanyut 34s ease-in-out infinite alternate;
+      will-change: transform;
+    }
+    /* Foto sampul tidak lagi menutup langit: tinggal tekstur yang diwarnai langit. */
+    & .pbar.ready .pbar-cover { opacity: .42; mix-blend-mode: soft-light; }
+    & .pbar-veil {
+      background:
+        var(--girih),
+        linear-gradient(90deg, color-mix(in oklab, var(--l-tinta) 62%, transparent) 0%,
+                               color-mix(in oklab, var(--l-tinta) 22%, transparent) 34%,
+                               transparent 58%,
+                               color-mix(in oklab, var(--l-tinta) 18%, transparent) 100%);
+    }
+    & .pbar-veil::after {
+      content: ''; position: absolute; top: -40%; bottom: -40%; left: 30%; width: 40%;
+      background: radial-gradient(50% 50% at 50% 50%, color-mix(in oklab, var(--l-sorot) 55%, transparent), transparent 70%);
+      mix-blend-mode: soft-light; pointer-events: none;
+      animation: matahariMelintas 26s ease-in-out infinite alternate;
+    }
+    & .pbar::after { background: var(--langit-garis); height: 2px; opacity: .95; }
+    & .pbar-inner :is(#pbarNama, .salam) { text-shadow: 0 1px 2px rgb(10 4 18 / .45), 0 0 18px rgb(10 4 18 / .25); }
+    & .pbar-btn {
+      background: color-mix(in oklab, white 14%, transparent);
+      border-color: color-mix(in oklab, white 30%, transparent);
+      color: #fff; text-shadow: 0 1px 2px rgb(10 4 18 / .35);
+      -webkit-backdrop-filter: var(--kaca-tipis); backdrop-filter: var(--kaca-tipis);
+    }
+    & .pbar-btn:hover { background: color-mix(in oklab, white 24%, transparent); border-color: color-mix(in oklab, white 50%, transparent); }
+    & .pbar-role { background: color-mix(in oklab, var(--l-tinta) 38%, transparent); }
+
+    /* ---------- 5 · Rel menu: kolom langit di balik kaca gelap ---------- */
+    & .sidebar::before {
+      background-image:
+        var(--girih),
+        linear-gradient(180deg, color-mix(in oklab, var(--l-tinta) 50%, transparent),
+                                color-mix(in oklab, var(--l-tinta) 62%, transparent) 55%,
+                                color-mix(in oklab, var(--l-tinta) 72%, transparent)),
+        var(--langit-tegak);
+    }
+    & .nav-item.active {
+      background: linear-gradient(90deg in oklab,
+        color-mix(in oklab, var(--l-mawar) 72%, var(--l-tinta)),
+        color-mix(in oklab, var(--l-ungu) 70%, var(--l-tinta)) 92%);
+      box-shadow: inset 0 1px 0 color-mix(in oklab, white 20%, transparent),
+                  inset 0 0 0 1px color-mix(in oklab, var(--l-sorot) 22%, transparent),
+                  0 10px 22px -12px color-mix(in oklab, var(--l-mawar) 90%, transparent);
+    }
+    & .sidebar .nav-item.active > i { color: var(--l-sorot); }
+    & .nav-item.active::before {
+      background: linear-gradient(180deg, var(--l-sorot), var(--l-emas-b));
+      box-shadow: 0 0 12px color-mix(in oklab, var(--l-emas-b) 80%, transparent);
+    }
+
+    /* ---------- 6 · Layar muat ---------- */
+    & .lm--penuh { background: var(--girih), var(--langit-luas); }
+    & .lm--penuh::before { background: var(--l-sorot); opacity: .22; }
+    & .lm--penuh::after  { background: var(--l-awan); opacity: .26; }
+
+    /* ---------- 7 · Gerbang masuk ---------- */
+    & #loginScreen { background: var(--l-tinta); }
+    & #loginScreen::before {
+      inset: -6%; background: var(--langit-luas);
+      animation: langitHanyut 40s ease-in-out infinite alternate;
+    }
+    & .login-bg { mix-blend-mode: soft-light; }
+    & #loginScreen.ready .login-bg { opacity: .55; }
+    & .login-wash {
+      background:
+        radial-gradient(120% 100% at 46% 46%, transparent 34%, color-mix(in oklab, var(--l-tinta) 48%, transparent) 100%),
+        linear-gradient(100deg,
+          color-mix(in oklab, var(--l-tinta) 58%, transparent) 0%,
+          color-mix(in oklab, var(--l-tinta) 34%, transparent) 30%,
+          color-mix(in oklab, var(--l-tinta) 8%, transparent) 60%,
+          color-mix(in oklab, var(--l-tinta) 24%, transparent) 100%);
+    }
+    & #loginScreen.ada-reel .login-wash {
+      background:
+        radial-gradient(46% 30% at 32% 48%, color-mix(in oklab, var(--l-tinta) 30%, transparent) 0%, transparent 100%),
+        radial-gradient(130% 110% at 40% 46%, transparent 40%, color-mix(in oklab, var(--l-tinta) 46%, transparent) 100%);
+    }
+    & #loginScreen::after {
+      background: radial-gradient(340px 340px at var(--mx,50%) var(--my,50%),
+        color-mix(in oklab, var(--l-sorot) 22%, transparent), transparent 68%);
+    }
+    /* Tombol Masuk: pil biru langit di atas senja — satu-satunya warna dingin yang menonjol. */
+    & .login-card .btn-primary {
+      border-radius: 999px; border: 0;
+      background: linear-gradient(180deg, color-mix(in oklab, var(--l-langit) 88%, white), var(--l-langit) 55%, color-mix(in oklab, var(--l-langit) 80%, var(--l-tinta)));
+      box-shadow: 0 1px 0 color-mix(in oklab, white 30%, transparent) inset,
+                  0 14px 26px -14px color-mix(in oklab, var(--l-langit) 95%, transparent);
+    }
+    & .login-card .btn-primary:hover { filter: brightness(1.06) saturate(1.05); }
+
+    /* ---------- 8 · Lembar: tab bulan aktif = jendela kecil ke langit ---------- */
+    & .lembar-tab.on {
+      background:
+        radial-gradient(80% 120% at 100% 0%, color-mix(in oklab, var(--l-emas-b) 80%, transparent), transparent 70%),
+        linear-gradient(118deg, var(--l-ungu), var(--l-mawar) 62%, var(--l-bara));
+      color: #fff; text-shadow: 0 1px 2px rgb(10 4 18 / .45);
+      box-shadow: inset 0 1px 0 color-mix(in oklab, white 25%, transparent);
+    }
+    & .lembar-tab.on small { color: color-mix(in oklab, var(--l-sorot) 85%, white); }
+    & .lembar { border-top: 3px solid transparent;
+      border-image: linear-gradient(90deg, var(--l-langit), var(--l-ungu) 35%, var(--l-mawar) 65%, var(--l-emas-b)) 1 0 0 0; }
+
+    /* ---------- 9 · Diam: hemat, gerak dikurangi, layar di luar pandang ---------- */
+    &.hemat .pbar-veil::after { display: none; }
+    &.hemat .pbar-btn { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  }
+  /* :is() tidak bisa memuat elemen-semu — ditulis terpisah supaya pasti berlaku. */
+  :root.hemat[data-langit]:not([data-langit="klasik"]) .pbar::before,
+  :root.hemat[data-langit]:not([data-langit="klasik"]) #loginScreen::before { animation: none; }
+  @media (prefers-reduced-motion: reduce) {
+    :root[data-langit] .pbar::before, :root[data-langit] .pbar-veil::after,
+    :root[data-langit] #loginScreen::before { animation: none !important; }
+  }
+  @media (orientation: portrait) {
+    :root[data-langit]:not([data-langit="klasik"]) .lm--penuh { background: var(--girih), var(--langit-tegak); }
+    :root[data-langit]:not([data-langit="klasik"]) #loginScreen::before { background: var(--langit-tegak); }
+  }
+  @media print {
+    :root[data-langit] .pbar::before, :root[data-langit] .pbar-veil::after { display: none; }
+    :root[data-langit] .lembar { border-image: none; border-top-color: #0B2B45; }
+  }
+
+  /* ---------- 10 · Panel "Tampilan" (tombol Efek) ---------- */
+  .tp-panel { text-align: left; display: grid; gap: 16px; }
+  .tp-grup > b { display: block; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); margin: 0 0 8px; }
+  .tp-grup > p { margin: 6px 0 0; font-size: 12.5px; color: var(--text-2); }
+  .tp-pilih { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .tp-opsi { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 14px; text-align: left;
+    border: 1.5px solid var(--line); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;
+    transition: border-color var(--cepat), box-shadow var(--cepat), transform var(--cepat); }
+  .tp-opsi:hover { border-color: color-mix(in oklab, var(--sea) 40%, white); }
+  .tp-opsi.on { border-color: var(--navy); box-shadow: 0 0 0 3px color-mix(in oklab, var(--sea) 16%, transparent); }
+  .tp-opsi:focus-visible { outline: none; box-shadow: var(--ring); }
+  .tp-opsi b { font-size: 13.5px; font-weight: 650; }
+  .tp-opsi small { font-size: 11.5px; color: var(--text-2); line-height: 1.3; }
+  .tp-cicip { height: 46px; border-radius: 9px; overflow: hidden; position: relative; }
+  .tp-cicip.senja  { background: linear-gradient(110deg, #1676E4, #4B2F66 38%, #E3305A 66%, #EDB616); }
+  .tp-cicip.waktu  { background: linear-gradient(90deg, #3657B8 0 25%, #1AAAF3 25% 50%, #E3305A 50% 75%, #1C2D6B 75%); }
+  .tp-cicip.klasik { background: var(--girih), linear-gradient(152deg, #16456A, #0B2B45 52%, #061826); }
+  .tp-cicip.waktu::after { content: ''; position: absolute; inset: auto 0 0; height: 3px; background: linear-gradient(90deg, #F7C873, #F2C230, #EDB616, #8C6E2A); }
+  .tp-cicip.gerak { display: grid; place-items: center; color: var(--navy); background: var(--line-soft); font-size: 18px; }
 </style>
 </head>
 <body>

@@ -22085,18 +22085,93 @@ function pasangTombolEfek() {
   const b = document.createElement('button');
   b.type = 'button'; b.className = 'pbar-btn'; b.id = 'btnEfek';
   b.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i><span>Efek</span>';
+  // v2.57: tombol Efek membuka panel "Tampilan" (gerak + langit). Bila SweetAlert
+  // belum siap, perilaku lama (memutar pilihan gerak) tetap jalan.
   b.addEventListener('click', () => {
-    const urut = ['otomatis', 'penuh', 'hemat'];
-    const p = urut[(urut.indexOf(pilihanEfek()) + 1) % urut.length];
-    tulisLS(EFEK.kunciPilih, p === 'otomatis' ? null : p);
-    if (p === 'otomatis') {
-      tulisLS(EFEK.kunciUkur, null); EFEK.sebab = 'tebak'; EFEK.sudahUkur = false;
-      terapkanHemat(EFEK.tebakan); ujiKelancaran();
-    } else terapkanHemat(p === 'hemat');
-    try { toast('info', `Efek tampilan: ${LABEL_EFEK[p]}`); } catch (e) {}
+    if (typeof Swal !== 'undefined') return bukaPanelTampilan();
+    gantiEfek(geserEfek());
   });
   acuan.parentElement.insertBefore(b, acuan);
   perbaruiTombolEfek();
+}
+function geserEfek() {
+  const urut = ['otomatis', 'penuh', 'hemat'];
+  return urut[(urut.indexOf(pilihanEfek()) + 1) % urut.length];
+}
+function gantiEfek(p) {
+  tulisLS(EFEK.kunciPilih, p === 'otomatis' ? null : p);
+  if (p === 'otomatis') {
+    tulisLS(EFEK.kunciUkur, null); EFEK.sebab = 'tebak'; EFEK.sudahUkur = false;
+    terapkanHemat(EFEK.tebakan); ujiKelancaran();
+  } else terapkanHemat(p === 'hemat');
+}
+
+/* ---------- v2.57 · LANGIT MEULABOH ----------
+ * Bingkai aplikasi (bilah atas, rel menu, gerbang, layar muat, tab lembar
+ * aktif) diwarnai langit sore pesisir barat. Pilihan per perangkat:
+ *   senja  — bawaan, palet penuh
+ *   waktu  — langit mengikuti jam: fajar 04–07, siang 07–15, senja 15–19, malam 19–04
+ *   klasik — navy lama
+ * html[data-langit] sudah dipasang skrip <head>; di sini hanya dijaga tetap
+ * benar saat pilihan diganti, jam berganti, atau aplikasi kembali dibuka. */
+const LANGIT = { kunci: 'rq-langit', jam: null,
+  warnaBilah: { senja: '#22234F', fajar: '#2A2C62', siang: '#0D4FB0', malam: '#0B1435', klasik: '#0B2B45' } };
+const LABEL_LANGIT = { senja: 'Senja Meulaboh', waktu: 'Ikut waktu', klasik: 'Klasik' };
+function pilihanLangit() { const p = bacaLS(LANGIT.kunci); return p === 'waktu' || p === 'klasik' ? p : 'senja'; }
+function waktuLangit(jam = new Date().getHours()) {
+  return jam < 4 ? 'malam' : jam < 7 ? 'fajar' : jam < 15 ? 'siang' : jam < 19 ? 'senja' : 'malam';
+}
+function terapkanLangit() {
+  const p = pilihanLangit();
+  const w = p === 'waktu' ? waktuLangit() : p;
+  const r = document.documentElement;
+  if (r.dataset.langit !== w) r.dataset.langit = w;
+  const m = document.querySelector('meta[name="theme-color"]');
+  if (m && m.content !== LANGIT.warnaBilah[w]) m.content = LANGIT.warnaBilah[w];
+  // Jam hanya berdetak untuk "Ikut waktu"; cukup tiap 5 menit.
+  clearInterval(LANGIT.jam); LANGIT.jam = null;
+  if (p === 'waktu') LANGIT.jam = setInterval(terapkanLangit, 5 * 60e3);
+}
+function gantiLangit(p) { tulisLS(LANGIT.kunci, p === 'senja' ? null : p); terapkanLangit(); }
+terapkanLangit();
+document.addEventListener('visibilitychange', () => { if (!document.hidden && pilihanLangit() === 'waktu') terapkanLangit(); });
+
+/** Panel "Tampilan": dua pilihan kecil, langsung berlaku saat disentuh. */
+function bukaPanelTampilan() {
+  const opsiGerak = [
+    ['otomatis', 'Otomatis', 'Diukur dari kelancaran perangkat', 'fa-gauge-high'],
+    ['penuh', 'Penuh', 'Semua gerak & kaca', 'fa-wand-magic-sparkles'],
+    ['hemat', 'Hemat', 'Diam & ringan untuk HP lama', 'fa-leaf']
+  ];
+  const opsiLangit = [
+    ['senja', 'Senja', 'Biru laut, emas, mawar, ungu'],
+    ['waktu', 'Ikut waktu', 'Fajar, siang, senja, malam'],
+    ['klasik', 'Klasik', 'Navy & kuningan']
+  ];
+  const tombol = (grup, [k, judul, ket, ikon], on) =>
+    `<button type="button" class="tp-opsi${on ? ' on' : ''}" data-grup="${grup}" data-k="${k}" aria-pressed="${on}">
+       <span class="tp-cicip ${grup === 'gerak' ? 'gerak' : k}">${ikon ? `<i class="fa-solid ${ikon}"></i>` : ''}</span>
+       <b>${judul}</b><small>${ket}</small></button>`;
+  const html = `<div class="tp-panel">
+    <div class="tp-grup"><b>Langit bingkai</b>
+      <div class="tp-pilih">${opsiLangit.map(o => tombol('langit', o, o[0] === pilihanLangit())).join('')}</div>
+      <p>Hanya bilah atas, menu, dan gerbang masuk yang berwarna. Lembar kerja tetap terang.</p></div>
+    <div class="tp-grup"><b>Gerak</b>
+      <div class="tp-pilih">${opsiGerak.map(o => tombol('gerak', o, o[0] === pilihanEfek())).join('')}</div></div>
+  </div>`;
+  Swal.fire({
+    title: 'Tampilan', html, showConfirmButton: true, confirmButtonText: 'Selesai',
+    confirmButtonColor: '#14618B', showCloseButton: true, width: 520,
+    didOpen: (el) => {
+      el.querySelectorAll('.tp-opsi').forEach((t) => t.addEventListener('click', () => {
+        const { grup, k } = t.dataset;
+        if (grup === 'langit') gantiLangit(k); else gantiEfek(k);
+        el.querySelectorAll(`.tp-opsi[data-grup="${grup}"]`).forEach((x) => {
+          const on = x === t; x.classList.toggle('on', on); x.setAttribute('aria-pressed', String(on));
+        });
+      }));
+    }
+  });
 }
 
 /* ---------- R1 · Anggaran gerak: luar layar, semburan, tenang ---------- */
