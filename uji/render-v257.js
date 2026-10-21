@@ -1,5 +1,5 @@
 /* render-v257.js — tangkapan Langit Senja v2.57: gerbang (login), bilah atas & Ringkasan
- * pada empat waktu langit.   RQSHOT=<folder> node uji/render-v257.js [cepat]          */
+ * dengan langit malam (bawaan).   RQSHOT=<folder> node uji/render-v257.js          */
 const A = require('./alat-v255.js'), fs = require('fs'), path = require('path');
 const OUT = process.env.RQSHOT || path.join(__dirname, 'keluaran-v257'); fs.mkdirSync(OUT, { recursive: true });
 const CEPAT = process.argv.includes('cepat');
@@ -26,25 +26,23 @@ const CEPAT = process.argv.includes('cepat');
     await page.screenshot({ path: `${OUT}/gerbang-${nama}.png` });
     await ctx.close();
   }
-  // 2 · Ringkasan pada empat waktu
-  const waktu = CEPAT ? [['senja', '2026-10-20T17:20:00+07:00']] :
-    [['fajar', '2026-10-20T06:10:00+07:00'], ['siang', '2026-10-20T10:00:00+07:00'], ['senja', '2026-10-20T17:20:00+07:00'], ['malam', '2026-10-20T21:30:00+07:00']];
+  // 2 · Ringkasan dengan langit malam (bawaan)
+  const waktu = [['malam', '2026-10-20T10:00:00+07:00']];
   for (const [w, jam] of waktu) {
     for (const [nama, o] of [['laptop', {}], ['hp', { mobile: true, dsf: 2 }]]) {
-      if (nama === 'hp' && w !== 'senja') continue;
-      const { ctx, page } = await A.buka(browser, port, { ...o, jam, init: () => { try { localStorage.setItem('rq-langit', 'waktu'); } catch (e) {} } });
+            const { ctx, page } = await A.buka(browser, port, { ...o, jam });
       await page.waitForTimeout(1800);
       await page.screenshot({ path: `${OUT}/ringkasan-${w}-${nama}.png`, fullPage: nama === 'hp' });
-      if (w === 'senja') {
+      if (w === 'malam') {
         await page.click('#btnEfek'); await page.waitForSelector('.tp-panel'); await page.waitForTimeout(500);
         await page.screenshot({ path: `${OUT}/tampilan-${nama}.png` });
         await page.click('.tp-opsi[data-k="klasik"]'); await page.waitForTimeout(300);
         const k = await page.evaluate(() => [document.documentElement.dataset.langit, localStorage.getItem('rq-langit'), document.querySelector('meta[name=theme-color]').content]);
         console.log('klasik →', k.join(' · '));
-        await page.click('.tp-opsi[data-k="senja"]'); await page.waitForTimeout(200);
+        await page.click('.tp-opsi[data-k="malam"]'); await page.waitForTimeout(200);
         await page.evaluate(() => Swal.close()); await page.waitForTimeout(400);
       }
-      if (nama === 'laptop' && w === 'senja') {
+      if (nama === 'laptop') {
         await page.mouse.move(34, 330); await page.waitForTimeout(700);
         await page.screenshot({ path: `${OUT}/panel-${w}-${nama}.png`, clip: { x: 0, y: 0, width: 700, height: 800 } });
       }

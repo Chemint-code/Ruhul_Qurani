@@ -1,4 +1,4 @@
-/* uji-v257.js — Langit Meulaboh: pilihan langit, jam, theme-color, hemat, panel Tampilan.
+/* uji-v257.js — Langit Meulaboh: langit malam (bawaan) & klasik, theme-color, hemat, panel Tampilan.
  *   node uji/uji-v257.js */
 const A = require('./alat-v255.js');
 (async () => {
@@ -12,40 +12,45 @@ const A = require('./alat-v255.js');
     lembarAtas: (() => { const l = document.querySelector('.lembar'); return l ? getComputedStyle(l).borderImageSource.slice(0, 15) : null; })()
   }));
 
-  // 1 · Bawaan tanpa pilihan tersimpan = senja, apa pun jamnya
-  let { ctx, page } = await A.buka(browser, port, { jam: '2026-10-20T10:00:00+07:00' });
+  for (const jam of ['06:00', '12:00', '17:30', '21:00']) {
+    const { ctx, page } = await A.buka(browser, port, { jam: `2026-10-20T${jam}:00+07:00` });
+    const s = await baca(page);
+    A.cek(`bawaan pukul ${jam}: langit malam`, s.langit === 'malam' && s.warna === '#0B1435', s.langit);
+    await ctx.close();
+  }
+  // Pilihan lama dari pratinjau (senja/waktu) jatuh ke malam
+  let { ctx, page } = await A.buka(browser, port, { init: () => { try { localStorage.setItem('rq-langit', 'senja'); } catch (e) {} } });
+  A.cek('pilihan lama "senja" → malam', (await baca(page)).langit === 'malam');
+  await ctx.close();
+
+  ({ ctx, page } = await A.buka(browser, port, {}));
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   let s = await baca(page);
-  A.cek('bawaan: senja pada pukul 10', s.langit === 'senja' && s.warna === '#22234F', s);
-  A.cek('bawaan: bilah atas bergradien & bergerak (mode penuh)', s.langitBilah.startsWith('radial-gradient') && s.anim === 'langitHanyut', s);
+  A.cek('bilah atas bergradien & bergerak (mode penuh)', s.langitBilah.startsWith('radial-gradient') && s.anim === 'langitHanyut', s);
   A.cek('lembar: tepi atas bergradien langit', String(s.lembarAtas).startsWith('linear-gradient'), s.lembarAtas);
-  // hemat → diam
   await page.evaluate(() => terapkanHemat(true)); s = await baca(page);
   A.cek('hemat: langit diam', s.anim === 'none', s.anim);
   await page.evaluate(() => terapkanHemat(false));
-  // klasik → aturan langit tidak berlaku
-  await page.evaluate(() => gantiLangit('klasik')); s = await baca(page);
-  A.cek('klasik: navy lama & theme-color #0B2B45', s.langit === 'klasik' && s.warna === '#0B2B45' && !s.langitBilah.startsWith('radial'), s);
-  await page.evaluate(() => gantiLangit('senja'));
-  A.cek('senja disimpan sebagai bawaan (kunci dihapus)', await page.evaluate(() => localStorage.getItem('rq-langit')) === null);
-  // panel Tampilan
+
   await page.click('#btnEfek'); await page.waitForSelector('.tp-panel');
-  await page.click('.tp-opsi[data-k="waktu"]'); await page.waitForTimeout(150);
-  s = await baca(page);
-  A.cek('panel: pilih "Ikut waktu" pukul 10 → siang', s.langit === 'siang' && s.warna === '#0D4FB0', s);
+  A.cek('panel: hanya dua pilihan langit, "Langit malam" menyala', await page.evaluate(() => {
+    const o = [...document.querySelectorAll('.tp-opsi[data-grup="langit"]')].map(x => x.dataset.k);
+    return o.join() === 'malam,klasik' && document.querySelector('.tp-opsi.on[data-grup="langit"]').dataset.k === 'malam';
+  }));
+  await page.click('.tp-opsi[data-k="klasik"]'); await page.waitForTimeout(150); s = await baca(page);
+  A.cek('klasik: navy lama & theme-color #0B2B45 & tersimpan', s.langit === 'klasik' && s.warna === '#0B2B45' && !s.langitBilah.startsWith('radial')
+    && await page.evaluate(() => localStorage.getItem('rq-langit')) === 'klasik', s);
+  await page.click('.tp-opsi[data-k="malam"]'); await page.waitForTimeout(150); s = await baca(page);
+  A.cek('kembali ke malam: kunci dihapus', s.langit === 'malam' && await page.evaluate(() => localStorage.getItem('rq-langit')) === null, s);
   await page.click('.tp-opsi[data-k="hemat"]'); await page.waitForTimeout(150);
-  A.cek('panel: pilih gerak Hemat berlaku', await page.evaluate(() => modeHemat() && localStorage.getItem('rq-efek-pilih') === 'hemat'));
-  A.cek('panel: hanya satu opsi menyala per grup', await page.evaluate(() =>
-    document.querySelectorAll('.tp-opsi.on[data-grup="langit"]').length === 1 && document.querySelectorAll('.tp-opsi.on[data-grup="gerak"]').length === 1));
+  A.cek('panel: gerak Hemat berlaku', await page.evaluate(() => modeHemat() && localStorage.getItem('rq-efek-pilih') === 'hemat'));
   await ctx.close();
 
-  // 2 · Ikut waktu pada empat jam (dipasang skrip <head> sebelum app.js)
-  for (const [jam, harap] of [['03:30', 'malam'], ['05:40', 'fajar'], ['12:00', 'siang'], ['17:10', 'senja'], ['19:05', 'malam']]) {
-    ({ ctx, page } = await A.buka(browser, port, { jam: `2026-10-20T${jam}:00+07:00`, init: () => { try { localStorage.setItem('rq-langit', 'waktu'); } catch (e) {} } }));
-    s = await baca(page);
-    A.cek(`ikut waktu ${jam} → ${harap}`, s.langit === harap, s.langit);
-    await ctx.close();
-  }
+  // Klasik bertahan setelah dibuka ulang (dipasang skrip <head>)
+  ({ ctx, page } = await A.buka(browser, port, { init: () => { try { localStorage.setItem('rq-langit', 'klasik'); } catch (e) {} } }));
+  A.cek('klasik bertahan saat dibuka ulang', (await baca(page)).langit === 'klasik');
+  await ctx.close();
+
   A.cek('tidak ada galat halaman', A.galat.length === 0, A.galat.slice(0, 3));
   const h = A.hasil(); console.log(`${h.lulus} lulus, ${h.gagal} gagal`);
   await browser.close(); srv.close(); process.exit(h.gagal ? 1 : 0);

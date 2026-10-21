@@ -6,17 +6,13 @@
 <meta name="theme-color" content="#0B2B45">
 <script>
 /* v2.57 — Langit Meulaboh: pasang html[data-langit] sebelum layar muat & gerbang digambar.
-   Pilihan disimpan app.js (LANGIT) di localStorage 'rq-langit': senja (bawaan) | waktu | klasik. */
+   Pilihan disimpan app.js (LANGIT) di localStorage 'rq-langit': (kosong) = malam, bawaan | 'klasik'. */
 (function () {
-  var r = document.documentElement, w = 'senja';
-  try {
-    var p = localStorage.getItem('rq-langit'), j = new Date().getHours();
-    if (p === 'klasik') w = 'klasik';
-    else if (p === 'waktu') w = j < 4 ? 'malam' : j < 7 ? 'fajar' : j < 15 ? 'siang' : j < 19 ? 'senja' : 'malam';
-  } catch (e) {}
+  var r = document.documentElement, w = 'malam';
+  try { if (localStorage.getItem('rq-langit') === 'klasik') w = 'klasik'; } catch (e) {}
   r.setAttribute('data-langit', w);
   var m = document.querySelector('meta[name="theme-color"]');
-  if (m) m.content = { senja: '#22234F', fajar: '#2A2C62', siang: '#0D4FB0', malam: '#0B1435', klasik: '#0B2B45' }[w];
+  if (m) m.content = w === 'klasik' ? '#0B2B45' : '#0B1435';
 })();
 </script>
 <meta name="description" content="Sistem Informasi Pengembangan Santri — Dayah Ruhul Qurani">
@@ -7974,51 +7970,31 @@
 <style id="gayaLangit">
   /* =====================================================================
    * v2.57 — LANGIT MEULABOH
-   *  Satu palet langit sore pesisir barat Aceh: biru laut, emas matahari,
-   *  merah mawar, ungu malam. Prinsipnya "langit di bingkai, kertas di meja":
+   *  Satu palet langit malam pesisir barat Aceh: indigo, ungu, anggur,
+   *  dengan kilau emas tipis. Prinsipnya "langit di bingkai, kertas di meja":
    *  langit hanya mengisi BINGKAI (gerbang masuk, layar muat, bilah atas,
    *  rel menu, tab lembar aktif). Isi kerja — tabel, angka, grafik, Benang
    *  Emas — tetap di atas kertas terang, tidak disentuh.
    *
    *  html[data-langit] dipasang skrip kecil di <head> (sebelum apa pun
    *  digambar) lalu dijaga app.js (LANGIT). Nilai:
-   *    senja  — bawaan; palet penuh seperti contoh
-   *    fajar · siang · malam — dipakai bila pengguna memilih "Ikut waktu"
+   *    malam  — bawaan
    *    klasik — tampilan navy lama, semua aturan di bawah tidak berlaku
+   *  (v2.57 awal sempat memuat langit senja/fajar/siang & "ikut waktu";
+   *   dicabut sebelum terbit atas permintaan pengguna.)
    *
    *  Biaya: gradien statis + paling banyak dua lapisan yang digeser
    *  (transform saja). Mode hemat & prefers-reduced-motion: diam.
    * ===================================================================== */
 
-  /* ---------- 1 · Sembilan warna per waktu ---------- */
-  :root, :root[data-langit="senja"] {
-    --l-langit: #1676E4;  --l-awan: #1AAAF3;
-    --l-emas-a: #D9B11E;  --l-emas-b: #EDB616;
-    --l-ungu:   #4B2F66;  --l-mawar: #E3305A;
-    --l-bara:   #E0791C;  --l-dasar: #6E1A2E;  --l-puncak: #2457B5;
-    --l-tinta:  #1A0E24;                       /* tinta paling gelap langit ini */
-    --l-sorot:  #FFE3A3;                       /* kilau matahari */
-  }
-  :root[data-langit="fajar"] {
-    --l-langit: #3657B8;  --l-awan: #86A9E6;
-    --l-emas-a: #F2A65A;  --l-emas-b: #F7C873;
-    --l-ungu:   #2E2459;  --l-mawar: #D9567E;
-    --l-bara:   #F08C5A;  --l-dasar: #1E1A44;  --l-puncak: #2A2F6E;
-    --l-tinta:  #120F2A;  --l-sorot: #FFD9B8;
-  }
-  :root[data-langit="siang"] {
-    --l-langit: #0F62D9;  --l-awan: #2EB6F5;
-    --l-emas-a: #3FA9E0;  --l-emas-b: #F2C230;
-    --l-ungu:   #0B3F8C;  --l-mawar: #1E8FE0;
-    --l-bara:   #4CC0E6;  --l-dasar: #0B2B6B;  --l-puncak: #1468D6;
-    --l-tinta:  #06204A;  --l-sorot: #FFF2B8;
-  }
-  :root[data-langit="malam"] {
+  /* ---------- 1 · Sembilan warna langit malam ---------- */
+  :root {
     --l-langit: #1C2D6B;  --l-awan: #2C5AA0;
     --l-emas-a: #3A2A6A;  --l-emas-b: #8C6E2A;
     --l-ungu:   #120E2E;  --l-mawar: #4B2457;
     --l-bara:   #6E1A33;  --l-dasar: #070B1E;  --l-puncak: #0B1638;
-    --l-tinta:  #05081A;  --l-sorot: #C9D8FF;
+    --l-tinta:  #05081A;                       /* tinta paling gelap langit ini */
+    --l-sorot:  #C9D8FF;                       /* kilau bulan */
   }
 
   /* ---------- 2 · Tiga susunan: bilah lebar, layar mendatar, layar tegak ---------- */
@@ -8160,7 +8136,7 @@
       background: radial-gradient(340px 340px at var(--mx,50%) var(--my,50%),
         color-mix(in oklab, var(--l-sorot) 22%, transparent), transparent 68%);
     }
-    /* Tombol Masuk: pil biru langit di atas senja — satu-satunya warna dingin yang menonjol. */
+    /* Tombol Masuk: pil indigo langit — satu warna pekat yang menonjol di atas kartu terang. */
     & .login-card .btn-primary {
       border-radius: 999px; border: 0;
       background: linear-gradient(180deg, color-mix(in oklab, var(--l-langit) 88%, white), var(--l-langit) 55%, color-mix(in oklab, var(--l-langit) 80%, var(--l-tinta)));
@@ -8205,7 +8181,7 @@
   .tp-panel { text-align: left; display: grid; gap: 16px; }
   .tp-grup > b { display: block; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); margin: 0 0 8px; }
   .tp-grup > p { margin: 6px 0 0; font-size: 12.5px; color: var(--text-2); }
-  .tp-pilih { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .tp-pilih { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; gap: 8px; }
   .tp-opsi { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 14px; text-align: left;
     border: 1.5px solid var(--line); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;
     transition: border-color var(--cepat), box-shadow var(--cepat), transform var(--cepat); }
@@ -8215,10 +8191,8 @@
   .tp-opsi b { font-size: 13.5px; font-weight: 650; }
   .tp-opsi small { font-size: 11.5px; color: var(--text-2); line-height: 1.3; }
   .tp-cicip { height: 46px; border-radius: 9px; overflow: hidden; position: relative; }
-  .tp-cicip.senja  { background: linear-gradient(110deg, #1676E4, #4B2F66 38%, #E3305A 66%, #EDB616); }
-  .tp-cicip.waktu  { background: linear-gradient(90deg, #3657B8 0 25%, #1AAAF3 25% 50%, #E3305A 50% 75%, #1C2D6B 75%); }
+  .tp-cicip.malam  { background: radial-gradient(60% 90% at 85% 10%, #8C6E2A, transparent 70%), linear-gradient(110deg, #1C2D6B, #120E2E 40%, #4B2457 70%, #6E1A33); }
   .tp-cicip.klasik { background: var(--girih), linear-gradient(152deg, #16456A, #0B2B45 52%, #061826); }
-  .tp-cicip.waktu::after { content: ''; position: absolute; inset: auto 0 0; height: 3px; background: linear-gradient(90deg, #F7C873, #F2C230, #EDB616, #8C6E2A); }
   .tp-cicip.gerak { display: grid; place-items: center; color: var(--navy); background: var(--line-soft); font-size: 18px; }
 </style>
 </head>

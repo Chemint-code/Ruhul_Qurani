@@ -22108,33 +22108,21 @@ function gantiEfek(p) {
 
 /* ---------- v2.57 · LANGIT MEULABOH ----------
  * Bingkai aplikasi (bilah atas, rel menu, gerbang, layar muat, tab lembar
- * aktif) diwarnai langit sore pesisir barat. Pilihan per perangkat:
- *   senja  — bawaan, palet penuh
- *   waktu  — langit mengikuti jam: fajar 04–07, siang 07–15, senja 15–19, malam 19–04
+ * aktif) diwarnai langit malam pesisir barat. Pilihan per perangkat:
+ *   malam  — bawaan
  *   klasik — navy lama
  * html[data-langit] sudah dipasang skrip <head>; di sini hanya dijaga tetap
- * benar saat pilihan diganti, jam berganti, atau aplikasi kembali dibuka. */
-const LANGIT = { kunci: 'rq-langit', jam: null,
-  warnaBilah: { senja: '#22234F', fajar: '#2A2C62', siang: '#0D4FB0', malam: '#0B1435', klasik: '#0B2B45' } };
-const LABEL_LANGIT = { senja: 'Senja Meulaboh', waktu: 'Ikut waktu', klasik: 'Klasik' };
-function pilihanLangit() { const p = bacaLS(LANGIT.kunci); return p === 'waktu' || p === 'klasik' ? p : 'senja'; }
-function waktuLangit(jam = new Date().getHours()) {
-  return jam < 4 ? 'malam' : jam < 7 ? 'fajar' : jam < 15 ? 'siang' : jam < 19 ? 'senja' : 'malam';
-}
+ * benar saat pilihan diganti. */
+const LANGIT = { kunci: 'rq-langit', warnaBilah: { malam: '#0B1435', klasik: '#0B2B45' } };
+function pilihanLangit() { return bacaLS(LANGIT.kunci) === 'klasik' ? 'klasik' : 'malam'; }
 function terapkanLangit() {
-  const p = pilihanLangit();
-  const w = p === 'waktu' ? waktuLangit() : p;
-  const r = document.documentElement;
+  const w = pilihanLangit(), r = document.documentElement;
   if (r.dataset.langit !== w) r.dataset.langit = w;
   const m = document.querySelector('meta[name="theme-color"]');
   if (m && m.content !== LANGIT.warnaBilah[w]) m.content = LANGIT.warnaBilah[w];
-  // Jam hanya berdetak untuk "Ikut waktu"; cukup tiap 5 menit.
-  clearInterval(LANGIT.jam); LANGIT.jam = null;
-  if (p === 'waktu') LANGIT.jam = setInterval(terapkanLangit, 5 * 60e3);
 }
-function gantiLangit(p) { tulisLS(LANGIT.kunci, p === 'senja' ? null : p); terapkanLangit(); }
+function gantiLangit(p) { tulisLS(LANGIT.kunci, p === 'klasik' ? 'klasik' : null); terapkanLangit(); }
 terapkanLangit();
-document.addEventListener('visibilitychange', () => { if (!document.hidden && pilihanLangit() === 'waktu') terapkanLangit(); });
 
 /** Panel "Tampilan": dua pilihan kecil, langsung berlaku saat disentuh. */
 function bukaPanelTampilan() {
@@ -22144,8 +22132,7 @@ function bukaPanelTampilan() {
     ['hemat', 'Hemat', 'Diam & ringan untuk HP lama', 'fa-leaf']
   ];
   const opsiLangit = [
-    ['senja', 'Senja', 'Biru laut, emas, mawar, ungu'],
-    ['waktu', 'Ikut waktu', 'Fajar, siang, senja, malam'],
+    ['malam', 'Langit malam', 'Indigo, ungu, kilau emas'],
     ['klasik', 'Klasik', 'Navy & kuningan']
   ];
   const tombol = (grup, [k, judul, ket, ikon], on) =>
