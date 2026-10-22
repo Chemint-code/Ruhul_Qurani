@@ -1,0 +1,51 @@
+{
+  "name": "Pengembangan Santri — Dayah Ruhul Qurani",
+  "short_name": "Santri RQ",
+  "description": "Pencatatan kedisiplinan, prestasi, hafalan, perizinan, dan pembinaan santri.",
+  "lang": "id",
+  "dir": "ltr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#061826",
+  "theme_color": "#0B2B45",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Catat Prestasi",
+      "url": "./index.html#prestasi",
+      "description": "Catat apresiasi santri"
+    },
+    {
+      "name": "Setoran Tahfiz",
+      "url": "./index.html#tahfiz",
+      "description": "Catat setoran hafalan"
+    },
+    {
+      "name": "Profil Santri",
+      "url": "./index.html#siswa",
+      "description": "Cari data santri"
+    }
+  ]
+}
