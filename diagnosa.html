@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Cek Sambungan · chemint</title>
+<style>
+  :root { --bg:#F6F9FC; --kartu:#fff; --teks:#0E2233; --redup:#5B7083; --garis:#E3EAF0;
+          --ok:#0F7B4B; --ok-bg:#E6F6EE; --gagal:#B42318; --gagal-bg:#FDECEA;
+          --waspada:#9A6700; --waspada-bg:#FFF6DB; --biru:#14618B; --navy:#0B2B45; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0B1724; --kartu:#12233A; --teks:#E8EEF5; --redup:#9AB0C4; --garis:#22384F;
+            --ok:#4ADE80; --ok-bg:#0F2E1F; --gagal:#F87171; --gagal-bg:#3A1414;
+            --waspada:#FBBF24; --waspada-bg:#33280A; --biru:#60A5FA; --navy:#E8EEF5; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--teks);
+         font:15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 21px; margin: 4px 0 2px; color: var(--navy); }
+  p.sub { margin: 0 0 16px; color: var(--redup); font-size: 14px; }
+  .kartu { background:var(--kartu); border:1px solid var(--garis); border-radius:14px; padding:14px; margin-bottom:12px; }
+  label { font-size: 13px; color: var(--redup); display:block; margin-bottom:6px; }
+  input { width:100%; font-size:16px; padding:11px 12px; border-radius:10px; border:1px solid var(--garis);
+          background:var(--bg); color:var(--teks); }
+  button, .tombol { display:inline-block; width:100%; margin-top:10px; font-size:16px; font-weight:600;
+          padding:13px 14px; border-radius:10px; border:0; background:var(--biru); color:#fff;
+          text-align:center; text-decoration:none; cursor:pointer; -webkit-appearance:none; }
+  button[disabled] { opacity:.55; }
+  .tombol.kedua { background:transparent; color:var(--biru); border:1px solid var(--biru); }
+  ol#daftar { list-style:none; padding:0; margin:0; }
+  ol#daftar li { display:flex; gap:10px; padding:9px 0; border-bottom:1px solid var(--garis); }
+  ol#daftar li:last-child { border-bottom:0; }
+  .lambang { flex:none; width:24px; height:24px; border-radius:50%; display:grid; place-items:center;
+             font-size:13px; font-weight:700; background:var(--garis); color:var(--redup); }
+  .ok .lambang { background:var(--ok-bg); color:var(--ok); }
+  .gagal .lambang { background:var(--gagal-bg); color:var(--gagal); }
+  .waspada .lambang { background:var(--waspada-bg); color:var(--waspada); }
+  .isi b { display:block; font-size:14.5px; }
+  .isi span { display:block; font-size:13px; color:var(--redup); word-break:break-word; }
+  .hasil { text-align:center; }
+  .hasil .kode { font-size:26px; font-weight:800; letter-spacing:.04em; color:var(--navy); }
+  .hasil .ip { font: 600 20px/1.3 ui-monospace, Menlo, monospace; margin:6px 0; }
+  .ringkas { font-size:14px; text-align:left; margin-top:10px; }
+  .ringkas li { margin-bottom:4px; }
+  textarea { width:100%; height:160px; font:12px/1.4 ui-monospace, Menlo, monospace; border-radius:10px;
+             border:1px solid var(--garis); background:var(--bg); color:var(--teks); padding:8px; }
+  .kecil { font-size:12.5px; color:var(--redup); }
+  .sembunyi { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Cek Sambungan chemint</h1>
+  <p class="sub">Halaman ini memeriksa apakah HP Anda bisa menjangkau semua bagian chemint. Tidak ada data santri yang dibuka.</p>
+
+  <section class="kartu" id="kartuMulai">
+    <label for="nama">Nama Anda (agar admin tahu laporan ini milik siapa)</label>
+    <input id="nama" autocomplete="name" autocapitalize="words" placeholder="mis. Ust. Fulan">
+    <button id="mulai" type="button">Mulai pemeriksaan</button>
+    <p class="kecil">Butuh sekitar 15 detik. Biarkan layar tetap menyala.</p>
+  </section>
+
+  <section class="kartu sembunyi" id="kartuHasil">
+    <div class="hasil">
+      <div class="kecil">Kode laporan</div>
+      <div class="kode" id="kode">—</div>
+      <div class="kecil">IP HP Anda</div>
+      <div class="ip" id="ip">memeriksa…</div>
+      <div class="kecil" id="terkirim">Mengirim laporan ke admin…</div>
+    </div>
+    <ul class="ringkas" id="ringkas"></ul>
+    <a class="tombol" id="wa" href="#" target="_blank" rel="noopener">Kirim ringkasan lewat WhatsApp</a>
+    <button class="tombol kedua" id="ulang" type="button">Periksa ulang</button>
+  </section>
+
+  <section class="kartu">
+    <ol id="daftar"></ol>
+  </section>
+
+  <details class="kartu" id="rincian">
+    <summary>Rincian teknis (untuk admin)</summary>
+    <p class="kecil">Bila laporan gagal terkirim otomatis, tekan lama kotak ini → Pilih Semua → Salin, lalu kirim ke admin.</p>
+    <textarea id="mentah" readonly></textarea>
+  </details>
+</main>
+
+<script>
+/* Ditulis tanpa ?. dan ?? supaya tetap berjalan di Safari lama — justru
+   HP lama yang paling perlu diperiksa. */
+(function () {
+  'use strict';
+  var SB = 'https://tuthhfdpcknocebliuhq.supabase.co';
+  var ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1dGhoZmRwY2tub2NlYmxpdWhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4NDY2NzUsImV4cCI6MjEwMjQyMjY3NX0.E3Jq7I5YWdO7zzZvRH6l4F0o-wV-hfCDJbRGHtYOrUk';
+  var FUNGSI = SB + '/functions/v1/cek-hp';
+  var NO_WA_ADMIN = ''; // kosong = pengguna memilih kontak sendiri
+  var BATAS = 9000;
+
+  function $(id) { return document.getElementById(id); }
+  function ms(t0) { return Math.round(performance.now() - t0); }
+  function acak() { var h = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', s = ''; for (var i = 0; i < 4; i++) s += h[Math.floor(Math.random() * h.length)]; return s; }
+
+  var laporan, daftar = $('daftar');
+
+  function baris(judul) {
+    var li = document.createElement('li');
+    li.innerHTML = '<div class="lambang">…</div><div class="isi"><b></b><span>memeriksa…</span></div>';
+    li.querySelector('b').textContent = judul;
+    daftar.appendChild(li);
+    return {
+      set: function (status, ket) {
+        li.className = status;
+        li.querySelector('.lambang').textContent = status === 'ok' ? '✓' : status === 'gagal' ? '✗' : '!';
+        li.querySelector('span').textContent = ket;
+      }
+    };
+  }
+
+  function batasWaktu(p, detik) {
+    return new Promise(function (ok, gagal) {
+      var t = setTimeout(function () { gagal(new Error('tidak menjawab dalam ' + detik + ' dtk')); }, detik * 1000);
+      p.then(function (v) { clearTimeout(t); ok(v); }, function (e) { clearTimeout(t); gagal(e); });
+    });
+  }
+
+  function catat(kunci, status, ket, tambahan) {
+    var o = { status: status, ket: ket };
+    if (tambahan) for (var k in tambahan) o[k] = tambahan[k];
+    laporan.uji[kunci] = o;
+  }
+
+  /* Uji jangkauan satu alamat: berhasil bila server menjawab apa pun. */
+  async function ujiAlamat(kunci, judul, url, opsi) {
+    var b = baris(judul), t0 = performance.now();
+    try {
+      var res = await batasWaktu(fetch(url, opsi || { cache: 'no-store' }), 10);
+      var ket = 'HTTP ' + res.status + ' · ' + ms(t0) + ' ms';
+      var st = res.status && res.status < 500 ? 'ok' : 'waspada';
+      b.set(st, ket); catat(kunci, st, ket, { http: res.status, ms: ms(t0) });
+      return res;
+    } catch (e) {
+      var ket2 = 'GAGAL: ' + (e && e.message || e) + ' · ' + ms(t0) + ' ms';
+      b.set('gagal', ket2); catat(kunci, 'gagal', ket2, { ms: ms(t0) });
+      return null;
+    }
+  }
+
+  function infoPerangkat() {
+    var ua = navigator.userAgent;
+    var m = ua.match(/OS (\d+)_(\d+)(?:_(\d+))? like Mac OS X/);
+    var ios = m ? m[1] + '.' + m[2] + (m[3] ? '.' + m[3] : '') : '';
+    var browser = /CriOS/.test(ua) ? 'Chrome iOS' : /FxiOS/.test(ua) ? 'Firefox iOS' : /EdgiOS/.test(ua) ? 'Edge iOS'
+      : /FBAN|FBAV|Instagram|Line\/|WhatsApp/.test(ua) ? 'Peramban dalam aplikasi (FB/IG/WA)'
+      : /Safari/.test(ua) && m ? 'Safari' : '';
+    var mandiri = (window.navigator.standalone === true) || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+    return { ua: ua, ios: ios, browser: browser, mandiri: mandiri,
+             layar: screen.width + '×' + screen.height + ' @' + (window.devicePixelRatio || 1) + 'x',
+             bahasa: navigator.language, zona: (Intl.DateTimeFormat().resolvedOptions().timeZone || ''),
+             daring: navigator.onLine, cookie: navigator.cookieEnabled, jam_hp: new Date().toString() };
+  }
+
+  function ujiSintaks() {
+    // Fitur sintaks yang dipakai app.js chemint. Bila satu saja tidak dikenal,
+    // seluruh app.js gagal dibaca dan layar berhenti di "Memuat…".
+    var fitur = { 'optional chaining ?.': 'var a={};return a?.b', 'nullish ??': 'return null??1',
+      'pemisah angka 1_000': 'return 1_000', 'logical assign ||=': 'var a;a||=1;return a',
+      'regex lookbehind': 'return new RegExp("(?<!x)y")', 'Promise.allSettled': 'return Promise.allSettled([])' };
+    var gagal = [];
+    for (var k in fitur) { try { new Function(fitur[k])(); } catch (e) { gagal.push(k); } }
+    return gagal;
+  }
+
+  async function ujiPenyimpanan() {
+    var hasil = {};
+    try { localStorage.setItem('rq-uji', '1'); localStorage.removeItem('rq-uji'); hasil.localStorage = 'ok'; }
+    catch (e) { hasil.localStorage = 'GAGAL: ' + e.name; }
+    try { sessionStorage.setItem('rq-uji', '1'); sessionStorage.removeItem('rq-uji'); hasil.sessionStorage = 'ok'; }
+    catch (e) { hasil.sessionStorage = 'GAGAL: ' + e.name; }
+    try {
+      hasil.indexedDB = await batasWaktu(new Promise(function (ok) {
+        var r = indexedDB.open('rq-uji');
+        r.onsuccess = function () { r.result.close(); ok('ok'); };
+        r.onerror = function () { ok('GAGAL: ' + (r.error && r.error.name)); };
+      }), 4);
+    } catch (e) { hasil.indexedDB = 'GAGAL: ' + e.message; }
+    return hasil;
+  }
+
+  async function ujiServiceWorker() {
+    if (!('serviceWorker' in navigator)) return { ada: false };
+    var o = { ada: true, mengendalikan: !!navigator.serviceWorker.controller, daftar: [], cache: [] };
+    try { var regs = await navigator.serviceWorker.getRegistrations(); o.daftar = regs.map(function (r) { return r.scope; }); } catch (e) { o.galat = e.message; }
+    try { if (window.caches) o.cache = await caches.keys(); } catch (e) {}
+    return o;
+  }
+
+  function ujiSkrip(url) {
+    return batasWaktu(new Promise(function (ok, gagal) {
+      var s = document.createElement('script');
+      s.src = url + (url.indexOf('?') < 0 ? '?uji=' : '&uji=') + Date.now();
+      s.onload = function () { ok(); }; s.onerror = function () { gagal(new Error('skrip diblokir/gagal dimuat')); };
+      document.head.appendChild(s);
+    }), 12);
+  }
+
+  function ujiWebSocket() {
+    return batasWaktu(new Promise(function (ok, gagal) {
+      var ws;
+      try { ws = new WebSocket(SB.replace('https', 'wss') + '/realtime/v1/websocket?apikey=' + ANON + '&vsn=1.0.0'); }
+      catch (e) { return gagal(e); }
+      ws.onopen = function () { ws.close(); ok(); };
+      ws.onerror = function () { gagal(new Error('websocket ditolak')); };
+    }), 10);
+  }
+
+  async function jalankan() {
+    var nama = ($('nama').value || '').trim().slice(0, 30);
+    laporan = { kode: (nama ? nama + ' · ' : '') + acak(), versi_diagnosa: 1, mulai: new Date().toISOString(),
+                halaman: location.href, rujukan: document.referrer, perangkat: infoPerangkat(), uji: {} };
+    try { localStorage.setItem('rq-nama-uji', nama); } catch (e) {}
+    $('mulai').disabled = true; daftar.innerHTML = '';
+    $('kartuHasil').classList.remove('sembunyi'); $('kode').textContent = laporan.kode;
+    $('ip').textContent = 'memeriksa…'; $('terkirim').textContent = 'Memeriksa…';
+
+    var p = laporan.perangkat;
+    var b0 = baris('Perangkat & peramban');
+    var ketP = (p.ios ? 'iOS ' + p.ios : 'Bukan iPhone/iPad') + ' · ' + (p.browser || 'peramban lain') + (p.mandiri ? ' · dibuka dari ikon Layar Utama' : '');
+    var stP = /dalam aplikasi/.test(p.browser) ? 'waspada' : (p.ios && parseInt(p.ios, 10) < 15 ? 'gagal' : 'ok');
+    if (stP === 'waspada') ketP += ' — buka lewat Safari, bukan dari dalam WhatsApp/FB';
+    if (stP === 'gagal') ketP += ' — iOS terlalu lama untuk chemint (minimal iOS 15)';
+    b0.set(stP, ketP); catat('perangkat', stP, ketP);
+
+    var bS = baris('Kemampuan peramban (sintaks app.js)');
+    var gs = ujiSintaks();
+    bS.set(gs.length ? 'gagal' : 'ok', gs.length ? 'Tidak dikenal: ' + gs.join(', ') : 'Semua fitur dikenali');
+    catat('sintaks', gs.length ? 'gagal' : 'ok', gs.join(', '));
+
+    var bM = baris('Penyimpanan peramban (sesi masuk)');
+    var sm = await ujiPenyimpanan();
+    var smGagal = sm.localStorage !== 'ok';
+    var ketM = 'localStorage ' + sm.localStorage + ' · IndexedDB ' + sm.indexedDB + ' · cookie ' + (p.cookie ? 'aktif' : 'MATI');
+    if (smGagal) ketM += ' — matikan "Blokir Semua Cookie" di Pengaturan › Safari';
+    bM.set(smGagal ? 'gagal' : 'ok', ketM); catat('penyimpanan', smGagal ? 'gagal' : 'ok', ketM, sm);
+
+    // --- Jaringan, urut dari yang paling dasar ---
+    await ujiAlamat('github', 'Server web chemint (GitHub Pages)', './manifest.webmanifest?uji=' + Date.now());
+
+    var bF = baris('Server data chemint (Supabase) + IP Anda');
+    var t0 = performance.now(), jawab = null;
+    try {
+      var r = await batasWaktu(fetch(FUNGSI + '?kode=' + encodeURIComponent(laporan.kode), { cache: 'no-store' }), 10);
+      jawab = await r.json();
+      var selisih = Math.round((Date.now() - new Date(jawab.waktu_server).getTime()) / 1000);
+      laporan.ip = jawab.ip_hp_anda; laporan.selisih_jam_detik = selisih;
+      $('ip').textContent = jawab.ip_hp_anda;
+      var ketF = 'Terhubung · ' + ms(t0) + ' ms · IP ' + jawab.ip_hp_anda;
+      bF.set('ok', ketF); catat('supabase_fungsi', 'ok', ketF, { ms: ms(t0) });
+
+      var bJ = baris('Jam & tanggal HP');
+      var mutlak = Math.abs(selisih);
+      var stJ = mutlak > 300 ? 'gagal' : mutlak > 60 ? 'waspada' : 'ok';
+      var ketJ = mutlak <= 60 ? 'Tepat (selisih ' + selisih + ' dtk)' : 'Selisih ' + Math.round(selisih / 60) + ' menit dari jam server — nyalakan Pengaturan › Umum › Tanggal & Waktu › Atur Otomatis';
+      bJ.set(stJ, ketJ); catat('jam', stJ, ketJ, { selisih_detik: selisih });
+    } catch (e) {
+      var ketF2 = 'GAGAL: ' + (e && e.message || e) + ' · ' + ms(t0) + ' ms — jaringan ini tidak menjangkau Supabase';
+      bF.set('gagal', ketF2); catat('supabase_fungsi', 'gagal', ketF2);
+    }
+
+    await ujiAlamat('supabase_auth', 'Layanan masuk (Auth)', SB + '/auth/v1/health', { headers: { apikey: ANON }, cache: 'no-store' });
+
+    var bW = baris('Sambungan langsung (Realtime)');
+    try { var tw = performance.now(); await ujiWebSocket(); bW.set('ok', 'Terhubung · ' + ms(tw) + ' ms'); catat('realtime', 'ok', ''); }
+    catch (e) { bW.set('waspada', 'Gagal: ' + e.message + ' (aplikasi tetap bisa dipakai, hanya tanpa pembaruan seketika)'); catat('realtime', 'waspada', e.message); }
+
+    var bJs = baris('Pustaka aplikasi (cdn.jsdelivr.net)');
+    try { var tj = performance.now(); await ujiSkrip('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2');
+      var adaSb = !!(window.supabase && window.supabase.createClient);
+      bJs.set(adaSb ? 'ok' : 'gagal', adaSb ? 'Termuat · ' + ms(tj) + ' ms' : 'Termuat tapi tidak berjalan');
+      catat('jsdelivr', adaSb ? 'ok' : 'gagal', '', { ms: ms(tj) });
+    } catch (e) { bJs.set('gagal', 'GAGAL: ' + e.message + ' — tanpa pustaka ini chemint berhenti di "Memuat…"'); catat('jsdelivr', 'gagal', e.message); }
+
+    await ujiAlamat('cdnjs', 'Ikon (cdnjs.cloudflare.com)', 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css', { cache: 'no-store' });
+    await ujiAlamat('gfonts', 'Huruf (fonts.googleapis.com)', 'https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400&display=swap', { cache: 'no-store' });
+
+    if (!laporan.ip) {
+      var bI = baris('IP cadangan (ipify)');
+      try { var ri = await batasWaktu(fetch('https://api.ipify.org?format=json', { cache: 'no-store' }), 8); var ji = await ri.json();
+        laporan.ip = ji.ip + ' (ipify)'; $('ip').textContent = ji.ip; bI.set('ok', ji.ip); catat('ipify', 'ok', ji.ip);
+      } catch (e) { $('ip').textContent = 'tidak terbaca'; bI.set('gagal', e.message); catat('ipify', 'gagal', e.message); }
+    }
+
+    var bSw = baris('Simpanan aplikasi di HP (service worker)');
+    var sw = await ujiServiceWorker(); laporan.service_worker = sw;
+    bSw.set('ok', sw.ada ? (sw.cache.length ? 'Versi tersimpan: ' + sw.cache.join(', ') : 'Belum ada simpanan') : 'Tidak didukung peramban');
+
+    laporan.selesai = new Date().toISOString();
+    tampilkanRingkasan();
+    await kirim();
+    $('mulai').disabled = false;
+  }
+
+  function tampilkanRingkasan() {
+    var u = laporan.uji, poin = [];
+    function gagal(k) { return u[k] && u[k].status === 'gagal'; }
+    if (gagal('perangkat')) poin.push('iOS di HP ini terlalu lama. Perbarui iOS, atau pakai HP lain.');
+    if (u.perangkat && u.perangkat.status === 'waspada') poin.push('Tautan dibuka dari dalam aplikasi. Salin tautan lalu buka di Safari.');
+    if (gagal('sintaks')) poin.push('Peramban tidak mengenal sebagian kode chemint. Perbarui iOS/Safari.');
+    if (gagal('penyimpanan')) poin.push('Safari memblokir penyimpanan. Pengaturan › Safari › matikan "Blokir Semua Cookie", lalu jangan pakai Tab Pribadi.');
+    if (gagal('github')) poin.push('HP tidak bisa menjangkau server web (github.io). Coba ganti Wi-Fi ⇄ data seluler.');
+    if (gagal('supabase_fungsi') || gagal('supabase_auth')) poin.push('Jaringan ini memblokir server data (supabase.co). Ganti Wi-Fi ⇄ data seluler, matikan VPN/DNS/pemblokir iklan.');
+    if (gagal('jam')) poin.push('Jam HP tidak tepat. Nyalakan Atur Otomatis di Tanggal & Waktu.');
+    if (gagal('jsdelivr')) poin.push('cdn.jsdelivr.net diblokir di jaringan/HP ini — inilah yang membuat chemint berhenti di "Memuat…". Ganti jaringan atau matikan pemblokir konten.');
+    if (!poin.length) poin.push('Semua pemeriksaan lolos. Bila chemint masih tidak terbuka, tutup tab lalu buka ulang; atau kirim kode ini ke admin.');
+    $('ringkas').innerHTML = poin.map(function (t) { return '<li></li>'; }).join('');
+    var li = $('ringkas').children; for (var i = 0; i < poin.length; i++) li[i].textContent = poin[i];
+    laporan.kesimpulan = poin;
+
+    var gagalList = Object.keys(u).filter(function (k) { return u[k].status !== 'ok'; });
+    var teks = 'Laporan cek chemint\nKode: ' + laporan.kode + '\nIP: ' + (laporan.ip || '-') +
+      '\nHP: ' + (laporan.perangkat.ios ? 'iOS ' + laporan.perangkat.ios : laporan.perangkat.ua.slice(0, 60)) + ' · ' + (laporan.perangkat.browser || '') +
+      '\nBermasalah: ' + (gagalList.length ? gagalList.join(', ') : 'tidak ada');
+    $('wa').href = 'https://wa.me/' + NO_WA_ADMIN + '?text=' + encodeURIComponent(teks);
+    $('mentah').value = JSON.stringify(laporan, null, 1).slice(0, BATAS);
+  }
+
+  async function kirim() {
+    try {
+      var r = await batasWaktu(fetch(FUNGSI, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        body: JSON.stringify(laporan).slice(0, 15000) }), 10);
+      var j = await r.json();
+      if (!laporan.ip && j.ip_hp_anda) { laporan.ip = j.ip_hp_anda; $('ip').textContent = j.ip_hp_anda; }
+      $('terkirim').textContent = '✓ Laporan sudah diterima admin. Sebutkan kode di atas saat menghubungi admin.';
+    } catch (e) {
+      $('terkirim').textContent = '✗ Laporan tidak bisa dikirim otomatis. Tekan tombol WhatsApp di bawah, atau salin Rincian teknis.';
+      $('rincian').open = true;
+    }
+  }
+
+  try { $('nama').value = localStorage.getItem('rq-nama-uji') || ''; } catch (e) {}
+  $('mulai').addEventListener('click', function () { jalankan().catch(function (e) { $('terkirim').textContent = 'Galat: ' + e.message; $('mulai').disabled = false; }); });
+  $('ulang').addEventListener('click', function () { window.scrollTo(0, 0); jalankan(); });
+})();
+</script>
+</body>
+</html>
