@@ -139,6 +139,11 @@ self.addEventListener('fetch', (e) => {
 
   const url = new URL(req.url);
 
+  // Halaman diagnosa (diagnosa.html) selalu langsung dari jaringan. Tanpa
+  // pengecualian ini, navigasi ke halaman yang belum tersimpan diganti
+  // index.html (langkah 3a), sehingga alat diagnosa malah membuka login.
+  if (url.origin === self.location.origin && /\/diagnosa\.html$/.test(url.pathname)) return;
+
   // 1. Data & autentikasi: selalu langsung ke jaringan.
   if (keSupabase(url)) return;
 
