@@ -34,6 +34,28 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // Username tanpa "@" dilengkapi domain ini saat login.
 const DOMAIN_INTERNAL = 'ruhulqurani.local';
 
+/* v2.57.2 — seluruh akun chemint memakai email asli (gmail.com, satu upi.edu);
+   tidak ada satu pun akun @ruhulqurani.local. Dulu ID tanpa "@" selalu
+   dilengkapi @ruhulqurani.local, sehingga pengguna yang mengetik
+   "arismahfud157" pasti ditolak "Username atau kata sandi salah" meski
+   sandinya benar. Kini ID pendek dicoba berurutan dengan domain di bawah. */
+const DOMAIN_COBA = ['gmail.com', DOMAIN_INTERNAL];
+
+/** Semua alamat email yang mungkin dimaksud oleh isian ID masuk. */
+function kandidatEmail(id) {
+  const v = String(id || '');
+  if (!v) return [];
+  return v.includes('@') ? [v] : DOMAIN_COBA.map(d => `${v}@${d}`);
+}
+
+/** Dua isian ID menunjuk akun yang sama? ("arismahfud157" = "arismahfud157@gmail.com") */
+function samaAkun(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const kb = kandidatEmail(b);
+  return kandidatEmail(a).some(x => kb.includes(x));
+}
+
 // Aset opsional untuk layar login (diisi otomatis dari tabel foto_aset
 // oleh visualLogin() di bagian bawah berkas ini — lihat modul FOTO PROFIL).
 const ASET = { logo: '', foto: '', korps: '' };
@@ -2361,12 +2383,15 @@ $('formLogin').addEventListener('submit', async (e) => {
   const u = rapikanIdLogin($('loginUsername').value);
   if ($('loginUsername').value !== u) $('loginUsername').value = u;
   const p = $('loginPassword').value;
-  const email = u.includes('@') ? u : `${u}@${DOMAIN_INTERNAL}`;
+  const daftarEmail = kandidatEmail(u);   // v2.57.2: ID pendek dicoba dengan beberapa domain
+  // v2.57.3 — sesi akun yang sama masih tersimpan di perangkat ini? Bila ya dan
+  // kata sandi ditolak, pengguna ditawari melanjutkan sesi alih-alih terkunci.
+  const sesiTersimpan = !!SINGGAH.id && samaAkun(u, SINGGAH.id);
 
   // v2.47.2 — singgah: sesi masih aktif & isian belum diubah → lanjutkan sesi
   // tanpa menghubungi server autentikasi (sandi tidak pernah disimpan).
   const form = $('formLogin');
-  const singgah = form.dataset.sesi === 'aktif' && u === SINGGAH.id && p === '';   // v2.54.1: kolom sandi dibiarkan kosong
+  const singgah = form.dataset.sesi === 'aktif' && samaAkun(u, SINGGAH.id) && p === '';   // v2.54.1: kolom sandi dibiarkan kosong
   const asli = { html: btn.innerHTML, disabled: false };
   btn.disabled = true;
   btn.innerHTML = singgah ? '<i class="fa-solid fa-circle-notch fa-spin"></i><span>Melanjutkan…</span>'
@@ -2378,14 +2403,34 @@ $('formLogin').addEventListener('submit', async (e) => {
       $('loginPassword').value = '';            // nilai tiruan tidak ikut disimpan pengelola sandi
       if (!(await penggunaSesi())) throw new Error('Sesi sudah berakhir. Silakan masuk dengan kata sandi.');
     } else {
-      if (SINGGAH.id && u !== SINGGAH.id) await bersihkanAkunPerangkat();   // ganti akun: data akun lama tidak ditinggal
+      // ganti akun: data akun lama tidak ditinggal. v2.57.2: "arismahfud157" dan
+      // "arismahfud157@gmail.com" dianggap akun yang sama — dulu dianggap ganti akun,
+      // sehingga sesi yang masih sah ikut dikeluarkan sebelum sandi diperiksa.
+      if (SINGGAH.id && !samaAkun(u, SINGGAH.id)) await bersihkanAkunPerangkat();
       // v2.54.1 — sisa versi lama: pengelola sandi bisa menyimpan nilai tiruan singgah sebagai sandi.
       if (p === SANDI_TIRUAN_LAMA) throw galatMasuk({ judul: 'Kata sandi terisi otomatis keliru',
         teks: 'Kata sandi yang terisi otomatis di HP ini berasal dari versi lama chemint, bukan kata sandi Anda. Hapus isian kata sandi, lalu ketik ulang kata sandi Anda.' });
+      // v2.57.3 — kata sandi yang ditempel dari WhatsApp sering membawa spasi di
+      // tepinya. Sandi persis seperti diketik tetap dicoba lebih dulu; versi tanpa
+      // spasi tepi hanya cadangan bila yang pertama ditolak.
+      const rapi = p.trim();
+      const daftarSandi = rapi && rapi !== p ? [p, rapi] : [p];
       let hasil;
-      try { hasil = await db.auth.signInWithPassword({ email, password: p }); }
-      catch (e) { throw galatMasuk(pesanGagalMasuk(e)); }
-      if (hasil?.error) throw galatMasuk(pesanGagalMasuk(hasil.error));
+      coba: for (const email of daftarEmail) {
+        for (const sandi of daftarSandi) {
+          try { hasil = await db.auth.signInWithPassword({ email, password: sandi }); }
+          catch (e) { throw galatMasuk(pesanGagalMasuk(e)); }
+          if (!hasil?.error) break coba;
+          // Hanya "sandi/akun tidak cocok" yang boleh dicoba dengan kombinasi berikutnya;
+          // galat jaringan, batas percobaan, dsb. langsung ditampilkan.
+          if (!kredensialTidakCocok(hasil.error)) break coba;
+        }
+      }
+      if (hasil?.error) {
+        const info = pesanGagalMasuk(hasil.error);
+        if (info.kode === 'tidak_cocok') info.sesi = sesiTersimpan;
+        throw galatMasuk(info);
+      }
     }
     if (gerbang) await gerbang.tertutup;
     else LayarMuat.bukaAwal(['Menyiapkan akun', 'Mengambil catatan santri', 'Menyusun ringkasan', 'Hampir selesai']);
@@ -2397,9 +2442,27 @@ $('formLogin').addEventListener('submit', async (e) => {
     gerbang?.batal();
     LayarMuat.tutupAwal();
     if (singgah) { $('loginPassword').value = ''; lepasSinggahForm(); }
-    // v2.54.1 — galat jaringan/server tampil sebagai dialog yang bisa dibaca utuh,
-    // bukan toast singkat; sandi salah tetap toast seperti biasa.
-    if (err?.judul) Swal.fire({ icon: 'warning', title: err.judul, text: err.message, confirmButtonColor: '#14618B' });
+    // v2.57.3 — kata sandi ditolak padahal sesi akun yang sama masih tersimpan:
+    // tawarkan lanjut lewat sesi itu. Tidak menambah celah — dalam keadaan ini
+    // pengguna memang sudah bisa masuk tanpa kata sandi (mode singgah).
+    const userSesi = err?.kode === 'tidak_cocok' && err.sesi ? await penggunaSesi() : null;
+    if (userSesi) {
+      Swal.fire({
+        icon: 'warning', title: err.judul,
+        html: `<p style="margin:0 0 10px">${esc(err.message)}</p>`
+            + '<p style="margin:0"><b>Sesi Anda masih tersimpan di perangkat ini</b>, jadi Anda tetap bisa masuk tanpa kata sandi.</p>',
+        showCancelButton: true,
+        confirmButtonText: 'Lanjutkan dengan sesi tersimpan', cancelButtonText: 'Coba lagi',
+        confirmButtonColor: '#14618B', reverseButtons: true
+      }).then(r => {
+        if (!r.isConfirmed) return;
+        // Kembalikan form ke mode singgah (sandi kosong), lalu kirim ulang.
+        if (siapkanSinggah(userSesi)) setTimeout(() => form.requestSubmit(), 0);
+      });
+    }
+    // v2.54.1 — galat jaringan/server (dan v2.57.3: sandi tidak cocok) tampil
+    // sebagai dialog yang bisa dibaca utuh, bukan toast singkat.
+    else if (err?.judul) Swal.fire({ icon: 'warning', title: err.judul, text: err.message, confirmButtonColor: '#14618B' });
     else toast('error', err.message);
   } finally {
     btn.disabled = asli.disabled;
@@ -27404,8 +27467,11 @@ function rapikanIdLogin(v) {
 function pesanGagalMasuk(err) {
   const kode = String(err?.code || ''), status = Number(err?.status) || 0;
   const nama = String(err?.name || ''), pesan = String(err?.message || '');
-  if (kode === 'invalid_credentials' || (status === 400 && /invalid login credentials/i.test(pesan)))
-    return { teks: 'Username atau kata sandi salah.' };
+  if (kredensialTidakCocok(err))
+    return { kode: 'tidak_cocok', judul: 'Kata sandi tidak cocok',
+             teks: 'ID atau kata sandi belum cocok dengan akun mana pun. Pastikan huruf besar-kecilnya sama persis '
+                 + 'dan tidak ada spasi di awal atau akhir (sering terbawa saat menempel dari WhatsApp). '
+                 + 'Bila masih belum bisa, mohon hubungi admin dayah untuk mengatur ulang kata sandi.' };
   if (kode === 'email_not_confirmed')
     return { judul: 'Akun belum aktif', teks: 'Akun ini belum dikonfirmasi. Mohon hubungi admin dayah.' };
   if (kode === 'user_banned')
@@ -27423,7 +27489,16 @@ function pesanGagalMasuk(err) {
 function galatMasuk(info) {
   const e = new Error(info.teks);
   if (info.judul) e.judul = info.judul;
+  if (info.kode) e.kode = info.kode;      // v2.57.3
+  if (info.sesi) e.sesi = true;
   return e;
+}
+
+/** v2.57.3 — server menolak karena ID/sandi tidak cocok (bukan jaringan/batas percobaan). */
+function kredensialTidakCocok(err) {
+  const kode = String(err?.code || ''), status = Number(err?.status) || 0;
+  return kode === 'invalid_credentials'
+    || (status === 400 && /invalid login credentials/i.test(String(err?.message || '')));
 }
 
 /* v2.54.1 — keluar dari mode singgah: kolom sandi kembali wajib diisi. */
@@ -27487,7 +27562,7 @@ function siapkanSinggah(user) {
   // Mengubah isian = masuk biasa (akun lain / sandi baru).
   const lepas = (e) => {
     if (form.dataset.sesi !== 'aktif') return;
-    if (rapikanIdLogin(idEl.value) !== SINGGAH.id || sandi.value !== '') lepasSinggahForm();
+    if (!samaAkun(rapikanIdLogin(idEl.value), SINGGAH.id) || sandi.value !== '') lepasSinggahForm();
   };
   idEl.addEventListener('input', lepas); sandi.addEventListener('input', lepas);
   return true;
@@ -32051,4 +32126,4 @@ function asPentasBagian(el) {
 
 /* v2.55 — Ringkasan satu lembar · halaman Analisis (Grafik & Sebaran) · kabar wali tercatat
    · jendela bulan berdata · sapaan bilah atas. Lihat perubahan-v2.55-satu-lembar.md. */
-APP.versi = 'rq-v2.55';
+APP.versi = 'rq-v2.57.3';   // v2.57.2: ID pendek → gmail.com · v2.57.3: jalan keluar sesi & pesan sandi
