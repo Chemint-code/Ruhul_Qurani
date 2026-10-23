@@ -39,7 +39,11 @@ const DOMAIN_INTERNAL = 'ruhulqurani.local';
    dilengkapi @ruhulqurani.local, sehingga pengguna yang mengetik
    "arismahfud157" pasti ditolak "Username atau kata sandi salah" meski
    sandinya benar. Kini ID pendek dicoba berurutan dengan domain di bawah. */
-const DOMAIN_COBA = ['gmail.com', DOMAIN_INTERNAL];
+// v2.57.4: @ruhulqurani.local dikeluarkan dari daftar (0 akun memakainya) supaya satu
+// kali tekan Masuk paling banyak 2 permintaan — batas laju masuk Supabase dihitung per
+// IP, dan wifi dayah dipakai bersama. Tambahkan DOMAIN_INTERNAL kembali bila kelak ada
+// akun @ruhulqurani.local.
+const DOMAIN_COBA = ['gmail.com'];
 
 /** Semua alamat email yang mungkin dimaksud oleh isian ID masuk. */
 function kandidatEmail(id) {
@@ -2481,7 +2485,7 @@ $('btnLogout').addEventListener('click', async () => {
   // v2.18.1: data santri tidak ditinggalkan di perangkat yang mungkin dipakai bergantian.
   await idbKosongkan();
   try { localStorage.removeItem('rq_profil'); localStorage.removeItem('rq_jml'); } catch (e) {}
-  await db.auth.signOut();
+  await db.auth.signOut({ scope: 'local' });
   location.reload();
 });
 
@@ -2522,7 +2526,7 @@ async function masukAplikasi() {
   if (profil) {
     janjiProfil.then(({ data, error }) => {
       if (error) return;                                   // luring: pakai yang tersimpan
-      if (!data || !data.aktif) { localStorage.removeItem('rq_profil'); db.auth.signOut().then(() => location.reload()); return; }
+      if (!data || !data.aktif) { localStorage.removeItem('rq_profil'); db.auth.signOut({ scope: 'local' }).then(() => location.reload()); return; }
       simpanProfil(data);
       const inti = (x) => JSON.stringify([x.role, x.kelas_binaan, x.unit_akses, x.jenjang_akses, x.korps, x.nama]);
       if (inti(data) !== inti(profil)) location.reload();
@@ -2531,11 +2535,11 @@ async function masukAplikasi() {
     const { data, error } = await janjiProfil;
     profil = data;
     if (error || !profil) {
-      await db.auth.signOut();
+      await db.auth.signOut({ scope: 'local' });
       return fireError(new Error('Profil pengguna belum dibuat. Hubungi Admin.'));
     }
     if (!profil.aktif) {
-      await db.auth.signOut();
+      await db.auth.signOut({ scope: 'local' });
       return fireError(new Error('Akun ini dinonaktifkan.'));
     }
     simpanProfil(profil);
@@ -27510,12 +27514,17 @@ function lepasSinggahForm() {
 }
 try { if (localStorage.getItem('rq-singgah') === 'mati') SINGGAH.aktif = false; } catch (e) {}   // sakelar per perangkat
 
+/* v2.57.4 — signOut() bawaan supabase-js memakai scope 'global': menekan Keluar
+   atau berganti akun di SATU perangkat mencabut sesi akun itu di SEMUA perangkat
+   (log 23 Okt: 8× logout?scope=global). Perangkat lain lalu meminta kata sandi
+   yang sudah berminggu-minggu tidak diketik — terasa "tiba-tiba sandi salah".
+   Kini semua keluar hanya berlaku di perangkat ini (scope 'local'). */
 async function bersihkanAkunPerangkat() {
   if (APP.channel) db.removeChannel(APP.channel);
   try { sessionStorage.removeItem('rq_ctx'); } catch (e) {}
   await idbKosongkan();
   try { localStorage.removeItem('rq_profil'); localStorage.removeItem('rq_jml'); } catch (e) {}
-  await db.auth.signOut();
+  await db.auth.signOut({ scope: 'local' });
   SINGGAH.id = ''; SINGGAH.user = null;
 }
 
@@ -32126,4 +32135,4 @@ function asPentasBagian(el) {
 
 /* v2.55 — Ringkasan satu lembar · halaman Analisis (Grafik & Sebaran) · kabar wali tercatat
    · jendela bulan berdata · sapaan bilah atas. Lihat perubahan-v2.55-satu-lembar.md. */
-APP.versi = 'rq-v2.57.3';   // v2.57.2: ID pendek → gmail.com · v2.57.3: jalan keluar sesi & pesan sandi
+APP.versi = 'rq-v2.57.4';   // v2.57.2: ID pendek → gmail.com · v2.57.3: jalan keluar sesi & pesan sandi

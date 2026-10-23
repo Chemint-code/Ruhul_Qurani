@@ -49,7 +49,7 @@
    hapus singgahan versi lama, lalu beri tahu halaman yang terbuka.
    ===================================================================== */
 
-const VERSI       = 'rq-v2.57.3';
+const VERSI       = 'rq-v2.57.4';
 const CACHE_INTI  = `${VERSI}-inti`;
 const CACHE_ASET  = 'rq-aset-v1';   // nama tetap: bertahan melewati kenaikan VERSI
 

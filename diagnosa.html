@@ -89,7 +89,9 @@
 
 <script>
 /* Ditulis tanpa ?. dan ?? supaya tetap berjalan di Safari lama — justru
-   HP lama yang paling perlu diperiksa. */
+   HP lama yang paling perlu diperiksa.
+   v2: alamat CDN diberi ?uji= agar tidak dijawab simpanan service worker
+   (simpanan itu berjenis opaque dan selalu gagal dibaca fetch → "cdnjs gagal" palsu). */
 (function () {
   'use strict';
   var SB = 'https://tuthhfdpcknocebliuhq.supabase.co';
@@ -217,7 +219,7 @@
 
   async function jalankan() {
     var nama = ($('nama').value || '').trim().slice(0, 30);
-    laporan = { kode: (nama ? nama + ' · ' : '') + acak(), versi_diagnosa: 1, mulai: new Date().toISOString(),
+    laporan = { kode: (nama ? nama + ' · ' : '') + acak(), versi_diagnosa: 2, mulai: new Date().toISOString(),
                 halaman: location.href, rujukan: document.referrer, perangkat: infoPerangkat(), uji: {} };
     try { localStorage.setItem('rq-nama-uji', nama); } catch (e) {}
     $('mulai').disabled = true; daftar.innerHTML = '';
@@ -281,8 +283,8 @@
       catat('jsdelivr', adaSb ? 'ok' : 'gagal', '', { ms: ms(tj) });
     } catch (e) { bJs.set('gagal', 'GAGAL: ' + e.message + ' — tanpa pustaka ini chemint berhenti di "Memuat…"'); catat('jsdelivr', 'gagal', e.message); }
 
-    await ujiAlamat('cdnjs', 'Ikon (cdnjs.cloudflare.com)', 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css', { cache: 'no-store' });
-    await ujiAlamat('gfonts', 'Huruf (fonts.googleapis.com)', 'https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400&display=swap', { cache: 'no-store' });
+    await ujiAlamat('cdnjs', 'Ikon (cdnjs.cloudflare.com)', 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css?uji=' + Date.now(), { cache: 'no-store' });
+    await ujiAlamat('gfonts', 'Huruf (fonts.googleapis.com)', 'https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400&display=swap&uji=' + Date.now(), { cache: 'no-store' });
 
     if (!laporan.ip) {
       var bI = baris('IP cadangan (ipify)');
