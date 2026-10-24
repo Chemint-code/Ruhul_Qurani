@@ -32136,3 +32136,273 @@ function asPentasBagian(el) {
 /* v2.55 — Ringkasan satu lembar · halaman Analisis (Grafik & Sebaran) · kabar wali tercatat
    · jendela bulan berdata · sapaan bilah atas. Lihat perubahan-v2.55-satu-lembar.md. */
 APP.versi = 'rq-v2.57.4';   // v2.57.2: ID pendek → gmail.com · v2.57.3: jalan keluar sesi & pesan sandi
+
+
+/* =====================================================================
+ * v2.59 — SARAN DARI KLINIK  (Pusat Perizinan · musyrif kelas binaan)
+ * =====================================================================
+ * Bot WA mendengarkan laporan klinik. Laporan yang menyebut santri
+ * DIPULANGKAN/DIJEMPUT atau DIRUJUK (pemeriksaan lanjutan) menjadi saran
+ * izin di sini; santri yang hanya diistirahatkan tidak (cukup rekap bot ke
+ * Admin). Nomor kamar yang disebut klinik menjadi USULAN; musyrif yang
+ * memutuskan benar atau tidak.
+ *
+ * Data & hak diatur di database (migrasi v2.59): RPC saran_klinik_daftar()
+ * hanya mengembalikan santri PUTRA pada kelas binaan pemanggil (Admin: semua
+ * putra). Unit putri belum disentuh. Panel ini tidak menulis tabel secara
+ * langsung: izin tetap lewat ajukan_perizinan (jalur yang sama dengan tombol
+ * Ajukan Izin), keputusan lewat saran_klinik_putus / saran_kamar_putus.
+ * ===================================================================== */
+const SK = { data: null, kapan: 0, buka: true };
+
+/** Musyrif putra berkelas binaan, atau Admin. Sama dengan saran_boleh() di database. */
+function bolehSaranKlinik() {
+  const p = APP.profil || {};
+  if (hanyaBaca()) return false;
+  if (role() === 'Admin') return true;
+  return role() === 'Guru' && !/putri/i.test(p.korps || '') && (p.kelas_binaan || []).length > 0;
+}
+
+async function muatSaranKlinik(paksa = false) {
+  if (!paksa && SK.data && Date.now() - SK.kapan < 60000) return SK.data;
+  const { data, error } = await db.rpc('saran_klinik_daftar');
+  if (error) throw error;
+  SK.data = { izin: data?.izin || [], kamar: data?.kamar || [] };
+  SK.kapan = Date.now();
+  return SK.data;
+}
+
+const skNama = (s) => String(s || '-').toLowerCase().replace(/(^|[\s.'’-])\p{L}/gu, m => m.toUpperCase())
+  .replace(/(\.\s*)(\p{L}{1,2})$/u, (_, t, x) => t + x.toUpperCase());
+const skWaktu = (w) => {
+  const d = new Date(w);
+  const hr = d.toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: 'Asia/Jakarta' });
+  const jm = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' });
+  return `${hr.replace('.', '')} ${jm}`;
+};
+const skTglLokal = (w) => new Date(w).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+const SK_JENIS = {
+  pulang: { label: 'Dipulangkan / dijemput', ikon: 'fa-house-medical', alasan: 'Dipulangkan atas saran klinik' },
+  rujuk:  { label: 'Pemeriksaan lanjutan',   ikon: 'fa-stethoscope',    alasan: 'Pemeriksaan lanjutan atas saran klinik' },
+};
+
+function htmlKartuSaranIzin(x) {
+  const j = SK_JENIS[x.jenis] || SK_JENIS.pulang;
+  const jalan = x.izin_berjalan;
+  return `<div class="izin st-wait sk-kartu">
+    <div class="top">
+      <div style="min-width:0">
+        <p style="margin:0;font-weight:700;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(skNama(x.nama))}</p>
+        <p style="margin:2px 0 0;font-size:11.5px;color:var(--text-3)" class="mono">${esc(x.nisn)} · ${esc(x.kelas)}</p>
+      </div>
+      <span class="tag tag-sedang"><i class="fa-solid ${j.ikon}" style="margin-right:5px"></i>${esc(j.label)}</span>
+    </div>
+    <div class="lines">
+      <span><i class="fa-solid fa-notes-medical"></i>${esc(x.ringkas || 'Keterangan klinik tidak dirinci')}</span>
+      <span><i class="fa-regular fa-clock"></i>Laporan klinik ${esc(skWaktu(x.waktu))}</span>
+      ${jalan ? `<span style="color:var(--teal)"><i class="fa-solid fa-circle-check" style="color:var(--teal)"></i>
+        Sudah ada izin berjalan: ${esc(jalan.jenis || '-')} ${esc(tgl(jalan.mulai))} s/d ${esc(tgl(jalan.selesai))}</span>` : ''}
+    </div>
+    <div class="acts">
+      ${jalan
+        ? `<button class="btn btn-ok btn-sm" data-sk-tangani="${x.id}|${esc(jalan.id_izin)}"><i class="fa-solid fa-check"></i>Sudah ditangani</button>`
+        : `<button class="btn btn-ok btn-sm" data-sk-izin="${x.id}"><i class="fa-solid fa-file-circle-plus"></i>Buat izin</button>`}
+      <button class="btn btn-ghost btn-sm" data-sk-abaikan="${x.id}"><i class="fa-solid fa-xmark"></i>Abaikan</button>
+    </div>
+  </div>`;
+}
+
+function htmlBarisSaranKamar(x) {
+  const kini = x.kini ? `Kamar ${x.kini}` : 'belum didata';
+  const lain = (x.lain || []).length ? ` · klinik juga pernah menulis kamar ${x.lain.map(esc).join(', ')}` : '';
+  return `<div class="sk-kamar">
+    <div style="min-width:0;flex:1 1 220px">
+      <b>${esc(skNama(x.nama))}</b> <span class="mono" style="color:var(--text-3);font-size:11.5px">${esc(x.kelas)}</span>
+      <div style="font-size:12px;color:var(--text-2);margin-top:2px">
+        Klinik menulis <b>Kamar ${esc(x.usul)}</b>${x.jumlah > 1 ? ` (${x.jumlah}× laporan)` : ''} · di chemint: ${esc(kini)}${lain}
+        ${x.mudabbir ? ' · <span class="tag tag-off">mudabbir</span>' : ''}
+      </div>
+    </div>
+    <div class="sk-kamar-aksi">
+      <button class="btn btn-ok btn-sm" data-sk-kamar="${x.id}|1"><i class="fa-solid fa-check"></i>Benar</button>
+      <button class="btn btn-ghost btn-sm" data-sk-kamar="${x.id}|0"><i class="fa-solid fa-xmark"></i>Tidak sesuai</button>
+    </div>
+  </div>`;
+}
+
+function htmlPanelSaranKlinik(d) {
+  const nIzin = d.izin.length, nKamar = d.kamar.length;
+  if (!nIzin && !nKamar) return '';
+  const ringkas = [nIzin ? `${nIzin} saran izin` : '', nKamar ? `${nKamar} usulan kamar` : ''].filter(Boolean).join(' · ');
+  return `<details class="card sk-panel" ${SK.buka ? 'open' : ''}>
+    <summary class="card-head" style="cursor:pointer;list-style:none">
+      <div><h3><i class="fa-solid fa-kit-medical" style="color:var(--maroon);margin-right:8px"></i>Saran dari Klinik
+        <span class="tag tag-berat" style="margin-left:6px">${ringkas}</span></h3>
+        <p class="sub">Dicatat otomatis dari laporan petugas klinik di grup WhatsApp. Periksa dulu sebelum memutuskan.</p></div>
+      <div class="actions"><i class="fa-solid fa-chevron-down sk-panah"></i></div>
+    </summary>
+    ${nIzin ? `<div class="sk-sub">Izin yang disarankan klinik</div>
+      <div class="izin-grid" style="padding-top:6px">${d.izin.map(htmlKartuSaranIzin).join('')}</div>` : ''}
+    ${nKamar ? `<div class="sk-sub" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <span>Usulan nomor kamar</span>
+        ${nKamar > 1 ? `<button class="btn btn-ghost btn-sm" data-sk-kamar-semua="1"><i class="fa-solid fa-check-double"></i>Benarkan semua (${nKamar})</button>` : ''}
+      </div>
+      <div class="sk-kamar-daftar">${d.kamar.map(htmlBarisSaranKamar).join('')}</div>` : ''}
+  </details>`;
+}
+
+function pasangGayaSaranKlinik() {
+  if (document.getElementById('gayaSaranKlinik')) return;
+  const st = document.createElement('style');
+  st.id = 'gayaSaranKlinik';
+  st.textContent = `
+    .sk-panel{margin-bottom:16px}
+    .sk-panel > summary::-webkit-details-marker{display:none}
+    .sk-panel[open] .sk-panah{transform:rotate(180deg)}
+    .sk-panah{transition:transform var(--cepat, .18s)}
+    .sk-sub{padding:12px var(--pad) 0;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-3)}
+    .sk-kamar-daftar{display:flex;flex-direction:column;gap:8px;padding:10px var(--pad) 18px}
+    .sk-kamar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--line);border-radius:var(--r, 12px);
+      padding:10px 12px;background:var(--surface)}
+    .sk-kamar-aksi{display:flex;gap:8px;flex:none}
+    @media (max-width:640px){.sk-kamar-aksi{width:100%}.sk-kamar-aksi .btn{flex:1 1 0;justify-content:center}}`;
+  document.head.appendChild(st);
+}
+
+async function gambarSaranKlinik() {
+  const el = document.getElementById('saranKlinik');
+  if (!el) return;
+  if (!bolehSaranKlinik()) { el.innerHTML = ''; return; }
+  try {
+    const d = await muatSaranKlinik();
+    el.innerHTML = htmlPanelSaranKlinik(d);
+    el.querySelector('details')?.addEventListener('toggle', (e) => { SK.buka = e.target.open; });
+  } catch (err) {
+    // Panel tambahan: kegagalan tidak boleh mengganggu Pusat Perizinan.
+    console.warn('[saran klinik] gagal dimuat:', err?.message || err);
+    el.innerHTML = '';
+  }
+}
+
+async function skBuatIzin(id) {
+  const x = (SK.data?.izin || []).find(s => String(s.id) === String(id));
+  if (!x) return toast('error', 'Saran tidak ditemukan. Muat ulang halaman.');
+  if (!bolehAjukanIzin()) return toast('error', `Role ${role()} tidak berwenang mengajukan perizinan.`);
+  const j = SK_JENIS[x.jenis] || SK_JENIS.pulang;
+  const mulai = skTglLokal(x.waktu) < hariIni() ? hariIni() : skTglLokal(x.waktu);
+  const tglKlinik = new Date(x.waktu).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', timeZone: 'Asia/Jakarta' });
+  const alasan = `${j.alasan}${x.ringkas ? ` — ${x.ringkas}` : ''} (laporan klinik ${tglKlinik})`;
+  const res = await Swal.fire({
+    title: 'Buat Izin dari Saran Klinik', width: 540, showCancelButton: true,
+    confirmButtonText: 'Simpan izin', cancelButtonText: 'Batal', confirmButtonColor: '#14618B',
+    showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
+    html: `<div class="stack">
+      <div class="field"><label class="label">Santri</label>
+        <input class="input" value="${esc(x.nisn)} - ${esc(skNama(x.nama))} (${esc(x.kelas)})" disabled></div>
+      <div class="duo">
+        <div class="field"><label class="label">Tanggal Mulai</label>
+          <input id="skMulai" type="date" class="input" value="${mulai}"></div>
+        <div class="field"><label class="label">Tanggal Selesai</label>
+          <input id="skSelesai" type="date" class="input" value="${mulai}"></div>
+      </div>
+      <p class="hint" style="margin:-4px 2px 4px">Tentukan tanggal selesai sesuai kesepakatan dengan wali atau klinik.</p>
+      <div class="field"><label class="label">Jenis Izin</label>
+        <select id="skJenis" class="input">${['Sakit', 'Keperluan', 'Pemberitahuan'].map(o => `<option>${o}</option>`).join('')}</select></div>
+      <div class="field"><label class="label">Alasan</label>
+        <textarea id="skAlasan" class="input" rows="3">${esc(alasan)}</textarea></div>
+      <p class="hint" style="margin:0 2px"><i class="fa-solid fa-notes-medical"></i> Pesan klinik: ${esc(String(x.teks || '').replace(/\s+/g, ' ').slice(0, 220))}</p>
+    </div>`,
+    didOpen: () => setTimeout(() => document.getElementById('skSelesai')?.focus(), 120),
+    preConfirm: async () => {
+      const m = document.getElementById('skMulai').value, s = document.getElementById('skSelesai').value;
+      if (!m || !s) { Swal.showValidationMessage('Tanggal mulai dan selesai wajib diisi.'); return false; }
+      if (s < m) { Swal.showValidationMessage('Tanggal selesai tidak boleh lebih awal dari tanggal mulai.'); return false; }
+      const { data, error } = await db.rpc('ajukan_perizinan', {
+        p_nisn: x.nisn, p_mulai: m, p_selesai: s,
+        p_jenis: document.getElementById('skJenis').value, p_alasan: document.getElementById('skAlasan').value.trim(),
+      });
+      if (error) { Swal.showValidationMessage(error.message); return false; }
+      const idIzin = data?.id_izin || null;
+      const r2 = await db.rpc('saran_klinik_putus', { p_id: x.id, p_status: 'diterima', p_id_izin: idIzin, p_catatan: null });
+      // Izin sudah tersimpan; bila penandaan saran gagal, saran akan tampil "Sudah ditangani" pada muat berikutnya.
+      if (r2.error) console.warn('[saran klinik] izin tersimpan, penandaan saran gagal:', r2.error.message);
+      return { idIzin };
+    },
+  });
+  if (!res.isConfirmed) return;
+  cacheHapus('izin');
+  sync('done', 'Izin tersimpan');
+  toast('success', `Izin ${skNama(x.nama)} tersimpan`);
+  await muatSaranKlinik(true);
+  gambarSaranKlinik(); gambarIzin(); refreshBadgePending();
+  waKirimIzinTerbaru(x.nisn);
+}
+
+async function skPutusSaran(id, status, idIzin = null) {
+  let catatan = null;
+  if (status === 'diabaikan') {
+    const r = await Swal.fire({
+      title: 'Abaikan saran klinik?', input: 'text', inputPlaceholder: 'Alasan singkat (boleh dikosongkan)',
+      showCancelButton: true, confirmButtonText: 'Abaikan', cancelButtonText: 'Batal', confirmButtonColor: '#9F1239',
+    });
+    if (!r.isConfirmed) return;
+    catatan = r.value || null;
+  }
+  try {
+    await q(db.rpc('saran_klinik_putus', { p_id: Number(id), p_status: status, p_id_izin: idIzin, p_catatan: catatan }), 'saran_klinik');
+    toast('success', status === 'diabaikan' ? 'Saran diabaikan' : 'Saran ditandai sudah ditangani');
+    await muatSaranKlinik(true); gambarSaranKlinik();
+  } catch (err) { fireError(err); }
+}
+
+async function skPutusKamar(ids, terima) {
+  const daftar = (SK.data?.kamar || []).filter(k => ids.includes(String(k.id)));
+  if (!daftar.length) return;
+  if (daftar.length > 1) {
+    const r = await Swal.fire({ icon: 'question', title: `Benarkan ${daftar.length} usulan kamar?`,
+      html: `Nomor kamar santri berikut akan diisi sesuai laporan klinik:<br><small>${daftar.map(k => `${esc(skNama(k.nama))} → ${esc(k.usul)}`).join(' · ')}</small>`,
+      showCancelButton: true, confirmButtonText: 'Ya, simpan', cancelButtonText: 'Batal', confirmButtonColor: '#0F766E' });
+    if (!r.isConfirmed) return;
+  }
+  sync('saving', 'Menyimpan kamar…');
+  let gagal = 0;
+  for (const k of daftar) {
+    const { error } = await db.rpc('saran_kamar_putus', { p_id: k.id, p_terima: terima });
+    if (error) { gagal++; console.warn('[saran kamar]', error.message); }
+  }
+  if (terima) cacheHapus('siswa', 'petaSiswa', 'kelas', 'detail');
+  sync(gagal ? 'warn' : 'done', gagal ? 'Sebagian gagal' : 'Tersimpan');
+  toast(gagal ? 'warning' : 'success', gagal ? `${gagal} usulan gagal disimpan`
+    : terima ? (daftar.length > 1 ? `${daftar.length} nomor kamar tersimpan` : `Tersimpan — ${skNama(daftar[0].nama)} Kamar ${daftar[0].usul}`)
+    : 'Usulan ditandai tidak sesuai');
+  await muatSaranKlinik(true); gambarSaranKlinik();
+}
+
+/* ---------- Tempel panel ke Pusat Perizinan (pembungkus, fungsi asli tidak diubah) */
+(function () {
+  const viewSebelum = viewPerizinan;
+  viewPerizinan = async function () {
+    const h = await viewSebelum.apply(this, arguments);
+    if (!bolehSaranKlinik()) return h;
+    pasangGayaSaranKlinik();
+    const root = $('viewRoot');
+    if (!root || document.getElementById('saranKlinik')) return h;
+    const wadah = document.createElement('div');
+    wadah.id = 'saranKlinik';
+    root.prepend(wadah);
+    wadah.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-sk-izin],[data-sk-tangani],[data-sk-abaikan],[data-sk-kamar],[data-sk-kamar-semua]');
+      if (!b) return;
+      e.preventDefault(); e.stopPropagation();
+      if (b.dataset.skIzin) return skBuatIzin(b.dataset.skIzin);
+      if (b.dataset.skTangani) { const [id, iz] = b.dataset.skTangani.split('|'); return skPutusSaran(id, 'diterima', iz || null); }
+      if (b.dataset.skAbaikan) return skPutusSaran(b.dataset.skAbaikan, 'diabaikan');
+      if (b.dataset.skKamar) { const [id, t] = b.dataset.skKamar.split('|'); return skPutusKamar([id], t === '1'); }
+      if (b.dataset.skKamarSemua) return skPutusKamar((SK.data?.kamar || []).map(k => String(k.id)), true);
+    });
+    await gambarSaranKlinik();
+    return h;
+  };
+})();
+
+APP.versi = 'rq-v2.59';   // v2.59: Saran dari Klinik (izin pulang/rujuk + usulan kamar) di Pusat Perizinan
