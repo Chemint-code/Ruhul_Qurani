@@ -12,6 +12,8 @@ name: Terbit
 on:
   push:
     branches: [main]
+  pull_request:          # PR: bangun + uji saja, tanpa terbit
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -20,7 +22,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
@@ -51,12 +53,15 @@ jobs:
           name: hasil-uji
           path: uji/keluaran/
           if-no-files-found: ignore
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
+      - if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v6
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
   terbit:
+    if: github.event_name != 'pull_request'
     needs: bangun
     runs-on: ubuntu-latest
     environment:
