@@ -27,6 +27,8 @@ concurrency:
 
 jobs:
   bangun:
+    # Hanya di repo publik; di repo privat src tidak dijalankan (hemat menit Actions).
+    if: github.repository == 'Chemint-code/Ruhul_Qurani'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
