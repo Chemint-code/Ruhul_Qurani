@@ -29,7 +29,19 @@ jobs:
   bangun:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    outputs:
+      pages: ${{ steps.pages.outputs.sumber }}
     steps:
+      # Terbit hanya bila Settings → Pages → Source sudah "GitHub Actions".
+      # Sebelum itu job terbit dilewati (bukan gagal); Pages menayangkan akar repo.
+      - id: pages
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          s=$(gh api "repos/${{ github.repository }}/pages" --jq .build_type 2>/dev/null || echo tidak-ada)
+          echo "Sumber Pages: $s"
+          echo "sumber=$s" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
@@ -53,15 +65,15 @@ jobs:
           name: hasil-uji
           path: uji/keluaran/
           if-no-files-found: ignore
-      - if: github.event_name != 'pull_request'
+      - if: steps.pages.outputs.sumber == 'workflow'
         uses: actions/configure-pages@v6
-      - if: github.event_name != 'pull_request'
+      - if: steps.pages.outputs.sumber == 'workflow'
         uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
   terbit:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.bangun.outputs.pages == 'workflow'
     needs: bangun
     runs-on: ubuntu-latest
     environment:
