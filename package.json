@@ -1,0 +1,21 @@
+{
+  "name": "chemint",
+  "private": true,
+  "version": "2.61.0",
+  "description": "Sistem Informasi Pengembangan Santri — Dayah Ruhul Qurani",
+  "type": "module",
+  "scripts": {
+    "bangun": "vite build",
+    "bangun:uji": "RQ_UJI=1 vite build",
+    "uji": "node uji/uji-v261.cjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.117.2",
+    "chart.js": "4.5.1",
+    "echarts": "6.1.0",
+    "sweetalert2": "11.26.25"
+  },
+  "devDependencies": {
+    "vite": "8.3.5"
+  }
+}

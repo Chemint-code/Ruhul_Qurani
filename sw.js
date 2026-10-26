@@ -49,7 +49,7 @@
    hapus singgahan versi lama, lalu beri tahu halaman yang terbuka.
    ===================================================================== */
 
-const VERSI       = 'rq-v2.59';
+const VERSI       = 'rq-v2.61';
 const CACHE_INTI  = `${VERSI}-inti`;
 const CACHE_ASET  = 'rq-aset-v1';   // nama tetap: bertahan melewati kenaikan VERSI
 
@@ -66,7 +66,11 @@ const INTI = [
 /* Berkas yang TIDAK BOLEH dilayani singgahan HTTP peramban. Inilah
    berkas yang berubah setiap kali aplikasi diperbarui; sisanya (gambar
    lambang, ikon) boleh memakai jalur biasa supaya tetap hemat kuota. */
-const POLA_INTI = /(?:^\/?$|\/$|index\.html$|app\.js$|showreel\.js$|panggung\.js$|manifest\.webmanifest$)/i;
+/* v2.60: vendor.js (hasil Vite) & potongan pustaka di /pustaka/ (nama berhash,
+   isinya tidak pernah berubah) ikut cache-first. Pada berkas sumber apa adanya
+   keduanya tidak ada, jadi pola ini tidak berpengaruh. Hasil build menambahkan
+   './vendor.js' ke INTI secara otomatis (vite.config.mjs). */
+const POLA_INTI = /(?:^\/?$|\/$|index\.html$|app\.js$|showreel\.js$|panggung\.js$|vendor\.js$|\/pustaka\/[^/]+\.js$|manifest\.webmanifest$)/i;
 
 const CDN_DIIZINKAN = [
   'https://fonts.googleapis.com',
