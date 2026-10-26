@@ -1,0 +1,84 @@
+# chemint · terbit ke GitHub Pages (v2.60)
+#
+# Setiap push ke main: pasang dependensi → bangun (Vite) → uji asap aplikasi
+# utuh dengan Supabase tiruan → terbitkan dist/ ke GitHub Pages.
+# Bila build ATAU uji gagal, situs yang sedang tayang TIDAK berubah.
+#
+# Sekali saja (oleh pemilik repo): Settings → Pages → Build and deployment →
+# Source: "GitHub Actions". Sebelum itu, Pages tetap menayangkan berkas di
+# akar repo apa adanya (tanpa build) — chemint tetap berjalan normal.
+name: Terbit
+
+on:
+  push:
+    branches: [main]
+  pull_request:          # PR: bangun + uji saja, tanpa terbit
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  bangun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      pages: ${{ steps.pages.outputs.sumber }}
+    steps:
+      # Terbit hanya bila Settings → Pages → Source sudah "GitHub Actions".
+      # Sebelum itu job terbit dilewati (bukan gagal); Pages menayangkan akar repo.
+      - id: pages
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          s=$(gh api "repos/${{ github.repository }}/pages" --jq .build_type 2>/dev/null || echo tidak-ada)
+          echo "Sumber Pages: $s"
+          echo "sumber=$s" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Pasang dependensi
+        run: npm ci
+      - name: Periksa sintaks
+        run: node --check app.js && node --check sw.js && node --check meja.js && node --check panggung.js && node --check showreel.js
+      - name: Bangun (uji + terbit)
+        run: npm run bangun:uji && npm run bangun
+      - name: Uji asap (Playwright, Supabase tiruan)
+        run: |
+          npm i --no-save playwright@1.63.0
+          npx playwright install --with-deps chromium
+          RQCEPAT=1 node uji/uji-v261.cjs
+      - name: Simpan hasil uji
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hasil-uji
+          path: uji/keluaran/
+          if-no-files-found: ignore
+      - if: steps.pages.outputs.sumber == 'workflow'
+        uses: actions/configure-pages@v6
+      - if: steps.pages.outputs.sumber == 'workflow'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  terbit:
+    if: github.event_name != 'pull_request' && needs.bangun.outputs.pages == 'workflow'
+    needs: bangun
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.terbit.outputs.page_url }}
+    steps:
+      - id: terbit
+        uses: actions/deploy-pages@v5

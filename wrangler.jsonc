@@ -1,0 +1,12 @@
+// chemint · Cloudflare Workers "ruhul-qurani" (v2.60)
+// Tanpa berkas ini, Wrangler menebak sendiri: dulu "Static" (akar repo), tetapi
+// sejak ada package.json + Vite ia mencoba memasang @cloudflare/vite-plugin dan
+// gagal. Di sini caranya ditulis jelas: bangun dengan Vite, unggah dist/.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ruhul-qurani",
+  "compatibility_date": "2026-10-19",
+  "observability": { "enabled": true },
+  "build": { "command": "npm ci && npm run bangun" },
+  "assets": { "directory": "./dist" }
+}
