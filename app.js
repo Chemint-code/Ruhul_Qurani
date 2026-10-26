@@ -23240,7 +23240,7 @@ const PLUGIN_SOROT = {
     ctx.restore();
   }
 };
-try { Chart.register(PLUGIN_SOROT); } catch (e) { console.warn('plugin sorot:', e.message); }
+saatGrafikSiap(() => Chart.register(PLUGIN_SOROT), 'plugin sorot');   // v2.61: Chart.js dimuat lambat
 
 /** Terapkan sorotan langsung ke config sebelum grafik dibuat. */
 function terapkanSorot(key, config, s) {
@@ -23689,7 +23689,7 @@ const PLUGIN_TARIK = {
     if (st) { st.mati = true; if (st.io) st.io.disconnect(); clearTimeout(st.tOto); }
   }
 };
-try { Chart.register(PLUGIN_TARIK); } catch (e) { console.warn('plugin tarik:', e.message); }
+saatGrafikSiap(() => Chart.register(PLUGIN_TARIK), 'plugin tarik');   // v2.61: Chart.js dimuat lambat
 
 function wadahGrafik(st) { return st.chart && st.chart.canvas && st.chart.canvas.parentElement; }
 
@@ -29183,7 +29183,7 @@ const PLUGIN_PANGGUNG = {
     PGR.items = PGR.items.filter(x => x !== it);
   }
 };
-try { Chart.register(PLUGIN_PANGGUNG); } catch (e) { console.warn('plugin panggung:', e.message); }
+saatGrafikSiap(() => Chart.register(PLUGIN_PANGGUNG), 'plugin panggung');   // v2.61: Chart.js dimuat lambat
 
 /** Satu tahap tarikan: data → p × nilai asli, dianimasikan Chart.js. */
 function tahapPanggung(it, p, durasi = 420, easing = 'easeOutBack') {
@@ -32406,3 +32406,331 @@ async function skPutusKamar(ids, terima) {
 })();
 
 APP.versi = 'rq-v2.59';   // v2.59: Saran dari Klinik (izin pulang/rujuk + usulan kamar) di Pusat Perizinan
+
+/* =====================================================================
+ * v2.60–v2.61 · PUSTAKA DIMUAT SAAT DIBUTUHKAN + KALENDER SEBARAN
+ *
+ * Ringkasan "Satu Lembar" (v2.55) tidak memuat grafik apa pun, jadi
+ * Chart.js (±70 KB gzip) tidak lagi diunduh di muat pertama. Pustaka
+ * baru diambil saat halaman bergrafik dibuka, atau diam-diam saat
+ * perangkat menganggur beberapa detik sesudah halaman pertama tampil.
+ *
+ * Dua jalur pemuat, satu pintu (muatPustaka):
+ *   · Hasil build Vite  → window.RQPustaka[nama]() dari vendor.js:
+ *     potongan swa-saji di github.io (tanpa CDN), ikut cache service worker.
+ *   · Berkas sumber apa adanya (tanpa build) → <script> CDN berversi pasti.
+ *     Jalur ini juga cadangan bila build belum dipasang.
+ *
+ * Kalender Sebaran (Apache ECharts) — kartu baru di Analitik: satu kotak
+ * satu hari, enam lembar terakhir (HP: tiga). Memperlihatkan pola hari
+ * dalam sepekan yang tidak tampak di grafik garis harian.
+ * Fungsi lama tidak diubah; semuanya pembungkus. Tanpa migrasi basis data.
+ * ===================================================================== */
+
+const PUSTAKA_LAMBAT = {
+  chart:   { global: 'Chart',   cdn: 'https://cdn.jsdelivr.net/npm/chart.js@4.5.1' },
+  echarts: { global: 'echarts', cdn: 'https://cdn.jsdelivr.net/npm/echarts@6.1.0/dist/echarts.min.js' }
+};
+const _janjiPustaka = {};
+
+/** Muat pustaka sekali saja; janji yang sama dipakai bersama. Gagal → boleh dicoba lagi. */
+function muatPustaka(nama) {
+  const p = PUSTAKA_LAMBAT[nama];
+  if (!p) return Promise.reject(new Error('pustaka tidak dikenal: ' + nama));
+  if (_janjiPustaka[nama]) return _janjiPustaka[nama];
+  if (window[p.global]) { if (nama === 'chart') jalankanAntreGrafik(); return Promise.resolve(window[p.global]); }
+  const lewatCdn = () => new Promise((ok, gagal) => {
+    const s = document.createElement('script');
+    s.src = p.cdn; s.async = true;
+    s.onload = () => ok(window[p.global]);
+    s.onerror = () => { s.remove(); gagal(new Error(nama + ' gagal diunduh')); };
+    document.head.appendChild(s);
+  });
+  let jalur = (window.RQPustaka && typeof window.RQPustaka[nama] === 'function') ? 'vite' : 'cdn';
+  // Peramban menyimpan kegagalan import() untuk alamat yang sama, jadi "Coba lagi"
+  // pada potongan Vite tidak akan pernah berhasil. Cadangannya: CDN berversi pasti.
+  const pemuat = jalur === 'vite'
+    ? () => window.RQPustaka[nama]().catch((e) => {
+        console.warn('[pustaka] potongan ' + nama + ' gagal, beralih ke CDN:', e.message);
+        jalur = 'cdn'; return lewatCdn();
+      })
+    : lewatCdn;
+  const t0 = performance.now();
+  _janjiPustaka[nama] = pemuat().then((lib) => {
+    if (!lib) throw new Error(nama + ' termuat tanpa isi');
+    window[p.global] = lib;
+    p.ms = Math.round(performance.now() - t0); p.jalur = jalur;
+    if (nama === 'chart') jalankanAntreGrafik();
+    return lib;
+  }).catch((e) => { delete _janjiPustaka[nama]; throw e; });
+  return _janjiPustaka[nama];
+}
+
+/* Plugin Chart.js (sorot, tarik, panggung) didaftarkan begitu pustaka tiba.
+   Fungsi dideklarasikan (bukan const) agar sudah ada saat baris
+   pendaftaran plugin di tengah berkas dijalankan. */
+function saatGrafikSiap(fn, label) {
+  if (window.Chart) { try { fn(); } catch (e) { console.warn((label || 'grafik') + ':', e.message); } return; }
+  (saatGrafikSiap.antre || (saatGrafikSiap.antre = [])).push([fn, label]);
+}
+function jalankanAntreGrafik() {
+  const antre = saatGrafikSiap.antre || [];
+  saatGrafikSiap.antre = [];
+  antre.forEach(([fn, label]) => { try { fn(); } catch (e) { console.warn((label || 'grafik') + ':', e.message); } });
+  setelGrafikEfek();
+}
+function grafikSiap() { return !!window.Chart && !(saatGrafikSiap.antre && saatGrafikSiap.antre.length); }
+
+/** Pesan santun di dalam kotak grafik bila pustaka gagal diunduh. */
+function tampilGrafikGagal(kotak, ulang) {
+  if (!kotak || kotak.querySelector('.grafik-gagal')) return;
+  pasangGayaPustaka();
+  const d = document.createElement('div');
+  d.className = 'grafik-gagal'; d.setAttribute('role', 'status');
+  d.innerHTML = '<i class="fa-solid fa-wifi" aria-hidden="true"></i><span>Grafik belum termuat. Periksa sambungan, lalu coba lagi.</span>'
+    + '<button type="button" class="btn btn-ghost btn-sm">Coba lagi</button>';
+  d.querySelector('button').addEventListener('click', (e) => { e.stopPropagation(); d.remove(); ulang(); });
+  kotak.appendChild(d);
+}
+
+function pasangGayaPustaka() {
+  if (document.getElementById('gayaPustakaLambat')) return;
+  const st = document.createElement('style');
+  st.id = 'gayaPustakaLambat';
+  st.textContent = `
+    .grafik-memuat{background:linear-gradient(90deg,transparent,color-mix(in oklab,var(--sea) 7%,transparent),transparent) 0 0/200% 100%;animation:grafikMemuat 1.2s linear infinite;border-radius:12px}
+    @keyframes grafikMemuat{to{background-position:-200% 0}}
+    :root.hemat .grafik-memuat{animation:none}
+    .grafik-gagal{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:16px;color:var(--text-3);font-size:13px}
+    .grafik-gagal i{font-size:20px;opacity:.6}
+    .kal-kartu{margin-bottom:16px}
+    .kal-cerita{margin:0 0 10px;font-family:'Instrument Serif',Georgia,serif;font-size:17px;line-height:1.35;color:var(--text-1,#0B2B45)}
+    .kal-cerita b{font-weight:400;background:linear-gradient(transparent 62%,color-mix(in oklab,var(--brass,#C9A227) 35%,transparent) 0)}
+    .kal-kotak{position:relative;width:100%;min-height:150px}
+    .kal-kotak > .rq-sk{position:absolute;inset:0;height:auto}
+  `;
+  document.head.appendChild(st);
+}
+
+/* ---------- Pembungkus buatChart PALING LUAR: tunggu pustaka bila belum ada ---------- */
+(function bungkusGrafikMuatLambat() {
+  const asli = buatChart;
+  buatChart = function (key, canvasId, config) {
+    if (grafikSiap()) return asli.apply(this, arguments);
+    const el = $(canvasId);
+    if (!el) return;
+    pasangGayaPustaka();
+    try { APP.charts[key]?.destroy(); } catch (e) {}
+    const wakil = { _tertunda: true, _menungguPustaka: true, batal: false, destroy() { this.batal = true; } };
+    APP.charts[key] = wakil;
+    const kotak = el.parentElement;
+    if (kotak) kotak.classList.add('grafik-memuat');
+    const self = this, args = arguments;
+    muatPustaka('chart').then(() => {
+      if (kotak) kotak.classList.remove('grafik-memuat');
+      // Sudah pindah halaman / digambar ulang selama menunggu → abaikan.
+      if (wakil.batal || APP.charts[key] !== wakil || $(canvasId) !== el || !el.isConnected) return;
+      asli.apply(self, args);
+    }, (e) => {
+      if (kotak) kotak.classList.remove('grafik-memuat');
+      console.warn('[grafik] Chart.js gagal dimuat:', e.message);
+      if (wakil.batal || !el.isConnected) return;
+      tampilGrafikGagal(kotak, () => buatChart(key, canvasId, config));
+    });
+    return wakil;
+  };
+})();
+
+/* ---------- Pramuat: sesudah halaman pertama tampil & perangkat menganggur ---------- */
+(function pramuatGrafik() {
+  const navAsli = navigateTo;
+  let terjadwal = false;
+  navigateTo = async function () {
+    const hasil = await navAsli.apply(this, arguments);
+    if (!terjadwal && !window.Chart) {
+      terjadwal = true;
+      const c = navigator.connection || {};
+      // Mode hemat data / 2G: tunggu sampai halaman bergrafik benar-benar dibuka.
+      if (!c.saveData && !/(^|-)2g$/.test(c.effectiveType || '')) {
+        setTimeout(() => {
+          const diam = window.requestIdleCallback || ((f) => setTimeout(f, 1));
+          diam(() => muatPustaka('chart').catch(() => {}), { timeout: 8000 });
+        }, 5000);
+      }
+    }
+    return hasil;
+  };
+})();
+
+/* ---------- Kalender Sebaran Pelanggaran (Apache ECharts) ---------- */
+const KALENDER = {
+  hariPendek: ['Ahd', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'],
+  hariPanjang: ['Ahad', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'],
+  bulanPendek: ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'],
+  warna: ['#EEF2F6', '#F6D5DC', '#E896A8', '#C8456A', '#8E1435'],
+  tinta: '#4A6076'
+};
+
+/** Hitung catatan per hari dalam jendela lembar (HP: 3 lembar, lainnya 6). */
+function dataKalenderSebaran(detailTr, per, nLembar) {
+  const lembar = jendelaBerdata(bulanMundur(per.bulan, nLembar));
+  const awal = lembar[0] + '-01';
+  const ujungBulan = per.bulan + '-' + String(per.hariBulan).padStart(2, '0');
+  const akhir = per.berjalan ? per.bulan + '-' + String(per.batas).padStart(2, '0') : ujungBulan;
+  const hitung = new Map();
+  for (const r of detailTr || []) {
+    const k = kunciBaris(r, 'tanggal', per);
+    if (k && k >= awal && k <= akhir) hitung.set(k, (hitung.get(k) || 0) + 1);
+  }
+  const hari = [];
+  for (let d = tglDari(awal), z = tglDari(akhir); d <= z; d.setDate(d.getDate() + 1)) {
+    const k = kunciTgl(d); hari.push([k, hitung.get(k) || 0]);
+  }
+  const jml = Array(7).fill(0), n = Array(7).fill(0);
+  hari.forEach(([k, v]) => { const w = tglDari(k).getDay(); jml[w] += v; n[w]++; });
+  const rata = jml.map((j, i) => (n[i] ? j / n[i] : 0));
+  const total = hari.reduce((a, h) => a + h[1], 0);
+  let puncak = null;
+  hari.forEach(h => { if (h[1] && (!puncak || h[1] > puncak[1])) puncak = h; });
+  return { lembar, awal, akhir, ujungBulan, hari, rata, total, puncak };
+}
+
+function labelTglKal(k, denganHari) {
+  const d = tglDari(k); if (!d) return k;
+  const t = `${d.getDate()} ${BULAN_ID[d.getMonth()]}`;
+  return denganHari ? `${KALENDER.hariPanjang[d.getDay()]}, ${t} ${d.getFullYear()}` : t;
+}
+
+/** Satu kalimat santun & ringkas: hari tersibuk + puncak. */
+function ceritaKalender(D) {
+  if (!D.total) return 'Belum ada catatan pelanggaran pada rentang ini.';
+  const urut = D.rata.map((v, i) => [i, v]).sort((a, b) => b[1] - a[1]);
+  const fmt = (v) => v.toLocaleString('id-ID', { maximumFractionDigits: 1 });
+  const sibuk = urut[0], sepi = urut[urut.length - 1];
+  let s = `Hari tersibuk: <b>${KALENDER.hariPanjang[sibuk[0]]}</b> (rata-rata ${fmt(sibuk[1])} catatan)`;
+  if (sepi[1] < sibuk[1]) s += `, tersepi ${KALENDER.hariPanjang[sepi[0]]}`;
+  s += '.';
+  if (D.puncak) s += ` Puncak ${labelTglKal(D.puncak[0])} (${angka(D.puncak[1])} catatan).`;
+  return s;
+}
+
+/** Ambang warna dari nilai tertinggi: 0 · rendah · sedang · tinggi · sangat tinggi. */
+function potonganKalender(maks) {
+  const W = KALENDER.warna;
+  const out = [{ value: 0, color: W[0], label: '0' }];
+  const ambang = [...new Set([Math.ceil(maks / 4), Math.ceil(maks / 2), Math.ceil(maks * 3 / 4)].filter(v => v >= 1))];
+  let bawah = 1;
+  ambang.forEach((a, i) => {
+    if (a < bawah) return;
+    out.push({ min: bawah, max: a, color: W[Math.min(1 + i, 3)], label: bawah === a ? String(a) : `${bawah}–${a}` });
+    bawah = a + 1;
+  });
+  if (bawah <= maks) out.push({ min: bawah, color: W[4], label: `≥ ${bawah}` });
+  return out;
+}
+
+function opsiKalender(D, lebar, hp) {
+  const pekan = Math.ceil((tglDari(D.ujungBulan) - tglDari(D.awal)) / 864e5 / 7) + 2;
+  const kiri = hp ? 30 : 34, kanan = 8, atas = hp ? 22 : 24, bawah = 50;
+  let sel, tinggi;
+  if (hp) { sel = [Math.max(16, Math.floor((lebar - kiri - kanan) / 7)), 18]; tinggi = atas + pekan * sel[1] + bawah; }
+  else { const c = Math.max(12, Math.min(30, Math.floor((lebar - kiri - kanan) / pekan))); sel = [c, c]; tinggi = atas + 7 * c + bawah; }
+  const maks = Math.max(1, ...D.hari.map(h => h[1]));
+  const hemat = modeHemat();
+  return {
+    tinggi,
+    opsi: {
+      animation: !hemat, animationDuration: hemat ? 0 : 500,
+      textStyle: { fontFamily: "'Inter Tight', system-ui, sans-serif" },
+      tooltip: {
+        confine: true, backgroundColor: 'rgba(11,27,53,.94)', borderWidth: 0,
+        textStyle: { color: '#F4F1E8', fontSize: 12 },
+        extraCssText: 'border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);padding:8px 12px',
+        formatter: (p) => `${labelTglKal(p.value[0], true)}<br><b>${angka(p.value[1])}</b> catatan`
+      },
+      visualMap: {
+        type: 'piecewise', orient: 'horizontal', left: 'center', bottom: 8,
+        pieces: potonganKalender(maks), itemWidth: 12, itemHeight: 12, itemGap: 8, itemSymbol: 'roundRect',
+        textStyle: { color: KALENDER.tinta, fontSize: 11 }, selectedMode: false
+      },
+      calendar: {
+        range: [D.awal, D.ujungBulan], orient: hp ? 'vertical' : 'horizontal',
+        cellSize: sel, top: atas, left: hp ? kiri : 'center', right: hp ? kanan : undefined, bottom: bawah,
+        splitLine: { show: true, lineStyle: { color: 'rgba(11,43,69,.22)', width: 1 } },
+        itemStyle: { color: '#FBFCFD', borderColor: '#fff', borderWidth: 2.5, borderRadius: 3 },
+        dayLabel: { firstDay: 1, nameMap: KALENDER.hariPendek, color: KALENDER.tinta, fontSize: 10, margin: 6 },
+        monthLabel: { nameMap: KALENDER.bulanPendek, color: KALENDER.tinta, fontSize: 11, fontWeight: 600, margin: 6 },
+        yearLabel: { show: false }
+      },
+      series: [{
+        type: 'heatmap', coordinateSystem: 'calendar', data: D.hari,
+        itemStyle: { borderRadius: 3, borderColor: '#fff', borderWidth: 2 },
+        emphasis: { itemStyle: { borderColor: '#0B2B45', borderWidth: 1.5 } }
+      }]
+    }
+  };
+}
+
+/** Gambar kalender ke #kalSebaran; dibersihkan otomatis saat pindah halaman (APP.charts). */
+async function gambarKalenderSebaran(D, hp) {
+  const kotak = $('kalSebaran');
+  if (!kotak) return;
+  let echarts;
+  try { echarts = await muatPustaka('echarts'); }
+  catch (e) {
+    console.warn('[kalender] ECharts gagal dimuat:', e.message);
+    const k = $('kalSebaran'); if (k && k === kotak) { k.innerHTML = ''; tampilGrafikGagal(k, () => gambarKalenderSebaran(D, hp)); }
+    return;
+  }
+  if (APP.view !== 'analisis' || $('kalSebaran') !== kotak || !kotak.isConnected) return;
+  try { APP.charts.kalSebaran?.destroy(); } catch (e) {}
+  kotak.innerHTML = '';
+  const susun = () => { const r = opsiKalender(D, kotak.clientWidth || 600, hp); kotak.style.height = r.tinggi + 'px'; return r.opsi; };
+  const opsi = susun();
+  const inst = echarts.init(kotak, null, { renderer: 'canvas' });
+  inst.setOption(opsi);
+  let lebar = kotak.clientWidth;
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+    if (Math.abs(kotak.clientWidth - lebar) < 4) return;
+    lebar = kotak.clientWidth; inst.setOption(susun()); inst.resize();
+  }) : null;
+  if (ro) ro.observe(kotak);
+  APP.charts.kalSebaran = { echarts: inst, destroy() { if (ro) ro.disconnect(); try { inst.dispose(); } catch (e) {} } };
+}
+
+/** Sisipkan kartu sebelum Peta Perkembangan, lalu gambar tanpa menahan halaman. */
+async function pasangKalenderSebaran() {
+  const blok = $('blokSebaran');
+  if (!blok || $('kalKartu')) return;
+  const [siswaAll, detailAll, izinAll, pembinaanAll] = await Promise.all([
+    amanKosong(muatSiswa, 'santri'), amanKosong(muatDetail, 'pelanggaran'),
+    amanKosong(muatIzin, 'perizinan'), amanKosong(muatPembinaan, 'pembinaan')]);
+  if (APP.view !== 'analisis' || !blok.isConnected) return;
+  const per = periodeRingkasan();
+  const hp = window.innerWidth < 640;
+  const D = dataKalenderSebaran(lingkupDasbor({ siswaAll, detailAll, izinAll, pembinaanAll }).detailTr, per, hp ? 3 : 6);
+  pasangGayaPustaka();
+  const tag = `<span class="tag tag-sea">${esc(labelJendela(D.lembar))}</span>`;
+  blok.insertAdjacentHTML('beforebegin', `<section class="card kal-kartu" id="kalKartu">
+    <div class="card-head">
+      <div><h3>Kalender Sebaran Pelanggaran</h3><p class="sub">Satu kotak satu hari; makin pekat makin banyak catatan. Arahkan atau ketuk kotak untuk rinciannya.</p></div>
+      <div class="actions">${tag}</div>
+    </div>
+    <div class="card-body">
+      <p class="kal-cerita">${ceritaKalender(D)}</p>
+      <div class="kal-kotak" id="kalSebaran" style="height:${hp ? 330 : 250}px"><div class="rq-sk"></div></div>
+    </div></section>`);
+  gambarKalenderSebaran(D, hp);   // sengaja tidak ditunggu: halaman tidak tertahan unduhan pustaka
+}
+
+/* Tempel ke Analitik (pembungkus, viewAnalisis asli tidak diubah). */
+(function bungkusAnalisisKalender() {
+  const asli = viewAnalisis;
+  viewAnalisis = async function () {
+    const hasil = await asli.apply(this, arguments);
+    try { await pasangKalenderSebaran(); } catch (e) { console.warn('[kalender]', e.message); }
+    return hasil;
+  };
+})();
+
+APP.versi = 'rq-v2.61';   // v2.60: Vite (pemadatan + pustaka swa-saji) · v2.61: grafik dimuat lambat + Kalender Sebaran
