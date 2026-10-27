@@ -8205,18 +8205,91 @@
   #viewRoot :is(.hero, .pgs-hero, .prs-hero, .thf-hero) { padding-top: 18px !important; padding-bottom: 18px !important; }
 }
 
-/* 3 · Tab "Catat" di tengah bilah bawah */
-.tabbar .tab-catat { position: relative; color: var(--text); font-weight: 700; }
-.tabbar .tab-catat .tc-bulat {
-  display: grid; place-items: center; width: 42px; height: 42px; margin: -20px auto 2px;
-  border-radius: 50%; color: #1d1405;
-  background: var(--brass, #C9A227);
-  background: linear-gradient(160deg, var(--brass-hi, #E8CC6B), var(--brass, #C9A227));
-  box-shadow: 0 6px 16px -6px rgba(11, 43, 69, .55), 0 0 0 4px var(--surface, #fff);
-  transition: transform .09s var(--lengkung);
+/* 3 · Tab "Catat" — v2.63 GERBANG KHATAM
+   Bilah bawah naik membentuk kubah di tengah; bintang delapan (dua persegi
+   berpilin — motif ikon chemint) duduk di kubah itu, berbingkai kuningan
+   dengan inti navy. Saat diketuk, bintang berputar 45° — bentuknya kembali
+   persis seperti semula, jadi tak ada keadaan "setengah jadi". */
+.tabbar .tab-dilipat { display: none !important; }
+.tabbar .tab-catat .tc-khatam, .tabbar .tab-catat .tc-ruang { display: none; }
+@media (max-width: 1024px) {
+  /* contain:paint dilepas — dulu memancung bulatan tombol di tepi atas bilah. */
+  .tabbar.ada-catat { contain: layout style; overflow: visible; --kubah-r: 37px; }
+
+  .tabbar .tab-catat {
+    position: relative; overflow: visible; background: none !important; box-shadow: none !important;
+    color: #7A5B0C; font-weight: 700;
+  }
+  .tabbar .tab-catat::before { display: none !important; }    /* tanpa garis tab aktif */
+  /* Kubah: bilah naik membentuk setengah lingkaran di belakang bintang, berbingkai
+     garis kuningan tipis — menyambung garis atas bilah, tanpa lubang tembus pandang. */
+  .tabbar .tab-catat::after {
+    content: ''; position: absolute; z-index: 0; pointer-events: none;
+    left: 50%; top: calc(-3px - var(--kubah-r));
+    width: calc(var(--kubah-r) * 2); height: calc(var(--kubah-r) + 4px); margin-left: calc(var(--kubah-r) * -1);
+    border-radius: var(--kubah-r) var(--kubah-r) 0 0;
+    background: var(--surface);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--brass) 7%, var(--surface)), var(--surface) 70%);
+    border: 1px solid rgba(201, 162, 39, .5); border-bottom: 0;
+    box-shadow: 0 -8px 16px -10px rgba(6, 24, 38, .28);
+    -webkit-mask: linear-gradient(#000 calc(100% - 1px), transparent 0);   /* buang bayangan di sisi bawah */
+  }
+  .tabbar .tab-catat .tc-ruang { display: block; width: 16px; height: 16px; }   /* = tinggi ikon tab lain → label sebaris */
+  .tabbar .tab-catat .tc-label { letter-spacing: .02em; }
+
+  .tabbar .tab-catat .tc-khatam {
+    --s: 58px; --sisi: 41px;
+    display: grid; place-items: center; position: absolute;
+    left: 50%; top: calc(-3px - var(--s) / 2);   /* pusat = pusat kubah, 3 px di atas tepi tab */
+    z-index: 1; isolation: isolate;
+    width: var(--s); height: var(--s); margin-left: calc(var(--s) / -2);
+    filter: drop-shadow(0 5px 9px rgba(11, 43, 69, .32));
+    transition: transform .14s var(--lengkung);
+  }
+  /* Bingkai kuningan: dua persegi membulat, satu diputar 45° (lapisan 0);
+     inti navy di lapisan 1; plus di lapisan 2. */
+  .tabbar .tab-catat .tc-khatam::before, .tabbar .tab-catat .tc-khatam::after,
+  .tabbar .tab-catat .tc-inti::before, .tabbar .tab-catat .tc-inti::after {
+    content: ''; position: absolute; left: 50%; top: 50%; border-radius: 9px; z-index: 0;
+  }
+  .tabbar .tab-catat .tc-khatam::before, .tabbar .tab-catat .tc-khatam::after {
+    width: var(--sisi); height: var(--sisi); margin: calc(var(--sisi) / -2) 0 0 calc(var(--sisi) / -2);
+    background: radial-gradient(circle, #F6E6A6 0, #D9B443 46%, #B08A1C 72%);   /* radial terpusat: kedua persegi identik saat diputar, tanpa jahitan */
+  }
+  .tabbar .tab-catat .tc-khatam::after { transform: rotate(45deg); }
+  /* Inti navy, 3 px lebih kecil di tiap sisi → bingkai kuningan merata. */
+  .tabbar .tab-catat .tc-inti { position: absolute; inset: 0; z-index: 1; }
+  .tabbar .tab-catat .tc-inti::before, .tabbar .tab-catat .tc-inti::after {
+    --d: calc(var(--sisi) - 6px);
+    width: var(--d); height: var(--d); margin: calc(var(--d) / -2) 0 0 calc(var(--d) / -2); border-radius: 7px;
+    background: radial-gradient(circle, #1E5682 0, var(--navy, #0B2B45) 58%, #071E31 80%);
+  }
+  .tabbar .tab-catat .tc-inti::after { transform: rotate(45deg); }
+  .tabbar .tab-catat .tc-plus {
+    position: relative; z-index: 2; display: block;
+    fill: none; stroke: #F2DC8A; stroke-width: 2.6; stroke-linecap: round;
+  }
+  .tabbar .tab-catat:active .tc-khatam { transform: scale(.93); }
+
+  /* Putaran 45° sekali ketuk (bingkai & inti), plus tetap tegak. */
+  @media (prefers-reduced-motion: no-preference) {
+    .tabbar .tab-catat.putar .tc-khatam::before, .tabbar .tab-catat.putar .tc-inti::before { animation: khatamPutar .42s var(--pegas-lenting, var(--lengkung)); }
+    .tabbar .tab-catat.putar .tc-khatam::after,  .tabbar .tab-catat.putar .tc-inti::after  { animation: khatamPutar45 .42s var(--pegas-lenting, var(--lengkung)); }
+  }
+  :root.hemat .tabbar .tab-catat.putar :is(.tc-khatam, .tc-inti)::before,
+  :root.hemat .tabbar .tab-catat.putar :is(.tc-khatam, .tc-inti)::after { animation: none; }
+
+  /* Angka kecil di tab (izin menunggu; pesan belum dibaca bila Pesan dilipat ke Menu). */
+  .tabbar .tab .tab-hitung {
+    position: absolute; top: 4px; left: calc(50% + 6px);
+    min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
+    display: grid; place-items: center;
+    background: #B4233C; color: #fff; font: 700 9.5px/1 var(--mono, 'IBM Plex Mono', monospace);
+    box-shadow: 0 0 0 2px var(--surface, #fff);
+  }
 }
-.tabbar .tab-catat .tc-bulat i { font-size: 17px; }
-.tabbar .tab-catat:active .tc-bulat { transform: scale(.94); }
+@keyframes khatamPutar   { from { transform: rotate(0deg); }  to { transform: rotate(45deg); } }
+@keyframes khatamPutar45 { from { transform: rotate(45deg); } to { transform: rotate(90deg); } }
 
 /* 4 · Pita "Lembar baru" di Ringkasan (dulu toast yang menutupi layar) */
 .pita-lembar {

@@ -1400,10 +1400,16 @@ function setKonteks(unit, jenjang, pindah, gender) {
 }
 
 function pulihkanKonteks() {
+  let tersimpan = false;
   try {
     const raw = sessionStorage.getItem('rq_ctx');
-    if (raw) { const p = JSON.parse(raw); APP.ctx = normalKonteks(p.unit, p.jenjang, p.gender); }
+    if (raw) { const p = JSON.parse(raw); APP.ctx = normalKonteks(p.unit, p.jenjang, p.gender); tersimpan = true; }
   } catch (e) { APP.ctx = { unit:'Semua', jenjang:'Semua', gender:'Semua' }; }
+  // v2.63: unit bawaan = Pengasuhan (menaungi santri MTs & MA). "Semua Unit" tetap
+  // bisa dipilih dan diingat selama sesi; akun berakses terbatas diatur di bawah.
+  if (!tersimpan && APP.ctx.unit === 'Semua' && bolehKonteks('Pengasuhan', 'Semua')) {
+    APP.ctx = normalKonteks('Pengasuhan', 'Semua', APP.ctx.gender);
+  }
   const ua = APP.profil?.unit_akses || 'Semua';
   if (APP.ctx.unit === 'Semua' && ua !== 'Semua') {
     APP.ctx = normalKonteks(ua, APP.profil?.jenjang_akses || 'Semua', APP.ctx.gender);
@@ -32764,6 +32770,7 @@ APP.versi = 'rq-v2.61';   // v2.60: Vite (pemadatan + pustaka swa-saji) · v2.61
  *  ada di gaya.css / di fungsinya masing-masing. Database tidak disentuh.
  * ===================================================================== */
 APP.versi = 'rq-v2.62';   // v2.62: gaya.css & ikon swa-saji, saring HP, tab Catat, kepala halaman ringkas
+APP.versi = 'rq-v2.63';   // v2.63: Gerbang Khatam di bilah bawah, unit bawaan Pengasuhan
 
 /* ---------- 1 · Saring di HP ----------------------------------------- */
 const SARING = { tombol: null, teks: null };
@@ -32777,10 +32784,12 @@ function ringkasanSaring() {
   const pilih = unit && unit.querySelector('select');
   const tUnit = !unit || unit.classList.contains('hidden') ? ''
     : (pilih ? (pilih.selectedOptions[0]?.textContent || '') : unit.textContent).replace(/\s+/g, ' ').trim();
-  if (tUnit) bag.push(tUnit);
-  const ctx = $('ctxBadge');
-  const tCtx = ctx && !ctx.classList.contains('hidden') ? ($('ctxLabel')?.textContent || '').trim() : '';
+  // Unit operasional (v2.63: bawaan Pengasuhan) — dari pemilih bila ada, selain itu dari label.
+  const ctx = $('ctxBadge'), pilihCtx = ctx && ctx.querySelector('select');
+  const tCtx = !ctx || ctx.classList.contains('hidden') ? ''
+    : (pilihCtx ? (pilihCtx.selectedOptions[0]?.textContent || '') : (ctx.textContent || '')).replace(/\s+/g, ' ').trim();
   if (tCtx && tCtx !== 'Semua Unit') bag.push(tCtx);
+  if (tUnit) bag.push(tCtx && tCtx !== 'Semua Unit' ? tUnit.replace(/^Asrama /, '') : tUnit);
   return bag.join(' · ');
 }
 
@@ -32830,20 +32839,75 @@ function perbaruiSaring() {
   const b = document.createElement('button');
   b.type = 'button'; b.className = 'tab tab-catat hidden'; b.id = 'tabCatat';
   b.setAttribute('aria-label', 'Catat pelanggaran');
-  b.innerHTML = '<span class="tc-bulat" aria-hidden="true"><i class="fa-solid fa-plus"></i></span>Catat';
+  // v2.63 — "Gerbang Khatam": bintang delapan (dua persegi, motif ikon chemint)
+  // duduk di lekuk bilah. Plus digambar SVG agar tepat di pusat (glif fon bergeser).
+  b.innerHTML = `<span class="tc-khatam" aria-hidden="true"><span class="tc-inti"></span>
+      <svg class="tc-plus" viewBox="0 0 24 24" width="22" height="22"><path d="M12 5.5v13M5.5 12h13"/></svg></span>
+    <span class="tc-ruang" aria-hidden="true"></span><span class="tc-label">Catat</span>`;
   if (izin) izin.before(b); else bilah.appendChild(b);
   // Tombol tanpa data-view: pendengar klik bilah tab lama mengabaikannya.
   b.addEventListener('click', () => {
     if (!bolehKilatPlg()) return;
+    if (bolehGerak()) { b.classList.remove('putar'); void b.offsetWidth; b.classList.add('putar'); }
     Promise.resolve(typeof kirimKilatSegera === 'function' ? kirimKilatSegera() : null)
       .then(() => modalCatatPelanggaran());
   });
+  b.addEventListener('animationend', () => b.classList.remove('putar'));
 })();
 
+/**
+ * v2.63 — Bilah bawah simetris. Tombol Catat harus tepat di tengah layar,
+ * jadi jumlah tab di kiri dan kanannya sama. Bila jumlah tab lain ganjil,
+ * tab Pesan dilipat ke Menu (pesan belum dibaca tampil sebagai angka di Menu).
+ * Peran yang tidak boleh mencatat tetap mendapat bilah lama apa adanya.
+ */
 function aturTabCatat() {
-  const b = $('tabCatat');
-  if (b) b.classList.toggle('hidden', !(APP.profil && bolehKilatPlg()));
+  const bilah = $('tabBar'), b = $('tabCatat'); if (!bilah || !b) return;
+  const boleh = !!(APP.profil && bolehKilatPlg());
+  b.classList.toggle('hidden', !boleh);
+  bilah.classList.toggle('ada-catat', boleh);
+  const pesan = bilah.querySelector('[data-view="pesan"]');
+  pesan?.classList.remove('tab-dilipat');
+  if (!boleh) { bilah.style.gridAutoFlow = ''; bilah.style.gridTemplateColumns = ''; [...bilah.children].forEach(el => { el.style.gridColumn = ''; }); return perbaruiHitungTab(); }
+  const tampak = () => [...bilah.querySelectorAll('.tab:not(.tab-catat)')]
+    .filter(t => !t.classList.contains('hidden') && !t.classList.contains('tab-dilipat'));
+  if (tampak().length % 2 && pesan && !pesan.classList.contains('hidden')) pesan.classList.add('tab-dilipat');
+  const t = tampak(), L = Math.floor(t.length / 2), R = t.length - L, kiri = t[L - 1];
+  if (kiri && kiri.nextElementSibling !== b) kiri.after(b);
+  else if (!kiri && bilah.firstElementChild !== b) bilah.prepend(b);
+  // Jumlah ganjil tanpa Pesan untuk dilipat (mis. Osis: Ringkasan · Santri · Menu):
+  // kolom dibagi rata per sisi supaya Catat tetap tepat di tengah layar.
+  [...bilah.children].forEach(el => { el.style.gridColumn = ''; });
+  if (L !== R && L > 0) {
+    bilah.style.gridAutoFlow = 'row';
+    bilah.style.gridTemplateColumns = `repeat(${2 * L * R + L * R}, 1fr)`;
+    t.forEach((el, i) => { el.style.gridColumn = `span ${i < L ? R : L}`; });
+    b.style.gridColumn = `span ${L * R}`;
+  } else { bilah.style.gridAutoFlow = ''; bilah.style.gridTemplateColumns = ''; }
+  perbaruiHitungTab();
 }
+
+/** Angka kecil di tab: izin menunggu (Izin) & pesan belum dibaca (Menu, bila Pesan dilipat). */
+function perbaruiHitungTab() {
+  const bilah = $('tabBar'); if (!bilah) return;
+  const pasang = (tab, sumber) => {
+    if (!tab) return;
+    let el = tab.querySelector('.tab-hitung');
+    const n = sumber && !sumber.classList.contains('hidden') ? sumber.textContent.trim() : '';
+    if (!n || n === '0') { el?.remove(); return; }
+    if (!el) { el = document.createElement('span'); el.className = 'tab-hitung'; tab.appendChild(el); }
+    if (el.textContent !== n) el.textContent = n;
+  };
+  pasang(bilah.querySelector('[data-view="perizinan"]'), $('badgePending'));
+  const dilipat = bilah.querySelector('[data-view="pesan"].tab-dilipat');
+  pasang($('tabMenu'), dilipat ? $('badgePesan') : null);
+}
+(function pantauHitungTab() {
+  try {
+    const mo = new MutationObserver(() => perbaruiHitungTab());
+    ['badgePending', 'badgePesan'].forEach(id => $(id) && mo.observe($(id), { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['class'] }));
+  } catch (e) {}
+})();
 
 /* rapikanGrupNav dipanggil sesudah login dan pada setiap perpindahan halaman
    — titik yang tepat untuk menyegarkan tab Catat & ringkasan saring tanpa
