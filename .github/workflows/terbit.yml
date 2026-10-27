@@ -60,6 +60,7 @@ jobs:
           npm i --no-save playwright@1.63.0
           npx playwright install --with-deps chromium
           RQCEPAT=1 node uji/uji-v261.cjs
+          node uji/uji-v262.cjs
       - name: Simpan hasil uji
         if: always()
         uses: actions/upload-artifact@v7

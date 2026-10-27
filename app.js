@@ -4236,7 +4236,7 @@ async function muatTabelSiswa() {
     <td class="secondary nowrap" style="padding-top:14px">${esc(s.nisn)}</td>
     <td><div class="primary">${esc(s.nama_siswa)}</div></td>
     <td>${esc(s.kelas||'-')}${subKelasSantri(s)}</td>
-    <td><span class="tag ${s.status_keberadaan==='Hadir'?'tag-ok':'tag-wait'}">${esc(s.status_keberadaan||'Hadir')}</span></td>
+    <td><span class="tag ${(s.status_keberadaan||'Hadir')==='Hadir'?'tag-off':'tag-wait'}">${esc(s.status_keberadaan||'Hadir')}</span></td>
     <td class="num center" style="color:${poinSantri(s)>=50?'var(--maroon)':'var(--text)'}" title="Seluruh riwayat: ${Number(s.total_poin_pelanggaran)||0} poin">${poinSantri(s)}</td>
     <td class="right"><button class="btn-link" data-detail="${esc(s.nisn)}">
       <i class="fa-solid fa-eye"></i> Detail</button></td>
@@ -9771,7 +9771,7 @@ function siapkanKlonPdf(doc) {
     doc.querySelectorAll('style').forEach(n => n.remove());
     doc.querySelectorAll('link[rel="stylesheet"]').forEach(n => {
       const href = n.getAttribute('href') || '';
-      if (!/fonts\.googleapis\.com|font-?awesome/i.test(href)) n.remove();
+      if (!/fonts\.googleapis\.com|font-?awesome|fa-subset/i.test(href)) n.remove();   // v2.62: ikon swa-saji ikut ke PDF
     });
     const gaya = doc.createElement('style');
     gaya.textContent = GAYA_AMAN_PDF + GAYA_LEMBAR_PDF;
@@ -22591,14 +22591,17 @@ function buatTiraiNY() {
 
 function tahanHalaman() {
   clearTimeout(TIRAI_NY.tUngkap);
-  document.documentElement.classList.remove('ungkap-halaman');
-  document.documentElement.classList.add('muat-halaman');
+  // v2.62: kelas dipasang di #viewRoot, bukan <html> — mengubah kelas <html>
+  // memaksa seluruh dokumen dihitung ulang gayanya; di #viewRoot cukup isi halaman.
+  const r = $('viewRoot') || document.documentElement;
+  r.classList.remove('ungkap-halaman');
+  r.classList.add('muat-halaman');
   try { if (window.Chart && Chart.defaults.animation) Chart.defaults.animation.duration = 0; } catch (e) {}
 }
 
 /** Lepas animasi masuk + putar ulang animasi grafik yang sudah jadi. */
 function ungkapHalaman() {
-  const r = document.documentElement;
+  const r = $('viewRoot') || document.documentElement;   // v2.62
   if (!r.classList.contains('muat-halaman')) return;
   r.classList.remove('muat-halaman');
   setelGrafikEfek();
@@ -22970,7 +22973,7 @@ async function tungguLayarBersih(maks = 12000) {
   const t0 = performance.now();
   const tertutup = (el) => !el || el.classList.contains('tutup');
   while (performance.now() - t0 < maks) {
-    if (tertutup($('layarMuat')) && tertutup($('tiraiNY')) && !document.documentElement.classList.contains('muat-halaman')
+    if (tertutup($('layarMuat')) && tertutup($('tiraiNY')) && !($('viewRoot') || document.documentElement).classList.contains('muat-halaman')
         && !(window.Swal && Swal.isVisible() && !document.querySelector('.swal2-toast'))) break;
     await tundaMs(150);
   }
@@ -26261,7 +26264,7 @@ async function optResetStatus(nisn) {
       const tag = [...tr.querySelectorAll('td > span.tag')].find(t => t.textContent.trim() === lama);
       if (tag) {
         optSimpanDom(ctx, tag.parentElement);
-        tag.className = 'tag tag-ok'; tag.textContent = 'Hadir';
+        tag.className = 'tag tag-off'; tag.textContent = 'Hadir';   // v2.62: keadaan biasa = netral
       }
       ctx.el = tr;
       ctx.gambarUlang = () => { if (APP.view === 'siswa') muatTabelSiswa(); };
@@ -28601,19 +28604,27 @@ APP.versi = 'rq-v2.50';   // v2.50: lembar baru — poin & tahap pembinaan nol t
 
 /**
  * v2.50 — pengumuman LEMBAR BARU: sekali per bulan per perangkat, saat
+ * (v2.62: kini pita di Ringkasan sampai ditutup — lihat isi fungsi.)
  * Ringkasan pertama kali dibuka pada bulan itu. Tidak tampil bila jendela
  * lain sedang terbuka (tur sambut, dialog) — dicoba lagi kunjungan berikutnya.
  */
 function umumkanLembarBaru() {
   const kunci = 'rq_lembar_umum', bulan = bulanIni();
   if (bacaLS(kunci) === bulan) return;
-  setTimeout(() => {
-    if (APP.view !== 'dashboard' || (window.Swal && Swal.isVisible())) return;
-    tulisLS(kunci, bulan);
-    Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false, timer: 8000, timerProgressBar: true })
-      .fire({ icon: 'info', title: `Lembar baru · ${labelBulan(bulan)}`,
-              text: 'Lembar baru. Poin dan tahap pembinaan dihitung dari nol setiap awal bulan. Catatan bulan lalu tetap tersimpan di Tutup Buku.' });
-  }, 1600);
+  // v2.62: pita di dalam Ringkasan, bukan toast yang menutupi layar saat mendarat.
+  // Tetap tampil di setiap gambar ulang Ringkasan (realtime, pindah bulan) sampai
+  // ditutup; tombol × yang menandai sudah dibaca untuk bulan ini di perangkat ini.
+  if (APP.view !== 'dashboard' || !$('viewRoot') || $('pitaLembar')) return;
+  const el = document.createElement('div');
+  el.className = 'pita-lembar'; el.id = 'pitaLembar'; el.setAttribute('role', 'status');
+  el.innerHTML = `<i class="fa-solid fa-calendar-day" aria-hidden="true"></i>
+    <div><b>Lembar baru · ${esc(labelBulan(bulan))}</b>
+      <span>Poin dan tahap pembinaan dihitung dari nol setiap awal bulan. Catatan bulan lalu tetap tersimpan di Tutup Buku.</span></div>
+    <button type="button" class="pita-tutup" aria-label="Tutup pemberitahuan"><i class="fa-solid fa-xmark"></i></button>`;
+  el.querySelector('.pita-tutup').addEventListener('click', () => { tulisLS(kunci, bulan); el.remove(); });
+  // Di bawah salam, di atas tab bulan (tab & lembar adalah satu kesatuan).
+  const tabs = $('viewRoot').querySelector('.lembar-tabs');
+  if (tabs) tabs.before(el); else $('viewRoot').prepend(el);
 }
 
 /* ---------- 1 · Periode Ringkasan ----------------------------------- */
@@ -32734,3 +32745,114 @@ async function pasangKalenderSebaran() {
 })();
 
 APP.versi = 'rq-v2.61';   // v2.60: Vite (pemadatan + pustaka swa-saji) · v2.61: grafik dimuat lambat + Kalender Sebaran
+
+/* =====================================================================
+ * v2.62 — RAPI & RINGAN
+ * ---------------------------------------------------------------------
+ *  Pasangan bagian "v2.62" di akhir gaya.css.
+ *
+ *  1. SARING DI HP. Baris penyaring bilah atas (unit, asrama, periode,
+ *     tanda sinkron) dilipat di balik satu tombol ringkas yang menuliskan
+ *     keadaannya ("Okt 2026 · Asrama Putra"). Bilah atas yang menempel di
+ *     layar turun dari ±112 px ke ±66 px. Penanda antrean & luring tetap
+ *     tampil bila menyala.
+ *  2. TAB "CATAT". Bilah bawah HP mendapat tombol tengah untuk mencatat
+ *     pelanggaran — tugas harian musyrif — dari halaman mana pun. Jalur
+ *     tulisnya tetap modalCatatPelanggaran(); hanya tampil bagi peran yang
+ *     boleh mencatat (bolehKilatPlg).
+ *  Kepala halaman yang ringkas, tag "Hadir" netral, dan pita Lembar Baru
+ *  ada di gaya.css / di fungsinya masing-masing. Database tidak disentuh.
+ * ===================================================================== */
+APP.versi = 'rq-v2.62';   // v2.62: gaya.css & ikon swa-saji, saring HP, tab Catat, kepala halaman ringkas
+
+/* ---------- 1 · Saring di HP ----------------------------------------- */
+const SARING = { tombol: null, teks: null };
+const BULAN_PENDEK = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+function ringkasanSaring() {
+  const bag = [];
+  const v = $('perBulan')?.value || '';
+  bag.push(/^\d{4}-\d{2}$/.test(v) ? `${BULAN_PENDEK[Number(v.slice(5)) - 1]} ${v.slice(0, 4)}` : 'Semua periode');
+  const unit = $('unitBox');
+  const pilih = unit && unit.querySelector('select');
+  const tUnit = !unit || unit.classList.contains('hidden') ? ''
+    : (pilih ? (pilih.selectedOptions[0]?.textContent || '') : unit.textContent).replace(/\s+/g, ' ').trim();
+  if (tUnit) bag.push(tUnit);
+  const ctx = $('ctxBadge');
+  const tCtx = ctx && !ctx.classList.contains('hidden') ? ($('ctxLabel')?.textContent || '').trim() : '';
+  if (tCtx && tCtx !== 'Semua Unit') bag.push(tCtx);
+  return bag.join(' · ');
+}
+
+function perbaruiSaring() {
+  if (!SARING.tombol) return;
+  const t = ringkasanSaring();
+  if (SARING.teks.textContent !== t) SARING.teks.textContent = t;
+  SARING.tombol.setAttribute('aria-label', `Penyaring: ${t}. Ketuk untuk ${SARING.tombol.getAttribute('aria-expanded') === 'true' ? 'menutup' : 'membuka'}.`);
+  // Baris penanda kosong saat terlipat → jangan menyisakan jarak baris.
+  const meta = document.querySelector('.topbar .meta');
+  if (meta) {
+    const ada = [...meta.children].some(el => el.getClientRects().length > 0);
+    document.querySelector('.topbar').classList.toggle('meta-kosong', !ada);
+  }
+}
+
+(function pasangSaring() {
+  const bar = document.querySelector('.topbar'), meta = bar && bar.querySelector('.meta');
+  if (!bar || !meta) return;
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'saring-ringkas'; b.id = 'btnSaring';
+  b.setAttribute('aria-expanded', 'false'); b.setAttribute('aria-controls', 'saringMeta');
+  b.innerHTML = '<i class="fa-solid fa-sliders" aria-hidden="true"></i><span class="sr-teks"></span><i class="fa-solid fa-chevron-down sr-panah" aria-hidden="true"></i>';
+  meta.id = meta.id || 'saringMeta';
+  meta.before(b);
+  SARING.tombol = b; SARING.teks = b.querySelector('.sr-teks');
+  b.addEventListener('click', () => {
+    const buka = !bar.classList.contains('saring-buka');
+    bar.classList.toggle('saring-buka', buka);
+    b.setAttribute('aria-expanded', String(buka));
+    perbaruiSaring();
+  });
+  meta.addEventListener('change', () => setTimeout(perbaruiSaring, 0));   // pemilih unit asrama digambar ulang
+  ['perBulan', 'perBasis', 'perReset'].forEach(id => $(id)?.addEventListener(id === 'perReset' ? 'click' : 'change', () => setTimeout(perbaruiSaring, 0)));
+  // Label unit/asrama digambar ulang oleh fungsi lain; antrean & luring menyala sendiri.
+  try {
+    new MutationObserver(() => perbaruiSaring())
+      .observe(meta, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'hidden', 'style'] });
+  } catch (e) {}
+  perbaruiSaring();
+})();
+
+/* ---------- 2 · Tab "Catat" di bilah bawah --------------------------- */
+(function pasangTabCatat() {
+  const bilah = $('tabBar'), izin = bilah && bilah.querySelector('[data-view="perizinan"]');
+  if (!bilah) return;
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'tab tab-catat hidden'; b.id = 'tabCatat';
+  b.setAttribute('aria-label', 'Catat pelanggaran');
+  b.innerHTML = '<span class="tc-bulat" aria-hidden="true"><i class="fa-solid fa-plus"></i></span>Catat';
+  if (izin) izin.before(b); else bilah.appendChild(b);
+  // Tombol tanpa data-view: pendengar klik bilah tab lama mengabaikannya.
+  b.addEventListener('click', () => {
+    if (!bolehKilatPlg()) return;
+    Promise.resolve(typeof kirimKilatSegera === 'function' ? kirimKilatSegera() : null)
+      .then(() => modalCatatPelanggaran());
+  });
+})();
+
+function aturTabCatat() {
+  const b = $('tabCatat');
+  if (b) b.classList.toggle('hidden', !(APP.profil && bolehKilatPlg()));
+}
+
+/* rapikanGrupNav dipanggil sesudah login dan pada setiap perpindahan halaman
+   — titik yang tepat untuk menyegarkan tab Catat & ringkasan saring tanpa
+   menambah satu lapis pembungkus navigateTo lagi. */
+(function bungkusRapikanNav() {
+  const asli = rapikanGrupNav;
+  rapikanGrupNav = function () {
+    const h = asli.apply(this, arguments);
+    try { aturTabCatat(); perbaruiSaring(); } catch (e) {}
+    return h;
+  };
+})();
