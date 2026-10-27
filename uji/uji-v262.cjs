@@ -3,6 +3,8 @@
  *   npm run bangun:uji && node uji/uji-v262.cjs
  *
  * A · berkas: gaya keluar dari index.html, ikon swa-saji lengkap, INTI sw.js
+ * v2.63 (bagian D): unit bawaan Pengasuhan, Gerbang Khatam tepat di tengah untuk
+ *     setiap peran, Pesan dilipat ke Menu, bulatan tidak terpancung.
  * B · aplikasi utuh (sumber & build, Supabase tiruan):
  *     gaya sumber = gaya build (CSSOM), ikon tergambar, Saring HP, tab Catat,
  *     pita Lembar Baru, kelas muat-halaman tidak lagi di <html>, tag Hadir netral,
@@ -92,7 +94,7 @@ const ikonKosong = (page) => page.evaluate(() => [...document.querySelectorAll('
     cek(`A5 ikon/${f} ada & kecil`, fs.existsSync(path.join(AKAR, 'ikon', f)) && fs.statSync(path.join(AKAR, 'ikon', f)).size < 40 * 1024);
   for (const [label, sw] of [['sumber', baca('sw.js')], ['build', baca('dist-uji', 'sw.js')]]) {
     const ok = ["'./gaya.css'", "'./ikon/fa-subset.css'", "'./ikon/fa-solid-subset.woff2'", "'./ikon/fa-regular-subset.woff2'", "'./ikon/fa-brands-subset.woff2'"].every(x => sw.includes(x));
-    cek(`A6 sw.js ${label}: VERSI rq-v2.62, gaya & ikon di INTI dan POLA_INTI`, ok && /VERSI\s+=\s+'rq-v2\.62'/.test(sw) && /gaya\\\.css\$/.test(sw) && /\\\/ikon\\\//.test(sw));
+    cek(`A6 sw.js ${label}: VERSI rq-v2.6x, gaya & ikon di INTI dan POLA_INTI`, ok && /VERSI\s+=\s+'rq-v2\.6[2-9]'/.test(sw) && /gaya\\\.css\$/.test(sw) && /\\\/ikon\\\//.test(sw));
   }
   const dhtml = baca('dist-uji', 'index.html');
   cek('A7 build: tag gaya & ikon utuh, berkas dengan nama tetap', dhtml.includes('href="gaya.css"') && dhtml.includes('href="ikon/fa-subset.css"')
@@ -169,7 +171,7 @@ const ikonKosong = (page) => page.evaluate(() => [...document.querySelectorAll('
       await sp.ctx.close();
       const sg = await masuk(browser, URL_[v], { hp: true, peran: 'Guru' });
       const g = await sg.page.evaluate(() => ({ catat: !document.getElementById('tabCatat').classList.contains('hidden'), saring: document.querySelector('#btnSaring .sr-teks').textContent }));
-      cek(`C16 ${v}: Guru — tab Catat tampil, Saring menyebut asramanya`, g.catat && /Asrama Putra/.test(g.saring), g);
+      cek(`C16 ${v}: Guru — tab Catat tampil, Saring menyebut unit & asramanya`, g.catat && /Pengasuhan · Putra/.test(g.saring), g);
       cek(`C17 ${v}: Guru tanpa galat`, sg.galat.length === 0, sg.galat.slice(0, 4));
       await sg.ctx.close();
     }
@@ -182,6 +184,44 @@ const ikonKosong = (page) => page.evaluate(() => [...document.querySelectorAll('
       cek(`C19 ${v}: desktop — ikon bilah sisi & bilah atas tergambar`, k.length === 0, k);
       await s.page.screenshot({ path: path.join(KELUAR, `v262-${v}-desktop.png`) });
       cek(`C20 ${v}: desktop tanpa galat`, s.galat.length === 0, s.galat.slice(0, 4));
+      await s.ctx.close();
+    }
+  }
+
+  console.log('\nD · v2.63 — unit bawaan & Gerbang Khatam');
+  for (const v of ['sumber', 'build']) {
+    { // Admin: unit bawaan, pilihan sesi diingat
+      const s = await masuk(browser, URL_[v], { hp: true });
+      const p = s.page;
+      cek(`D1 ${v}: Admin masuk → unit aktif Pengasuhan, Saring menyebutnya`, await p.evaluate(() => APP.ctx.unit === 'Pengasuhan'
+        && document.querySelector('#btnSaring .sr-teks').textContent.includes('Pengasuhan')));
+      await p.evaluate(() => setKonteks('Semua', 'Semua')); await p.waitForTimeout(500);
+      await p.reload(); await p.waitForFunction(() => { const b = document.getElementById('btnLogin'); return typeof APP !== 'undefined' && b && b.offsetParent && !b.disabled; }, null, { timeout: 120000 });
+      await p.click('#btnLogin'); await p.waitForFunction(() => APP.profil && document.querySelector('#viewRoot').children.length, null, { timeout: 120000 });
+      cek(`D2 ${v}: "Semua Unit" yang dipilih tetap diingat selama sesi`, await p.evaluate(() => APP.ctx.unit === 'Semua'));
+      const k = await p.evaluate(() => { const bar = document.getElementById('tabBar'), kh = document.querySelector('#tabCatat .tc-khatam').getBoundingClientRect();
+        return { pusat: kh.left + kh.width / 2, lebar: innerWidth, atas: kh.top - bar.getBoundingClientRect().top,
+          contain: getComputedStyle(bar).contain, tabs: [...bar.querySelectorAll('.tab')].filter(t => t.getClientRects().length).map(t => t.id || t.dataset.view),
+          menu: document.querySelector('#tabMenu .tab-hitung')?.textContent || null }; });
+      cek(`D3 ${v}: Admin — bintang tepat di tengah (±1 px), menonjol di atas bilah, tidak terpancung`, Math.abs(k.pusat - k.lebar / 2) <= 1 && k.atas < -15 && !/paint|strict|content/.test(k.contain), k);
+      cek(`D4 ${v}: Admin — 2 tab | Catat | 2 tab (Pesan dilipat ke Menu)`, JSON.stringify(k.tabs) === JSON.stringify(['dashboard', 'siswa', 'tabCatat', 'perizinan', 'tabMenu']), k.tabs);
+      // Langsung dibaca sesudah pemantau bereaksi (refreshBadgePesan tiruan bisa menimpanya kemudian).
+      cek(`D5 ${v}: pesan belum dibaca tampil sebagai angka di Menu`, await p.evaluate(async () => {
+        const b = document.getElementById('badgePesan'); b.textContent = '4'; b.classList.remove('hidden');
+        await new Promise(r => setTimeout(r, 0));
+        return document.querySelector('#tabMenu .tab-hitung')?.textContent === '4'; }));
+      await p.screenshot({ path: path.join(KELUAR, `v263-${v}-hp-bilah.png`), clip: { x: 0, y: 700, width: 390, height: 144 } });
+      cek(`D6 ${v}: Admin tanpa galat`, s.galat.length === 0, s.galat.slice(0, 4));
+      await s.ctx.close();
+    }
+    for (const peran of ['Guru', 'Walas', 'Osis', 'Pimpinan']) {
+      const s = await masuk(browser, URL_[v], { hp: true, peran });
+      const r = await s.page.evaluate(() => { const b = document.getElementById('tabCatat'), kh = b.querySelector('.tc-khatam').getBoundingClientRect();
+        return { tampil: b.getClientRects().length > 0, pusat: kh.left + kh.width / 2, lebar: innerWidth, unit: APP.ctx.unit,
+          tabs: [...document.querySelectorAll('#tabBar .tab')].filter(t => t.getClientRects().length).map(t => t.id || t.dataset.view) }; });
+      if (peran === 'Pimpinan') cek(`D7 ${v}: Pimpinan — tanpa Catat, bilah lama utuh`, !r.tampil && !(await s.page.$('#tabBar.ada-catat')), r.tabs);
+      else cek(`D7 ${v}: ${peran} — Catat tepat di tengah (${r.tabs.join(' · ')})`, r.tampil && Math.abs(r.pusat - r.lebar / 2) <= 1, r);
+      cek(`D8 ${v}: ${peran} tanpa galat`, s.galat.length === 0, s.galat.slice(0, 4));
       await s.ctx.close();
     }
   }
