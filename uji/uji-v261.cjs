@@ -120,7 +120,7 @@ async function telusuriMenu(page) {
     dist('index.html').indexOf('src="./vendor.js"') > 0 && dist('index.html').indexOf('src="./vendor.js"') < dist('index.html').indexOf('src="app.js"')
     && !/jsdelivr\.net\/npm\/(@supabase|sweetalert2|chart\.js)/.test(dist('index.html')));
   cek('A2 manifest tetap di akar (start_url/scope tidak bergeser)', dist('index.html').includes('<link rel="manifest" href="manifest.webmanifest">') && fs.existsSync(path.join(AKAR, 'dist-uji/manifest.webmanifest')));
-  cek('A3 sw.js: VERSI rq-v2.61 + ./vendor.js di INTI', /VERSI\s+=\s+'rq-v2\.61'/.test(dist('sw.js')) && dist('sw.js').includes("'./vendor.js',"));
+  cek('A3 sw.js: VERSI rq-v2.6x + ./vendor.js di INTI', /VERSI\s+=\s+'rq-v2\.6\d'/.test(dist('sw.js')) && dist('sw.js').includes("'./vendor.js',"));
   const potongan = fs.readdirSync(path.join(AKAR, 'dist-uji/pustaka'));
   cek('A4 potongan pustaka terpisah: chart-*.js & echarts-chemint-*.js', potongan.some(f => /^chart-.+\.js$/.test(f)) && potongan.some(f => /^echarts-chemint-.+\.js$/.test(f)), potongan);
   cek('A5 vendor.js tidak memuat Chart.js maupun ECharts', !/Chart\.js v4|registerController|zrender/i.test(dist('vendor.js')));

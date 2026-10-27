@@ -22,8 +22,29 @@ import { createRequire } from 'node:module';
 const AKAR = path.dirname(new URL(import.meta.url).pathname);
 const UJI = process.env.RQ_UJI === '1';
 const KLASIK = ['app.js', 'meja.js', 'panggung.js', 'showreel.js'];
-const SALIN = ['manifest.webmanifest', 'favicon-64.png', 'icon-192.png', 'icon-512.png', 'icon-512-maskable.png', 'diagnosa.html'];
+const SALIN = ['manifest.webmanifest', 'favicon-64.png', 'icon-192.png', 'icon-512.png', 'icon-512-maskable.png', 'diagnosa.html',
+  'ikon/fa-solid-subset.woff2', 'ikon/fa-regular-subset.woff2', 'ikon/fa-brands-subset.woff2'];
+/* v2.62: gaya klasik — hanya komentar yang dibuang (bukan dipadatkan lightningcss:
+   pemadat mengubah `max-width` menjadi sintaks rentang & warna menjadi oklab(), yang
+   tidak dikenal Safari lama). Nama berkas tetap agar tercantum di INTI sw.js.
+   Tag <link>-nya disembunyikan dari Vite (lihat GAYA_TAG). */
+const GAYA = ['gaya.css', 'ikon/fa-subset.css'];
+const GAYA_TAG = (f) => `<link rel="stylesheet" href="${f}">`;
+const GAYA_PENANDA = (f) => `<!--RQ_GAYA:${f}-->`;
 const TAG_CDN = (paket) => new RegExp(`<script defer src="https://cdn\\.jsdelivr\\.net/npm/${paket.replace(/[./]/g, '\\$&')}@[^"]+"></script>\\n?`);
+
+/** Buang komentar CSS di luar string; selebihnya byte demi byte sama. */
+function buangKomentarCss(css) {
+  let o = '', i = 0, q = null;
+  while (i < css.length) {
+    const c = css[i];
+    if (q) { o += c; if (c === '\\') { o += css[i + 1] ?? ''; i += 2; continue; } if (c === q) q = null; i++; continue; }
+    if (c === '"' || c === "'") { q = c; o += c; i++; continue; }
+    if (c === '/' && css[i + 1] === '*') { const z = css.indexOf('*/', i + 2); i = z < 0 ? css.length : z + 2; continue; }
+    o += c; i++;
+  }
+  return o.replace(/\n[ \t]*\n+/g, '\n');
+}
 
 function chemint() {
   return {
@@ -44,6 +65,10 @@ function chemint() {
         const sb = TAG_CDN('@supabase/supabase-js'), sw = TAG_CDN('sweetalert2');
         if (!sb.test(html) || !sw.test(html)) throw new Error('[chemint] tag CDN supabase-js/sweetalert2 tidak ditemukan di index.html');
         html = html.replace(sb, '<script type="module" src="./vite/vendor.js"></script>\n').replace(sw, '');
+        for (const f of GAYA) {
+          if (!html.includes(GAYA_TAG(f))) throw new Error(`[chemint] ${GAYA_TAG(f)} tidak ditemukan di index.html`);
+          html = html.replace(GAYA_TAG(f), GAYA_PENANDA(f));
+        }
         if (TAG_CDN('chart.js').test(html)) this.warn?.('[chemint] tag CDN chart.js masih ada — dibiarkan (index.html lama).');
         // Lindungi manifest dari pemindahan ke assets/ (start_url & scope relatif terhadap berkasnya).
         return html.replace('<link rel="manifest" href="manifest.webmanifest">', '<link rel="manifest" href="__RQ_MANIFEST__">');
@@ -58,6 +83,8 @@ function chemint() {
         if (r.errors && r.errors.length) throw new Error(`[chemint] gagal memadatkan ${f}: ${JSON.stringify(r.errors).slice(0, 400)}`);
         this.emitFile({ type: 'asset', fileName: f, source: r.code });
       }
+      // 1b. Gaya: buang komentar saja, nama berkas tetap.
+      for (const f of GAYA) this.emitFile({ type: 'asset', fileName: f, source: buangKomentarCss(fs.readFileSync(path.join(AKAR, f), 'utf8')) });
       // 2. Berkas statis apa adanya.
       for (const f of SALIN) this.emitFile({ type: 'asset', fileName: f, source: fs.readFileSync(path.join(AKAR, f)) });
       // 3. Service worker: vendor.js ikut INTI (cache-first, ganti hanya saat VERSI naik).
@@ -78,7 +105,8 @@ function periksaHtml() {
       order: 'post',
       handler(html) {
         html = html.replace('__RQ_MANIFEST__', 'manifest.webmanifest');
-        for (const wajib of ['src="./vendor.js"', 'src="app.js"', 'href="manifest.webmanifest"'])
+        for (const f of GAYA) html = html.replace(GAYA_PENANDA(f), GAYA_TAG(f));
+        for (const wajib of ['src="./vendor.js"', 'src="app.js"', 'href="manifest.webmanifest"', ...GAYA.map(GAYA_TAG)])
           if (!html.includes(wajib)) throw new Error(`[chemint] index.html hasil build tidak memuat ${wajib}`);
         if (html.indexOf('src="./vendor.js"') > html.indexOf('src="app.js"')) throw new Error('[chemint] vendor.js harus mendahului app.js');
         return html;
