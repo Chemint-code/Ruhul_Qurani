@@ -83,7 +83,7 @@ const ikonKosong = (page) => page.evaluate(() => [...document.querySelectorAll('
   cek('A3 index.html < 40 KB (dulu ±480 KB)', Buffer.byteLength(html) < 40 * 1024, Math.round(Buffer.byteLength(html) / 1024) + ' KB');
 
   // Setiap nama fa-* yang dipakai harus ada di subset (penjaga bila ikon baru ditambahkan).
-  const sumber = ['app.js', 'meja.js', 'panggung.js', 'showreel.js', 'index.html', 'gaya.css'].map(f => baca(f)).join('\n');
+  const sumber = ['app.js', 'meja.js', 'panggung.js', 'showreel.js', 'sidang.js', 'index.html', 'gaya.css'].map(f => baca(f)).join('\n');
   const subset = baca('ikon', 'fa-subset.css');
   const UTIL = /^fa-(subset|solid|regular|brands|spin|fw|lg|xs|sm|\d+x|rotate|flip|beat|fade|shake|bounce|pulse|stack|border|pull|li|ul|inverse|sharp|classic|duotone|layers)/;
   const nama = [...new Set(sumber.match(/(?<![\w-])fa-[a-z0-9]+(?:-[a-z0-9]+)*/g))]

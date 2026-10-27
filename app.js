@@ -2672,6 +2672,7 @@ async function navigateTo(view) {
     view = rumah();
   }
   const viewLama = APP.viewTampil;
+  if (view !== 'sidang') tutupRuangSidang();   // v2.64: ruang sidang layar penuh ditutup saat berpindah
   APP.view = view;
   APP.onKlik = null;
   // Dipakai CSS untuk cap air korps pada halaman kosong modul Pengasuhan.
@@ -2727,6 +2728,7 @@ async function navigateTo(view) {
     else if (view === 'rekapbina')   await viewRekapPembinaan();
     else if (view === 'master')      await viewMaster();
     else if (view === 'pengguna')    await viewPengguna();
+    else if (view === 'sidang')      await viewSidang();       // v2.64
     tandaiTabelBisaGeser();
   } catch (err) { fireError(err); }
   finally { loading(false); APP.navSibuk--; tutupTirai(); LayarMuat.tutupAwal(); }
@@ -6155,7 +6157,7 @@ async function gambarBina() {
       lapor ? `${angka(belumLapor)} belum dilaporkan`
             : (nMusyawarah ? `${angka(nMusyawarah)} menunggu musyawarah` : '')) +
     stat('Menunggu Pengesahan', angka(menunggu), 'fa-solid fa-file-signature', 'background:#E7F1F7;color:var(--sea)', 'var(--sea)',
-      bolehPembinaan() ? 'Laporan Ustadz GEN-Z untuk Anda' : 'Di tangan guru kelas binaan') +
+      bolehPembinaan() ? 'Laporan Ustadz GEN-Z & sidang OSDA untuk Anda' : 'Di tangan guru kelas binaan') +
     stat('Selesai', angka(total - proses), 'fa-solid fa-circle-check', 'background:var(--teal-bg);color:var(--teal)', 'var(--teal)',
       `${angka(otomatis)} dibuat otomatis`);
 
@@ -32917,6 +32919,132 @@ function perbaruiHitungTab() {
   rapikanGrupNav = function () {
     const h = asli.apply(this, arguments);
     try { aturTabCatat(); perbaruiSaring(); } catch (e) {}
+    return h;
+  };
+})();
+
+/* =====================================================================
+ * v2.64 — RUANG SIDANG TA'DIB (Majelis OSDA)
+ * =====================================================================
+ *  Pembinaan Ringan & Sedang angkatan VII–X disidangkan OSDA: pilih bidang
+ *  → kategori → tahap → bacakan putusan → tandai "sudah diberikan". Laporan
+ *  sampai ke musyrif kelas lewat pesan_bk jenis 'pembinaan' (alur Ustadz
+ *  GEN-Z v2.12), dan musyrif yang mengesahkan. Berat & angkatan XI–XII
+ *  tetap otonomi musyrif.
+ *
+ *  Halaman layar penuh ada di sidang.js (dimuat lambat). Di sini hanya:
+ *  menu, rute, pemuat, pintu sidang di Ringkasan (OSDA), dan tab bawah
+ *  "Sidang" khusus OSDA. Semua batas (kategori, angkatan, unit, hari
+ *  Senin/Rabu/Jumat/Sabtu) ditegakkan RPC sidang_* di database — RLS
+ *  p_pbn_read yang menutup log_pembinaan dari Osis TIDAK diubah.
+ * ===================================================================== */
+APP.versi = 'rq-v2.64';   // v2.64: Ruang Sidang Ta'dib (OSDA)
+
+// Semua peran kecuali Klinik: OSDA & Admin memutus, selebihnya mengamati
+// (lingkup kelas mengikuti akun — diatur RPC sidang_berkas).
+MENU_ROLE.sidang = ['Admin','Guru','Walas','Guru BK','Wakasis','Guru Piket','Ustadz GEN-Z','Osis','Pimpinan'];
+JUDUL.sidang = { lat:"Sidang Ta'dib", ar:'مجلس التأديب', teks:"Ruang Sidang Ta'dib" };
+const HARI_SIDANG = [1, 3, 5, 6];   // ISO: Senin, Rabu, Jumat, Sabtu (sama dengan sidang_hari() di database)
+
+/** Tanggal & hari sidang menurut WIB, apa pun zona waktu perangkat. */
+function infoHariSidang(d = new Date()) {
+  const kunci = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
+  const iso = (k) => { const x = new Date(k + 'T12:00:00+07:00').getUTCDay(); return x === 0 ? 7 : x; };
+  let berikut = null;
+  for (let i = 1; i <= 7 && !berikut; i++) {
+    const k = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date(d.getTime() + i * 864e5));
+    if (HARI_SIDANG.includes(iso(k))) berikut = k;
+  }
+  const label = (k) => new Date(k + 'T12:00:00+07:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Jakarta' });
+  return { kunci, buka: HARI_SIDANG.includes(iso(kunci)), berikut, label };
+}
+
+const SIDANG_JS = { muat: null };
+function muatSidangJs() {
+  if (window.RQSidang) return Promise.resolve(true);
+  if (!SIDANG_JS.muat) {
+    SIDANG_JS.muat = new Promise((ok) => {
+      const s = document.createElement('script');
+      s.src = 'sidang.js'; s.async = true;
+      s.onload = () => ok(!!window.RQSidang);
+      s.onerror = () => { SIDANG_JS.muat = null; ok(false); };   // boleh dicoba lagi
+      document.head.appendChild(s);
+    });
+  }
+  return SIDANG_JS.muat;
+}
+
+async function viewSidang() {
+  $('viewRoot').innerHTML = `<div class="card" style="padding:28px;text-align:center">
+    <i class="fa-solid fa-gavel" style="font-size:22px;color:var(--sea)"></i>
+    <p style="margin:10px 0 0">Membuka Ruang Sidang…</p></div>`;
+  const ok = await muatSidangJs();
+  if (APP.view !== 'sidang') return;
+  if (!ok) {
+    $('viewRoot').innerHTML = kartu("Ruang Sidang Ta'dib",
+      `<div class="card-body">${kosong('Ruang Sidang belum bisa dibuka', 'Berkas halaman sidang gagal dimuat. Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark')}
+       <p style="text-align:center"><button class="btn btn-primary" id="sdUlang"><i class="fa-solid fa-rotate"></i>Coba lagi</button></p></div>`);
+    $('sdUlang')?.addEventListener('click', () => navigateTo('sidang'));
+    return;
+  }
+  window.RQSidang.buka();
+}
+
+function tutupRuangSidang() { try { window.RQSidang?.tutup(); } catch (e) { console.warn('[sidang]', e); } }
+
+// Satu-satunya pintu sidang.js ke aplikasi.
+window.RQ_SIDANG = {
+  db, esc, toast, fireError, sync, Swal: window.Swal,
+  profil: () => APP.profil,
+  unitAwal: () => { try { return unitGuru() || normalUnit(APP.ctx.gender); } catch (e) { return null; } },
+  kurangGerak: () => MULUS.kurangGerak || matchMedia('(prefers-reduced-motion: reduce)').matches,
+  hemat: () => modeHemat(),
+  keluar: () => navigateTo(rumah()),
+  segarkanPesan: () => { try { cacheHapus('laporan_bina', 'pesan_bk', 'pembinaan'); refreshBadgePesan(); } catch (e) {} }
+};
+// Swal dimuat `defer`/modul — ambil ulang saat dipakai bila awalnya belum ada.
+Object.defineProperty(window.RQ_SIDANG, 'Swal', { get: () => window.Swal, configurable: true });
+
+/* ---------- Tab "Sidang" di bilah bawah — khusus OSDA ----------------- */
+(function pasangTabSidang() {
+  const bilah = $('tabBar'); if (!bilah) return;
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'tab tab-sidang hidden'; b.dataset.view = 'sidang';
+  b.innerHTML = '<i class="fa-solid fa-gavel"></i>Sidang';
+  const menu = $('tabMenu');
+  if (menu) menu.before(b); else bilah.appendChild(b);
+})();
+(function bungkusAturTabCatat() {
+  // Tab Sidang hanya untuk Osis. Disetel SEBELUM aturTabCatat menghitung
+  // tab yang tampak, supaya tombol Catat tetap tepat di tengah:
+  // Osis → Ringkasan · Santri | Catat | Sidang · Menu.
+  const asli = aturTabCatat;
+  aturTabCatat = function () {
+    try { document.querySelector('#tabBar .tab-sidang')?.classList.toggle('hidden', role() !== 'Osis'); } catch (e) {}
+    return asli.apply(this, arguments);
+  };
+})();
+
+/* ---------- Pintu sidang di Ringkasan — khusus OSDA ------------------- */
+(function bungkusRingkasanOsda() {
+  const asli = viewDashboard;
+  viewDashboard = async function () {
+    const h = await asli.apply(this, arguments);
+    try {
+      if (role() === 'Osis' && APP.view === 'dashboard' && !$('pintuSidang')) {
+        const info = infoHariSidang();
+        const el = document.createElement('div');
+        el.id = 'pintuSidang';
+        el.className = 'pintu-sidang rise' + (info.buka ? '' : ' reses');
+        el.innerHTML = info.buka
+          ? `<i class="fa-solid fa-gavel"></i><div><b>Hari ini hari sidang</b><small>${esc(info.label(info.kunci))} · berkas perkara Ringan & Sedang sudah tersusun.</small></div>
+             <button type="button">Masuk Ruang Sidang</button>`
+          : `<i class="fa-solid fa-calendar-day"></i><div><b>Majelis sedang reses</b><small>Sidang berikutnya ${esc(info.label(info.berikut))}.</small></div>
+             <button type="button">Lihat jadwal</button>`;
+        el.querySelector('button').addEventListener('click', () => navigateTo('sidang'));
+        $('viewRoot').prepend(el);
+      }
+    } catch (e) { console.warn('[pintu sidang]', e); }
     return h;
   };
 })();

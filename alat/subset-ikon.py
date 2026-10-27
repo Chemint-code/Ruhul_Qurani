@@ -18,7 +18,7 @@ from fontTools import subset
 
 AKAR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FA = os.path.join(AKAR, 'node_modules', '@fortawesome', 'fontawesome-free')
-SUMBER = ['app.js', 'meja.js', 'panggung.js', 'showreel.js', 'index.html', 'gaya.css']
+SUMBER = ['app.js', 'meja.js', 'panggung.js', 'showreel.js', 'sidang.js', 'index.html', 'gaya.css']
 # Nama kelas yang dibentuk dari potongan string:
 #   app.js  fa-${… ? 'compress' : 'expand'}   ·   fa-arrow-trend-${naik ? 'up' : 'down'}
 TAMBAHAN = ['fa-compress', 'fa-expand', 'fa-arrow-trend-up', 'fa-arrow-trend-down']

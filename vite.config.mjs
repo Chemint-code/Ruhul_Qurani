@@ -21,7 +21,7 @@ import { createRequire } from 'node:module';
 
 const AKAR = path.dirname(new URL(import.meta.url).pathname);
 const UJI = process.env.RQ_UJI === '1';
-const KLASIK = ['app.js', 'meja.js', 'panggung.js', 'showreel.js'];
+const KLASIK = ['app.js', 'meja.js', 'panggung.js', 'showreel.js', 'sidang.js'];   // v2.64: + sidang.js
 const SALIN = ['manifest.webmanifest', 'favicon-64.png', 'icon-192.png', 'icon-512.png', 'icon-512-maskable.png', 'diagnosa.html',
   'ikon/fa-solid-subset.woff2', 'ikon/fa-regular-subset.woff2', 'ikon/fa-brands-subset.woff2'];
 /* v2.62: gaya klasik — hanya komentar yang dibuang (bukan dipadatkan lightningcss:

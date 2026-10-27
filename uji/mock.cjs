@@ -61,7 +61,7 @@ const MOCK = `
   const sesi = window.__TANPASESI ? null : { user:{ id:'u-admin', email:'admin@x' }, access_token:'t' };
   window.supabase = { createClient: () => ({
     from: q,
-    rpc: (nama, arg) => { __LOG.push({ t:'rpc:'+nama }); return new Promise(r=>setTimeout(()=>r({data:null,error:null}),JEDA)); },
+    rpc: (nama, arg) => { __LOG.push({ t:'rpc:'+nama, arg }); const f = window.__RPC && window.__RPC[nama]; return new Promise(r=>setTimeout(()=>r(f ? f(arg) : {data:null,error:null}),JEDA)); },
     auth: { getSession: async()=>({data:{session:sesi}}), getUser: async()=>({data:{user:sesi&&sesi.user}}),
             onAuthStateChange: ()=>({data:{subscription:{unsubscribe(){}}}}), signOut: async()=>({}), signInWithPassword: async()=>({data:{},error:null}) },
     channel: () => { const c={ on(){return c;}, subscribe(cb){ cb&&cb('SUBSCRIBED'); return c; } }; return c; },
