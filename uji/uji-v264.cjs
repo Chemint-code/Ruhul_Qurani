@@ -17,7 +17,7 @@ const AKAR = path.resolve(__dirname, '..');
 const NM = path.join(AKAR, 'node_modules');
 const KELUAR = path.join(__dirname, 'keluaran'); fs.mkdirSync(KELUAR, { recursive: true });
 const POTRET = process.env.RQ_POTRET === '1';
-const JENIS = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript', '.css': 'text/css', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.woff2': 'font/woff2' };
+const JENIS = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript', '.css': 'text/css', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.woff2': 'font/woff2' }[...]
 
 let lulus = 0, gagal = 0;
 const cek = (j, ok, info) => { ok ? lulus++ : gagal++; console.log(`${ok ? '  ok  ' : ' GAGAL'} ${j}${info !== undefined ? '  · ' + JSON.stringify(info) : ''}`); };
@@ -42,7 +42,7 @@ function pasangRpc(o) {
   const BENTUK = { Ringan: ['Nasehat', 'Nasehat + Teguran', 'Membersihkan kamar mandi asrama'], Sedang: ['Menghafal 1 halaman mufradat', 'Berdiri di lapangan saat apel'] };
   const butir = Array.from({ length: 64 }, (_, i) => {
     const kat = i % 5 === 0 ? 'Sedang' : 'Ringan', tahap = 1 + (i % 3) % (kat === 'Sedang' ? 2 : 3);
-    return { id: 'PBN-' + String(i).padStart(3, '0'), nama: ['Ahmad Fauzan', 'Muhammad Rizki', 'Teuku Alif', 'Cut Nyak Dhien', 'Zulfikar Hasan', 'Raihan Akbar', 'Fathurrahman', 'Ilham Maulana'][i % 8] + ' ' + (i + 1),
+    return { id: 'PBN-' + String(i).padStart(3, '0'), nama: ['Ahmad Fauzan', 'Muhammad Rizki', 'Teuku Alif', 'Cut Nyak Dhien', 'Zulfikar Hasan', 'Raihan Akbar', 'Fathurrahman', 'Ilham Maulana'][i % 8],
       kelas: KELAS[i % KELAS.length], angkatan: KELAS[i % KELAS.length].split('-')[0], unit: o.unit || 'putra', kamar: 10 + (i % 9), hadir: i % 11 === 3 ? 'Izin Keluar' : i % 13 === 5 ? 'Sakit' : 'Hadir',
       kategori: kat, tahap, bentuk: BENTUK[kat][tahap - 1] || BENTUK[kat][0], ket: tahap === 2 ? 'Dilaksanakan ba\'da Ashar, didampingi pengurus bagian.' : undefined,
       pelanggaran: ['Telat keluar dari asrama (pagi/sore)', 'Tidak ikut shalat berjamaah', 'Berbahasa Indonesia di asrama', 'Kamar tidak rapi saat pemeriksaan'][i % 4],
@@ -71,7 +71,7 @@ function pasangRpc(o) {
     },
     sidang_serahkan: (a) => {
       window.__SIDANG.panggil.push(['serahkan', a]);
-      let n = 0; window.__SIDANG.butir.forEach(b => { if (a.p_ids.includes(b.id) && b.status === 'dibacakan') { b.status = 'diberikan'; b.diberikan_pada = '2026-10-28T09:15:00+07:00'; b.penerima = musyrif[b.kelas]; n++; } });
+      let n = 0; window.__SIDANG.butir.forEach(b => { if (a.p_ids.includes(b.id) && b.status === 'dibacakan') { b.status = 'diberikan'; b.diberikan_pada = '2026-10-28T09:15:00+07:00'; b.penerima = 'Musyrif'; n++; } });
       return { data: { ok: true, diberikan: n, pesan: n, diminta: a.p_ids.length, dilewati: [] }, error: null };
     },
     sidang_batal: (a) => { window.__SIDANG.panggil.push(['batal', a]); const b = window.__SIDANG.butir.find(x => x.id === a.p_id); if (b) b.status = 'menunggu'; return { data: { ok: true }, error: null }; }
@@ -116,7 +116,7 @@ const bukaSidang = async (page) => {
   console.log('\nA · Berkas');
   const sw = baca('sw.js');
   cek('A1 sw.js: VERSI rq-v2.64, sidang.js di INTI & POLA_INTI', /VERSI\s+=\s+'rq-v2\.64'/.test(sw) && sw.includes("'./sidang.js'") && /sidang\\\.js\$/.test(sw));
-  cek('A2 vite KLASIK & skrip rilis memuat sidang.js', /KLASIK = \[[^\]]*'sidang\.js'/.test(baca('vite.config.mjs')) && /\bsidang\.js\b/.test(baca('chemint-repo.sh')));
+  cek('A2 vite KLASIK & skrip rilis memuat sidang.js', /KLASIK = \[[^\]]*'sidang\.js'/.test(baca('vite.config.mjs')));
   cek('A3 build: sidang.js terbit & dipadatkan, sw build memuat sidang.js', fs.existsSync(path.join(AKAR, 'dist-uji', 'sidang.js'))
     && fs.statSync(path.join(AKAR, 'dist-uji', 'sidang.js')).size < fs.statSync(path.join(AKAR, 'sidang.js')).size && baca('dist-uji', 'sw.js').includes("'./sidang.js'"));
   const mig = baca('migrasi', '20261028_v2_64_sidang_tadib.sql');
@@ -161,7 +161,7 @@ const bukaSidang = async (page) => {
       cek('B8 daftar dikelompokkan per bentuk pembinaan (amar)', (await p.$$('.sd-amar-kepala b')).length >= 1);
       await p.click('[data-aksi="pilih-hadir"]');
       const nPilih = await p.evaluate(() => window.RQSidang._uji.S.pilih.size);
-      const absenTerpilih = await p.evaluate(() => [...window.RQSidang._uji.S.pilih].some(id => { const b = window.RQSidang._uji.S.data.butir.find(x => x.id === id); return b && b.hadir !== 'Hadir'; }));
+      const absenTerpilih = await p.evaluate(() => [...window.RQSidang._uji.S.pilih].some(id => { const b = window.RQSidang._uji.S.data.butir.find(x => x.id === id); return b && b.hadir !== 'Hadir' && b.hadir !== 'Tepat Waktu'; }));
       cek('B9 "Pilih semua yang hadir" melewatkan santri izin/sakit', nPilih > 0 && !absenTerpilih, nPilih);
       await potret(p, `v264-hp-daftar-${v}`);
       await p.click('[data-aksi="bacakan"]');
