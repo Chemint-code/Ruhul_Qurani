@@ -94,7 +94,7 @@ const ikonKosong = (page) => page.evaluate(() => [...document.querySelectorAll('
     cek(`A5 ikon/${f} ada & kecil`, fs.existsSync(path.join(AKAR, 'ikon', f)) && fs.statSync(path.join(AKAR, 'ikon', f)).size < 40 * 1024);
   for (const [label, sw] of [['sumber', baca('sw.js')], ['build', baca('dist-uji', 'sw.js')]]) {
     const ok = ["'./gaya.css'", "'./ikon/fa-subset.css'", "'./ikon/fa-solid-subset.woff2'", "'./ikon/fa-regular-subset.woff2'", "'./ikon/fa-brands-subset.woff2'"].every(x => sw.includes(x));
-    cek(`A6 sw.js ${label}: VERSI rq-v2.6x, gaya & ikon di INTI dan POLA_INTI`, ok && /VERSI\s+=\s+'rq-v2\.6[2-9]'/.test(sw) && /gaya\\\.css\$/.test(sw) && /\\\/ikon\\\//.test(sw));
+    cek(`A6 sw.js ${label}: VERSI rq-v2.6x, gaya & ikon di INTI dan POLA_INTI`, ok && /VERSI\s+=\s+'rq-v2\.6[2-9](\.\d+)?'/.test(sw) && /gaya\\\.css\$/.test(sw) && /\\\/ikon\\\//.test(sw));
   }
   const dhtml = baca('dist-uji', 'index.html');
   cek('A7 build: tag gaya & ikon utuh, berkas dengan nama tetap', dhtml.includes('href="gaya.css"') && dhtml.includes('href="ikon/fa-subset.css"')

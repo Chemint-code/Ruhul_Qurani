@@ -2027,6 +2027,17 @@
     background: color-mix(in oklab, var(--sea) 8%, white);
   }
   .kertas-pilih .kp-opsi:has(input:focus-visible) { outline:2px solid var(--sea); outline-offset:2px; }
+  /* v2.65 · pemilih periode laporan: chip bulan dipilih berwarna kuningan (selaras pita periode) */
+  .periode-pilih { margin-top:14px; }
+  .periode-pilih .kp-opsi.on { border-color:var(--brass); color:#6E5406; background: color-mix(in oklab, var(--brass) 10%, white); }
+  .periode-pilih .kp-opsi:last-of-type.on { border-color:var(--sea); color:var(--sea); background: color-mix(in oklab, var(--sea) 8%, white); }
+  .periode-pilih + .detail-periode { margin-top:8px; }
+  .detail-acts .dp-ekor { font-weight:600; opacity:.85; margin-left:1px; white-space:nowrap; }
+  @media (max-width:560px) {
+    .periode-pilih .kp-opsi { padding:6px 11px; min-height:34px; font-size:12px; }
+    /* Cetak & PDF membawa nama bulan: masing-masing selebar baris supaya tidak terpotong. */
+    .detail-acts #dCetak, .detail-acts #dPdf { flex:1 1 100%; }
+  }
 
   /* v2.41 · panel Status Cetak Laporan (Jejak Audit) */
   .ctk-bar { height:6px; margin:2px 0 12px; border-radius:999px; background:var(--line-soft); overflow:hidden; }

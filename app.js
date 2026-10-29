@@ -8,7 +8,7 @@
    - Modul Pembinaan (KPI, filter, ubah status) + Rekap Pembinaan per santri
    - Master Bidang (divisi) berdampingan dengan Master Pelanggaran
    - Dashboard Pimpinan (analisis eksekutif, tier santri prioritas)
-   - Laporan terpadu: cetak + unduh PDF (html2pdf) — MENGIKUTI PERIODE AKTIF
+   - Laporan terpadu: cetak + unduh PDF (html2pdf) — periode dipilih di rincian santri (v2.64.1)
    - RBAC klien: Admin/Guru/Walas/Guru BK/Guru Piket/Ustadz GEN-Z/Osis/Pimpinan
    - Indikator sinkronisasi saat proses input
    - v2.12: Laporan pembinaan Ustadz GEN-Z → pengesahan guru kelas
@@ -1582,14 +1582,16 @@ const berkasPeriode = () => APP.periode.aktif && APP.periode.bulan
  */
 function batasPeriode() {
   if (!APP.periode.aktif || !APP.periode.bulan) return null;
-  const [th, bl] = APP.periode.bulan.split('-').map(Number);
-  if (!th || !bl) return null;
+  return batasBulan(APP.periode.bulan);
+}
+
+/** v2.65: batas satu bulan 'yyyy-MM' apa pun — null bila kosong/tak sah. */
+function batasBulan(bulan) {
+  const [th, bl] = String(bulan || '').split('-').map(Number);
+  if (!th || !bl || bl < 1 || bl > 12) return null;
+  const kunci = `${th}-${String(bl).padStart(2,'0')}`;
   const hariAkhir = new Date(th, bl, 0).getDate();
-  return {
-    bulan: APP.periode.bulan,
-    awal:  `${APP.periode.bulan}-01`,
-    akhir: `${APP.periode.bulan}-${String(hariAkhir).padStart(2,'0')}`
-  };
+  return { bulan: kunci, awal: `${kunci}-01`, akhir: `${kunci}-${String(hariAkhir).padStart(2,'0')}` };
 }
 
 /** Satu baris lolos periode atau tidak. `fKejadian` = nama kolom tanggalnya. */
@@ -4315,6 +4317,10 @@ async function bukaDetailSantri(nisn, opsi = {}) {
     const cermin = cerminBulanan({ detail: riwayatSemua, izin: izinSemua, bina: binaSemua, tahfiz: tahfizSemua, prestasi: prestasiSemua },
       jendelaBerdata(bulanMundur(lembar || bulanIni(), 6)));
     const bukaLagi = (o) => { Swal.close(); setTimeout(() => bukaDetailSantri(nisn, o), 220); };
+    // v2.65: pilihan periode Cetak & PDF — bawaan = lembar yang sedang dibuka.
+    const periodeLapAwal = lembar || '';
+    const opsiPeriodeLap = opsiPeriodeLaporan(
+      { detail: riwayatSemua, izin: izinSemua, bina: binaSemua, tahfiz: tahfizSemua, prestasi: prestasiSemua }, lembar);
 
     // Timeline gabungan, urut dari yang terbaru
     const timeline = [
@@ -4429,20 +4435,13 @@ async function bukaDetailSantri(nisn, opsi = {}) {
             ${['plg', 'poin', 'izin', 'bina', 'thf', 'prs'].map(k => `<td class="right">${angka(m[k])}</td>`).join('')}
           </tr>`).join('')}</tbody></table></div>
 
-        ${bolehLaporan ? `<div class="detail-periode${APP.periode.aktif ? ' on' : ''}">
-          <i class="fa-regular fa-calendar-days"></i>
-          <span>Cetak &amp; PDF mengikuti periode aktif:
-            <b>${esc(labelPeriode())}</b>${APP.periode.aktif
-              ? `. Pelanggaran, pembinaan, dan perizinan hanya bulan ini.
-                  Presensi tetap ditampilkan seluruhnya.`
-              : `. Seluruh riwayat santri akan tercetak.`}</span>
-        </div>` : ''}
+        ${bolehLaporan ? pilihPeriodeLaporanHTML(opsiPeriodeLap, periodeLapAwal) : ''}
 
         ${(bolehCetak() || bolehPdf()) ? pilihKertasHTML() : ''}
 
         <div class="detail-acts">
-          ${bolehCetak() ? `<button class="btn btn-primary btn-sm" id="dCetak"><i class="fa-solid fa-print"></i>Cetak Laporan</button>` : ''}
-          ${bolehPdf() ? `<button class="btn btn-ghost btn-sm" id="dPdf"><i class="fa-solid fa-file-pdf"></i>Unduh PDF</button>` : ''}
+          ${bolehCetak() ? `<button class="btn btn-primary btn-sm" id="dCetak"><i class="fa-solid fa-print"></i><span>Cetak Laporan<span class="dp-ekor" data-dp-ekor></span></span></button>` : ''}
+          ${bolehPdf() ? `<button class="btn btn-ghost btn-sm" id="dPdf"><i class="fa-solid fa-file-pdf"></i><span>Unduh PDF<span class="dp-ekor" data-dp-ekor></span></span></button>` : ''}
           ${bolehTulis() ? `<button class="btn btn-ghost btn-sm" id="dReset"><i class="fa-solid fa-rotate-left"></i>Reset ke Hadir</button>` : ''}
           ${isAdmin() ? `<button class="btn btn-ghost btn-sm" id="dKamar"><i class="fa-solid fa-bed"></i>Atur Kamar</button>` : ''}
         </div>
@@ -4458,8 +4457,9 @@ async function bukaDetailSantri(nisn, opsi = {}) {
         </div></div>`,
       didOpen: () => {
         pasangPilihKertas();
-        $('dCetak')?.addEventListener('click', () => cetakLaporan(nisn, kertasDipilih()));
-        $('dPdf')?.addEventListener('click', () => unduhLaporanPdf(nisn, kertasDipilih()));
+        pasangPilihPeriodeLaporan();
+        $('dCetak')?.addEventListener('click', () => cetakLaporan(nisn, kertasDipilih(), periodeLaporanDipilih()));
+        $('dPdf')?.addEventListener('click', () => unduhLaporanPdf(nisn, kertasDipilih(), periodeLaporanDipilih()));
         $('dReset')?.addEventListener('click', () => resetStatus(nisn));
         // SweetAlert tidak bisa bertumpuk: tutup detail dulu, lalu buka
         // kembali setelah selesai — pola yang sama dengan target pembinaan.
@@ -8638,9 +8638,12 @@ function blokPenutupCetak(pj, dicetak) {
  * nomor pengulangan pada objek riwayat penuh, dan nomor itu harus ikut
  * terbawa ke baris yang dicetak.
  */
-function saringDataLaporanBulanan(mentah) {
+function saringDataLaporanBulanan(mentah, bulanPilihan) {
   const data = mentah || {};
-  const p = batasPeriode();
+  /* v2.65: periode laporan dipilih di jendela rincian santri.
+     bulanPilihan = 'yyyy-MM' → satu bulan; '' / null → seluruh riwayat;
+     undefined → pemanggil lama, tetap mengikuti periode global. */
+  const p = bulanPilihan === undefined ? batasPeriode() : batasBulan(bulanPilihan);
 
   const perkembanganPenuh = (data.perkembangan || []).slice().sort((a, b) =>
     String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal))));
@@ -8662,6 +8665,7 @@ function saringDataLaporanBulanan(mentah) {
       goalLalu: [],
       rekap: akumulasiUnik(perkembanganPenuh),
       periodeAktif: false,
+      periodeBulan: null,
       labelPeriode: 'Seluruh Periode',
       poinPeriode: perkembanganPenuh.reduce((a, r) => a + (Number(r.poin) || 0), 0) };
   }
@@ -8688,7 +8692,9 @@ function saringDataLaporanBulanan(mentah) {
     pembinaan,
     pembinaanPenuh,
     perizinan,
-    presensi: data.presensi || [],          // presensi TIDAK disaring
+    // Presensi TIDAK disaring: rekap wali kelas sebulan baru lengkap pada
+    // bulan berikutnya, jadi laporan bulanan tetap memuat seluruh bulan.
+    presensi: data.presensi || [],
     prestasi: prestasiPenuh.filter(r => diBulan(r.tanggal)),
     prestasiPenuh,
     tahfiz: tahfizPenuh.filter(r => diBulan(r.tanggal)),
@@ -8699,7 +8705,8 @@ function saringDataLaporanBulanan(mentah) {
     rekap: akumulasiUnik(perkembangan),
     poinPeriode: perkembangan.reduce((a, r) => a + (Number(r.poin) || 0), 0),
     periodeAktif: true,
-    labelPeriode: labelPeriode(),
+    periodeBulan: p.bulan,
+    labelPeriode: labelBulan(p.bulan),
     periodeAwal: p.awal,
     periodeAkhir: p.akhir };
 }
@@ -9111,6 +9118,7 @@ function rekapPresensiCetak(rows, pekan, kelasKini, kini) {
     const pekanTotal = Math.ceil(new Date(o.tahun, o.bulanKe, 0).getDate() / 7);
     const tidakHadir = o.S + o.IP + o.A;
     return {
+      kunci: k,                                   // v2.65: 'yyyy-MM' — bahan saringan laporan bulanan
       bulan: `${BULAN_ID[o.bulanKe - 1]} ${o.tahun}`,
       status: o.pekan.size ? 'rekap' : (o.libur.size ? 'libur' : 'belum'),
       pekan: o.pekan.size, libur: o.libur.size, pekanTotal,
@@ -9119,13 +9127,19 @@ function rekapPresensiCetak(rows, pekan, kelasKini, kini) {
     };
   });
 
-  const rekap = hasil.filter(h => h.status === 'rekap');
-  const total = rekap.length ? rekap.reduce((a, h) => {
+  return { bulan: hasil, total: totalPresensiCetak(hasil) };
+}
+
+/** Total presensi dari baris bulan yang sudah direkap (v2.65: dipakai ulang laporan bulanan). */
+function totalPresensiCetak(hasil) {
+  const rekap = (hasil || []).filter(h => h.status === 'rekap');
+  if (!rekap.length) return null;
+  const total = rekap.reduce((a, h) => {
     ['jp','S','IK','IP','A','tidakHadir','pekan'].forEach(x => { a[x] += h[x]; });
     return a;
-  }, { jp: 0, S: 0, IK: 0, IP: 0, A: 0, tidakHadir: 0, pekan: 0, bulanRekap: rekap.length }) : null;
-  if (total) total.hadirPct = persen(total.jp, total.tidakHadir);
-  return { bulan: hasil, total };
+  }, { jp: 0, S: 0, IK: 0, IP: 0, A: 0, tidakHadir: 0, pekan: 0, bulanRekap: rekap.length });
+  total.hadirPct = total.jp ? Math.round((1 - Math.min(total.jp, total.tidakHadir) / total.jp) * 1000) / 10 : null;
+  return total;
 }
 
 async function ambilLaporan(nisn) {
@@ -9216,10 +9230,12 @@ async function ambilLaporan(nisn) {
 }
 
 /** Nama berkas laporan: selalu membawa periode. */
-function namaBerkasLaporan(namaSantri) {
+function namaBerkasLaporan(namaSantri, bulan) {
   const bersih = String(namaSantri || 'Santri')
     .trim().replace(/[\\/:*?"<>|]+/g,'').replace(/\s+/g,'_');
-  return `Laporan_${bersih}_${berkasPeriode()}.pdf`;
+  // v2.65: Laporan_Nama_2026-10.pdf  ·  Laporan_Nama_Seluruh-Riwayat_2026-10-29.pdf
+  const ekor = bulan === undefined ? berkasPeriode() : (bulan || `Seluruh-Riwayat_${hariIni()}`);
+  return `Laporan_${bersih}_${ekor}.pdf`;
 }
 
 /**
@@ -9239,14 +9255,14 @@ function teraCetakHTML() {
   return korpsMusyrifPutra() ? '<div class="tera-cetak" aria-hidden="true"></div>' : '';
 }
 
-async function cetakLaporan(nisn, kodeKertas) {
+async function cetakLaporan(nisn, kodeKertas, bulan) {
   if (!bolehCetak()) return toast('error', `Role ${role()} tidak memiliki izin cetak.`);
   const kertas = kertasLaporan(kodeKertas || kertasTersimpan());
   loading(true);
   try {
     pastikanGayaLembarLaporan();
     const dataMentah = await ambilLaporan(nisn);
-    const data = await lengkapiLaporan(saringDataLaporanBulanan(dataMentah));
+    const data = await lengkapiLaporan(saringDataLaporanBulanan(dataMentah, bulan));
     /* v2.41: @page di sini datang SETELAH @page{size:A4} milik index.html,
        sehingga menang (pola yang sama dipakai rekap lanskap). Ikut terhapus
        bersama isi #printArea pada 'afterprint'. */
@@ -9256,7 +9272,7 @@ async function cetakLaporan(nisn, kodeKertas) {
     // Peramban tidak memberi tahu apakah pengguna menekan Cetak atau Batal;
     // yang tercatat adalah "dialog cetak dibuka" (jenis 'cetak').
     catatCetakLaporan({ nisn: data.siswa?.nisn || nisn, ukuran: kertas.kode, jenis: 'cetak',
-                        periode: data.periodeAktif ? periodeLaporanAktif() : null });
+                        periode: data.periodeBulan || null });
   } catch (err) { fireError(err); }
   finally { loading(false); }
 }
@@ -10002,7 +10018,7 @@ function muatHtml2pdf() {
   return muatHtml2pdf.janji;
 }
 
-async function unduhLaporanPdf(nisn, kodeKertas) {
+async function unduhLaporanPdf(nisn, kodeKertas, bulan) {
   if (!bolehPdf()) return toast('error', `Role ${role()} tidak memiliki izin unduh PDF.`);
   // v2.41: seluruh ukuran di bawah dibaca dari kertas ini, bukan dari A4.
   const kertas = kertasLaporan(kodeKertas || kertasTersimpan());
@@ -10012,12 +10028,14 @@ async function unduhLaporanPdf(nisn, kodeKertas) {
 
   const stage = $('pdfStage'), mask = $('pdfMask');
   let htmlLaporan = '';
+  let periodeLog = null;
   let pulihkanLatar = () => {};
   loading(true);
   try {
     pastikanGayaLembarLaporan();
     const dataMentah = await ambilLaporan(nisn);
-    const data = await lengkapiLaporan(saringDataLaporanBulanan(dataMentah));
+    const data = await lengkapiLaporan(saringDataLaporanBulanan(dataMentah, bulan));
+    periodeLog = data.periodeBulan || null;
     htmlLaporan = bangunLaporanHTML(data);
     stage.innerHTML = htmlLaporan;
 
@@ -10051,7 +10069,7 @@ async function unduhLaporanPdf(nisn, kodeKertas) {
       throw new Error(`Area PDF belum siap dirender (${Math.round(rect.width)}×${Math.round(rect.height)}, ${panjang} karakter).`);
     }
 
-    const nama = namaBerkasLaporan(data.siswa?.nama_siswa);
+    const nama = namaBerkasLaporan(data.siswa?.nama_siswa, bulan === undefined ? undefined : (data.periodeBulan || ''));
     const kakiSantri = `${data.siswa?.nama_siswa || 'Santri'} · ${data.siswa?.nisn || ''}`.trim();
     pulihkanLatar = amankanLatarDokumen();
 
@@ -10138,9 +10156,9 @@ async function unduhLaporanPdf(nisn, kodeKertas) {
     // v2.41: dicatat SETELAH berkas diserahkan ke peramban. Tidak ditunggu,
     // tidak pernah melempar — gagal mencatat tidak boleh menggagalkan unduhan.
     catatCetakLaporan({ nisn: data.siswa?.nisn || nisn, ukuran: kertas.kode, jenis: 'pdf',
-                        periode: data.periodeAktif ? periodeLaporanAktif() : null });
+                        periode: periodeLog });
 
-    toast('success', `PDF ${data.periodeAktif ? labelPeriode() : 'lengkap'} (${kertas.nama}) berhasil diunduh.`);
+    toast('success', `PDF ${data.periodeAktif ? data.labelPeriode : 'seluruh riwayat'} (${kertas.nama}) berhasil diunduh.`);
   } catch (err) {
     // Bila peramban tetap menolak (mis. versi lama tanpa dukungan warna
     // yang dipakai perangkat pengguna), laporan tidak dibiarkan hilang:
@@ -10155,7 +10173,7 @@ async function unduhLaporanPdf(nisn, kodeKertas) {
       mask.classList.remove('on'); loading(false);
       setTimeout(() => {
         window.print();
-        catatCetakLaporan({ nisn, ukuran: kertas.kode, jenis: 'cetak', periode: periodeLaporanAktif() });
+        catatCetakLaporan({ nisn, ukuran: kertas.kode, jenis: 'cetak', periode: periodeLog });
       }, 220);
       return;
     }
@@ -10185,6 +10203,72 @@ function pilihKertasHTML() {
         <b>${esc(k.nama)}</b><small>${esc(k.ukuran)}</small>
       </label>`).join('')}
   </div>`;
+}
+
+/* ---------------------------------------------------------------------
+   v2.65 · PEMILIH PERIODE LAPORAN
+   Dulu Cetak & PDF membaca periode global (APP.periode). Sejak v2.50
+   bulan berjalan tampil sebagai "lembar" tanpa periode aktif, sehingga
+   rincian menampilkan Oktober tetapi laporan yang terunduh berisi seluruh
+   riwayat. Kini periode laporan dipilih langsung di sini, bawaannya
+   lembar yang sedang dibuka, dan tombolnya menyebut bulan yang dipilih.
+   --------------------------------------------------------------------- */
+
+/** Bulan yang layak dipilih: 6 bulan berdata terakhir + lembar yang dibuka; terbaru dulu. */
+function opsiPeriodeLaporan(sumber, lembar) {
+  const kini = bulanIni();
+  const kunci = jendelaBerdata(bulanMundur(kini, 6));
+  if (lembar && !kunci.includes(lembar)) kunci.push(lembar);
+  return cerminBulanan(sumber, kunci.sort())
+    .map(m => ({ bulan: m.bulan, n: m.plg + m.izin + m.bina + m.prs + (m.thf > 0 ? 1 : 0), jmlPlg: m.plg }))
+    .filter(m => m.n > 0 || m.bulan === kini || m.bulan === lembar)
+    .reverse();
+}
+
+// BULAN_PENDEK dideklarasikan di bagian rekap bawah; dibaca saat dipanggil, bukan saat dimuat.
+const labelBulanPendek = (b) => { const [th, bl] = String(b).split('-').map(Number); return `${BULAN_PENDEK[bl - 1] || bl} ${th}`; };
+
+function ketPeriodeLaporan(bulan) {
+  return bulan
+    ? `Laporan <b>${esc(labelBulan(bulan))}</b>: pelanggaran, pembinaan, perizinan, apresiasi, dan tahfiz bulan ini saja. Presensi tetap seluruh bulan, karena rekap wali kelas baru lengkap pada bulan berikutnya.`
+    : `Laporan <b>seluruh riwayat</b>: semua catatan santri sejak awal tercatat.`;
+}
+
+function pilihPeriodeLaporanHTML(opsi, bawaan) {
+  const daftar = (opsi || []).slice();
+  if (bawaan && !daftar.some(m => m.bulan === bawaan)) daftar.unshift({ bulan: bawaan, n: 0 });
+  const chip = (nilai, judul, kecil, aria) => `
+      <label class="kp-opsi${nilai === bawaan ? ' on' : ''}"${aria ? ` title="${esc(aria)}"` : ''}>
+        <input type="radio" name="dPeriode" value="${esc(nilai)}"${nilai === bawaan ? ' checked' : ''}>
+        <b>${esc(judul)}</b>${kecil ? `<small>${esc(kecil)}</small>` : ''}
+      </label>`;
+  return `<div class="kertas-pilih periode-pilih" role="radiogroup" aria-label="Periode laporan">
+    <span class="kp-label"><i class="fa-regular fa-calendar-days"></i>Periode</span>
+    ${daftar.map(m => chip(m.bulan, labelBulanPendek(m.bulan), m.n ? `${m.n} catatan` : 'bersih', labelBulan(m.bulan))).join('')}
+    ${chip('', 'Seluruh riwayat', '', 'Semua catatan santri')}
+  </div>
+  <div class="detail-periode${bawaan ? ' on' : ''}" id="dPeriodeKet" aria-live="polite">
+    <i class="fa-regular fa-file-lines" aria-hidden="true"></i><span>${ketPeriodeLaporan(bawaan)}</span>
+  </div>`;
+}
+
+/** 'yyyy-MM' yang dipilih, atau '' untuk seluruh riwayat. */
+function periodeLaporanDipilih() {
+  const el = document.querySelector('input[name="dPeriode"]:checked');
+  return el ? String(el.value || '') : '';
+}
+
+function pasangPilihPeriodeLaporan() {
+  const segarkan = () => {
+    const b = periodeLaporanDipilih();
+    document.querySelectorAll('.periode-pilih .kp-opsi')
+      .forEach(l => l.classList.toggle('on', !!l.querySelector('input')?.checked));
+    const ket = $('dPeriodeKet');
+    if (ket) { ket.classList.toggle('on', !!b); ket.querySelector('span').innerHTML = ketPeriodeLaporan(b); }
+    document.querySelectorAll('[data-dp-ekor]').forEach(e => { e.textContent = b ? ` · ${labelBulanPendek(b)}` : ' · Semua'; });
+  };
+  document.querySelectorAll('input[name="dPeriode"]').forEach(el => el.addEventListener('change', segarkan));
+  segarkan();
 }
 
 /** Ukuran yang sedang dipilih di detail santri (jatuh ke pilihan tersimpan). */
@@ -32938,7 +33022,7 @@ function perbaruiHitungTab() {
  *  Senin/Rabu/Jumat/Sabtu) ditegakkan RPC sidang_* di database — RLS
  *  p_pbn_read yang menutup log_pembinaan dari Osis TIDAK diubah.
  * ===================================================================== */
-APP.versi = 'rq-v2.64';   // v2.64: Ruang Sidang Ta'dib (OSDA)
+APP.versi = 'rq-v2.64.1';   // v2.64: Ruang Sidang Ta'dib (OSDA) · v2.64.1: periode laporan dipilih di rincian santri
 
 // Semua peran kecuali Klinik: OSDA & Admin memutus, selebihnya mengamati
 // (lingkup kelas mengikuti akun — diatur RPC sidang_berkas).
