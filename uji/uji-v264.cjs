@@ -115,7 +115,7 @@ const bukaSidang = async (page) => {
 (async () => {
   console.log('\nA · Berkas');
   const sw = baca('sw.js');
-  cek('A1 sw.js: VERSI rq-v2.64, sidang.js di INTI & POLA_INTI', /VERSI\s+=\s+'rq-v2\.64(\.\d+)?'/.test(sw) && sw.includes("'./sidang.js'") && /sidang\\\.js\$/.test(sw));
+  cek('A1 sw.js: VERSI rq-v2.64+, sidang.js di INTI & POLA_INTI', /VERSI\s+=\s+'rq-v2\.6[4-9](\.\d+)?'/.test(sw) && sw.includes("'./sidang.js'") && /sidang\\\.js\$/.test(sw));
   // chemint-repo.sh & migrasi/ hanya ada di repo src (tidak ikut repo publik tempat CI berjalan).
   const ada = (...p) => fs.existsSync(path.join(AKAR, ...p));
   cek('A2 vite KLASIK (& skrip rilis bila ada) memuat sidang.js', /KLASIK = \[[^\]]*'sidang\.js'/.test(baca('vite.config.mjs'))

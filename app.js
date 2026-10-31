@@ -9,6 +9,8 @@
    - Master Bidang (divisi) berdampingan dengan Master Pelanggaran
    - Dashboard Pimpinan (analisis eksekutif, tier santri prioritas)
    - Laporan terpadu: cetak + unduh PDF (html2pdf) — periode dipilih di rincian santri (v2.64.1)
+   - v2.65: berkas perkara sidang (PDF + majelis), kritik & saran OSDA,
+     gelembung pesan super admin (modul v2.65 di akhir berkas)
    - RBAC klien: Admin/Guru/Walas/Guru BK/Guru Piket/Ustadz GEN-Z/Osis/Pimpinan
    - Indikator sinkronisasi saat proses input
    - v2.12: Laporan pembinaan Ustadz GEN-Z → pengesahan guru kelas
@@ -2731,6 +2733,8 @@ async function navigateTo(view) {
     else if (view === 'master')      await viewMaster();
     else if (view === 'pengguna')    await viewPengguna();
     else if (view === 'sidang')      await viewSidang();       // v2.64
+    else if (view === 'saran')       await viewSaran();        // v2.65
+    else if (view === 'kotaksaran')  await viewKotakSaran();   // v2.65
     tandaiTabelBisaGeser();
   } catch (err) { fireError(err); }
   finally { loading(false); APP.navSibuk--; tutupTirai(); LayarMuat.tutupAwal(); }
@@ -33129,6 +33133,492 @@ Object.defineProperty(window.RQ_SIDANG, 'Swal', { get: () => window.Swal, config
         $('viewRoot').prepend(el);
       }
     } catch (e) { console.warn('[pintu sidang]', e); }
+    return h;
+  };
+})();
+
+/* =====================================================================
+ * v2.65 — BERKAS PERKARA · KRITIK & SARAN · GELEMBUNG PESAN
+ * =====================================================================
+ *  1. Jembatan PDF untuk sidang.js: dokumen jsPDF kosong berukuran A4/F4
+ *     (diambil dari pustaka html2pdf yang sama dengan laporan santri) dan
+ *     lambang kop sebagai PNG. Berkas perkara digambar sidang.js.
+ *  2. Halaman "Kritik & Saran" (khusus OSDA): kiriman langsung ke super
+ *     admin. Nama pengirim boleh dikosongkan ("Anggota OSDA").
+ *  3. Halaman "Kotak Saran OSDA" (khusus super admin): membaca, menjawab,
+ *     dan mengirim pesan yang tampil sebagai gelembung di Ringkasan OSDA.
+ *
+ *  Super admin TIDAK ditentukan di sini. Satu-satunya sumber kebenaran
+ *  adalah fungsi database adalah_super_admin(); aplikasi hanya bertanya
+ *  kepadanya (APP.superAdmin) untuk menampilkan menu. Semua RPC v2.65
+ *  menolak sendiri akun yang bukan super admin.
+ * ===================================================================== */
+APP.versi = 'rq-v2.65';   // v2.65: berkas perkara & majelis · kritik & saran OSDA · gelembung pesan super admin
+
+MENU_ROLE.saran      = ['Osis'];
+MENU_ROLE.kotaksaran = ['Admin'];   // + adalah_super_admin() — Admin lain tidak melihat menunya
+JUDUL.saran      = { lat:'Kritik & Saran', ar:'النقد والاقتراح', teks:'Kritik & Saran' };
+JUDUL.kotaksaran = { lat:'Kotak Saran',    ar:'صندوق الاقتراحات', teks:'Kotak Saran OSDA' };
+
+/** RPC v2.65 belum ada di server (migrasi belum diterapkan)? */
+const galatBelumMigrasi = (e) => /saran_|pesan_|sidang_majelis|adalah_super_admin|does not exist|Could not find the function|PGRST202/i.test(String(e?.message || e?.code || e));
+const tglJamWib = (ts) => { try { return new Date(ts).toLocaleString('id-ID', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit', timeZone:'Asia/Jakarta' }); } catch (e) { return ''; } };
+const tglWib = (ts) => { try { return new Date(ts).toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', timeZone:'Asia/Jakarta' }); } catch (e) { return ''; } };
+/** "Nyak Al Azwansyah, S.Sos." → "Ustadz Nyak Al Azwansyah" */
+const sapaanPengirim = (nama) => `Ustadz ${String(nama || 'Nyak Al Azwansyah').split(',')[0].trim()}`;
+
+/* ---------- 1. Jembatan PDF untuk sidang.js -------------------------- */
+
+/**
+ * Dokumen jsPDF kosong selebar kertas pilihan. jsPDF tidak diekspos global
+ * oleh berkas html2pdf.bundle, jadi dokumen diambil dari pekerja html2pdf
+ * yang merender satu titik putih, lalu halaman pertamanya diganti halaman
+ * baru yang bersih. Latar <html>/<body> diamankan seperti pada laporan
+ * (html2canvas menolak warna oklch).
+ */
+async function pdfKosong(kode) {
+  const kertas = kertasLaporan(kode);
+  const format = () => Array.isArray(kertas.format) ? kertas.format.slice() : kertas.format;
+  try { await muatHtml2pdf(); }
+  catch (e) { throw new Error('Pustaka PDF gagal dimuat. Periksa koneksi internet lalu coba lagi.'); }
+  const titik = document.createElement('div');
+  // all:initial — titik tidak mewarisi `color` oklch dari halaman (warna
+  // turunan seperti border/outline ikut currentColor dan ditolak html2canvas).
+  titik.style.cssText = 'all:initial;display:block;position:fixed;left:0;top:0;width:4px;height:4px;color:#000000;background:#ffffff;pointer-events:none;z-index:-1';
+  document.body.appendChild(titik);
+  const pulihkan = amankanLatarDokumen();
+  try {
+    const pdf = await window.html2pdf().set({
+      margin: 0, image: { type:'jpeg', quality:0.5 },
+      html2canvas: { scale:1, logging:false, backgroundColor:'#ffffff', useCORS:false, onclone: klonPdfPolos },
+      jsPDF: { unit:'mm', format: format(), orientation:'portrait', compress:true }
+    }).from(titik).toPdf().get('pdf');
+    pdf.addPage(format(), 'portrait');
+    pdf.deletePage(1);
+    try { pdf.setProperties({ title: "Berkas Perkara Sidang Ta'dib", creator: 'chemint' }); } catch (e) {}
+    return { pdf, kertas };
+  } finally { pulihkan(); titik.remove(); }
+}
+
+/** Salinan dokumen tanpa gaya aplikasi: wadah html2pdf mewarisi `color`
+ *  oklch dari <body>, dan html2canvas menolak warna itu. Titik putih tidak
+ *  butuh gaya apa pun, jadi semua gaya cukup dicabut. */
+function klonPdfPolos(doc) {
+  try {
+    doc.querySelectorAll('style, link[rel="stylesheet"]').forEach(n => n.remove());
+    doc.querySelectorAll('#loginScreen, #appShell, #ruangSidang, #tabBar, .swal2-container, #pdfStage, #printArea').forEach(n => n.remove());
+    doc.documentElement.removeAttribute('class');
+    doc.documentElement.style.cssText = 'background:#ffffff;color:#000000';
+    if (doc.body) { doc.body.removeAttribute('class'); doc.body.style.cssText = 'background:#ffffff;color:#000000;margin:0'; }
+  } catch (e) { console.warn('[berkas] klon PDF:', e.message); }
+}
+
+/** Lambang kop sebagai PNG (jsPDF tidak membaca WebP); jatuh ke lambang tertanam. */
+async function logoKopPng() {
+  const muat = (u) => new Promise((ok, gagal) => { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => ok(im); im.onerror = gagal; im.src = u; });
+  let im;
+  try { im = await muat(ASET.korps ? (await dataUriGambar(ASET.korps)) || KORPS_WARNA : KORPS_WARNA); }
+  catch (e) { im = await muat(KORPS_WARNA); }
+  const w0 = im.naturalWidth || 160, h0 = im.naturalHeight || 94, s = Math.min(1, 520 / Math.max(w0, h0));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w0 * s)); c.height = Math.max(1, Math.round(h0 * s));
+  c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+  try { return { uri: c.toDataURL('image/png'), w: c.width, h: c.height }; }
+  catch (e) { return { uri: KORPS_WARNA, w: 160, h: 94 }; }   // kanvas tercemar CORS
+}
+
+Object.assign(window.RQ_SIDANG, {
+  pdfBaru: pdfKosong,
+  logoKop: logoKopPng,
+  kertasDaftar: () => Object.values(UKURAN_KERTAS).map(k => ({ kode: k.kode, nama: k.nama, ukuran: k.ukuran })),
+  kertasTersimpan: () => kertasTersimpan(),
+  simpanKertas: (k) => simpanKertas(k)
+});
+
+/* ---------- 2. Super admin: tanya database, bukan nama/peran ---------- */
+APP.superAdmin = false;
+async function periksaSuperAdmin() {
+  APP.superAdmin = false;
+  if (!APP.profil || role() !== 'Admin') return false;
+  try {
+    const { data, error } = await db.rpc('adalah_super_admin');
+    if (error) throw error;
+    APP.superAdmin = data === true;
+  } catch (e) { if (!galatBelumMigrasi(e)) console.warn('[super admin]', e?.message || e); }
+  aturMenuSuper();
+  if (APP.superAdmin) refreshBadgeSaran();
+  return APP.superAdmin;
+}
+function aturMenuSuper() {
+  document.querySelectorAll('[data-view="kotaksaran"]').forEach(b => b.classList.toggle('hidden', !APP.superAdmin));
+}
+async function refreshBadgeSaran() {
+  const b = $('badgeSaran'); if (!b) return;
+  if (!APP.superAdmin) return b.classList.add('hidden');
+  try {
+    const { data, error } = await db.rpc('saran_hitung_baru');
+    if (error) throw error;
+    const n = Number(data) || 0;
+    b.textContent = n > 99 ? '99+' : String(n);
+    b.classList.toggle('hidden', !n);
+    b.title = n ? `${n} kritik/saran belum dibaca` : '';
+  } catch (e) { b.classList.add('hidden'); }
+}
+(function bungkusRapikanNavSuper() {
+  // Menu Kotak Saran disembunyikan SEBELUM grup dihitung, supaya grup
+  // "Sistem" milik Admin lain tidak memuat butir yang tak boleh dibuka.
+  const asli = rapikanGrupNav;
+  rapikanGrupNav = function () {
+    try { aturMenuSuper(); } catch (e) {}
+    return asli.apply(this, arguments);
+  };
+})();
+(function bungkusBadgePesanSuper() {
+  // refreshBadgePesan dipanggil sekali saat masuk (dan setelah pesan berubah):
+  // titik paling tenang untuk sekali bertanya "apakah akun ini super admin?".
+  const asli = refreshBadgePesan;
+  let sudah = null;
+  refreshBadgePesan = function () {
+    const h = asli.apply(this, arguments);
+    try {
+      const id = APP.profil?.id || null;
+      if (id && sudah !== id) { sudah = id; periksaSuperAdmin().then(() => rapikanGrupNav(APP.view)); }
+      else if (APP.superAdmin) refreshBadgeSaran();
+    } catch (e) {}
+    return h;
+  };
+})();
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && APP.superAdmin) refreshBadgeSaran(); });
+
+/* ---------- 3. Halaman Kritik & Saran (OSDA) -------------------------- */
+const KRITIK_OSDA = { jenis: 'Saran' };
+
+async function viewSaran() {
+  let riwayat = [], galat = '';
+  try {
+    const { data, error } = await db.rpc('saran_milik_saya');
+    if (error) throw error;
+    riwayat = Array.isArray(data) ? data : [];
+  } catch (e) {
+    galat = galatBelumMigrasi(e) ? 'Kotak kritik & saran belum aktif di server. Admin perlu menerapkan migrasi v2.65.' : (e?.message || String(e));
+  }
+  if (APP.view !== 'saran') return;
+  const status = (r) => r.jawaban ? ['dijawab', 'fa-comments', 'Dijawab']
+    : r.dibaca_pada ? ['dibaca', 'fa-check-double', 'Sudah dibaca'] : ['terkirim', 'fa-paper-plane', 'Terkirim'];
+  const butir = (r) => { const [k, ik, l] = status(r); return `<li class="saran-butir">
+      <div class="saran-butir-atas"><span class="saran-jenis ${r.jenis === 'Kritik' ? 'kritik' : 'saran'}">${esc(r.jenis)}</span>
+        <span class="saran-status st-${k}"><i class="fa-solid ${ik}"></i>${l}</span>
+        <time>${esc(tglJamWib(r.dikirim_pada))}</time></div>
+      <p class="saran-isi">${esc(r.isi)}</p>
+      <p class="saran-dari">${esc(r.nama || 'Anggota OSDA')}</p>
+      ${r.jawaban ? `<div class="saran-jawab"><b>Jawaban ${esc(sapaanPengirim())}</b><p>${esc(r.jawaban)}</p></div>` : ''}
+    </li>`; };
+  $('viewRoot').innerHTML = `
+    <div class="saran-halaman">
+      ${kartu('Sampaikan kritik & saran', `<div class="card-body">
+        <p class="saran-pengantar">Kritik dan saran antum langsung sampai kepada <b>Ustadz Nyak Al Azwansyah</b>. Hanya beliau yang membacanya. Tulislah dengan adab, jujur, dan jelas; nama boleh dikosongkan.</p>
+        ${galat ? `<p class="saran-galat"><i class="fa-solid fa-triangle-exclamation"></i>${esc(galat)}</p>` : ''}
+        <form id="saranForm" class="saran-form" novalidate>
+          <div class="saran-pilih" role="radiogroup" aria-label="Jenis">
+            ${['Saran', 'Kritik'].map(j => `<label class="${KRITIK_OSDA.jenis === j ? 'on' : ''}"><input type="radio" name="saranJenis" value="${j}"${KRITIK_OSDA.jenis === j ? ' checked' : ''}>${j}</label>`).join('')}
+          </div>
+          <label class="saran-label" for="saranIsi">Isi</label>
+          <textarea id="saranIsi" rows="5" maxlength="1000" placeholder="Contoh: Jadwal sidang hari Sabtu sering bentrok dengan kegiatan muhadharah. Bagaimana kalau dipindah ba'da Ashar?"></textarea>
+          <div class="saran-baris"><small id="saranHitung">0 / 1.000</small></div>
+          <label class="saran-label" for="saranNama">Nama <small>(boleh dikosongkan; tercatat sebagai Anggota OSDA)</small></label>
+          <input id="saranNama" type="text" maxlength="60" autocomplete="off" placeholder="Nama antum">
+          <button type="submit" class="btn btn-primary saran-kirim"${galat ? ' disabled' : ''}><i class="fa-solid fa-paper-plane"></i>Kirim</button>
+        </form></div>`)}
+      ${kartu('Riwayat kiriman', `<div class="card-body">${riwayat.length
+          ? `<ul class="saran-daftar">${riwayat.map(butir).join('')}</ul>`
+          : kosong('Belum ada kiriman', 'Kritik dan saran yang antum kirim akan tampil di sini beserta statusnya.', 'fa-comment-dots')}</div>`,
+        '', 'Terkirim → Sudah dibaca → Dijawab')}
+    </div>`;
+  const isi = $('saranIsi'), hit = $('saranHitung');
+  isi.addEventListener('input', () => { hit.textContent = `${angka(isi.value.length)} / 1.000`; });
+  $('saranForm').addEventListener('change', (e) => {
+    const r = e.target.closest('input[name="saranJenis"]'); if (!r) return;
+    KRITIK_OSDA.jenis = r.value;
+    document.querySelectorAll('.saran-pilih label').forEach(l => l.classList.toggle('on', l.querySelector('input').checked));
+  });
+  $('saranForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const teks = isi.value.trim();
+    if (teks.length < 3) { toast('warning', 'Isi kritik/saran masih kosong.'); return isi.focus(); }
+    const btn = e.target.querySelector('.saran-kirim'); btn.disabled = true;
+    try {
+      const { error } = await db.rpc('saran_kirim', { p_jenis: KRITIK_OSDA.jenis, p_isi: teks, p_nama: $('saranNama').value.trim() || null });
+      if (error) throw error;
+      toast('success', `${KRITIK_OSDA.jenis} terkirim. Jazakumullahu khairan.`);
+      navigateTo('saran');
+    } catch (er) { btn.disabled = false; fireError(er); }
+  });
+}
+
+/* ---------- 4. Halaman Kotak Saran OSDA (super admin) ----------------- */
+const KOTAK = { saring: 'semua', baruSesi: new Set() };
+
+async function viewKotakSaran() {
+  if (!APP.superAdmin) await periksaSuperAdmin();
+  if (APP.view !== 'kotaksaran') return;
+  if (!APP.superAdmin) {
+    $('viewRoot').innerHTML = kartu('Kotak Saran OSDA', `<div class="card-body">${kosong('Khusus super admin', 'Halaman ini hanya untuk super admin chemint.', 'fa-user-shield')}</div>`);
+    return;
+  }
+  let d = { saran: [], pesan: [], belum_dibaca: 0 }, galat = '';
+  try {
+    const { data, error } = await db.rpc('saran_kotak');
+    if (error) throw error;
+    d = data || d;
+  } catch (e) { galat = galatBelumMigrasi(e) ? 'Kotak saran belum aktif di server. Terapkan migrasi v2.65 di Supabase.' : (e?.message || String(e)); }
+  if (APP.view !== 'kotaksaran') return;
+  const saran = d.saran || [], pesan = d.pesan || [];
+  saran.filter(s => !s.dibaca_pada).forEach(s => KOTAK.baruSesi.add(s.id));
+  KOTAK.data = d;
+  gambarKotakSaran(galat);
+  // Dibuka = dibaca. Tanda "Baru" tetap tampil selama halaman ini terbuka.
+  const belum = saran.filter(s => !s.dibaca_pada).map(s => s.id);
+  if (belum.length) {
+    db.rpc('saran_tandai_dibaca', { p_ids: belum }).then(({ error }) => { if (!error) refreshBadgeSaran(); });
+  }
+}
+
+function gambarKotakSaran(galat) {
+  const d = KOTAK.data || { saran: [], pesan: [] };
+  const saran = d.saran || [], pesan = d.pesan || [];
+  const cocok = (s) => KOTAK.saring === 'semua' || (KOTAK.saring === 'baru' ? KOTAK.baruSesi.has(s.id) : s.jenis === KOTAK.saring);
+  const tampil = saran.filter(cocok);
+  const unitLbl = (u) => u === 'putri' ? 'OSDA Putri' : u === 'putra' ? 'OSDA Putra' : 'OSDA';
+  const nKritik = saran.filter(s => s.jenis === 'Kritik').length;
+  const chip = (k, l, n) => `<button type="button" class="ks-chip${KOTAK.saring === k ? ' on' : ''}" data-ks-saring="${k}">${l}<span>${angka(n)}</span></button>`;
+  const butir = (s) => `<li class="ks-butir${KOTAK.baruSesi.has(s.id) ? ' baru' : ''}">
+      <div class="saran-butir-atas"><span class="saran-jenis ${s.jenis === 'Kritik' ? 'kritik' : 'saran'}">${esc(s.jenis)}</span>
+        ${KOTAK.baruSesi.has(s.id) ? '<span class="ks-baru">Baru</span>' : ''}
+        <span class="ks-unit">${esc(unitLbl(s.unit))}</span><time>${esc(tglJamWib(s.dikirim_pada))}</time></div>
+      <p class="saran-isi">${esc(s.isi)}</p>
+      <p class="saran-dari">${esc(s.nama || 'Anggota OSDA')}</p>
+      ${s.jawaban ? `<div class="saran-jawab"><b>Jawaban antum · ${esc(tglJamWib(s.dijawab_pada))}</b><p>${esc(s.jawaban)}</p></div>` : ''}
+      <div class="ks-aksi"><button type="button" class="btn btn-ghost btn-sm" data-ks-jawab="${s.id}"><i class="fa-solid fa-comments"></i>${s.jawaban ? 'Jawab lagi' : 'Jawab'}</button></div>
+    </li>`;
+  const statusPesan = (p) => p.ditarik_pada ? ['ditarik', 'Ditarik'] : p.aktif ? ['aktif', `Tampil s.d. ${tglJamWib(p.tampil_sampai)}`] : ['habis', 'Masa tampil habis'];
+  const paham = (p) => {
+    const t = [];
+    if (p.tujuan !== 'putri') t.push(p.dipahami_putra ? `Putra: dipahami ${tglJamWib(p.dipahami_putra)}` : 'Putra: belum');
+    if (p.tujuan !== 'putra') t.push(p.dipahami_putri ? `Putri: dipahami ${tglJamWib(p.dipahami_putri)}` : 'Putri: belum');
+    return t.join(' · ');
+  };
+  const butirPesan = (p) => { const [k, l] = statusPesan(p); return `<li class="ks-pesan st-${k}">
+      <div class="saran-butir-atas"><span class="ks-unit">Untuk ${esc(p.tujuan === 'semua' ? 'semua OSDA' : unitLbl(p.tujuan))}</span><time>${esc(tglJamWib(p.dikirim_pada))}</time></div>
+      ${p.menjawab_isi ? `<p class="ks-kutip">Menjawab: “${esc(p.menjawab_isi)}”</p>` : ''}
+      <p class="saran-isi">${esc(p.isi)}</p>
+      <p class="ks-pesan-status"><span class="ks-tanda st-${k}">${esc(l)}</span>${p.ditarik_pada ? '' : `<small>${esc(paham(p))}</small>`}</p>
+      ${p.aktif ? `<div class="ks-aksi"><button type="button" class="btn btn-ghost btn-sm" data-ks-tarik="${p.id}"><i class="fa-solid fa-rotate-left"></i>Tarik</button></div>` : ''}
+    </li>`; };
+
+  $('viewRoot').innerHTML = `
+    ${galat ? `<p class="saran-galat"><i class="fa-solid fa-triangle-exclamation"></i>${esc(galat)}</p>` : ''}
+    <div class="ks-kisi">
+      ${kartu('Kotak masuk', `<div class="card-body">
+          <div class="ks-saring">${chip('semua', 'Semua', saran.length)}${chip('baru', 'Baru', KOTAK.baruSesi.size)}${chip('Kritik', 'Kritik', nKritik)}${chip('Saran', 'Saran', saran.length - nKritik)}</div>
+          ${tampil.length ? `<ul class="saran-daftar">${tampil.map(butir).join('')}</ul>`
+            : kosong(saran.length ? 'Tidak ada yang cocok' : 'Belum ada kritik & saran', saran.length ? 'Ganti saringan di atas.' : 'Kiriman dari halaman Kritik & Saran OSDA akan masuk ke sini.', 'fa-inbox')}
+        </div>`, '', 'Kritik & saran dari OSDA. Hanya antum yang membaca kotak ini.')}
+      <div class="ks-kanan">
+        ${kartu('Kirim pesan ke OSDA', `<div class="card-body">
+          <form id="ksForm" class="saran-form" novalidate>
+            <label class="saran-label" for="ksIsi">Pesan</label>
+            <textarea id="ksIsi" rows="4" maxlength="500" placeholder="Contoh: Sidang Senin dimulai tepat ba'da Ashar. Mohon daftar panggil sudah dicetak sebelum Maghrib."></textarea>
+            <div class="saran-baris"><small id="ksHitung">0 / 500</small></div>
+            ${formTujuanPesan('ksTujuan', 'semua', 7)}
+            <button type="submit" class="btn btn-primary saran-kirim"${galat ? ' disabled' : ''}><i class="fa-solid fa-paper-plane"></i>Kirim sebagai gelembung</button>
+          </form>
+          <p class="saran-catatan">Pesan tampil sebagai gelembung di Ringkasan OSDA sampai masa tampilnya habis atau antum menariknya.</p>
+        </div>`)}
+        ${kartu('Pesan terkirim', `<div class="card-body">${pesan.length ? `<ul class="saran-daftar">${pesan.map(butirPesan).join('')}</ul>`
+          : kosong('Belum ada pesan', 'Pesan yang antum kirim ke OSDA tampil di sini.', 'fa-comment-dots')}</div>`)}
+      </div>
+    </div>`;
+
+  const isi = $('ksIsi');
+  isi?.addEventListener('input', () => { $('ksHitung').textContent = `${angka(isi.value.length)} / 500`; });
+  $('ksForm')?.addEventListener('change', tandaiPilihanTujuan);
+  $('ksForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const v = bacaTujuanPesan(e.target);
+    if (isi.value.trim().length < 2) { toast('warning', 'Isi pesan masih kosong.'); return isi.focus(); }
+    const btn = e.target.querySelector('.saran-kirim'); btn.disabled = true;
+    try {
+      const { error } = await db.rpc('pesan_kirim', { p_isi: isi.value.trim(), p_tujuan: v.tujuan, p_hari: v.hari, p_menjawab: null });
+      if (error) throw error;
+      toast('success', 'Pesan terkirim ke Ringkasan OSDA.');
+      navigateTo('kotaksaran');
+    } catch (er) { btn.disabled = false; fireError(er); }
+  });
+  onKlik(async (e) => {
+    const s = e.target.closest('[data-ks-saring]');
+    if (s) { KOTAK.saring = s.dataset.ksSaring; return gambarKotakSaran(galat); }
+    const j = e.target.closest('[data-ks-jawab]');
+    if (j) return jawabSaran(Number(j.dataset.ksJawab));
+    const t = e.target.closest('[data-ks-tarik]');
+    if (t) {
+      const k = await Swal.fire({ icon:'question', title:'Tarik pesan ini?', text:'Gelembungnya langsung hilang dari Ringkasan OSDA.',
+        showCancelButton:true, confirmButtonText:'Ya, tarik', cancelButtonText:'Batal', confirmButtonColor:'#9F1239' });
+      if (!k.isConfirmed) return;
+      try { const { error } = await db.rpc('pesan_tarik', { p_id: Number(t.dataset.ksTarik) }); if (error) throw error; toast('success', 'Pesan ditarik.'); navigateTo('kotaksaran'); }
+      catch (er) { fireError(er); }
+    }
+  });
+}
+
+function formTujuanPesan(nama, tujuan, hari) {
+  const r = (n, v, l, on) => `<label class="${on ? 'on' : ''}"><input type="radio" name="${n}" value="${v}"${on ? ' checked' : ''}>${l}</label>`;
+  return `<div class="ks-tujuan">
+      <span class="saran-label">Tujuan</span>
+      <div class="saran-pilih" role="radiogroup" aria-label="Tujuan pesan">
+        ${r(nama, 'semua', 'Semua', tujuan === 'semua')}${r(nama, 'putra', 'Putra', tujuan === 'putra')}${r(nama, 'putri', 'Putri', tujuan === 'putri')}
+      </div>
+      <label class="saran-label" for="${nama}Hari">Tampil selama</label>
+      <select id="${nama}Hari" class="ks-hari">${[1, 3, 7, 14, 30].map(h => `<option value="${h}"${h === hari ? ' selected' : ''}>${h} hari</option>`).join('')}</select>
+    </div>`;
+}
+function tandaiPilihanTujuan(e) {
+  const r = e.target.closest('input[type="radio"]'); if (!r) return;
+  r.closest('.saran-pilih')?.querySelectorAll('label').forEach(l => l.classList.toggle('on', l.querySelector('input').checked));
+}
+function bacaTujuanPesan(akar) {
+  return { tujuan: akar.querySelector('.ks-tujuan input[type="radio"]:checked')?.value || 'semua',
+           hari: Number(akar.querySelector('.ks-hari')?.value) || 7 };
+}
+
+async function jawabSaran(id) {
+  const s = (KOTAK.data?.saran || []).find(x => x.id === id); if (!s) return;
+  const res = await Swal.fire({
+    title: `Jawab ${s.jenis.toLowerCase()}`, width: 600, showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-paper-plane"></i> Kirim jawaban', cancelButtonText: 'Batal', showLoaderOnConfirm: true,
+    allowOutsideClick: () => !Swal.isLoading(),
+    html: `<div class="ks-swal">
+      <p class="ks-kutip">“${esc(s.isi)}”<br><small>${esc(s.nama || 'Anggota OSDA')} · ${esc(tglJamWib(s.dikirim_pada))}</small></p>
+      <label class="saran-label" for="ksJawab">Jawaban</label>
+      <textarea id="ksJawab" rows="4" maxlength="500" placeholder="Jawaban tampil sebagai gelembung di Ringkasan OSDA, lengkap dengan kutipan di atas."></textarea>
+      ${formTujuanPesan('ksJTujuan', s.unit || 'semua', 7)}
+    </div>`,
+    didOpen: (el) => { el.addEventListener('change', tandaiPilihanTujuan); setTimeout(() => el.querySelector('#ksJawab')?.focus(), 60); },
+    preConfirm: async () => {
+      const pop = Swal.getPopup(), teks = (pop.querySelector('#ksJawab')?.value || '').trim();
+      if (teks.length < 2) { Swal.showValidationMessage('Jawaban masih kosong.'); return false; }
+      const v = bacaTujuanPesan(pop);
+      try {
+        const { data, error } = await db.rpc('pesan_kirim', { p_isi: teks, p_tujuan: v.tujuan, p_hari: v.hari, p_menjawab: id });
+        if (error) throw error;
+        return data;
+      } catch (e) { Swal.showValidationMessage(e.message || 'Gagal mengirim.'); return false; }
+    }
+  });
+  if (!res.isConfirmed) return;
+  toast('success', 'Jawaban terkirim sebagai gelembung di Ringkasan OSDA.');
+  navigateTo('kotaksaran');
+}
+
+/* ---------- 5. Gelembung pesan di Ringkasan OSDA ---------------------- */
+const GELEMBUNG = { data: [], buka: null };
+
+/** Maskot kecil: berpeci (putra) / berjilbab (putri) — turunan Si Peci & Si Payung. */
+function svgAvatarPesan(putri) {
+  return putri
+    ? `<svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path d="M32 4C49 4 57 17 57 32c0 8 2 14 4 18Q32 60 3 50c2-4 4-10 4-18C7 17 15 4 32 4Z" fill="#F7B8CF"/>
+        <ellipse cx="32" cy="31" rx="17" ry="15" fill="#7EE0BD"/><ellipse cx="26" cy="29" rx="4.6" ry="5.2" fill="#fff"/><ellipse cx="38" cy="29" rx="4.6" ry="5.2" fill="#fff"/>
+        <circle cx="27" cy="30" r="3" fill="#241646"/><circle cx="39" cy="30" r="3" fill="#241646"/><circle cx="28" cy="28.6" r="1.1" fill="#fff"/><circle cx="40" cy="28.6" r="1.1" fill="#fff"/>
+        <path d="M28 38q4 3.4 8 0" fill="none" stroke="#1B1030" stroke-width="2" stroke-linecap="round"/><circle cx="32" cy="49" r="3" fill="#E0578A"/></svg>`
+    : `<svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path d="M32 10c13 0 21 10 21 24 0 14-5 24-21 24S11 48 11 34c0-14 8-24 21-24Z" fill="#58B4E6"/>
+        <path d="M19 17c0-5 1-9 2.4-11Q32 3 42.6 6C44 8 45 12 45 17q-13 3-26 0Z" fill="#1D1A2E"/><ellipse cx="32" cy="6" rx="10.6" ry="1.8" fill="#403A5E"/>
+        <ellipse cx="25.5" cy="31" rx="5" ry="5.6" fill="#fff"/><ellipse cx="38.5" cy="31" rx="5" ry="5.6" fill="#fff"/>
+        <circle cx="26.4" cy="32" r="3.2" fill="#241646"/><circle cx="39.4" cy="32" r="3.2" fill="#241646"/><circle cx="27.6" cy="30.4" r="1.2" fill="#fff"/><circle cx="40.6" cy="30.4" r="1.2" fill="#fff"/>
+        <path d="M28 41q4 3.6 8 0" fill="none" stroke="#1B1030" stroke-width="2" stroke-linecap="round"/></svg>`;
+}
+
+async function pasangGelembungOsda() {
+  if (role() !== 'Osis' || APP.view !== 'dashboard') return;
+  let l = [];
+  try {
+    const { data, error } = await db.rpc('pesan_untuk_osda');
+    if (error) throw error;
+    l = Array.isArray(data) ? data : [];
+  } catch (e) { if (!galatBelumMigrasi(e)) console.warn('[gelembung]', e?.message || e); return; }
+  if (APP.view !== 'dashboard') return;
+  GELEMBUNG.data = l;
+  $('gelembungOsda')?.remove();
+  if (!l.length) return;
+  // Terbuka bila ada pesan yang belum dipahami; selebihnya cukup tanda kecil.
+  GELEMBUNG.buka = l.some(p => !p.dipahami_pada);
+  const el = document.createElement('aside');
+  el.id = 'gelembungOsda';
+  el.setAttribute('aria-label', 'Pesan dari super admin');
+  $('viewRoot').prepend(el);
+  gambarGelembung(!APP.segarSama);   // penyegaran realtime: tanpa gerak masuk ulang
+}
+
+function gambarGelembung(masuk) {
+  const el = $('gelembungOsda'); if (!el) return;
+  const l = GELEMBUNG.data, p = l.find(x => !x.dipahami_pada) || l[0];
+  const belum = l.filter(x => !x.dipahami_pada).length;
+  const putri = /putri/i.test(APP.profil?.korps || '');
+  const gerak = masuk && !(MULUS.kurangGerak || matchMedia('(prefers-reduced-motion: reduce)').matches) && !modeHemat();
+  el.className = `gelembung-osda${GELEMBUNG.buka ? ' buka' : ' kecil'}${putri ? ' putri' : ''}${gerak ? ' masuk' : ''}`;
+  if (!GELEMBUNG.buka) {
+    el.innerHTML = `<button type="button" class="go-tanda" data-go="buka" aria-expanded="false">
+        <span class="go-avatar">${svgAvatarPesan(putri)}</span>
+        <span><b>${l.length > 1 ? `${angka(l.length)} pesan` : 'Pesan'} dari ${esc(sapaanPengirim(p.pengirim))}</b><small>${belum ? `${angka(belum)} belum dipahami` : 'Sudah dipahami · ketuk untuk membaca lagi'}</small></span>
+        <i class="fa-solid fa-chevron-down"></i></button>`;
+    return;
+  }
+  el.innerHTML = `
+    <span class="go-avatar">${svgAvatarPesan(putri)}</span>
+    <div class="go-bicara" role="status">
+      <p class="go-dari"><b>Pesan dari ${esc(sapaanPengirim(p.pengirim))}</b><time>${esc(tglJamWib(p.dikirim_pada))}</time></p>
+      ${p.menjawab_isi ? `<p class="go-kutip">Menjawab ${esc((p.menjawab_jenis || 'kiriman').toLowerCase())} OSDA: “${esc(p.menjawab_isi)}”</p>` : ''}
+      <p class="go-isi">${esc(p.isi)}</p>
+      <div class="go-aksi">
+        ${p.dipahami_pada
+          ? `<span class="go-sudah"><i class="fa-solid fa-check-double"></i>Dipahami ${esc(tglJamWib(p.dipahami_pada))}</span><button type="button" class="go-tipis" data-go="tutup">Kecilkan</button>`
+          : `<button type="button" class="go-paham" data-go="paham" data-id="${p.id}"><i class="fa-solid fa-circle-check"></i>InsyaAllah, dipahami</button>`}
+        ${l.length > 1 ? `<button type="button" class="go-tipis" data-go="semua">+${angka(l.length - 1)} pesan lain</button>` : ''}
+        <button type="button" class="go-tipis" data-go="saran"><i class="fa-solid fa-comment-dots"></i>Kritik & saran</button>
+      </div>
+    </div>`;
+}
+
+$('viewRoot')?.addEventListener('click', async (e) => {
+  const t = e.target.closest('#gelembungOsda [data-go]'); if (!t) return;
+  e.stopPropagation();
+  const a = t.dataset.go;
+  if (a === 'buka') { GELEMBUNG.buka = true; return gambarGelembung(false); }
+  if (a === 'tutup') { GELEMBUNG.buka = false; return gambarGelembung(false); }
+  if (a === 'saran') return navigateTo('saran');
+  if (a === 'semua') {
+    return Swal.fire({ title: 'Pesan untuk OSDA', width: 600, confirmButtonText: 'Tutup',
+      html: `<ul class="go-daftar">${GELEMBUNG.data.map(p => `<li><time>${esc(tglWib(p.dikirim_pada))}</time>
+        ${p.menjawab_isi ? `<p class="go-kutip">“${esc(p.menjawab_isi)}”</p>` : ''}<p>${esc(p.isi)}</p>
+        <small>${p.dipahami_pada ? 'Sudah dipahami' : 'Belum dipahami'}</small></li>`).join('')}</ul>` });
+  }
+  if (a === 'paham') {
+    t.disabled = true;
+    const id = Number(t.dataset.id);
+    try {
+      const { error } = await db.rpc('pesan_dipahami', { p_id: id });
+      if (error) throw error;
+      const p = GELEMBUNG.data.find(x => x.id === id); if (p) p.dipahami_pada = new Date().toISOString();
+      if (GELEMBUNG.data.some(x => !x.dipahami_pada)) gambarGelembung(false);
+      else { GELEMBUNG.buka = false; gambarGelembung(false); toast('success', 'Jazakumullahu khairan.'); }
+    } catch (er) { t.disabled = false; fireError(er); }
+  }
+}, true);
+
+(function bungkusRingkasanGelembung() {
+  // Dibungkus SETELAH pintu sidang (v2.64), jadi gelembung berdiri paling atas.
+  const asli = viewDashboard;
+  viewDashboard = async function () {
+    const h = await asli.apply(this, arguments);
+    try { await pasangGelembungOsda(); } catch (e) { console.warn('[gelembung]', e); }
     return h;
   };
 })();

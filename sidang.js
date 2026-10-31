@@ -23,6 +23,15 @@
  *  dimatikan dan selalu mati di mode hemat.
  *
  *  Satu-satunya pintu ke aplikasi: window.RQ_SIDANG (app.js v2.64).
+ *
+ *  v2.65 · BERKAS PERKARA
+ *    Tombol "Berkas perkara" → isi susunan majelis (Hakim Ketua, Hakim
+ *    Anggota I/II, Panitera) → pilih cakupan & kertas → PDF: daftar panggil
+ *    per kelas, rincian perkara per bidang/kategori/tahap, dan kolom tanda
+ *    tangan majelis (nama diketik, tanda tangan dengan pena). PDF digambar
+ *    langsung dengan jsPDF (teks vektor: tajam dicetak, berkas kecil).
+ *    Mode PERSIAPAN: mulai 19.00 WIB malam sebelum hari sidang, OSDA sudah
+ *    menerima berkas sidang besok (lihat / unduh saja, belum bisa memutus).
  * ===================================================================== */
 (function () {
   'use strict';
@@ -258,6 +267,9 @@
    *  DATA
    * ================================================================= */
   const majelis = () => S.data?.peran === 'majelis';
+  /** v2.65: OSDA di luar hari sidang tanpa mode persiapan → reses. */
+  const reses = (d = S.data) => !!d && d.role === 'Osis' && !d.buka && !d.pratinjau;
+  const persiapan = (d = S.data) => !!d && d.role === 'Osis' && !d.buka && !!d.pratinjau;
   const butir = () => S.data?.butir || [];
   const aktif = (b) => b.status === 'menunggu' || b.status === 'dibacakan';
   const hadir = (b) => !b.hadir || b.hadir === 'Hadir';
@@ -377,14 +389,18 @@
     const kanan = S.akar.querySelector('#sdKanan');
     const status = !d ? '' : d.buka
       ? `<span class="sd-status buka" title="Hari sidang"><i class="fa-solid fa-circle-dot"></i><span>Hari sidang</span></span>`
-      : `<span class="sd-status reses" title="Reses — bukan hari sidang"><i class="fa-solid fa-clock"></i><span>Reses</span></span>`;
+      : persiapan(d)
+        ? `<span class="sd-status persiapan" title="Persiapan sidang ${esc(labelHari(d.sesi_berkas || d.berikut, true))}"><i class="fa-solid fa-list-check"></i><span>Persiapan</span></span>`
+        : `<span class="sd-status reses" title="Reses — bukan hari sidang"><i class="fa-solid fa-clock"></i><span>Reses</span></span>`;
+    const berkas = bolehBerkas() ? `<button type="button" class="sd-ikon sd-ikon-berkas" data-aksi="berkas" title="Unduh berkas perkara (PDF)">
+        <i class="fa-solid fa-file-pdf"></i><span class="sr-only">Berkas perkara</span></button>` : '';
     const unit = d && !d.unit_terkunci ? `<div class="sd-unit" role="group" aria-label="Unit asrama">
         ${[['', 'Semua'], ['putra', 'Putra'], ['putri', 'Putri']].map(([v, l]) =>
           `<button type="button" data-aksi="unit" data-nilai="${v}" aria-pressed="${(S.unit || '') === v}">${l}</button>`).join('')}
       </div>` : '';
     const bunyi = majelis() ? `<button type="button" class="sd-ikon" data-aksi="bunyi" aria-pressed="${bunyiAktif()}" title="${bunyiAktif() ? 'Matikan bunyi palu' : 'Nyalakan bunyi palu'}">
         <i class="fa-solid fa-gavel"></i><span class="sr-only">Bunyi palu</span></button>` : '';
-    kanan.innerHTML = status + unit + bunyi +
+    kanan.innerHTML = status + unit + berkas + bunyi +
       `<button type="button" class="sd-ikon" data-aksi="segarkan" title="Muat ulang berkas"><i class="fa-solid fa-rotate"></i><span class="sr-only">Muat ulang</span></button>`;
   }
 
@@ -392,7 +408,10 @@
     const d = S.data;
     if (S.galat) return 'Berkas belum bisa dibuka. Periksa sambungan, lalu muat ulang.';
     if (!d) return 'Bismillah. Berkas perkara sedang disiapkan…';
-    if (d.role === 'Osis' && !d.buka) return `Majelis sedang reses. Sidang berikutnya ${labelHari(d.berikut, true)}.`;
+    if (reses(d)) return `Majelis sedang reses. Sidang berikutnya ${labelHari(d.berikut, true)}.`;
+    if (persiapan(d)) return butir().some(b => b.status === 'menunggu')
+      ? `Persiapan sidang ${labelHari(d.sesi_berkas || d.berikut, true)}. Unduh berkas perkara untuk memanggil nama-nama ananda.`
+      : `Persiapan sidang ${labelHari(d.sesi_berkas || d.berikut, true)}. Alhamdulillah, belum ada perkara yang menunggu.`;
     if (!majelis()) return 'Anda hadir sebagai pengamat. Putusan dibacakan dan diberikan oleh majelis OSDA.';
     if (!butir().length) return 'Alhamdulillah, tidak ada perkara Ringan atau Sedang yang menunggu sidang.';
     if (S.bubble) return S.bubble;
@@ -412,8 +431,7 @@
   function gambarPanggung() {
     if (!S.akar) return;
     const d = S.data;
-    const reses = d && d.role === 'Osis' && !d.buka;
-    S.ekspresi = S.galat ? 'serius' : reses ? 'tidur' : S.ekspresi === 'tidur' ? 'normal' : S.ekspresi;
+    S.ekspresi = S.galat ? 'serius' : reses(d) ? 'tidur' : S.ekspresi === 'tidur' ? 'normal' : S.ekspresi;
     const el = S.akar.querySelector('#sdPanggung');
     el.dataset.unit = unitHakim();
     el.innerHTML = `
@@ -448,16 +466,18 @@
       return;
     }
     if (!d) return;
-    if (d.role === 'Osis' && !d.buka) { el.innerHTML = htmlReses(); return; }
+    if (reses(d)) { el.innerHTML = htmlReses(); return; }
 
     const bs = daftarBidang();
     const sB = saranDari(bs);
     const pengamat = !majelis()
       ? `<p class="sd-catatan"><i class="fa-solid fa-eye"></i>Mode pengamat: Anda melihat berkas${d.peran === 'pengamat' && d.role !== 'Admin' ? ' sesuai lingkup akun Anda' : ''}. Membacakan dan memberikan putusan adalah tugas majelis OSDA.</p>` : '';
-    const reses = majelis() && !d.buka
+    const catResus = persiapan(d)
+      ? `<p class="sd-catatan sd-catatan-persiapan"><i class="fa-solid fa-list-check"></i><span>Mode persiapan: berkas sidang <b>${esc(labelHari(d.sesi_berkas || d.berikut, true))}</b> sudah tersusun. Unduh dan cetak daftar panggilnya malam ini; putusan baru bisa dibacakan besok.</span></p>`
+      : majelis() && !d.buka
       ? `<p class="sd-catatan"><i class="fa-solid fa-clock"></i>Hari ini bukan hari sidang. Sebagai Admin Anda tetap dapat memutus; OSDA baru bisa membuka ruang ini pada ${esc(jadwalTeks())}.</p>` : '';
 
-    let html = `${pengamat}${reses}
+    let html = `${pengamat}${catResus}
       <ol class="sd-langkah" aria-label="Urutan persidangan">
         <li class="${S.bidang ? 'selesai' : 'kini'}"><span>1</span>Bidang</li>
         <li class="${S.kategori ? 'selesai' : S.bidang ? 'kini' : ''}"><span>2</span>Kategori</li>
@@ -497,7 +517,7 @@
       <i class="fa-solid fa-calendar-day"></i>
       <b>Majelis sedang reses</b>
       <p>Ruang Sidang dibuka pada ${esc(jadwalTeks())}. Sidang berikutnya <strong>${esc(labelHari(d.berikut, true))}</strong>.</p>
-      <p class="sd-kecil">Perkara yang masuk sampai saat itu otomatis tersusun di berkas; tidak ada yang perlu disiapkan.</p>
+      <p class="sd-kecil">Perkara yang masuk sampai saat itu otomatis tersusun di berkas. Mulai pukul 19.00 malam sebelum hari sidang, berkasnya sudah bisa diunduh dan dicetak untuk memanggil nama-nama ananda.</p>
     </div>`;
   }
 
@@ -569,6 +589,8 @@
         <div><dt>Di tangan musyrif</dt><dd>${angka(all.diberikan)}</dd></div>
         <div><dt>Tuntas</dt><dd>${angka(all.tuntas)}</dd></div>
       </dl>
+      ${bolehBerkas() ? `<button type="button" class="sd-btn sd-btn-emas sd-btn-berkas" data-aksi="berkas"><i class="fa-solid fa-file-pdf"></i>Unduh berkas perkara</button>
+        <p class="sd-kecil">Daftar panggil per kelas, rincian perkara, dan kolom tanda tangan majelis. Siap dicetak A4 atau F4.</p>` : ''}
       ${s.list.length ? `<p class="sd-kecil">Sidang hari ini: ${angka(s.dibacakan)} putusan dibacakan, ${angka(s.diberikan)} sudah diberikan.</p>
         <button type="button" class="sd-btn sd-btn-tipis" data-aksi="berita-acara"><i class="fa-solid fa-copy"></i>Salin berita acara hari ini</button>` : ''}
     </aside>`;
@@ -755,6 +777,350 @@
     } catch (e) { A.fireError(e); }
   }
 
+  /* =================================================================
+   *  v2.65 · BERKAS PERKARA (PDF) + SUSUNAN MAJELIS
+   *  ---------------------------------------------------------------
+   *  Digambar langsung dengan jsPDF (bawaan pustaka html2pdf yang sudah
+   *  dipakai laporan santri; dimuat app.js saat perlu). Teks vektor:
+   *  tajam saat dicetak, ringan dibuat di HP, berkas hanya puluhan KB.
+   *  Huruf Helvetica bawaan PDF hanya mengenal Latin-1, jadi semua teks
+   *  disaring teksPdf() lebih dulu.
+   * ================================================================= */
+  const JABATAN = [['ketua', 'Hakim Ketua'], ['anggota1', 'Hakim Anggota I'], ['anggota2', 'Hakim Anggota II'], ['panitera', 'Panitera']];
+  const tunggu = (l) => l.filter(b => b.status === 'menunggu');
+  const bolehBerkas = () => !!S.data && !S.galat && !reses() && tunggu(butir()).length > 0;
+  const sesiBerkas = () => S.data?.sesi_berkas || (S.data?.buka ? S.data.hari : S.data?.berikut) || S.data?.hari;
+  const unitBerkas = () => S.data?.unit === 'putri' ? 'Putri' : S.data?.unit === 'putra' ? 'Putra' : 'Putra & Putri';
+  const kunciMajelis = () => `rq-sidang-majelis-${S.data?.unit || 'semua'}`;
+  const santriUnik = (l) => new Set(l.map(b => `${b.nama}|${b.kelas}`)).size;
+  const urutTeks = (a, b) => String(a || '').localeCompare(String(b || ''), 'id', { numeric: true, sensitivity: 'base' });
+  /** Kelas berangka Romawi: VII-D < VIII-A < IX-F < X-C (bukan urutan abjad). */
+  const ROMAWI = { I: 1, V: 5, X: 10, L: 50 };
+  const angkaKelas = (k) => { const r = (String(k || '').match(/^[IVXL]+/i) || [''])[0].toUpperCase(); let n = 0;
+    for (let i = 0; i < r.length; i++) { const v = ROMAWI[r[i]], w = ROMAWI[r[i + 1]] || 0; n += v < w ? -v : v; } return n || 99; };
+  const urutKelas = (a, b) => angkaKelas(a) - angkaKelas(b) || urutTeks(a, b);
+
+  /** Nama majelis: dari server (sesi ini) → kalau belum ada, isian terakhir di perangkat ini. */
+  function majelisAwal() {
+    const srv = S.data?.majelis;
+    if (srv && srv.ketua) return srv;
+    try { return JSON.parse(localStorage.getItem(kunciMajelis()) || 'null') || {}; } catch (e) { return {}; }
+  }
+
+  /** Pilihan isi berkas: semua → bidang terbuka → tahap terbuka (yang kosong dibuang). */
+  function pilihanCakupan() {
+    const o = [{ k: 'semua', label: 'Semua perkara menunggu', list: tunggu(butir()) }];
+    if (S.bidang) o.push({ k: 'bidang', label: `Bidang ${S.bidang}`, list: tunggu(diBidang()) });
+    if (S.bidang && S.kategori && S.tahap != null) o.push({ k: 'tahap', label: `${S.bidang} · ${S.kategori} · tahap ke-${S.tahap || '?'}`, list: tunggu(diTahap()) });
+    return o.filter(x => x.list.length);
+  }
+
+  /** Teks aman untuk Helvetica (WinAnsi): tanda kutip/pisah dirapikan, diakritik dilepas. */
+  function teksPdf(s) {
+    return String(s == null ? '' : s)
+      .replace(/[‘’ʼʻ]/g, "'").replace(/[“”]/g, '"')
+      .replace(/[–—−]/g, '-').replace(/…/g, '...').replace(/[•●]/g, '-')
+      .normalize('NFKD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, '').replace(/\s+/g, ' ').trim();
+  }
+  const tglPanjang = (k) => { const d = tglObj(k); return `${d.getUTCDate()} ${BULAN[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
+
+  /** Bahan PDF yang sudah tersusun (dipisah supaya bisa diuji tanpa jsPDF). */
+  function isiBerkas(list, majelisNama, cakupanLabel) {
+    // I · Daftar panggil: satu baris per santri (bisa membawa >1 perkara), dikelompokkan per kelas.
+    const peta = new Map();
+    list.forEach(b => {
+      const k = `${b.nama}|${b.kelas}`;
+      const x = peta.get(k) || { nama: b.nama, kelas: b.kelas, kamar: b.kamar, hadir: b.hadir, n: 0 };
+      x.n++; if (!hadir(b)) x.hadir = b.hadir; peta.set(k, x);
+    });
+    const santri = [...peta.values()].sort((a, b) => urutKelas(a.kelas, b.kelas) || urutTeks(a.nama, b.nama));
+    const panggil = [...kelompok(santri, s => s.kelas || '-')].map(([kelas, l]) => ({ kelas, santri: l }));
+    // II · Rincian: bidang → kategori (Sedang dulu) → tahap → bentuk.
+    const rincian = [...kelompok(list, b => b.bidang || 'Belum Dipetakan')].sort((a, b) => b[1].length - a[1].length || urutTeks(a[0], b[0]))
+      .map(([bidang, lb]) => ({
+        bidang, n: lb.length,
+        sub: [...kelompok(lb, b => `${b.kategori}|${Number(b.tahap) || 0}|${b.bentuk || '-'}`)]
+          .map(([k, l]) => { const [kategori, tahap, bentuk] = k.split('|'); return { kategori, tahap: Number(tahap), bentuk, ket: l.find(x => x.ket)?.ket || '',
+            baris: l.slice().sort((a, b) => urutKelas(a.kelas, b.kelas) || urutTeks(a.nama, b.nama)) }; })
+          .sort((a, b) => (a.kategori === b.kategori ? 0 : a.kategori === 'Sedang' ? -1 : 1) || a.tahap - b.tahap || urutTeks(a.bentuk, b.bentuk))
+      }));
+    return { sesi: sesiBerkas(), unit: unitBerkas(), cakupan: cakupanLabel, nPerkara: list.length, nSantri: santri.length,
+      panggil, rincian, majelis: majelisNama || {}, persiapan: persiapan(), dicetak: new Date() };
+  }
+
+  /**
+   * Gambar berkas ke dokumen jsPDF yang masih kosong.
+   * kertas: baris UKURAN_KERTAS dari app.js ({ lebar, tinggi, margin:[atas,kiri,bawah,kanan], format }).
+   */
+  function gambarBerkasPdf(pdf, kertas, isi, logo) {
+    const [mT, mL, mB, mR] = kertas.margin;
+    const W = kertas.lebar, H = kertas.tinggi, L = W - mL - mR, KAKI = 8;
+    const PT = 0.3528;
+    let y = mT;
+    const huruf = (n, g) => { pdf.setFont('helvetica', g || 'normal'); pdf.setFontSize(n); };
+    const tinta = (r, g, b) => pdf.setTextColor(r, g, b);
+    const sisa = () => H - mB - KAKI - y;
+    const halamanBaru = () => { pdf.addPage(Array.isArray(kertas.format) ? kertas.format.slice() : kertas.format, 'portrait'); y = mT; };
+    const naik = (fs) => fs * PT * 0.8;                     // jarak puncak huruf → garis dasar
+
+    /* ---- kop ---- */
+    if (logo && logo.uri) {
+      const h = 18, w = Math.min(28, h * (logo.w || 160) / (logo.h || 94));
+      try { pdf.addImage(logo.uri, 'PNG', mL, y, w, h, 'logoKopSidang', 'FAST'); } catch (e) { console.warn('[berkas] logo dilewati:', e.message); }
+    }
+    huruf(6.8); tinta(100, 116, 139); pdf.text('SISTEM INFORMASI PENGEMBANGAN SANTRI', W / 2, y + 4, { align: 'center' });
+    huruf(15, 'bold'); tinta(15, 23, 42); pdf.text('DAYAH RUHUL QURANI', W / 2, y + 10.4, { align: 'center' });
+    huruf(7.6); tinta(100, 116, 139); pdf.text(teksPdf(`Aceh Barat, Provinsi Aceh · Majelis Ta'dib OSDA ${isi.unit}`), W / 2, y + 15, { align: 'center' });
+    y += 20.5;
+    pdf.setDrawColor(15, 23, 42); pdf.setLineWidth(0.7); pdf.line(mL, y, W - mR, y);
+    pdf.setLineWidth(0.25); pdf.line(mL, y + 1.1, W - mR, y + 1.1);
+    y += 7;
+
+    /* ---- judul ---- */
+    huruf(12.5, 'bold'); tinta(28, 26, 46); pdf.text("BERKAS PERKARA SIDANG TA'DIB", W / 2, y, { align: 'center' });
+    y += 5.2;
+    huruf(9.5); pdf.text(teksPdf(`OSDA ${isi.unit} · ${labelHari(isi.sesi, true)}`), W / 2, y, { align: 'center' });
+    y += 4.8;
+    huruf(7.8); tinta(90, 96, 112);
+    pdf.text(teksPdf(`${isi.cakupan} · ${angka(isi.nPerkara)} perkara · ${angka(isi.nSantri)} santri · Ringan & Sedang, angkatan VII-X`), W / 2, y, { align: 'center' });
+    y += 7;
+
+    /* ---- tabel berpaginasi ---- */
+    const PAD = 1.6;
+    function tabel(kolom, baris) {
+      const tetap = kolom.reduce((a, k) => a + (k.lebar || 0), 0);
+      const bobot = kolom.reduce((a, k) => a + (k.lebar ? 0 : (k.bobot || 1)), 0);
+      const lebar = kolom.map(k => k.lebar || (L - tetap) * (k.bobot || 1) / bobot);
+      const kepala = () => {
+        const h = 6.6;
+        pdf.setFillColor(28, 26, 46); pdf.rect(mL, y, L, h, 'F');
+        huruf(7.4, 'bold'); tinta(247, 241, 220);
+        let x = mL;
+        kolom.forEach((k, i) => {
+          const tx = k.rata === 'center' ? x + lebar[i] / 2 : x + PAD;
+          pdf.text(k.judul, tx, y + h / 2 + 1.2, { align: k.rata === 'center' ? 'center' : 'left' });
+          x += lebar[i];
+        });
+        y += h;
+      };
+      if (sisa() < 22) halamanBaru();
+      kepala();
+      let zebra = 0, no = 0;
+      baris.forEach((b, bi) => {
+        if (b.grup) {
+          const h = b.tingkat === 2 ? 6 : 6.6;
+          // judul kelompok tidak boleh tertinggal sendirian di dasar halaman
+          if (sisa() < h + 7.5) { halamanBaru(); kepala(); }
+          if (b.tingkat === 2) pdf.setFillColor(246, 241, 226); else pdf.setFillColor(232, 225, 205);
+          pdf.rect(mL, y, L, h, 'F');
+          huruf(b.tingkat === 2 ? 7.8 : 8.4, 'bold'); tinta(28, 26, 46);
+          const kanan = b.kanan ? teksPdf(b.kanan) : '';
+          huruf(7.4); const lebarKanan = kanan ? pdf.getTextWidth(kanan) + 4 : 0;
+          huruf(b.tingkat === 2 ? 7.8 : 8.4, 'bold');
+          const potong = pdf.splitTextToSize(teksPdf(b.grup), L - PAD * 2 - lebarKanan - 4);
+          const kiri = (potong[0] || '') + (potong.length > 1 ? '...' : '');
+          pdf.text(kiri, mL + PAD, y + h / 2 + 1.2);
+          if (kanan) { huruf(7.4); tinta(74, 71, 99); pdf.text(kanan, W - mR - PAD, y + h / 2 + 1.2, { align: 'right' }); }
+          y += h; zebra = 0;
+          if (b.nol) no = 0;
+          return;
+        }
+        const FS = 8.2, LH = FS * PT * 1.22;
+        no++;
+        const sel = b.sel.map(t => t === '#' ? String(no) : t);
+        const isiSel = sel.map((t, i) => kolom[i].cek ? [] : (huruf(FS, kolom[i].tebal ? 'bold' : 'normal'), pdf.splitTextToSize(teksPdf(t), lebar[i] - PAD * 2)));
+        const nBaris = Math.max(1, ...isiSel.map(l => l.length));
+        const h = Math.max(6.2, nBaris * LH + 2.8);
+        if (sisa() < h) { halamanBaru(); kepala(); }
+        if (zebra++ % 2) { pdf.setFillColor(249, 247, 242); pdf.rect(mL, y, L, h, 'F'); }
+        pdf.setDrawColor(217, 211, 195); pdf.setLineWidth(0.15); pdf.line(mL, y + h, W - mR, y + h);
+        let x = mL;
+        sel.forEach((t, i) => {
+          const k = kolom[i];
+          if (k.cek) {
+            const s = 3.6; pdf.setDrawColor(74, 71, 99); pdf.setLineWidth(0.3);
+            pdf.rect(x + (lebar[i] - s) / 2, y + (h - s) / 2, s, s);
+          } else if (isiSel[i].length) {
+            huruf(FS, k.tebal ? 'bold' : 'normal');
+            if (k.redup) tinta(96, 102, 118); else tinta(28, 26, 46);
+            const tx = k.rata === 'center' ? x + lebar[i] / 2 : x + PAD;
+            pdf.text(isiSel[i], tx, y + 1.4 + naik(FS), { align: k.rata === 'center' ? 'center' : 'left', lineHeightFactor: 1.22 });
+          }
+          x += lebar[i];
+        });
+        y += h;
+      });
+      y += 5;
+    }
+    function judulBagian(t, kanan) {
+      if (sisa() < 26) halamanBaru();
+      huruf(10.5, 'bold'); tinta(142, 27, 50); pdf.text(t, mL, y + 3.6);
+      if (kanan) { huruf(7.6); tinta(96, 102, 118); pdf.text(teksPdf(kanan), W - mR, y + 3.6, { align: 'right' }); }
+      y += 6.6;
+    }
+
+    /* ---- I · daftar panggil ---- */
+    judulBagian('I. DAFTAR PANGGIL', 'Centang kolom Hadir saat nama dipanggil');
+    const barisPanggil = [];
+    isi.panggil.forEach(g => {
+      barisPanggil.push({ grup: `Kelas ${g.kelas}`, kanan: `${angka(g.santri.length)} santri`, nol: false });
+      g.santri.forEach(s => barisPanggil.push({ sel: ['#', s.nama, s.kamar ? `Kamar ${s.kamar}` : '-', `${angka(s.n)} perkara`, hadir(s) ? '' : s.hadir, ''] }));
+    });
+    tabel([
+      { judul: 'No', lebar: 10, rata: 'center', redup: true },
+      { judul: 'Nama santri', tebal: true },
+      { judul: 'Kamar', lebar: 22, rata: 'center' },
+      { judul: 'Perkara', lebar: 20, rata: 'center' },
+      { judul: 'Keterangan', lebar: 30, redup: true },
+      { judul: 'Hadir', lebar: 14, rata: 'center', cek: true }
+    ], barisPanggil);
+
+    /* ---- II · rincian perkara ---- */
+    judulBagian('II. RINCIAN PERKARA', 'Centang kolom Dibacakan saat putusan dibacakan');
+    const barisRinci = [];
+    isi.rincian.forEach(r => {
+      barisRinci.push({ grup: `Bidang ${r.bidang}`, kanan: `${angka(r.n)} perkara` });
+      r.sub.forEach(sb => {
+        barisRinci.push({ grup: `${sb.kategori} · tahap ke-${sb.tahap || '?'} · Pembinaan: ${sb.bentuk}${sb.ket ? ` (${sb.ket})` : ''}`, kanan: `${angka(sb.baris.length)}`, tingkat: 2, nol: true });
+        sb.baris.forEach(b => barisRinci.push({ sel: ['#', b.nama, b.kelas, b.pelanggaran, labelTgl(b.tanggal), ''] }));
+      });
+    });
+    tabel([
+      { judul: 'No', lebar: 10, rata: 'center', redup: true },
+      { judul: 'Nama santri', bobot: 0.9, tebal: true },
+      { judul: 'Kelas', lebar: 16, rata: 'center' },
+      { judul: 'Pelanggaran', bobot: 1.25 },
+      { judul: 'Dicatat', lebar: 16, rata: 'center', redup: true },
+      { judul: 'Dibacakan', lebar: 18, rata: 'center', cek: true }
+    ], barisRinci);
+
+    /* ---- III · majelis sidang ---- */
+    if (sisa() < 58) halamanBaru();
+    judulBagian('III. MAJELIS SIDANG');
+    huruf(9); tinta(28, 26, 46);
+    pdf.text(teksPdf(`Meulaboh, ${tglPanjang(isi.sesi)}`), W - mR, y + 2, { align: 'right' });
+    y += 8;
+    const kol = L / JABATAN.length;
+    JABATAN.forEach(([k, label], i) => {
+      const cx = mL + kol * i + kol / 2;
+      huruf(8.6, 'bold'); tinta(74, 71, 99); pdf.text(label, cx, y, { align: 'center' });
+      pdf.setDrawColor(28, 26, 46); pdf.setLineWidth(0.3); pdf.line(cx - kol / 2 + 5, y + 24, cx + kol / 2 - 5, y + 24);
+      const nama = teksPdf(isi.majelis[k] || '');
+      if (nama) { huruf(8.8, 'bold'); tinta(28, 26, 46); pdf.text(pdf.splitTextToSize(nama, kol - 8), cx, y + 28.5, { align: 'center', lineHeightFactor: 1.2 }); }
+      else { huruf(8.4); tinta(150, 156, 170); pdf.text('(nama & tanda tangan)', cx, y + 28.5, { align: 'center' }); }
+    });
+    y += 38;
+    huruf(7.4); tinta(110, 116, 130);
+    const jam = (() => { try { return isi.dicetak.toLocaleString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }); } catch (e) { return ''; } })();
+    pdf.text(pdf.splitTextToSize(teksPdf(`Berkas disusun chemint ${jam} WIB${isi.persiapan ? ' (persiapan malam sebelum sidang)' : ''}. Perkara yang masuk sesudah waktu itu belum tercantum. Majelis membubuhkan tanda tangan dengan pena setelah sidang selesai.`), L), mL, y);
+
+    /* ---- kaki setiap halaman ---- */
+    const n = pdf.internal.getNumberOfPages();
+    for (let i = 1; i <= n; i++) {
+      pdf.setPage(i);
+      huruf(7.2); tinta(150, 160, 172);
+      pdf.text(teksPdf(`Berkas Perkara Sidang Ta'dib · OSDA ${isi.unit} · ${labelHari(isi.sesi, true)}`), mL, H - 6);
+      pdf.text(`Halaman ${i} dari ${n}`, W - mR, H - 6, { align: 'right' });
+    }
+    return n;
+  }
+
+  async function bukaBerkas() {
+    if (!bolehBerkas()) return A.toast('info', 'Tidak ada perkara yang menunggu sidang.');
+    if (!A.pdfBaru) return A.toast('error', 'Pembuat PDF belum tersedia. Muat ulang aplikasi.');
+    const m = majelisAwal();
+    const ops = pilihanCakupan();
+    const kertasL = A.kertasDaftar ? A.kertasDaftar() : [{ kode: 'A4', nama: 'A4', ukuran: '210 × 297 mm' }];
+    const kAwal = A.kertasTersimpan ? A.kertasTersimpan() : 'A4';
+    const isiMajelis = majelis();
+    const sesi = sesiBerkas();
+    const radio = (nama, nilai, judul, kecil, on) => `<label class="sd-opsi${on ? ' on' : ''}"><input type="radio" name="${nama}" value="${esc(nilai)}"${on ? ' checked' : ''}>
+        <b>${esc(judul)}</b>${kecil ? `<small>${esc(kecil)}</small>` : ''}</label>`;
+    const res = await A.Swal.fire({
+      title: 'Berkas perkara',
+      width: 640, showCancelButton: true, showDenyButton: true, reverseButtons: false,
+      confirmButtonText: '<i class="fa-solid fa-file-pdf"></i> Unduh PDF',
+      denyButtonText: '<i class="fa-solid fa-print"></i> Buka & cetak',
+      cancelButtonText: 'Batal', confirmButtonColor: '#8E1B32', denyButtonColor: '#334155',
+      showLoaderOnConfirm: true, showLoaderOnDeny: true, allowOutsideClick: () => !A.Swal.isLoading(),
+      html: `<div class="sd-swal sd-berkas-form">
+        <p class="sd-berkas-sesi"><i class="fa-solid fa-scale-balanced"></i><span>Sidang <b>${esc(labelHari(sesi, true))}</b> · OSDA ${esc(unitBerkas())}${persiapan() ? ' <em>persiapan</em>' : ''}</span></p>
+        ${isiMajelis ? `<fieldset><legend>Majelis sidang</legend>
+          <div class="sd-majelis-isian">${JABATAN.map(([k, l]) => `<label>${esc(l)}${k === 'ketua' ? ' <span class="sd-wajib">wajib</span>' : ''}
+            <input type="text" id="sdM-${k}" maxlength="80" autocomplete="off" value="${esc(m[k] || '')}" placeholder="${k === 'panitera' ? 'Pencatat sidang' : 'Nama lengkap'}"></label>`).join('')}</div>
+          <p class="sd-kecil">Nama tercetak di bawah ruang tanda tangan. Tanda tangan dibubuhkan dengan pena setelah berkas dicetak.</p>
+        </fieldset>` : `<p class="sd-kecil">Majelis: ${m.ketua ? esc(JABATAN.map(([k, l]) => m[k] ? `${l} ${m[k]}` : '').filter(Boolean).join(' · ')) : 'belum diisi OSDA; kolom tanda tangan dicetak kosong.'}</p>`}
+        <fieldset><legend>Isi berkas</legend>
+          <div class="sd-opsi-daftar">${ops.map((o, i) => radio('sdCakupan', o.k, o.label, `${angka(o.list.length)} perkara · ${angka(santriUnik(o.list))} santri`, i === 0)).join('')}</div>
+        </fieldset>
+        <fieldset><legend>Kertas</legend>
+          <div class="sd-opsi-daftar sd-opsi-baris">${kertasL.map(k => radio('sdKertas', k.kode, k.nama, k.ukuran, k.kode === kAwal)).join('')}</div>
+        </fieldset>
+      </div>`,
+      didOpen: (el) => {
+        el.addEventListener('change', (e) => {
+          const r = e.target.closest('input[type="radio"]'); if (!r) return;
+          el.querySelectorAll(`input[name="${r.name}"]`).forEach(x => x.closest('.sd-opsi')?.classList.toggle('on', x.checked));
+        });
+        if (isiMajelis && !m.ketua) setTimeout(() => el.querySelector('#sdM-ketua')?.focus(), 80);
+      },
+      preConfirm: () => siapkanBerkas('unduh'),
+      preDeny: () => siapkanBerkas('cetak')
+    });
+    if (!(res.isConfirmed || res.isDenied) || !res.value) return;
+    ucap('Berkas perkara siap. Panggil nama-nama ananda per kelas, lalu bacakan putusannya.', 'senang');
+  }
+
+  /** Kumpulkan isian → simpan majelis → bangun & serahkan PDF. Galat ditampilkan di jendela. */
+  async function siapkanBerkas(aksi) {
+    const pop = A.Swal.getPopup();
+    const ambil = (id) => (pop.querySelector('#' + id)?.value || '').replace(/\s+/g, ' ').trim();
+    const mj = majelis() ? Object.fromEntries(JABATAN.map(([k]) => [k, ambil('sdM-' + k)])) : (S.data?.majelis || {});
+    if (majelis() && mj.ketua.length < 2) {
+      A.Swal.showValidationMessage('Nama Hakim Ketua wajib diisi.');
+      pop.querySelector('#sdM-ketua')?.focus();
+      return false;
+    }
+    const kode = pop.querySelector('input[name="sdKertas"]:checked')?.value || 'A4';
+    const cak = pilihanCakupan().find(o => o.k === (pop.querySelector('input[name="sdCakupan"]:checked')?.value || 'semua')) || pilihanCakupan()[0];
+    if (!cak) { A.Swal.showValidationMessage('Tidak ada perkara yang menunggu.'); return false; }
+
+    if (majelis()) {
+      try { localStorage.setItem(kunciMajelis(), JSON.stringify(mj)); } catch (e) {}
+      try {
+        const { data, error } = await A.db.rpc('sidang_majelis_simpan', {
+          p_sesi: sesiBerkas(), p_unit: S.data?.unit || null, p_ketua: mj.ketua,
+          p_anggota1: mj.anggota1 || null, p_anggota2: mj.anggota2 || null, p_panitera: mj.panitera || null });
+        if (error) throw error;
+        if (S.data) S.data.majelis = data || mj;
+      } catch (e) {
+        // Berkas tetap dibuat: nama majelis tetap tercetak dari isian ini.
+        console.warn('[berkas] majelis belum tersimpan di server:', e?.message || e);
+        A.toast('warning', 'Nama majelis tercetak, tetapi belum tersimpan di server.');
+      }
+    }
+    try {
+      A.simpanKertas?.(kode);
+      const [{ pdf, kertas }, logo] = await Promise.all([A.pdfBaru(kode), A.logoKop ? A.logoKop().catch(() => null) : null]);
+      const isi = isiBerkas(cak.list, mj, cak.label);
+      gambarBerkasPdf(pdf, kertas, isi, logo);
+      const nama = `Berkas Sidang Tadib OSDA ${unitBerkas().replace(/ & /g, '-')} ${isi.sesi}${cak.k === 'semua' ? '' : ' - ' + teksPdf(cak.label).replace(/[^\w .-]+/g, ' ').trim()}.pdf`;
+      if (aksi === 'cetak') {
+        let buka = null;
+        try { pdf.autoPrint(); buka = window.open(pdf.output('bloburl'), '_blank'); } catch (e) { buka = null; }
+        if (!buka) { pdf.save(nama); A.toast('info', 'Jendela cetak diblokir peramban; PDF diunduh. Cetak dari berkas itu.'); }
+      } else {
+        pdf.save(nama);
+        A.toast('success', `Berkas perkara (${kertas.nama}) diunduh: ${angka(isi.nPerkara)} perkara, ${angka(isi.nSantri)} santri.`);
+      }
+      return true;
+    } catch (e) {
+      A.Swal.showValidationMessage(`PDF gagal dibuat: ${e?.message || e}`);
+      return false;
+    }
+  }
+
   /* ---------- berita acara (teks untuk grup WA / arsip syura) ---------- */
   async function beritaAcara() {
     const d = S.data, s = sesiHariIni();
@@ -765,6 +1131,11 @@
       t += `\n${bidang}\n`;
       l.forEach((b, i) => { t += `${i + 1}. ${b.nama} (${b.kelas}) — ${b.pelanggaran} — ${b.kategori} ke-${b.tahap || '?'} — ${b.bentuk} — ${LABEL_STATUS[b.status]}\n`; });
     });
+    const mj = d.majelis;
+    if (mj && mj.ketua && d.sesi_berkas === d.hari) {
+      t += `\nMajelis: Hakim Ketua ${mj.ketua}` + (mj.anggota1 || mj.anggota2 ? ` · Hakim Anggota ${[mj.anggota1, mj.anggota2].filter(Boolean).join(', ')}` : '')
+        + (mj.panitera ? ` · Panitera ${mj.panitera}` : '') + '\n';
+    }
     t += `\nDicatat chemint · ${d.nama || ''}`;
     try { await navigator.clipboard.writeText(t); A.toast('success', 'Berita acara disalin'); }
     catch (e) {
@@ -813,6 +1184,7 @@
     if (a === 'berikan') return berikan();
     if (a === 'batal') return batal(v);
     if (a === 'berita-acara') return beritaAcara();
+    if (a === 'berkas') return bukaBerkas();
     if (a === 'baca-lanjut') return lanjutBaca();
     if (a === 'baca-mundur') { if (S.baca && S.baca.i > 0) { S.baca.i--; gambarBaca(); } return; }
     if (a === 'baca-lewati') {
@@ -903,5 +1275,5 @@
   }
   window.addEventListener('popstate', () => { if (S.akar) { S.histori = false; A.keluar(); } });
 
-  window.RQSidang = { buka, tutup, terbuka: () => !!S.akar, _uji: { S, daftarBidang, daftarKategori, daftarTahap } };
+  window.RQSidang = { buka, tutup, terbuka: () => !!S.akar, _uji: { S, daftarBidang, daftarKategori, daftarTahap, pilihanCakupan, isiBerkas, gambarBerkasPdf, teksPdf } };
 })();

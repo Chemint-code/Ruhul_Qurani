@@ -57,11 +57,12 @@ jobs:
         run: npm run bangun:uji && npm run bangun
       - name: Uji asap (Playwright, Supabase tiruan)
         run: |
-          npm i --no-save playwright@1.63.0
+          npm i --no-save playwright@1.63.0 html2pdf.js@0.10.1
           npx playwright install --with-deps chromium
           RQCEPAT=1 node uji/uji-v261.cjs
           node uji/uji-v262.cjs
           node uji/uji-v264.cjs
+          node uji/uji-v265.cjs
       - name: Simpan hasil uji
         if: always()
         uses: actions/upload-artifact@v7

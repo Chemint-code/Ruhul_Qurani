@@ -49,7 +49,7 @@
    hapus singgahan versi lama, lalu beri tahu halaman yang terbuka.
    ===================================================================== */
 
-const VERSI       = 'rq-v2.64.1';   // v2.64.1: periode laporan dipilih di rincian santri
+const VERSI       = 'rq-v2.65';     // v2.65: berkas perkara & majelis sidang · kritik & saran OSDA · gelembung pesan
 const CACHE_INTI  = `${VERSI}-inti`;
 const CACHE_ASET  = 'rq-aset-v1';   // nama tetap: bertahan melewati kenaikan VERSI
 
