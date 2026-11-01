@@ -169,89 +169,102 @@
       <span class="sub" data-inst="nama">Dayah Ruhul Qurani</span>
     </div>
 
-    <nav class="sb-nav" id="navMenu">
+    <!-- v2.67 — PETA AMANAH: menu dikelompokkan menurut PEKERJAAN, bukan modul.
+         Urutan kelompok = urutan kerja harian musyrif (beranda → catat → tindak
+         lanjut → santri → laporan → pedoman), pengelolaan paling akhir. Nama di
+         sini = judul halaman = label tab bawah (peta NAMA_HAL di app.js). -->
+    <nav class="sb-nav" id="navMenu" aria-label="Menu utama">
 
-      <details class="nav-grup" data-grup="pantau" open>
+      <details class="nav-grup" data-grup="beranda" open>
         <summary class="sb-group">
-          <i class="fa-solid fa-gauge-high"></i><span>Pemantauan</span>
+          <i class="fa-solid fa-house"></i><span>Beranda</span>
           <i class="fa-solid fa-chevron-down tanda"></i>
         </summary>
         <div class="nav-isi">
-          <button class="nav-item" data-view="dashboard"><i class="fa-solid fa-chart-simple"></i>Ringkasan</button>
-          <button class="nav-item" data-view="radar"><i class="fa-solid fa-satellite-dish"></i>Radar Amanah</button>
-          <button class="nav-item" data-view="pimpinan"><i class="fa-solid fa-landmark"></i>Dashboard Pimpinan</button>
-          <button class="nav-item" data-view="bk"><i class="fa-solid fa-user-shield"></i>Dashboard Guru BK</button>
-          <button class="nav-item" data-view="keterlibatan"><i class="fa-solid fa-user-clock"></i>Keterlibatan Pencatat</button>
-          <button class="nav-item" data-view="asatidz"><i class="fa-solid fa-people-group"></i>Para Pendidik</button>
-          <button class="nav-item" data-view="siswa"><i class="fa-solid fa-user-graduate"></i>Profil Santri</button>
+          <button class="nav-item" data-view="dashboard"><i class="fa-solid fa-house"></i>Ringkasan</button>
+          <button class="nav-item" data-view="pimpinan"><i class="fa-solid fa-landmark"></i>Kabar Dayah</button>
+          <button class="nav-item" data-view="bk"><i class="fa-solid fa-user-shield"></i>Meja Pendampingan</button>
         </div>
       </details>
 
-      <details class="nav-grup" data-grup="catatan" open>
+      <details class="nav-grup" data-grup="catat" open>
         <summary class="sb-group">
-          <i class="fa-solid fa-clipboard-list"></i><span>Catatan Santri</span>
+          <i class="fa-solid fa-feather-pointed"></i><span>Catat</span>
           <i class="fa-solid fa-chevron-down tanda"></i>
         </summary>
         <div class="nav-isi">
-          <button class="nav-item" data-view="pelanggaran"><i class="fa-solid fa-scale-balanced"></i>Catatan Pelanggaran</button>
+          <button class="nav-item" data-view="pengasuhan"><i class="fa-solid fa-mosque"></i>Catat di Asrama</button>
+          <button class="nav-item" data-view="madrasah"><i class="fa-solid fa-school"></i>Catat di Madrasah</button>
           <button class="nav-item" data-view="prestasi"><i class="fa-solid fa-award"></i>Prestasi &amp; Apresiasi</button>
           <button class="nav-item" data-view="tahfiz"><i class="fa-solid fa-book-quran"></i>Tahfiz Al-Qur'an</button>
           <button class="nav-item" data-view="perizinan"><i class="fa-solid fa-door-open"></i>Perizinan
             <span id="badgePending" class="nav-count hidden"></span></button>
+          <button class="nav-item" data-view="pelanggaran"><i class="fa-solid fa-scale-balanced"></i>Daftar Pelanggaran</button>
         </div>
       </details>
 
-      <details class="nav-grup" data-grup="bina">
+      <details class="nav-grup" data-grup="tindak" open>
         <summary class="sb-group">
-          <i class="fa-solid fa-hands-holding-child"></i><span>Pembinaan</span>
+          <i class="fa-solid fa-hands-holding-child"></i><span>Tindak Lanjut</span>
           <i class="fa-solid fa-chevron-down tanda"></i>
         </summary>
         <div class="nav-isi">
           <button class="nav-item" data-view="pembinaan"><i class="fa-solid fa-hands-praying"></i>Pembinaan</button>
-          <button class="nav-item" data-view="rekapbina"><i class="fa-solid fa-clipboard-check"></i>Rekap Pembinaan</button>
           <button class="nav-item" data-view="pesan"><i class="fa-solid fa-comments"></i>Pesan Tindak Lanjut
             <span id="badgePesan" class="nav-count hidden"></span></button>
           <button class="nav-item" data-view="sidang"><i class="fa-solid fa-gavel"></i>Ruang Sidang Ta'dib</button>
+        </div>
+      </details>
+
+      <details class="nav-grup" data-grup="santri">
+        <summary class="sb-group">
+          <i class="fa-solid fa-users"></i><span>Santri &amp; Asatidz</span>
+          <i class="fa-solid fa-chevron-down tanda"></i>
+        </summary>
+        <div class="nav-isi">
+          <button class="nav-item" data-view="siswa"><i class="fa-solid fa-user-graduate"></i>Profil Santri</button>
+          <button class="nav-item" data-view="radar"><i class="fa-solid fa-satellite-dish"></i>Radar Amanah</button>
+          <button class="nav-item" data-view="asatidz"><i class="fa-solid fa-people-group"></i>Para Pendidik</button>
+          <button class="nav-item" data-view="keterlibatan"><i class="fa-solid fa-user-clock"></i>Keterlibatan Pencatat</button>
+        </div>
+      </details>
+
+      <details class="nav-grup" data-grup="laporan">
+        <summary class="sb-group">
+          <i class="fa-solid fa-chart-pie"></i><span>Laporan</span>
+          <i class="fa-solid fa-chevron-down tanda"></i>
+        </summary>
+        <div class="nav-isi">
+          <button class="nav-item" data-view="analisis"><i class="fa-solid fa-chart-column"></i>Grafik</button>
+          <button class="nav-item" data-view="rekapbina"><i class="fa-solid fa-clipboard-check"></i>Rekap Pembinaan</button>
+          <button class="nav-item" data-view="rekap"><i class="fa-solid fa-layer-group"></i>Rekap Pelanggaran</button>
+          <button class="nav-item" data-view="bidang"><i class="fa-solid fa-diagram-project"></i>Evaluasi Bidang</button>
+        </div>
+      </details>
+
+      <details class="nav-grup" data-grup="pedoman">
+        <summary class="sb-group">
+          <i class="fa-solid fa-book-open"></i><span>Pedoman</span>
+          <i class="fa-solid fa-chevron-down tanda"></i>
+        </summary>
+        <div class="nav-isi">
+          <button class="nav-item" data-view="master"><i class="fa-solid fa-book"></i>Pedoman Pelanggaran</button>
           <button class="nav-item" data-view="saran"><i class="fa-solid fa-comment-dots"></i>Kritik &amp; Saran</button>
         </div>
       </details>
 
-      <details class="nav-grup" data-grup="analisis">
+      <details class="nav-grup" data-grup="kelola">
         <summary class="sb-group">
-          <i class="fa-solid fa-chart-pie"></i><span>Analisis</span>
+          <i class="fa-solid fa-sliders"></i><span>Pengelolaan</span>
           <i class="fa-solid fa-chevron-down tanda"></i>
         </summary>
         <div class="nav-isi">
-          <button class="nav-item" data-view="analisis"><i class="fa-solid fa-chart-column"></i>Grafik &amp; Sebaran</button>
-          <button class="nav-item" data-view="rekap"><i class="fa-solid fa-layer-group"></i>Rekap Pelanggaran</button>
-          <button class="nav-item" data-view="bidang"><i class="fa-solid fa-diagram-project"></i>Evaluasi Bidang</button>
-          <button class="nav-item" data-view="lab"><i class="fa-solid fa-flask"></i>Laboratorium Kebijakan</button>
-        </div>
-      </details>
-
-      <details class="nav-grup" data-grup="unit">
-        <summary class="sb-group">
-          <i class="fa-solid fa-building-columns"></i><span>Unit Operasional</span>
-          <i class="fa-solid fa-chevron-down tanda"></i>
-        </summary>
-        <div class="nav-isi">
-          <button class="nav-item" data-view="pengasuhan"><i class="fa-solid fa-mosque"></i>Pengasuhan</button>
-          <button class="nav-item" data-view="madrasah"><i class="fa-solid fa-school"></i>Madrasah</button>
-        </div>
-      </details>
-
-      <details class="nav-grup" data-grup="sistem">
-        <summary class="sb-group">
-          <i class="fa-solid fa-sliders"></i><span>Sistem</span>
-          <i class="fa-solid fa-chevron-down tanda"></i>
-        </summary>
-        <div class="nav-isi">
-          <button class="nav-item" data-view="master"><i class="fa-solid fa-book"></i>Master &amp; Bidang</button>
           <button class="nav-item" data-view="pengguna"><i class="fa-solid fa-users-gear"></i>Pengguna</button>
-          <button class="nav-item" data-view="audit"><i class="fa-solid fa-fingerprint"></i>Jejak Audit</button>
           <button class="nav-item" data-view="tutupbuku"><i class="fa-solid fa-book-bookmark"></i>Tutup Buku</button>
+          <button class="nav-item" data-view="audit"><i class="fa-solid fa-fingerprint"></i>Jejak Audit</button>
           <button class="nav-item hidden" data-view="kotaksaran"><i class="fa-solid fa-inbox"></i>Kotak Saran OSDA
             <span id="badgeSaran" class="nav-count hidden"></span></button>
+          <button class="nav-item" data-view="lab"><i class="fa-solid fa-flask"></i>Simulasi Aturan</button>
         </div>
       </details>
 
@@ -299,18 +312,37 @@
           <span class="pbar-role" id="pbarRole">-</span>
         </div>
         <div class="pbar-acts">
-          <button type="button" class="pbar-btn" id="btnPasang" title="Pasang aplikasi di perangkat ini">
-            <i class="fa-solid fa-download"></i><span>Pasang</span>
-          </button>
-          <button type="button" class="pbar-btn" id="pbarBtnStudio" title="Ganti foto profil">
-            <i class="fa-solid fa-images"></i><span>Identitas</span>
-          </button>
-          <!-- Jalan keluar terakhir bila satu perangkat tersangkut pada
-               versi lama meski berkas di server sudah diperbarui — v2.10. -->
-          <button type="button" class="pbar-btn" id="btnSegarkan"
-                  title="Bersihkan singgahan dan muat versi terbaru">
-            <i class="fa-solid fa-rotate"></i><span>Segarkan</span>
-          </button>
+          <!-- v2.67: tombol teknis (Pasang, Identitas, Tampilan, Bantuan, Segarkan)
+               dikumpulkan di satu laci "Akun". ID & pendengar kliknya tetap. -->
+          <div class="akun" id="akunMenu">
+            <button type="button" class="pbar-btn akun-pemicu" id="btnAkun"
+                    aria-haspopup="menu" aria-expanded="false" aria-controls="akunLaci"
+                    title="Akun, tampilan, dan bantuan">
+              <i class="fa-solid fa-sliders"></i><span>Akun</span><i class="fa-solid fa-chevron-down akun-panah"></i>
+            </button>
+            <div class="akun-laci" id="akunLaci" role="menu" aria-label="Akun dan pengaturan" hidden>
+              <div class="akun-kepala" aria-hidden="true">
+                <span class="ar">الحساب</span>
+                <b id="akunNama">Akun</b>
+                <small id="akunPeran"></small>
+              </div>
+              <button type="button" class="pbar-btn" id="btnPasang" role="menuitem" title="Pasang aplikasi di perangkat ini">
+                <i class="fa-solid fa-download"></i><span>Pasang</span>
+              </button>
+              <button type="button" class="pbar-btn" id="pbarBtnStudio" role="menuitem" title="Ganti foto profil">
+                <i class="fa-solid fa-images"></i><span>Identitas</span>
+              </button>
+              <!-- Jalan keluar terakhir bila satu perangkat tersangkut pada
+                   versi lama meski berkas di server sudah diperbarui — v2.10. -->
+              <button type="button" class="pbar-btn" id="btnSegarkan" role="menuitem"
+                      title="Bersihkan singgahan dan muat versi terbaru">
+                <i class="fa-solid fa-rotate"></i><span>Segarkan</span>
+              </button>
+              <button type="button" class="pbar-btn akun-keluar" id="btnAkunKeluar" role="menuitem">
+                <i class="fa-solid fa-right-from-bracket"></i><span>Keluar</span>
+              </button>
+            </div>
+          </div>
           <div class="pbar-korps" id="pbarKorps" role="img"
                aria-label="Korps Musyrif Asrama Putra"
                title="Musyrif Asrama Putra · Dayah Ruhul Qurani">
@@ -335,6 +367,13 @@
         </div>
         <h2 id="pageTitle">Ringkasan</h2>
       </div>
+      <!-- v2.67 — Lentera: satu kotak cari untuk santri, halaman, dan perintah (Ctrl+K atau /). -->
+      <button type="button" class="lentera-pemicu" id="btnLentera" aria-haspopup="dialog"
+              aria-controls="lentera" title="Cari santri atau halaman (Ctrl+K)">
+        <span class="lp-ikon" aria-hidden="true"><i class="fa-solid fa-magnifying-glass"></i></span>
+        <span class="lp-teks">Cari santri atau halaman</span>
+        <kbd class="lp-kbd" aria-hidden="true">Ctrl K</kbd>
+      </button>
       <div class="meta">
         <span class="ctx-badge" id="ctxBadge" title="Unit operasional aktif">
           <i class="fa-solid fa-layer-group"></i><span id="ctxLabel">Semua Unit</span>
@@ -356,16 +395,33 @@
             <i class="fa-solid fa-xmark"></i></button>
         </span>
 
-        <span class="antre" id="antreBadge" title="Perubahan menunggu koneksi">
-          <i class="fa-solid fa-cloud-arrow-up"></i><b id="antreText">0</b>
-        </span>
-        <span class="luring" id="luringBadge" title="Tidak ada koneksi">
-          <i class="fa-solid fa-plug-circle-xmark"></i>Luring
-        </span>
-        <span class="sync" id="syncDot"><span class="dot"></span><b id="syncText">Tersinkron</b></span>
-        <span class="live" id="liveDot"><span class="dot"></span>Realtime</span>
-        <span class="qtime" id="queryTime"></span>
       </div>
+      <!-- v2.67 — Denyut: lima penanda sistem menjadi satu titik. Penanda aslinya
+           tetap hidup (diperbarui fungsi lama) di dalam panel. -->
+      <div class="denyut" id="denyut" data-keadaan="tenang">
+        <button type="button" class="denyut-titik" id="btnDenyut" aria-expanded="false"
+                aria-controls="denyutPanel" title="Status sambungan">
+          <span class="dt-inti" aria-hidden="true"></span><b id="denyutTeks">Tersambung</b>
+        </button>
+        <div class="denyut-panel" id="denyutPanel" role="status" hidden>
+          <span class="ar" aria-hidden="true">حال الاتصال</span>
+          <span class="antre" id="antreBadge" title="Perubahan menunggu koneksi">
+            <i class="fa-solid fa-cloud-arrow-up"></i><b id="antreText">0</b>
+          </span>
+          <span class="luring" id="luringBadge" title="Tidak ada koneksi">
+            <i class="fa-solid fa-plug-circle-xmark"></i>Luring
+          </span>
+          <span class="sync" id="syncDot"><span class="dot"></span><b id="syncText">Tersinkron</b></span>
+          <span class="live" id="liveDot"><span class="dot"></span>Realtime</span>
+          <span class="qtime" id="queryTime"></span>
+          <p class="denyut-ket" id="denyutKet"></p>
+        </div>
+      </div>
+      <!-- v2.67 — satu tombol Catat, sama dengan tombol tengah bilah bawah HP. -->
+      <button type="button" class="catat-atas hidden" id="btnCatatAtas" title="Catat pelanggaran (C)">
+        <span class="ca-khatam" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M12 5.5v13M5.5 12h13"/></svg></span>
+        <span>Catat</span>
+      </button>
     </header>
 
     <main class="view" id="viewRoot"></main>
@@ -373,8 +429,9 @@
 </div>
 
 <!-- ======= NAVIGASI BAWAH (ponsel) ======= -->
+<!-- v2.67: isi bilah ini disusun ulang app.js (TAB_PERAN) — tetap per peran, tidak bergeser. -->
 <nav class="tabbar" id="tabBar" aria-label="Navigasi cepat">
-  <button class="tab" data-view="dashboard"><i class="fa-solid fa-chart-simple"></i>Ringkasan</button>
+  <button class="tab" data-view="dashboard"><i class="fa-solid fa-house"></i>Ringkasan</button>
   <button class="tab" data-view="siswa"><i class="fa-solid fa-user-graduate"></i>Santri</button>
   <button class="tab" data-view="perizinan"><i class="fa-solid fa-door-open"></i>Izin</button>
   <button class="tab" data-view="pesan"><i class="fa-solid fa-comments"></i>Pesan</button>

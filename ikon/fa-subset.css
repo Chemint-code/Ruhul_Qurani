@@ -5549,7 +5549,6 @@ readers do not read off random characters that represent icons */
 .fa-book-quran::before{content:"\f687"}
 .fa-bookmark::before{content:"\f02e"}
 .fa-box-archive::before{content:"\f187"}
-.fa-building-columns::before{content:"\f19c"}
 .fa-bullseye::before{content:"\f140"}
 .fa-calendar::before{content:"\f133"}
 .fa-calendar-check::before{content:"\f274"}
@@ -5579,7 +5578,6 @@ readers do not read off random characters that represent icons */
 .fa-circle-question::before{content:"\f059"}
 .fa-circle-xmark::before{content:"\f057"}
 .fa-clipboard-check::before{content:"\f46c"}
-.fa-clipboard-list::before{content:"\f46d"}
 .fa-clock::before{content:"\f017"}
 .fa-clock-rotate-left::before{content:"\f1da"}
 .fa-cloud-arrow-down::before{content:"\f0ed"}
@@ -5625,6 +5623,7 @@ readers do not read off random characters that represent icons */
 .fa-hands-holding-child::before{content:"\e4fa"}
 .fa-hands-praying::before{content:"\f684"}
 .fa-hourglass-half::before{content:"\f252"}
+.fa-house::before{content:"\f015"}
 .fa-house-medical::before{content:"\e3b2"}
 .fa-id-badge::before{content:"\f2c1"}
 .fa-image::before{content:"\f03e"}
@@ -5680,6 +5679,7 @@ readers do not read off random characters that represent icons */
 .fa-table::before{content:"\f0ce"}
 .fa-table-cells::before{content:"\f00a"}
 .fa-table-list::before{content:"\f00b"}
+.fa-thumbtack::before{content:"\f08d"}
 .fa-trash::before{content:"\f1f8"}
 .fa-trash-arrow-up::before{content:"\f829"}
 .fa-trash-can::before{content:"\f2ed"}

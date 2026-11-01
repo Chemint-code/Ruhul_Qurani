@@ -33622,3 +33622,998 @@ $('viewRoot')?.addEventListener('click', async (e) => {
     return h;
   };
 })();
+
+
+/* =====================================================================
+ * v2.67 — PETA AMANAH: NAVIGASI BERBASIS TUGAS
+ * ---------------------------------------------------------------------
+ *  Rancangan: analisis tata navigasi 1 Nov 2026 (usulan A–I disetujui
+ *  pemilik: "maksimalkan kreativitasmu di setiap transisi dan gayanya").
+ *
+ *  A · Menu dikelompokkan menurut pekerjaan (index.html): Beranda · Catat ·
+ *      Tindak Lanjut · Santri & Asatidz · Laporan · Pedoman · Pengelolaan.
+ *  B · Satu tombol Catat di bilah atas desktop (= tombol tengah bilah HP).
+ *  C · LENTERA — satu kotak cari: santri, halaman, perintah (Ctrl+K, /).
+ *  D · Satu nama untuk satu halaman: menu = judul = tab (NAMA_HAL).
+ *  E · Riwayat halaman (#alamat): tombol Kembali Android kembali ke halaman
+ *      sebelumnya; tautan langsung (#perizinan) bisa dikirim bot WA.
+ *  F · Bilah atas rapi: saringan hanya di halaman pemakainya; lima penanda
+ *      sistem menjadi satu DENYUT; tombol teknis masuk laci AKUN.
+ *  G · Bilah sisi desktop bisa DISEMATKAN (bawaan ≥1280 px); kelompok yang
+ *      dibuka diingat; peran bermenu sedikit tampil datar tanpa lipatan.
+ *  H · Bilah bawah HP TETAP per peran (tidak lagi melipat tab), dengan
+ *      LACI AMANAH untuk Tindak Lanjut.
+ *  I · Jejak: eyebrow judul = nama kelompok; diketuk → halaman saudara.
+ *
+ *  GERAK — model ruang: kelompok = lantai (pindah kelompok = naik/turun),
+ *  halaman sekelompok = ruang bersebelahan (geser kiri/kanan, v2.36),
+ *  tombol Kembali = kembali ke ruang semula (lapisan lama tersingkap).
+ *  Semua gerak tunduk pada bolehGerak() (mode hemat & prefers-reduced-motion).
+ *
+ *  Tidak ada perubahan skema, RPC, trigger, maupun RLS. Fungsi lama tidak
+ *  ditimpa isinya — hanya dibungkus.
+ * ===================================================================== */
+APP.versi = 'rq-v2.67';   // v2.67: Peta Amanah — navigasi berbasis tugas, Lentera, riwayat halaman
+
+const PA = {
+  GRUP: [
+    { id: 'beranda', label: 'Beranda',          ar: 'الرئيسية',          views: ['dashboard', 'pimpinan', 'bk'] },
+    { id: 'catat',   label: 'Catat',            ar: 'التسجيل',           views: ['pengasuhan', 'madrasah', 'prestasi', 'tahfiz', 'perizinan', 'pelanggaran'] },
+    { id: 'tindak',  label: 'Tindak Lanjut',    ar: 'المتابعة',          views: ['pembinaan', 'pesan', 'sidang'] },
+    { id: 'santri',  label: 'Santri & Asatidz', ar: 'الطلاب والأساتذة',  views: ['siswa', 'radar', 'asatidz', 'keterlibatan', 'pendidik'] },
+    { id: 'laporan', label: 'Laporan',          ar: 'التقارير',          views: ['analisis', 'rekapbina', 'rekap', 'bidang'] },
+    { id: 'pedoman', label: 'Pedoman',          ar: 'الدليل',            views: ['master', 'saran'] },
+    { id: 'kelola',  label: 'Pengelolaan',      ar: 'الإدارة',           views: ['pengguna', 'tutupbuku', 'audit', 'kotaksaran', 'lab'] }
+  ],
+  /* nama = menu = judul halaman; tab = label bilah bawah (kata inti nama yang sama);
+     ket = penjelas di Lentera & petunjuk menu; kata = sinonim pencarian. */
+  NAMA: {
+    dashboard:    { nama: 'Ringkasan', tab: 'Ringkasan', ket: 'Amanah hari ini dan lembar bulan berjalan', kata: 'beranda rumah dasbor dashboard amanah lembar' },
+    pimpinan:     { nama: 'Kabar Dayah', tab: 'Kabar Dayah', ket: 'Gambaran dayah untuk pimpinan', kata: 'dashboard pimpinan kepala mudir' },
+    bk:           { nama: 'Meja Pendampingan', tab: 'Pendampingan', ket: 'Santri yang perlu didampingi Guru BK', kata: 'dashboard bk bimbingan konseling' },
+    pengasuhan:   { nama: 'Catat di Asrama', tab: 'Asrama', ket: 'Catat pelanggaran, izin, dan rekap unit Pengasuhan', kata: 'pengasuhan asrama unit catat pelanggaran ubudiyah bahasa kebersihan keamanan' },
+    madrasah:     { nama: 'Catat di Madrasah', tab: 'Madrasah', ket: 'Atribut, pelanggaran, dan presensi kelas MTs/MA', kata: 'madrasah mts ma sekolah kelas atribut presensi' },
+    prestasi:     { nama: 'Prestasi & Apresiasi', tab: 'Prestasi', ket: 'Catat prestasi dan apresiasi santri', kata: 'prestasi apresiasi penghargaan juara' },
+    tahfiz:       { nama: "Tahfiz Al-Qur'an", tab: 'Tahfiz', ket: 'Setoran hafalan, ziyadah, dan murajaah', kata: 'tahfiz hafalan quran setoran ziyadah murajaah' },
+    perizinan:    { nama: 'Perizinan', tab: 'Perizinan', ket: 'Izin keluar-masuk santri hari ini', kata: 'izin keluar pulang klinik sakit kembali' },
+    pelanggaran:  { nama: 'Daftar Pelanggaran', tab: 'Pelanggaran', ket: 'Seluruh catatan pelanggaran beserta suntingannya', kata: 'pelanggaran catatan log daftar' },
+    pembinaan:    { nama: 'Pembinaan', tab: 'Pembinaan', ket: 'Pembinaan yang harus dituntaskan bulan ini', kata: 'pembinaan hukuman tahap tuntas sanksi' },
+    pesan:        { nama: 'Pesan Tindak Lanjut', tab: 'Pesan', ket: 'Pesan antara guru, BK, dan pimpinan', kata: 'pesan chat tindak lanjut bk wali' },
+    sidang:       { nama: "Ruang Sidang Ta'dib", tab: 'Sidang', ket: 'Sidang OSDA untuk pembinaan Ringan & Sedang', kata: 'sidang tadib osda osim majelis putusan' },
+    siswa:        { nama: 'Profil Santri', tab: 'Santri', ket: 'Cari santri, riwayat lengkap, dan laporan wali', kata: 'santri siswa profil laporan wali nisn' },
+    radar:        { nama: 'Radar Amanah', tab: 'Radar', ket: 'Santri binaan yang perlu perhatian, dalam satu radar', kata: 'radar perhatian ipp tingkat binaan' },
+    asatidz:      { nama: 'Para Pendidik', tab: 'Pendidik', ket: 'Guru, musyrif, dan progres kelas binaannya', kata: 'guru asatidz ustadz musyrif pendidik tim' },
+    pendidik:     { nama: 'Profil Pendidik', tab: 'Pendidik', ket: 'Progres kelas binaan dan aktivitas seorang pendidik', kata: 'profil guru' },
+    keterlibatan: { nama: 'Keterlibatan Pencatat', tab: 'Keterlibatan', ket: 'Siapa yang belum mencatat bulan ini', kata: 'kinerja guru pencatat aktif' },
+    analisis:     { nama: 'Grafik', tab: 'Grafik', ket: 'Grafik dan sebaran catatan santri', kata: 'grafik sebaran analisis statistik kalender chart' },
+    rekapbina:    { nama: 'Rekap Pembinaan', tab: 'Rekap', ket: 'Rekap pembinaan per santri dan kelas', kata: 'rekap pembinaan laporan bulanan' },
+    rekap:        { nama: 'Rekap Pelanggaran', tab: 'Rekap', ket: 'Rekap pelanggaran per santri', kata: 'rekap pelanggaran laporan poin' },
+    bidang:       { nama: 'Evaluasi Bidang', tab: 'Bidang', ket: 'Bidang pelanggaran yang paling sering terjadi', kata: 'evaluasi bidang kategori sebaran' },
+    master:       { nama: 'Pedoman Pelanggaran', tab: 'Pedoman', ket: 'Daftar pelanggaran, bidang, dan tahap pembinaan', kata: 'master pedoman aturan peraturan instrumen bidang kode' },
+    saran:        { nama: 'Kritik & Saran', tab: 'Saran', ket: 'Kirim kritik dan saran untuk pengurus', kata: 'kritik saran usul masukan' },
+    pengguna:     { nama: 'Pengguna', tab: 'Pengguna', ket: 'Akun, peran, dan kelas binaan', kata: 'pengguna akun user peran role' },
+    tutupbuku:    { nama: 'Tutup Buku', tab: 'Tutup Buku', ket: 'Kunci dan arsipkan catatan bulan lalu', kata: 'tutup buku arsip kunci bulan' },
+    audit:        { nama: 'Jejak Audit', tab: 'Audit', ket: 'Riwayat perubahan data oleh setiap akun', kata: 'audit jejak log riwayat perubahan' },
+    kotaksaran:   { nama: 'Kotak Saran OSDA', tab: 'Kotak Saran', ket: 'Kritik & saran masuk dari OSDA', kata: 'kotak saran osda masuk' },
+    lab:          { nama: 'Simulasi Aturan', tab: 'Simulasi', ket: 'Uji dampak perubahan aturan sebelum diterapkan', kata: 'laboratorium kebijakan simulasi aturan' }
+  },
+  /* F · halaman yang tidak memakai saringan unit/asrama/periode di bilah atas. */
+  TANPA_SARING: new Set(['asatidz', 'pendidik', 'audit', 'saran', 'kotaksaran', 'sidang']),
+  RAMPING: 10,              // ≤ sekian menu → bilah sisi datar tanpa lipatan
+  arahBaru: null,
+  grupDibuka: false,
+  lapis: [],                 // lapisan yang bisa ditutup tombol Kembali (laci, Lentera, …)
+  abaikanPop: 0,
+  dariPop: false,
+  riwayatSiap: false,
+  tungguPop: [],
+  navigasi: false,           // true selama bagian sinkron navigateTo berjalan
+  gantiRiwayat: false
+};
+
+const grupDari = (v) => PA.GRUP.find(g => g.views.includes(v)) || null;
+const indeksGrup = (v) => { const g = grupDari(v); return g ? PA.GRUP.indexOf(g) : -1; };
+const namaHal = (v) => (PA.NAMA[v] && PA.NAMA[v].nama) || (JUDUL[v] && JUDUL[v].teks) || v;
+const bolehHal = (v) => (MENU_ROLE[v] || []).includes(role())
+  && !(v === 'kotaksaran' && document.querySelector('#navMenu [data-view="kotaksaran"]')?.classList.contains('hidden'));
+const kunciPA = (k) => `rq.${k}.v1.${idSaya()}`;
+
+/* ---------- D · Satu nama: judul halaman & eyebrow = kelompok ---------- */
+(function satukanNama() {
+  for (const [v, n] of Object.entries(PA.NAMA)) {
+    const g = grupDari(v);
+    JUDUL[v] = { ...(JUDUL[v] || { ar: '' }), teks: n.nama, lat: g ? g.label : (JUDUL[v]?.lat || '') };
+  }
+  // Ringkasan memakai ikon rumah di bilah sisi; label nav tetap dari index.html.
+})();
+
+/* =====================================================================
+ * A · G · BILAH SISI: kelompok tunggal, datar, ingat yang dibuka
+ * ===================================================================== */
+function petaRapikanNav(viewAktif) {
+  const nav = $('navMenu'); if (!nav || !APP.profil) return;
+  const grup = [...nav.querySelectorAll('.nav-grup')];
+  let total = 0;
+  grup.forEach(g => {
+    const n = [...g.querySelectorAll('.nav-item[data-view]')].filter(b => !b.classList.contains('hidden')).length;
+    total += n;
+    g.classList.toggle('tunggal', n === 1);
+    if (n === 1) g.open = true;          // kelompok satu menu: judulnya disembunyikan, isinya selalu tampil
+    g.dataset.jumlah = n;
+  });
+  const datar = total <= PA.RAMPING;
+  nav.classList.toggle('nav-datar', datar);
+  if (datar) { grup.forEach(g => { g.open = true; }); PA.grupDibuka = true; return; }
+  if (!PA.grupDibuka) {
+    PA.grupDibuka = true;
+    let simpan = null;
+    try { simpan = JSON.parse(bacaLS(kunciPA('grup')) || 'null'); } catch (e) {}
+    const buka = new Set(Array.isArray(simpan) ? simpan : ['beranda', 'catat', 'tindak']);
+    PA.memulihkanGrup = true;
+    grup.forEach(g => { g.open = buka.has(g.dataset.grup) || [...g.querySelectorAll('.nav-item.active')].length > 0; });
+    setTimeout(() => { PA.memulihkanGrup = false; }, 0);
+  }
+  if (viewAktif) { const g = nav.querySelector(`.nav-item[data-view="${viewAktif}"]`)?.closest('.nav-grup'); if (g && !g.open) g.open = true; }
+}
+
+(function pasangGrupIngat() {
+  const nav = $('navMenu'); if (!nav) return;
+  // Kelompok yang dibuka/ditutup pengguna diingat per akun.
+  nav.addEventListener('toggle', (e) => {
+    const g = e.target;
+    if (!g.classList || !g.classList.contains('nav-grup') || !APP.profil || PA.memulihkanGrup || nav.classList.contains('nav-datar')) return;
+    const buka = [...nav.querySelectorAll('.nav-grup')].filter(x => x.open && !x.classList.contains('hidden')).map(x => x.dataset.grup);
+    tulisLS(kunciPA('grup'), JSON.stringify(buka));
+    if (g.open && bolehGerak()) {
+      [...g.querySelectorAll('.nav-item:not(.hidden)')].forEach((b, i) => {
+        b.animate([{ opacity: 0, transform: 'translateX(-8px)' }, { opacity: 1, transform: 'none' }],
+          { duration: 260, delay: 22 * i, easing: 'cubic-bezier(.22,1,.36,1)', fill: 'backwards' });
+      });
+    }
+  }, true);
+  // Mode datar: judul kelompok hanya penanda, tidak melipat.
+  nav.addEventListener('click', (e) => {
+    const s = e.target.closest('summary.sb-group');
+    if (s && nav.classList.contains('nav-datar')) e.preventDefault();
+  });
+})();
+
+(function bungkusRapikanPeta() {
+  const asli = rapikanGrupNav;
+  rapikanGrupNav = function (viewAktif) {
+    const h = asli.apply(this, arguments);
+    try { petaRapikanNav(viewAktif); } catch (e) { console.warn('[peta]', e); }
+    return h;
+  };
+})();
+
+/* ---------- G · Sematkan bilah sisi (desktop) ---------- */
+const SEMAT = { mq: window.matchMedia('(min-width:1025px)'), lebarBawaan: window.matchMedia('(min-width:1280px)') };
+function sematAktif() {
+  const p = bacaLS('rq.sisi.v1');
+  return p === 'semat' ? true : p === 'lepas' ? false : SEMAT.lebarBawaan.matches;
+}
+function terapkanSemat(animasi) {
+  const sb = $('sidebar'), shell = $('appShell'); if (!sb || !shell) return;
+  const on = SEMAT.mq.matches && sematAktif();
+  if (on === sb.classList.contains('tersemat')) return;
+  if (!animasi || !bolehGerak()) shell.classList.add('semat-tanpa-gerak');
+  sb.classList.toggle('tersemat', on);
+  shell.classList.toggle('sisi-tersemat', on);
+  const t = $('btnSemat');
+  if (t) { t.setAttribute('aria-pressed', String(on)); t.title = on ? 'Lepas bilah sisi (ramping jadi ikon)' : 'Sematkan bilah sisi (label selalu tampil)'; }
+  requestAnimationFrame(() => requestAnimationFrame(() => shell.classList.remove('semat-tanpa-gerak')));
+  // Grafik menyesuaikan lebar baru setelah geser selesai.
+  setTimeout(() => { try { window.dispatchEvent(new Event('resize')); } catch (e) {} }, 380);
+}
+(function pasangSemat() {
+  const kepala = document.querySelector('#sidebar .sb-head'); if (!kepala) return;
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'sb-semat'; b.id = 'btnSemat';
+  b.setAttribute('aria-pressed', 'false');
+  b.innerHTML = '<i class="fa-solid fa-thumbtack" aria-hidden="true"></i><span class="sr-only">Sematkan bilah sisi</span>';
+  kepala.appendChild(b);
+  b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const on = !$('sidebar').classList.contains('tersemat');
+    tulisLS('rq.sisi.v1', on ? 'semat' : 'lepas');
+    terapkanSemat(true);
+    if (bolehGerak()) b.animate(on
+      ? [{ transform: 'rotate(-45deg) translateY(-4px)' }, { transform: 'rotate(0) translateY(1px)', offset: .7 }, { transform: 'none' }]
+      : [{ transform: 'none' }, { transform: 'rotate(-45deg) translateY(-3px)' }], { duration: 420, easing: 'cubic-bezier(.3,1.4,.5,1)', fill: on ? 'none' : 'forwards' });
+    if (!on) { setTimeout(() => b.getAnimations().forEach(a => a.cancel()), 450); try { $('sidebar').classList.remove('lebar'); } catch (er) {} }
+  });
+  terapkanSemat(false);
+  SEMAT.mq.addEventListener?.('change', () => terapkanSemat(false));
+  SEMAT.lebarBawaan.addEventListener?.('change', () => terapkanSemat(true));
+})();
+
+/* =====================================================================
+ * I · JEJAK — eyebrow judul = kelompok; diketuk → halaman saudara
+ * ===================================================================== */
+function saudaraDari(v) {
+  const g = grupDari(v === 'pendidik' ? 'asatidz' : v); if (!g) return [];
+  return g.views.filter(x => x !== 'pendidik' && bolehHal(x));
+}
+function perbaruiJejak(v) {
+  const eb = $('pageEyebrow'); if (!eb) return;
+  const s = saudaraDari(v);
+  eb.classList.toggle('ada-saudara', s.length > 1);
+  eb.setAttribute('role', s.length > 1 ? 'button' : '');
+  if (s.length > 1) {
+    eb.tabIndex = 0;
+    eb.setAttribute('aria-haspopup', 'menu');
+    eb.setAttribute('aria-label', `${grupDari(v)?.label || ''}: buka halaman lain di kelompok ini`);
+  } else { eb.removeAttribute('tabindex'); eb.removeAttribute('aria-haspopup'); eb.removeAttribute('aria-label'); eb.removeAttribute('role'); }
+  tutupJejak();
+}
+function ikonView(v) {
+  const i = document.querySelector(`#navMenu .nav-item[data-view="${v}"] > i`);
+  return i ? i.className : 'fa-solid fa-circle';
+}
+function bukaJejak() {
+  const eb = $('pageEyebrow'); if (!eb || !eb.classList.contains('ada-saudara')) return;
+  if ($('jejakPop')) return tutupJejak();
+  const v = APP.view, g = grupDari(v === 'pendidik' ? 'asatidz' : v);
+  const pop = document.createElement('div');
+  pop.className = 'jejak-pop'; pop.id = 'jejakPop'; pop.setAttribute('role', 'menu');
+  pop.innerHTML = `<span class="jp-kepala"><span class="ar">${esc(g.ar)}</span>${esc(g.label)}</span>` +
+    saudaraDari(v).map((x, i) => `<button type="button" role="menuitem" class="jp-item${x === v || (v === 'pendidik' && x === 'asatidz') ? ' kini' : ''}" data-jejak="${x}" style="--i:${i}">
+      <i class="${ikonView(x)}" aria-hidden="true"></i><span><b>${esc(namaHal(x))}</b><small>${esc(PA.NAMA[x]?.ket || '')}</small></span></button>`).join('');
+  const r = eb.getBoundingClientRect();
+  pop.style.left = Math.max(10, Math.min(r.left, innerWidth - 330)) + 'px';
+  pop.style.top = (r.bottom + 8) + 'px';
+  document.body.appendChild(pop);
+  eb.setAttribute('aria-expanded', 'true');
+  requestAnimationFrame(() => pop.classList.add('buka'));
+  pop.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-jejak]'); if (!b) return;
+    tutupJejak();
+    if (b.dataset.jejak !== APP.view) navigateTo(b.dataset.jejak);
+  });
+  pop.querySelector('.jp-item.kini')?.focus({ preventScroll: true }) || pop.querySelector('.jp-item')?.focus({ preventScroll: true });
+}
+function tutupJejak() {
+  const p = $('jejakPop'); if (!p) return;
+  $('pageEyebrow')?.setAttribute('aria-expanded', 'false');
+  p.remove();
+}
+(function pasangJejak() {
+  const eb = $('pageEyebrow'); if (!eb) return;
+  eb.addEventListener('click', (e) => { e.stopPropagation(); bukaJejak(); });
+  eb.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); bukaJejak(); } });
+  document.addEventListener('pointerdown', (e) => { if ($('jejakPop') && !e.target.closest('#jejakPop, #pageEyebrow')) tutupJejak(); }, true);
+  document.addEventListener('keydown', (e) => {
+    const p = $('jejakPop'); if (!p) return;
+    if (e.key === 'Escape') { tutupJejak(); eb.focus(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const it = [...p.querySelectorAll('.jp-item')], i = it.indexOf(document.activeElement);
+      it[(i + (e.key === 'ArrowDown' ? 1 : -1) + it.length) % it.length]?.focus();
+    }
+  });
+  addEventListener('resize', tutupJejak);
+  addEventListener('scroll', tutupJejak, { passive: true });
+})();
+
+/* =====================================================================
+ * E · RIWAYAT HALAMAN — #alamat, tombol Kembali, tautan langsung
+ * ===================================================================== */
+const hashView = () => {
+  const h = decodeURIComponent(String(location.hash || '').replace(/^#/, ''));
+  const [v, id] = h.split('/');
+  return { v: v || '', id: id || '' };
+};
+const alamatView = (v) => '#' + v + (v === 'pendidik' && typeof AS !== 'undefined' && AS.pilih ? '/' + encodeURIComponent(AS.pilih) : '');
+
+/* Tautan #pendidik/<id>: pilihan pendidik dipasang sebelum login membaca alamat. */
+(function pulihkanAlamatAwal() {
+  const { v, id } = hashView();
+  if (v === 'pendidik' && id && typeof AS !== 'undefined') { AS.pilih = id; try { history.replaceState(history.state, '', '#pendidik'); } catch (e) {} }
+})();
+
+/* Lapisan (laci, Lentera, laci amanah) ikut riwayat: Kembali menutupnya dulu. */
+function bukaLapis(nama, tutup) {
+  if (PA.lapis.some(l => l.nama === nama)) return;
+  PA.lapis.push({ nama, tutup });
+  try { history.pushState({ rq: APP.view, lapis: nama }, '', location.hash || alamatView(APP.view)); } catch (e) {}
+}
+/* Menutup lapisan lewat tombol di layar → entri riwayatnya dibuang. Bila penutupan
+   itu bagian dari pindah halaman, entri lapisan DITIMPA alamat halaman baru (bukan
+   history.back(), yang bisa bertabrakan dengan pushState halaman baru). */
+function tutupLapis(nama) {
+  const i = PA.lapis.findIndex(l => l.nama === nama); if (i < 0) return Promise.resolve();
+  PA.lapis.splice(i, 1);
+  if (!(history.state && history.state.lapis === nama)) return Promise.resolve();
+  if (PA.navigasi) { PA.gantiRiwayat = true; return Promise.resolve(); }
+  return new Promise((ok) => {
+    PA.tungguPop.push(ok); PA.abaikanPop++;
+    try { history.back(); } catch (e) { PA.abaikanPop--; PA.tungguPop.pop(); return ok(); }
+    setTimeout(ok, 450);   // jaga-jaga: popstate tidak datang
+  });
+}
+
+window.addEventListener('popstate', (e) => {
+  if (PA.abaikanPop > 0) { PA.abaikanPop--; const ok = PA.tungguPop.shift(); if (ok) ok(); return; }
+  if (!APP.profil) return;
+  // 1 · lapisan teratas ditutup lebih dulu
+  const l = PA.lapis.pop();
+  if (l) { try { l.tutup(true); } catch (er) {} return; }
+  // 2 · dialog (formulir catat, rincian santri) ditutup; halaman tetap
+  if (window.Swal && Swal.isVisible && Swal.isVisible() && !document.querySelector('.swal2-toast')) {
+    Swal.close();
+    try { history.pushState({ rq: APP.view }, '', alamatView(APP.view)); } catch (er) {}
+    return;
+  }
+  const st = e.state || {};
+  const { v, id } = hashView();
+  const tujuan = st.rq || v;
+  if (!tujuan || !(MENU_ROLE[tujuan])) return;
+  if (tujuan === 'pendidik' && id && typeof AS !== 'undefined') AS.pilih = id;
+  if (tujuan === APP.view && tujuan !== 'pendidik') return;
+  PA.dariPop = true;
+  navigateTo(tujuan);
+});
+// Alamat diketik/ditempel saat aplikasi terbuka (bukan lewat tombol Kembali).
+window.addEventListener('hashchange', () => {
+  // Penjelajahan riwayat (Kembali/Maju) sudah ditangani popstate; entri buatan aplikasi selalu berstatus {rq}.
+  if (!APP.profil || (history.state && history.state.rq)) return;
+  const { v, id } = hashView();
+  if (!v || v === APP.view || !MENU_ROLE[v]) return;
+  if (v === 'pendidik' && id && typeof AS !== 'undefined') AS.pilih = id;
+  navigateTo(v);
+});
+
+function catatRiwayat() {
+  const v = APP.view; if (!v || !APP.profil) return;
+  const alamat = alamatView(v);
+  try {
+    if (!PA.riwayatSiap || PA.gantiRiwayat) { history.replaceState({ rq: v }, '', alamat); PA.riwayatSiap = true; PA.gantiRiwayat = false; }
+    else if (location.hash !== alamat) history.pushState({ rq: v }, '', alamat);
+    else if (!history.state || history.state.rq !== v) history.replaceState({ rq: v }, '', alamat);
+  } catch (e) {}
+  // Kunjungan terakhir (Lentera: "Baru dibuka").
+  try {
+    const k = kunciPA('kunjung');
+    const d = (JSON.parse(bacaLS(k) || '[]') || []).filter(x => x !== v && x !== 'pendidik');
+    if (v !== 'pendidik') d.unshift(v);
+    tulisLS(k, JSON.stringify(d.slice(0, 6)));
+  } catch (e) {}
+}
+
+/* ---------- Pembungkus navigasi terluar: arah gerak + riwayat + bilah ---------- */
+(function bungkusNavigasiPeta() {
+  const asli = navigateTo;
+  navigateTo = async function (view) {
+    const dariPop = PA.dariPop; PA.dariPop = false;
+    const lama = APP.viewTampil;
+    const gL = indeksGrup(lama === 'pendidik' ? 'asatidz' : lama), gB = indeksGrup(view === 'pendidik' ? 'asatidz' : view);
+    PA.arahBaru = dariPop ? 'balik' : (lama && gL >= 0 && gB >= 0 && gL !== gB ? (gB > gL ? 'naik' : 'turun') : null);
+    tutupJejak();
+    // Laci HP yang tertutup karena memilih menu (di kode yang sama, sesudah panggilan ini)
+    // tidak memundurkan riwayat; entrinya ditimpa alamat halaman baru (tutupLapis).
+    PA.navigasi = true;
+    // Dilepas sesudah tugas ini (bukan mikrotugas): pengamat laci menu berjalan sebagai mikrotugas
+    // sesudah tutupSidebar() dan harus masih melihat bendera ini.
+    setTimeout(() => { PA.navigasi = false; }, 0);
+    const janji = asli.apply(this, arguments);
+    // View Transition (v2.36) sudah dimulai secara sinkron di dalam: ganti tipenya bila perlu.
+    try {
+      if (PA.arahBaru && VT.jalan && VT.jalan.types && typeof VT.jalan.types.clear === 'function') {
+        VT.jalan.types.clear(); VT.jalan.types.add(PA.arahBaru);
+        document.documentElement.dataset.arahVt = PA.arahBaru;
+      }
+      // Transisi yang dilompati (pindah halaman beruntun) menolak janji `ready` — bukan galat.
+      if (VT.jalan && VT.jalan.ready) VT.jalan.ready.catch(() => {});
+    } catch (e) {}
+    const hasil = await janji;
+    try {
+      catatRiwayat();
+      perbaruiJejak(APP.view);
+      aturBilahAtas(APP.view);
+      tandaiTabAktif(APP.view);
+    } catch (e) { console.warn('[peta]', e); }
+    return hasil;
+  };
+})();
+
+/* =====================================================================
+ * F · BILAH ATAS — saringan seperlunya · Denyut · laci Akun
+ * ===================================================================== */
+function aturBilahAtas(v) {
+  const bar = document.querySelector('.topbar'); if (!bar) return;
+  const tanpa = PA.TANPA_SARING.has(v);
+  bar.classList.toggle('tanpa-saring', tanpa);
+  if (tanpa) bar.classList.remove('saring-buka');
+  try { perbaruiSaring(); } catch (e) {}
+}
+
+/* ---------- Denyut: satu titik untuk koneksi, antrean, simpan, realtime ---------- */
+const DENYUT = { keadaan: '', t: 0 };
+function bacaDenyut() {
+  const on = (id) => !!$(id) && $(id).classList.contains('on');
+  const sync = $('syncDot');
+  const n = Number($('antreText')?.textContent || 0) || 0;
+  if (on('luringBadge') || !navigator.onLine) return { k: 'luring', teks: 'Luring', ket: n ? `Tidak ada sambungan. ${n} perubahan disimpan di perangkat dan dikirim otomatis saat tersambung.` : 'Tidak ada sambungan. Catatan baru disimpan di perangkat dan dikirim otomatis saat tersambung.' };
+  if (on('antreBadge') && n > 0) return { k: 'antre', teks: `${n} menunggu`, ket: `${n} perubahan menunggu dikirim ke server.` };
+  if (sync && sync.classList.contains('on') && sync.classList.contains('save')) return { k: 'simpan', teks: 'Menyimpan…', ket: $('syncText')?.textContent || 'Menyimpan…' };
+  if (sync && sync.classList.contains('on') && sync.classList.contains('warn')) return { k: 'tertunda', teks: 'Tertunda', ket: $('syncText')?.textContent || 'Penyimpanan tertunda.' };
+  if (on('liveDot')) return { k: 'langsung', teks: 'Tersambung', ket: 'Tersambung langsung: catatan guru lain muncul tanpa perlu memuat ulang.' };
+  return { k: 'tenang', teks: 'Tersambung', ket: 'Tersambung ke server dayah.' };
+}
+function gambarDenyut() {
+  const d = $('denyut'); if (!d) return;
+  const s = bacaDenyut();
+  if (s.k !== DENYUT.keadaan) {
+    const awal = !DENYUT.keadaan; DENYUT.keadaan = s.k;
+    d.dataset.keadaan = s.k;
+    if (!awal && bolehGerak()) d.querySelector('.dt-inti')?.animate(
+      [{ boxShadow: '0 0 0 0 var(--dt-warna)' }, { boxShadow: '0 0 0 9px transparent' }], { duration: 700, easing: 'ease-out' });
+  }
+  const t = $('denyutTeks'); if (t && t.textContent !== s.teks) t.textContent = s.teks;
+  const k = $('denyutKet'); if (k && k.textContent !== s.ket) k.textContent = s.ket;
+  $('btnDenyut')?.setAttribute('aria-label', `Status sambungan: ${s.teks}`);
+}
+(function pasangDenyut() {
+  const d = $('denyut'), b = $('btnDenyut'), p = $('denyutPanel'); if (!d || !b || !p) return;
+  const tutup = () => { p.hidden = true; b.setAttribute('aria-expanded', 'false'); d.classList.remove('buka'); };
+  b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const buka = p.hidden;
+    if (!buka) return tutup();
+    p.hidden = false; b.setAttribute('aria-expanded', 'true');
+    requestAnimationFrame(() => d.classList.add('buka'));
+  });
+  document.addEventListener('click', (e) => { if (!p.hidden && !e.target.closest('#denyut')) tutup(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !p.hidden) { tutup(); b.focus(); } });
+  try {
+    new MutationObserver(() => gambarDenyut()).observe(p, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class'] });
+  } catch (e) {}
+  addEventListener('online', gambarDenyut); addEventListener('offline', gambarDenyut);
+  gambarDenyut();
+})();
+
+/* ---------- Laci Akun: Pasang · Identitas · Tampilan · Bantuan · Segarkan · Keluar ---------- */
+const AKUN_ITEM = {
+  btnPasang:     ['Pasang aplikasi', 'Pasang di layar utama perangkat ini'],
+  pbarBtnStudio: ['Foto & identitas', 'Ganti foto profil'],
+  btnEfek:       ['Tampilan', 'Gerak dan warna langit bingkai'],
+  btnBantuan:    ['Bantuan & tur', 'Ulangi tur singkat, atur getar'],
+  btnSegarkan:   ['Segarkan versi', 'Muat ulang bila aplikasi tersangkut versi lama'],
+  btnAkunKeluar: ['Keluar', 'Akhiri sesi di perangkat ini']
+};
+function rapikanLaciAkun() {
+  const laci = $('akunLaci'); if (!laci) return;
+  for (const [id, [nama, ket]] of Object.entries(AKUN_ITEM)) {
+    const b = $(id); if (!b || !laci.contains(b)) continue;
+    b.setAttribute('role', 'menuitem');
+    let n = b.querySelector(':scope > .ak-nama');
+    if (!n) {
+      n = document.createElement('span'); n.className = 'ak-nama';
+      n.innerHTML = '<b></b><small></small>';
+      b.appendChild(n);
+    }
+    const ketNyata = id === 'pbarBtnStudio' && isAdmin() ? 'Foto profil, foto latar, dan logo dayah' : ket;
+    if (n.firstChild.textContent !== nama) n.firstChild.textContent = nama;
+    if (n.lastChild.textContent !== ketNyata) n.lastChild.textContent = ketNyata;
+  }
+  // Urutan tetap: Bantuan & Tampilan dibuat belakangan oleh kodenya sendiri (sebelum Segarkan).
+  const urut = ['btnPasang', 'pbarBtnStudio', 'btnEfek', 'btnBantuan', 'btnSegarkan', 'btnAkunKeluar'].map($).filter(x => x && laci.contains(x));
+  const kini = [...laci.querySelectorAll(':scope > .pbar-btn')];
+  // Hanya disusun ulang bila urutannya berbeda (pengamat childList tidak berputar-putar).
+  if (urut.some((x, i) => kini[i] !== x)) urut.forEach(x => laci.appendChild(x));
+  if (APP.profil) {
+    const nm = $('akunNama'), pr = $('akunPeran');
+    if (nm) nm.textContent = APP.profil.nama || 'Akun';
+    if (pr) pr.textContent = labelPeranAkun();
+  }
+}
+function labelPeranAkun() {
+  const p = APP.profil || {};
+  return (p.role || '') + (p.kelas_binaan?.length ? ' · ' + p.kelas_binaan.join(', ') : '');
+}
+function bukaLaciAkun() {
+  const laci = $('akunLaci'), b = $('btnAkun'); if (!laci || !b) return;
+  rapikanLaciAkun();
+  laci.hidden = false; b.setAttribute('aria-expanded', 'true');
+  $('akunMenu')?.classList.add('buka');
+  const r = b.getBoundingClientRect();
+  laci.style.setProperty('--ak-x', Math.round(r.right) + 'px');
+  laci.style.setProperty('--ak-y', Math.round(r.bottom + 8) + 'px');
+  requestAnimationFrame(() => laci.classList.add('tampil'));
+  bukaLapis('akun', tutupLaciAkun);
+  setTimeout(() => laci.querySelector('.pbar-btn:not([hidden])')?.focus({ preventScroll: true }), 30);
+}
+function tutupLaciAkun(dariKembali) {
+  const laci = $('akunLaci'), b = $('btnAkun'); if (!laci || laci.hidden) return;
+  laci.classList.remove('tampil'); laci.hidden = true;
+  b?.setAttribute('aria-expanded', 'false');
+  $('akunMenu')?.classList.remove('buka');
+  if (!dariKembali) tutupLapis('akun');
+  else PA.lapis = PA.lapis.filter(l => l.nama !== 'akun');
+}
+(function pasangLaciAkun() {
+  const b = $('btnAkun'), laci = $('akunLaci'); if (!b || !laci) return;
+  // Laci dipindah ke <body> agar tidak terpotong bilah profil (overflow & langit).
+  document.body.appendChild(laci);
+  b.addEventListener('click', (e) => { e.stopPropagation(); laci.hidden ? bukaLaciAkun() : tutupLaciAkun(); });
+  laci.addEventListener('click', (e) => {
+    const it = e.target.closest('.pbar-btn'); if (!it) return;
+    if (it.id === 'btnAkunKeluar') { tutupLaciAkun(); return $('btnLogout')?.click(); }
+    setTimeout(() => tutupLaciAkun(), 0);   // pendengar asli tombolnya tetap jalan lebih dulu
+  });
+  document.addEventListener('click', (e) => { if (!laci.hidden && !e.target.closest('#akunLaci, #btnAkun')) tutupLaciAkun(); });
+  document.addEventListener('keydown', (e) => {
+    if (laci.hidden) return;
+    if (e.key === 'Escape') { tutupLaciAkun(); b.focus(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const it = [...laci.querySelectorAll('.pbar-btn')].filter(x => x.getClientRects().length);
+      const i = it.indexOf(document.activeElement);
+      it[(i + (e.key === 'ArrowDown' ? 1 : -1) + it.length) % it.length]?.focus();
+    }
+  });
+  addEventListener('resize', () => tutupLaciAkun());
+  // Tombol Tampilan & Bantuan dibuat kode lama (sebelum Segarkan): rapikan saat muncul.
+  try { new MutationObserver(() => rapikanLaciAkun()).observe(laci, { childList: true }); } catch (e) {}
+  rapikanLaciAkun();
+})();
+
+/* =====================================================================
+ * B · TOMBOL CATAT DI BILAH ATAS (desktop) — kembaran tombol tengah HP
+ * ===================================================================== */
+function catatDariMana(tombol) {
+  if (!bolehKilatPlg()) return;
+  if (tombol && bolehGerak()) {
+    const k = tombol.querySelector('.ca-khatam, .tc-khatam');
+    k?.animate([{ transform: 'rotate(0)' }, { transform: 'rotate(135deg)', offset: .6 }, { transform: 'rotate(90deg)' }],
+      { duration: 520, easing: 'cubic-bezier(.3,1.4,.5,1)' });
+  }
+  Promise.resolve(typeof kirimKilatSegera === 'function' ? kirimKilatSegera() : null).then(() => modalCatatPelanggaran());
+}
+$('btnCatatAtas')?.addEventListener('click', (e) => catatDariMana(e.currentTarget));
+
+/* =====================================================================
+ * H · BILAH BAWAH TETAP PER PERAN + LACI AMANAH
+ * ===================================================================== */
+const TAB_IKON = { dashboard: 'fa-house', pimpinan: 'fa-landmark', bk: 'fa-user-shield', siswa: 'fa-user-graduate', perizinan: 'fa-door-open',
+  asatidz: 'fa-people-group', bidang: 'fa-diagram-project', pesan: 'fa-comments', sidang: 'fa-gavel', prestasi: 'fa-award', pembinaan: 'fa-hands-praying' };
+const LACI_TINDAK = ['pembinaan', 'pesan', 'perizinan', 'sidang', 'rekapbina'];
+
+function susunanTab() {
+  const r = role(), rm = rumah();
+  if (r === 'Klinik') return [rm, 'asatidz', 'MENU'];
+  if (r === 'Pimpinan') return ['pimpinan', 'asatidz', 'bidang', 'pesan', 'MENU'];
+  if (r === 'Osis') return ['dashboard', 'siswa', 'CATAT', 'sidang', 'MENU'];
+  const catat = bolehKilatPlg();
+  const laci = LACI_TINDAK.filter(bolehHal);
+  const ke4 = laci.length ? 'TINDAK' : (bolehHal('perizinan') ? 'perizinan' : 'pesan');
+  if (catat) return [rm, 'siswa', 'CATAT', ke4, 'MENU'];
+  return [rm, 'siswa', bolehHal('perizinan') ? 'perizinan' : 'prestasi', ke4 === 'perizinan' ? 'pesan' : ke4, 'MENU'].filter((x, i, a) => a.indexOf(x) === i);
+}
+
+function aturTabPeran() {
+  const bilah = $('tabBar'); if (!bilah || !APP.profil) return;
+  const catat = $('tabCatat'), menu = $('tabMenu');
+  const susun = susunanTab().filter(x => x === 'MENU' || x === 'CATAT' || x === 'TINDAK' || bolehHal(x));
+  const kunci = role() + '|' + susun.join(',');
+  if (bilah.dataset.susun !== kunci) {
+    bilah.dataset.susun = kunci;
+    // Tab lama yang ber-data-view (dan tab Sidang v2.64) diganti susunan tetap.
+    [...bilah.querySelectorAll('.tab[data-view]:not(.tab-sidang), #tabTindak')].forEach(el => el.remove());
+    const sidang = bilah.querySelector('.tab-sidang');   // tab Sidang v2.64 dipakai ulang (tersembunyi bila bukan susunan peran ini)
+    const anak = susun.map(x => {
+      if (x === 'MENU') return menu;
+      if (x === 'CATAT') return catat;
+      const b = document.createElement('button');
+      b.type = 'button';
+      if (x === 'TINDAK') {
+        b.className = 'tab tab-tindak'; b.id = 'tabTindak';
+        b.setAttribute('aria-haspopup', 'dialog'); b.setAttribute('aria-controls', 'laciAmanah');
+        b.innerHTML = '<i class="fa-solid fa-hands-holding-child"></i>Tindak Lanjut';
+        return b;
+      }
+      if (x === 'sidang' && sidang) { sidang.classList.remove('hidden'); return sidang; }
+      b.className = 'tab'; b.dataset.view = x;
+      b.innerHTML = `<i class="fa-solid ${TAB_IKON[x] || 'fa-circle'}"></i>${esc(PA.NAMA[x]?.tab || namaHal(x))}`;
+      return b;
+    }).filter(Boolean);
+    anak.forEach(el => bilah.appendChild(el));
+    if (sidang && !susun.includes('sidang')) { sidang.classList.add('hidden'); bilah.appendChild(sidang); }
+  }
+  const adaCatat = susun.includes('CATAT');
+  catat?.classList.toggle('hidden', !adaCatat);
+  bilah.classList.toggle('ada-catat', adaCatat);
+  bilah.style.gridAutoFlow = ''; bilah.style.gridTemplateColumns = `repeat(${susun.length}, minmax(0, 1fr))`;
+  [...bilah.children].forEach(el => { el.style.gridColumn = ''; el.classList.remove('tab-dilipat'); });
+  $('btnCatatAtas')?.classList.toggle('hidden', !bolehKilatPlg());
+  tandaiTabAktif(APP.view);
+  perbaruiHitungTab();
+}
+function tandaiTabAktif(v) {
+  const t = $('tabTindak');
+  if (t) t.classList.toggle('active', LACI_TINDAK.includes(v) && !document.querySelector(`#tabBar .tab[data-view="${v}"]`));
+}
+// Tab Catat lama (v2.62–v2.64) disusun ulang oleh susunan tetap ini.
+aturTabCatat = function () { try { aturTabPeran(); } catch (e) { console.warn('[tab]', e); } };
+
+perbaruiHitungTab = function () {
+  const bilah = $('tabBar'); if (!bilah) return;
+  const angkaDari = (id) => { const el = $(id); const n = el && !el.classList.contains('hidden') ? Number(el.textContent.trim()) || 0 : 0; return n; };
+  const pasang = (tab, n) => {
+    if (!tab) return;
+    let el = tab.querySelector('.tab-hitung');
+    if (!n) { el?.remove(); return; }
+    if (!el) { el = document.createElement('span'); el.className = 'tab-hitung'; tab.appendChild(el); }
+    const s = n > 99 ? '99+' : String(n);
+    if (el.textContent !== s) {
+      el.textContent = s;
+      if (bolehGerak()) el.animate([{ transform: 'scale(.4)' }, { transform: 'scale(1.18)', offset: .6 }, { transform: 'scale(1)' }], { duration: 380, easing: 'ease-out' });
+    }
+  };
+  const izin = angkaDari('badgePending'), pesan = angkaDari('badgePesan');
+  pasang(bilah.querySelector('.tab[data-view="perizinan"]'), izin);
+  pasang(bilah.querySelector('.tab[data-view="pesan"]'), pesan);
+  const t = $('tabTindak');
+  if (t) {
+    const diTab = (v) => !!bilah.querySelector(`.tab[data-view="${v}"]`);
+    pasang(t, (bolehHal('perizinan') && !diTab('perizinan') ? izin : 0) + (bolehHal('pesan') && !diTab('pesan') ? pesan : 0));
+  }
+  const tm = $('tabMenu');
+  if (tm) pasang(tm, 0);
+  gambarLaciAmanah();
+};
+
+/* ---------- Laci Amanah: Tindak Lanjut dalam satu sapuan ibu jari ---------- */
+function bangunLaciAmanah() {
+  let l = $('laciAmanah'); if (l) return l;
+  l = document.createElement('div');
+  l.className = 'laci-amanah'; l.id = 'laciAmanah'; l.hidden = true;
+  l.setAttribute('role', 'dialog'); l.setAttribute('aria-modal', 'true'); l.setAttribute('aria-labelledby', 'laTajuk');
+  l.innerHTML = `<div class="la-tirai" data-la-tutup></div>
+    <section class="la-lembar">
+      <span class="la-pegangan" aria-hidden="true"></span>
+      <header><span class="ar" aria-hidden="true">المتابعة</span><h3 id="laTajuk">Tindak Lanjut</h3>
+        <p>Amanah yang menunggu diselesaikan.</p></header>
+      <div class="la-daftar" id="laDaftar"></div>
+    </section>`;
+  document.body.appendChild(l);
+  l.addEventListener('click', (e) => {
+    if (e.target.closest('[data-la-tutup]')) return tutupLaciAmanah();
+    const b = e.target.closest('[data-la]'); if (!b) return;
+    navigateTo(b.dataset.la);
+    tutupLaciAmanah();
+  });
+  // Seret turun untuk menutup.
+  const lembar = l.querySelector('.la-lembar');
+  let y0 = null, dy = 0;
+  lembar.addEventListener('pointerdown', (e) => { if (e.target.closest('[data-la]')) return; y0 = e.clientY; dy = 0; lembar.setPointerCapture?.(e.pointerId); });
+  lembar.addEventListener('pointermove', (e) => { if (y0 == null) return; dy = Math.max(0, e.clientY - y0); lembar.style.transform = `translateY(${dy}px)`; });
+  const lepas = () => { if (y0 == null) return; y0 = null; lembar.style.transform = ''; if (dy > 80) tutupLaciAmanah(); };
+  lembar.addEventListener('pointerup', lepas); lembar.addEventListener('pointercancel', lepas);
+  return l;
+}
+function gambarLaciAmanah() {
+  const d = $('laDaftar'); if (!d) return;
+  const izin = Number($('badgePending')?.classList.contains('hidden') ? 0 : $('badgePending')?.textContent) || 0;
+  const pesan = Number($('badgePesan')?.classList.contains('hidden') ? 0 : $('badgePesan')?.textContent) || 0;
+  const n = { perizinan: izin, pesan };
+  d.innerHTML = LACI_TINDAK.filter(bolehHal).map((v, i) => `<button type="button" class="la-item${APP.view === v ? ' kini' : ''}" data-la="${v}" style="--i:${i}">
+      <span class="la-ikon"><i class="${ikonView(v)}" aria-hidden="true"></i></span>
+      <span class="la-teks"><b>${esc(namaHal(v))}</b><small>${esc(PA.NAMA[v]?.ket || '')}</small></span>
+      ${n[v] ? `<span class="la-angka" aria-label="${n[v]} menunggu">${n[v]}</span>` : '<i class="fa-solid fa-chevron-right la-panah" aria-hidden="true"></i>'}
+    </button>`).join('');
+}
+function bukaLaciAmanah() {
+  const l = bangunLaciAmanah(); gambarLaciAmanah();
+  l.hidden = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => l.classList.add('buka')));
+  $('tabTindak')?.setAttribute('aria-expanded', 'true');
+  bukaLapis('amanah', tutupLaciAmanah);
+  setTimeout(() => l.querySelector('.la-item')?.focus({ preventScroll: true }), 60);
+}
+function tutupLaciAmanah(dariKembali) {
+  const l = $('laciAmanah'); if (!l || l.hidden) return;
+  l.classList.remove('buka');
+  $('tabTindak')?.setAttribute('aria-expanded', 'false');
+  setTimeout(() => { if (!l.classList.contains('buka')) l.hidden = true; }, bolehGerak() ? 260 : 0);
+  if (!dariKembali) tutupLapis('amanah'); else PA.lapis = PA.lapis.filter(x => x.nama !== 'amanah');
+}
+$('tabBar')?.addEventListener('click', (e) => {
+  if (e.target.closest('#tabTindak')) { $('laciAmanah') && !$('laciAmanah').hidden ? tutupLaciAmanah() : bukaLaciAmanah(); }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('laciAmanah') && !$('laciAmanah').hidden) tutupLaciAmanah(); });
+
+/* ---------- Laci menu HP ikut riwayat: Kembali menutup laci ---------- */
+(function laciMenuRiwayat() {
+  const sb = $('sidebar'); if (!sb) return;
+  try {
+    new MutationObserver(() => {
+      const buka = sb.classList.contains('open');
+      if (buka) bukaLapis('menu', () => { sb.classList.remove('open'); $('scrim')?.classList.add('hidden'); });
+      else if (PA.lapis.some(l => l.nama === 'menu')) tutupLapis('menu');
+    }).observe(sb, { attributes: true, attributeFilter: ['class'] });
+  } catch (e) {}
+})();
+
+/* =====================================================================
+ * C · LENTERA — cari santri, halaman, dan perintah dari mana saja
+ * ===================================================================== */
+const LENTERA = { el: null, hasil: [], aktif: 0, token: 0, santri: [], cariSantri: null };
+
+const normalCari = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+function skorCocok(q, teks, kata) {
+  const t = normalCari(teks), k = normalCari(kata);
+  if (!q) return 0;
+  if (t === q) return 100;
+  if (t.startsWith(q)) return 80;
+  if (t.split(' ').some(w => w.startsWith(q))) return 60;
+  if (q.length >= 4 && t.includes(q)) return 45;     // potongan di tengah kata hanya untuk kueri ≥ 4 huruf
+  const ks = k.split(' ');
+  if (ks.some(w => w.startsWith(q))) return 35;
+  // semua kata kueri ada di nama/kata kunci
+  const qs = q.split(' ');
+  if (qs.length > 1 && qs.every(x => (t + ' ' + k).includes(x))) return 30;
+  return 0;
+}
+function sorotTeks(teks, q) {
+  const s = esc(teks); if (!q) return s;
+  const i = normalCari(teks).indexOf(q.split(' ')[0]);
+  if (i < 0 || normalCari(teks).length !== String(teks).length) return s;
+  const a = String(teks);
+  return esc(a.slice(0, i)) + '<mark>' + esc(a.slice(i, i + q.split(' ')[0].length)) + '</mark>' + esc(a.slice(i + q.split(' ')[0].length));
+}
+
+function perintahLentera() {
+  const p = [];
+  if (bolehKilatPlg()) p.push({ jenis: 'aksi', id: 'catat', nama: 'Catat pelanggaran', ket: 'Buka formulir catat (tombol C)', ikon: 'fa-solid fa-feather-pointed', kata: 'catat tambah input pelanggaran baru', jalan: () => catatDariMana($('btnCatatAtas')) });
+  if (bisa('izin.ajukan')) p.push({ jenis: 'aksi', id: 'izin', nama: 'Ajukan izin santri', ket: 'Buka formulir izin keluar', ikon: 'fa-solid fa-door-open', kata: 'izin ajukan keluar pulang', jalan: () => modalAjukanIzin() });
+  p.push({ jenis: 'aksi', id: 'tampilan', nama: 'Atur tampilan', ket: 'Gerak dan warna langit bingkai', ikon: 'fa-solid fa-wand-magic-sparkles', kata: 'tampilan efek tema langit gelap warna hemat', jalan: () => (typeof bukaPanelTampilan === 'function' ? bukaPanelTampilan() : null) });
+  p.push({ jenis: 'aksi', id: 'tur', nama: 'Ulangi tur singkat', ket: 'Kenali bagian-bagian aplikasi', ikon: 'fa-solid fa-route', kata: 'tur bantuan panduan petunjuk', jalan: () => setTimeout(() => turMulai(true), 200) });
+  p.push({ jenis: 'aksi', id: 'sisi', nama: $('sidebar')?.classList.contains('tersemat') ? 'Lepas bilah sisi' : 'Sematkan bilah sisi', ket: 'Label menu selalu tampil di desktop', ikon: 'fa-solid fa-thumbtack', kata: 'sematkan bilah sisi menu sidebar', hanyaDesktop: true, jalan: () => $('btnSemat')?.click() });
+  p.push({ jenis: 'aksi', id: 'segar', nama: 'Segarkan versi', ket: 'Muat ulang bila tersangkut versi lama', ikon: 'fa-solid fa-rotate', kata: 'segarkan muat ulang refresh perbarui', jalan: () => $('btnSegarkan')?.click() });
+  p.push({ jenis: 'aksi', id: 'keluar', nama: 'Keluar', ket: 'Akhiri sesi di perangkat ini', ikon: 'fa-solid fa-right-from-bracket', kata: 'keluar logout', jalan: () => $('btnLogout')?.click() });
+  return p.filter(x => !x.hanyaDesktop || SEMAT.mq.matches);
+}
+function halamanLentera() {
+  return PA.GRUP.flatMap(g => g.views.filter(v => v !== 'pendidik' && bolehHal(v)).map(v => ({
+    jenis: 'hal', id: v, nama: namaHal(v), ket: PA.NAMA[v]?.ket || '', grup: g.label, ikon: ikonView(v), kata: PA.NAMA[v]?.kata || '',
+    jalan: () => navigateTo(v)
+  })));
+}
+
+function bangunLentera() {
+  if (LENTERA.el) return LENTERA.el;
+  const l = document.createElement('div');
+  l.className = 'lentera'; l.id = 'lentera'; l.hidden = true;
+  l.setAttribute('role', 'dialog'); l.setAttribute('aria-modal', 'true'); l.setAttribute('aria-label', 'Cari santri, halaman, atau perintah');
+  l.innerHTML = `<div class="lt-tirai" data-lt-tutup></div>
+    <div class="lt-kotak">
+      <div class="lt-kepala">
+        <span class="lt-khatam" aria-hidden="true"><i></i><i></i></span>
+        <input id="ltMasuk" type="search" enterkeyhint="go" autocomplete="off" spellcheck="false"
+               placeholder="Nama santri, NISN, atau nama halaman"
+               role="combobox" aria-expanded="true" aria-controls="ltDaftar" aria-autocomplete="list">
+        <button type="button" class="lt-esc" data-lt-tutup aria-label="Tutup">Esc</button>
+      </div>
+      <div class="lt-isi">
+        <i class="lt-benang" aria-hidden="true"></i><i class="lt-simpul" aria-hidden="true"></i>
+        <div id="ltDaftar" role="listbox" aria-label="Hasil"></div>
+      </div>
+      <div class="lt-kaki" aria-hidden="true"><span><kbd>↑</kbd><kbd>↓</kbd> pilih</span><span><kbd>Enter</kbd> buka</span><span><kbd>Esc</kbd> tutup</span></div>
+    </div>`;
+  document.body.appendChild(l);
+  LENTERA.el = l;
+  const inp = l.querySelector('#ltMasuk');
+  inp.addEventListener('input', () => isiLentera(inp.value));
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); pilihLentera(LENTERA.aktif + (e.key === 'ArrowDown' ? 1 : -1), true); }
+    else if (e.key === 'Enter') { e.preventDefault(); jalankanLentera(LENTERA.aktif); }
+    else if (e.key === 'Escape') { e.preventDefault(); tutupLentera(); }
+  });
+  l.addEventListener('click', (e) => {
+    if (e.target.closest('[data-lt-tutup]')) return tutupLentera();
+    const b = e.target.closest('[data-lt-i]'); if (b) jalankanLentera(Number(b.dataset.ltI));
+  });
+  l.addEventListener('pointermove', (e) => {
+    const b = e.target.closest('[data-lt-i]'); if (b && Number(b.dataset.ltI) !== LENTERA.aktif) pilihLentera(Number(b.dataset.ltI), false);
+  });
+  return l;
+}
+
+function bolehCariSantri() { return (MENU_ROLE.siswa || []).includes(role()); }
+const cariSantriLentera = debounce(async (q, token) => {
+  try {
+    const r = await cariSantriRingkas(q);
+    if (token !== LENTERA.token || !LENTERA.el || LENTERA.el.hidden) return;
+    LENTERA.santri = (r || []).slice(0, 8);
+    LENTERA.santriSelesai = true;
+    gambarLentera(normalCari(q));
+  } catch (e) { if (token === LENTERA.token) { LENTERA.santri = []; LENTERA.santriGagal = true; LENTERA.santriSelesai = true; gambarLentera(normalCari(q)); } }
+}, 220);
+
+function isiLentera(mentah) {
+  const q = normalCari(mentah);
+  LENTERA.token++;
+  LENTERA.santri = []; LENTERA.santriGagal = false; LENTERA.santriSelesai = false;
+  LENTERA.memuatSantri = bolehCariSantri() && q.length >= 2;
+  if (LENTERA.memuatSantri) cariSantriLentera(mentah, LENTERA.token);
+  gambarLentera(q);
+}
+
+function gambarLentera(q) {
+  const daftar = $('ltDaftar'); if (!daftar) return;
+  const bag = [];
+  if (!q) {
+    let kunjung = [];
+    try { kunjung = (JSON.parse(bacaLS(kunciPA('kunjung')) || '[]') || []).filter(v => v !== APP.view && bolehHal(v)); } catch (e) {}
+    const hal = halamanLentera();
+    const aksi = perintahLentera().filter(p => ['catat', 'izin'].includes(p.id));
+    if (aksi.length) bag.push(['Kerja cepat', aksi]);
+    if (kunjung.length) bag.push(['Baru dibuka', kunjung.slice(0, 4).map(v => hal.find(h => h.id === v)).filter(Boolean)]);
+    const g = grupDari(APP.view === 'pendidik' ? 'asatidz' : APP.view);
+    if (g) {
+      const sd = hal.filter(h => g.views.includes(h.id) && h.id !== APP.view && !kunjung.slice(0, 4).includes(h.id));
+      if (sd.length) bag.push([`Di kelompok ${g.label}`, sd]);
+    }
+  } else {
+    const hal = halamanLentera().filter(h => h.id !== APP.view)
+      .map(h => ({ ...h, s: skorCocok(q, h.nama, h.kata + (q.length >= 4 ? ' ' + h.ket + ' ' + h.grup : '')) })).filter(h => h.s).sort((a, b) => b.s - a.s).slice(0, 6);
+    const aksi = perintahLentera().map(h => ({ ...h, s: skorCocok(q, h.nama, h.kata) })).filter(h => h.s).sort((a, b) => b.s - a.s).slice(0, 4);
+    const santri = LENTERA.santri.map(s => ({ jenis: 'santri', id: s.nisn, nama: s.nama_siswa, ket: `${s.kelas || '-'}${s.jenjang ? ' · ' + s.jenjang : ''} · NISN ${s.nisn}`,
+      huruf: (s.nama_siswa || '?').trim().charAt(0).toUpperCase(), jalan: () => bukaDetailSantri(s.nisn) }));
+    // Santri lebih dulu bila kueri tampak seperti nama/NISN dan tidak ada halaman yang cocok kuat.
+    const santriDulu = /^\d{3,}$/.test(q) || !hal.length || (hal[0] && hal[0].s < 60);
+    const kSantri = santri.length ? ['Santri', santri] : null;
+    if (santriDulu && kSantri) bag.push(kSantri);
+    if (hal.length) bag.push(['Halaman', hal]);
+    if (!santriDulu && kSantri) bag.push(kSantri);
+    if (aksi.length) bag.push(['Perintah', aksi]);
+  }
+  LENTERA.hasil = bag.flatMap(([, x]) => x);
+  let i = 0;
+  const html = bag.map(([judul, isi]) => `<div class="lt-bagian" role="group" aria-label="${esc(judul)}"><span class="lt-judul">${esc(judul)}</span>` +
+    isi.map(h => {
+      const n = i++;
+      const ikon = h.jenis === 'santri' ? `<span class="lt-huruf" aria-hidden="true">${esc(h.huruf)}</span>` : `<span class="lt-ikon" aria-hidden="true"><i class="${esc(h.ikon)}"></i></span>`;
+      const ujung = h.jenis === 'hal' && q ? `<span class="lt-grup">${esc(h.grup)}</span>` : h.jenis === 'santri' ? '<span class="lt-grup">Rincian</span>' : '';
+      return `<button type="button" class="lt-item" role="option" id="ltO${n}" data-lt-i="${n}" aria-selected="false" style="--i:${n}">
+        ${ikon}<span class="lt-teks"><b>${h.jenis === 'santri' ? sorotTeks(h.nama, q) : sorotTeks(h.nama, q)}</b><small>${esc(h.ket)}</small></span>${ujung}</button>`;
+    }).join('') + '</div>').join('');
+  let catatan = '';
+  if (q && LENTERA.memuatSantri && !LENTERA.santriSelesai) catatan = '<p class="lt-catatan"><i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>Mencari santri…</p>';
+  else if (q && !LENTERA.hasil.length && !LENTERA.santriGagal) catatan = `<p class="lt-catatan kosong">Tidak ada santri atau halaman bernama “${esc(q)}”.${bolehCariSantri() ? ' Coba potongan nama atau NISN.' : ''}</p>`;
+  else if (q && LENTERA.santriGagal) catatan = '<p class="lt-catatan">Pencarian santri butuh sambungan internet.</p>';
+  daftar.innerHTML = html + catatan;
+  LENTERA.aktif = Math.min(LENTERA.aktif, Math.max(0, LENTERA.hasil.length - 1));
+  if (!q) LENTERA.aktif = 0;
+  pilihLentera(LENTERA.aktif, false, true);
+}
+
+function pilihLentera(i, gulir, langsung) {
+  const n = LENTERA.hasil.length; if (!n) { LENTERA.el?.classList.remove('ada-pilih'); return; }
+  i = (i + n) % n;
+  LENTERA.aktif = i;
+  const el = LENTERA.el; if (!el) return;
+  el.querySelectorAll('.lt-item').forEach(b => { const on = Number(b.dataset.ltI) === i; b.classList.toggle('aktif', on); b.setAttribute('aria-selected', String(on)); });
+  const b = el.querySelector(`[data-lt-i="${i}"]`);
+  el.querySelector('#ltMasuk')?.setAttribute('aria-activedescendant', b ? b.id : '');
+  if (!b) return;
+  if (gulir) b.scrollIntoView({ block: 'nearest' });
+  // Simpul benang emas meluncur ke baris terpilih.
+  const isi = el.querySelector('.lt-isi'), simpul = el.querySelector('.lt-simpul');
+  const y = b.offsetTop + b.offsetHeight / 2 - isi.scrollTop;
+  el.classList.add('ada-pilih');
+  simpul.classList.toggle('lompat', !!langsung || !bolehGerak());
+  simpul.style.transform = `translateY(${Math.round(y - 5)}px) rotate(45deg)`;
+}
+
+async function jalankanLentera(i) {
+  const h = LENTERA.hasil[i]; if (!h) return;
+  if (h.jenis === 'hal') { h.jalan(); tutupLentera(); return; }
+  // Dialog (rincian santri, formulir) dibuka SESUDAH entri riwayat Lentera dibuang,
+  // supaya tombol Kembali berikutnya menutup dialog itu, bukan Lentera yang sudah tiada.
+  await tutupLentera();
+  try { h.jalan(); } catch (e) { fireError(e); }
+}
+
+function bukaLentera(dari) {
+  if (!APP.profil) return;
+  const l = bangunLentera();
+  if (!l.hidden) return;
+  tutupLaciAkun(); tutupJejak();
+  // Cahaya lentera menyala dari tombol yang diketuk.
+  const asal = (dari && dari.getBoundingClientRect) ? dari.getBoundingClientRect() : null;
+  l.style.setProperty('--lt-x', asal ? Math.round(asal.left + asal.width / 2) + 'px' : '50%');
+  l.style.setProperty('--lt-y', asal ? Math.round(asal.top + asal.height / 2) + 'px' : '18%');
+  l.hidden = false;
+  document.documentElement.classList.add('lentera-buka');
+  const inp = l.querySelector('#ltMasuk');
+  inp.value = ''; LENTERA.aktif = 0; isiLentera('');
+  // Baris hasil masuk berurutan hanya saat Lentera menyala, bukan di setiap ketukan huruf.
+  l.classList.add('baru-buka'); clearTimeout(LENTERA.tBuka);
+  LENTERA.tBuka = setTimeout(() => l.classList.remove('baru-buka'), 520);
+  requestAnimationFrame(() => { l.classList.add('buka'); inp.focus({ preventScroll: true }); });
+  bukaLapis('lentera', tutupLentera);
+  tulisLS('rq.lentera.kenal', '1');
+  $('btnLentera')?.classList.remove('baru'); $('btnLenteraLangit')?.classList.remove('baru');
+}
+function tutupLentera(dariKembali) {
+  const l = LENTERA.el; if (!l || l.hidden) return Promise.resolve();
+  l.classList.remove('buka');
+  document.documentElement.classList.remove('lentera-buka');
+  LENTERA.token++;
+  setTimeout(() => { if (!l.classList.contains('buka')) l.hidden = true; }, bolehGerak() ? 220 : 0);
+  if (!dariKembali) return tutupLapis('lentera');
+  PA.lapis = PA.lapis.filter(x => x.nama !== 'lentera');
+  return Promise.resolve();
+}
+
+/** Pemicu yang sedang terlihat — asal cahaya lentera. */
+function pemicuLentera() {
+  const tampak = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.bottom > 0 && r.top < innerHeight && getComputedStyle(el).visibility !== 'hidden' && Number(getComputedStyle(el).opacity) > .2; };
+  return [$('btnLenteraLangit'), $('btnLentera')].find(tampak) || null;
+}
+(function pasangLentera() {
+  const b = $('btnLentera'); if (!b) return;
+  b.addEventListener('click', () => bukaLentera(b));
+  if (!bacaLS('rq.lentera.kenal')) b.classList.add('baru');
+  /* Desktop: kotak cari lebar menyala di langit bilah profil; saat bilah profil
+     tergulir keluar layar, lentera kecil "turun" ke bilah atas yang menempel. */
+  const inti = document.querySelector('#profileBar .pbar-inner'), acts = inti && inti.querySelector('.pbar-acts');
+  if (inti && acts) {
+    const l = document.createElement('button');
+    l.type = 'button'; l.className = 'lentera-langit'; l.id = 'btnLenteraLangit';
+    l.setAttribute('aria-haspopup', 'dialog'); l.setAttribute('aria-controls', 'lentera');
+    l.innerHTML = `<span class="ll-khatam" aria-hidden="true"><i></i><i></i></span>
+      <span class="ll-teks">Cari santri, halaman, atau perintah</span><kbd aria-hidden="true">Ctrl K</kbd>`;
+    inti.insertBefore(l, acts);
+    l.addEventListener('click', () => bukaLentera(l));
+    if (!bacaLS('rq.lentera.kenal')) l.classList.add('baru');
+    try {
+      new IntersectionObserver(([en]) => {
+        document.querySelector('.topbar')?.classList.toggle('langit-lewat', !en.isIntersecting);
+      }, { threshold: 0 }).observe($('profileBar'));
+    } catch (e) {}
+  }
+  const sedangMengetik = (t) => !!(t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)));
+  document.addEventListener('keydown', (e) => {
+    if (!APP.profil || $('appShell')?.classList.contains('hidden')) return;
+    const swal = window.Swal && Swal.isVisible && Swal.isVisible() && !document.querySelector('.swal2-toast');
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+      if (swal) return;
+      e.preventDefault();
+      return LENTERA.el && !LENTERA.el.hidden ? tutupLentera() : bukaLentera(pemicuLentera());
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey || sedangMengetik(e.target) || swal || TUR.aktif) return;
+    if (LENTERA.el && !LENTERA.el.hidden) return;
+    if (e.key === '/') { e.preventDefault(); bukaLentera(pemicuLentera()); }
+    else if ((e.key === 'c' || e.key === 'C') && bolehKilatPlg() && APP.view !== 'sidang') { e.preventDefault(); catatDariMana($('btnCatatAtas')); }
+  });
+})();
+
+/* ---------- Tur: langkah baru untuk Lentera; Bantuan kini di laci Akun ---------- */
+(function perbaruiTur() {
+  try {
+    const i = DAFTAR_TUR.findIndex(l => l.id === 'bantuan');
+    const bantu = DAFTAR_TUR[i];
+    if (bantu) {
+      bantu.sel = ['#btnAkun', '#btnBantuan'];
+      bantu.judul = 'Akun & bantuan';
+      bantu.teks = 'Tur ini bisa diulang dari sini. Foto profil, tampilan, dan getar saat catatan tersimpan juga diatur di laci ini.';
+    }
+    if (!DAFTAR_TUR.some(l => l.id === 'lentera')) DAFTAR_TUR.splice(Math.max(0, i), 0, {
+      id: 'lentera', sel: ['#btnLenteraLangit', '#btnLentera'], judul: 'Cari apa saja',
+      teks: 'Ketik nama santri, NISN, atau nama halaman di sini, lalu tekan Enter. Di laptop bisa juga dengan Ctrl+K.'
+    });
+  } catch (e) {}
+})();
+
+/* ---------- Setelah masuk: rapikan semuanya sekali ---------- */
+(function sesudahMasukPeta() {
+  const tunggu = () => {
+    if (!APP.profil) return setTimeout(tunggu, 300);
+    try { rapikanLaciAkun(); aturTabPeran(); aturBilahAtas(APP.view); terapkanSemat(false); gambarDenyut(); } catch (e) { console.warn('[peta]', e); }
+  };
+  tunggu();
+})();
