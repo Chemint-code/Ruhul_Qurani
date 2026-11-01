@@ -63,6 +63,7 @@ jobs:
           node uji/uji-v262.cjs
           node uji/uji-v264.cjs
           node uji/uji-v265.cjs
+          node uji/uji-v267.cjs
       - name: Simpan hasil uji
         if: always()
         uses: actions/upload-artifact@v7

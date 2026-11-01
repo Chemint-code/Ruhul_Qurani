@@ -138,8 +138,9 @@ const ikonKosong = (page) => page.evaluate(() => [...document.querySelectorAll('
       cek(`C5 ${v}: ganti periode → teks Saring ikut`, (await p.textContent('#btnSaring .sr-teks')).startsWith('Sep 2026'));
       await p.evaluate(() => { const i = document.getElementById('perBulan'); i.value = bulanIni(); i.dispatchEvent(new Event('change', { bubbles: true })); });
 
-      cek(`C6 ${v}: tab Catat tampil untuk Admin, di antara Santri dan Izin`, await p.evaluate(() => { const b = document.getElementById('tabCatat');
-        return b && b.getClientRects().length > 0 && b.previousElementSibling?.dataset.view === 'siswa' && b.nextElementSibling?.dataset.view === 'perizinan'; }));
+      // v2.67: bilah bawah tetap per peran — Catat di antara Santri dan Tindak Lanjut (Laci Amanah).
+      cek(`C6 ${v}: tab Catat tampil untuk Admin, di antara Santri dan Tindak Lanjut`, await p.evaluate(() => { const b = document.getElementById('tabCatat');
+        return b && b.getClientRects().length > 0 && b.previousElementSibling?.dataset.view === 'siswa' && b.nextElementSibling?.id === 'tabTindak'; }));
       await p.evaluate(() => { APP.ctx.unit = APP.ctx.unit === 'Semua' ? 'Pengasuhan' : APP.ctx.unit; });
       await p.click('#tabCatat');
       await p.waitForSelector('.swal2-popup', { timeout: 5000 }).catch(() => {});
@@ -204,12 +205,14 @@ const ikonKosong = (page) => page.evaluate(() => [...document.querySelectorAll('
           contain: getComputedStyle(bar).contain, tabs: [...bar.querySelectorAll('.tab')].filter(t => t.getClientRects().length).map(t => t.id || t.dataset.view),
           menu: document.querySelector('#tabMenu .tab-hitung')?.textContent || null }; });
       cek(`D3 ${v}: Admin — bintang tepat di tengah (±1 px), menonjol di atas bilah, tidak terpancung`, Math.abs(k.pusat - k.lebar / 2) <= 1 && k.atas < -15 && !/paint|strict|content/.test(k.contain), k);
-      cek(`D4 ${v}: Admin — 2 tab | Catat | 2 tab (Pesan dilipat ke Menu)`, JSON.stringify(k.tabs) === JSON.stringify(['dashboard', 'siswa', 'tabCatat', 'perizinan', 'tabMenu']), k.tabs);
+      cek(`D4 ${v}: Admin — 2 tab | Catat | 2 tab (v2.67: Tindak Lanjut tetap, tidak ada tab yang dilipat)`, JSON.stringify(k.tabs) === JSON.stringify(['dashboard', 'siswa', 'tabCatat', 'tabTindak', 'tabMenu']), k.tabs);
       // Langsung dibaca sesudah pemantau bereaksi (refreshBadgePesan tiruan bisa menimpanya kemudian).
-      cek(`D5 ${v}: pesan belum dibaca tampil sebagai angka di Menu`, await p.evaluate(async () => {
+      // v2.67: angka di tab Tindak Lanjut = izin menunggu + pesan belum dibaca.
+      cek(`D5 ${v}: pesan belum dibaca ikut dijumlahkan di tab Tindak Lanjut`, await p.evaluate(async () => {
+        const iz = document.getElementById('badgePending'), nIzin = iz && !iz.classList.contains('hidden') ? Number(iz.textContent) || 0 : 0;
         const b = document.getElementById('badgePesan'); b.textContent = '4'; b.classList.remove('hidden');
         await new Promise(r => setTimeout(r, 0));
-        return document.querySelector('#tabMenu .tab-hitung')?.textContent === '4'; }));
+        return document.querySelector('#tabTindak .tab-hitung')?.textContent === String(nIzin + 4); }));
       await p.screenshot({ path: path.join(KELUAR, `v263-${v}-hp-bilah.png`), clip: { x: 0, y: 700, width: 390, height: 144 } });
       cek(`D6 ${v}: Admin tanpa galat`, s.galat.length === 0, s.galat.slice(0, 4));
       await s.ctx.close();

@@ -82,7 +82,9 @@ async function masuk(browser, url, o = {}) {
   await page.waitForFunction(() => { const b = document.getElementById('btnLogin'); return typeof APP !== 'undefined' && b && b.offsetParent && !b.disabled && /Sesi masih aktif/.test(document.body.innerText); }, null, { timeout: 120000 });
   const tLogin = Date.now() - t0, t1 = Date.now();
   await page.click('#btnLogin');
-  await page.waitForFunction(() => typeof APP !== 'undefined' && APP.profil && document.querySelector('#viewRoot .stats, #viewRoot .card'), null, { timeout: 120000 });
+  // v2.67: Ringkasan "satu lembar" (v2.55) pada bulan tanpa data tiruan hanya berisi .lembar —
+  // dulu uji ini macet setiap awal bulan (data tiruan Agu–Okt 2026).
+  await page.waitForFunction(() => typeof APP !== 'undefined' && APP.profil && !APP.navSibuk && document.querySelector('#viewRoot .stats, #viewRoot .card, #viewRoot .lembar'), null, { timeout: 120000 });
   return { ctx, page, galat, peringatan, catat, tLogin, tSiap: tLogin + (Date.now() - t1) };
 }
 
