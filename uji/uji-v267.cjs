@@ -33,12 +33,12 @@ const tabBawah = (p) => p.evaluate(() => [...document.querySelectorAll('#tabBar 
   cek('A2 index.html: kelompok berbasis tugas, berurutan', JSON.stringify(grup) === JSON.stringify(['beranda', 'catat', 'tindak', 'santri', 'laporan', 'pedoman', 'kelola']), grup);
   const nav = ih.slice(ih.indexOf('id="navMenu"'), ih.indexOf('</nav>', ih.indexOf('id="navMenu"')));
   const views = [...nav.matchAll(/data-view="([a-z]+)"/g)].map(m => m[1]);
-  cek('A3 setiap halaman tepat satu kali di menu (tanpa "Unit Operasional"/"Sistem")', new Set(views).size === views.length && views.length === 27 && !/Unit Operasional|>Sistem</.test(nav), views.length);
+  cek('A3 setiap halaman tepat satu kali di menu (tanpa "Unit Operasional"/"Sistem")', new Set(views).size === views.length && views.length === 27 + (views.includes('banding') ? 1 : 0) && !/Unit Operasional|>Sistem</.test(nav), views.length);   // v2.68: + Eksekusi Banding
   const ikon = JSON.parse(baca('ikon', 'daftar.json'));
   cek('A4 ikon baru masuk subset (fa-house, fa-thumbtack)', ikon.ikon.includes('fa-house') && ikon.ikon.includes('fa-thumbtack') && !ikon.tak_dikenal.length);
   const app = baca('app.js');
   cek('A5 app.js: pembungkus, bukan penimpaan (navigateTo/rapikanGrupNav dibungkus)', /const asli = navigateTo;/.test(app.slice(app.indexOf('v2.67 — PETA AMANAH'))) && /const asli = rapikanGrupNav;/.test(app.slice(app.indexOf('v2.67 — PETA AMANAH'))));
-  cek('A6 tanpa perubahan database (tidak ada db.rpc/insert baru di v2.67)', !/db\.(rpc|from)\(/.test(app.slice(app.indexOf('v2.67 — PETA AMANAH'))));
+  cek('A6 tanpa perubahan database (tidak ada db.rpc/insert baru di v2.67)', !/db\.(rpc|from)\(/.test(app.slice(app.indexOf('v2.67 — PETA AMANAH'), app.indexOf('v2.68 — ANTREAN PANGGIL') > 0 ? app.indexOf('v2.68 — ANTREAN PANGGIL') : undefined)));
 
   const s1 = await layani(AKAR), s2 = await layani(path.join(AKAR, 'dist-uji'));
   const URL_ = { sumber: `http://127.0.0.1:${s1.address().port}/`, build: `http://127.0.0.1:${s2.address().port}/` };

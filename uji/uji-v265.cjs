@@ -12,6 +12,8 @@
  *     Kritik & Saran: kirim (nama kosong → null), riwayat + jawaban;
  *     super admin: menu + lencana, kotak masuk, tandai dibaca, jawab, tarik;
  *     Admin lain: menu tersembunyi & halaman tertutup; Guru: tanpa menu saran.
+ *   v2.68: berkas PDF disusun ulang per kode jumlah perkara (I. Daftar Panggil & Perkara,
+ *   II. Majelis Sidang); B9, B11, B15, B16 diperbarui. Uji rinci antrean: uji-v268.cjs.
  */
 const fs = require('fs'), path = require('path'), http = require('http');
 const { chromium } = require('playwright');
@@ -70,7 +72,8 @@ function pasangRpc(o) {
       const osis = peran === 'Osis', buka = window.__BUKA !== false, prat = !buka && window.__PRATINJAU === true;
       const d = { hari: '2026-11-01', buka, berikut: '2026-11-02', jadwal: [1, 3, 5, 6], peran: ['Admin', 'Osis'].includes(peran) ? 'majelis' : 'pengamat',
         role: peran, nama: osis ? 'OSDA-RQ' : 'Penguji', unit: osis ? 'putra' : (a && a.p_unit) || null, unit_terkunci: osis, reses: !buka,
-        pratinjau: osis && prat, sesi_berkas: buka ? '2026-11-01' : '2026-11-02', majelis: S.majelis };
+        pratinjau: osis && prat, sesi_berkas: buka ? '2026-11-01' : '2026-11-02', majelis: S.majelis,
+        versi: 268, banding_baru: 0, potong: '2026-10-30T15:00:00Z', santri: {}, tangga: {} };
       if (osis && !buka && !prat) return r({ ...d, butir: [], musyrif: {} });
       return r({ ...d, butir: butir.map(b => ({ ...b })), musyrif: Object.fromEntries(KELAS.map((k, i) => [k, ['Ust. Musyrif ' + (i + 1)]])) });
     },
@@ -206,13 +209,13 @@ const bukaSidang = async (page) => {
       cek('B8 PDF terunduh: %PDF, kertas F4 215×330, ≥2 halaman, nama berkas', buf.slice(0, 4).toString() === '%PDF' && info.w === 215 && info.h === 330 && info.hal >= 2
         && /^Berkas Sidang Tadib OSDA Putra 2026-11-01\.pdf$/.test(unduh.suggestedFilename()), { hal: info.hal, ukuran: buf.length, nama: unduh.suggestedFilename() });
       const T = info.teks.join('\n');
-      cek('B9 isi PDF: kop, judul, tiga bagian, kolom majelis bernama', ['DAYAH RUHUL QURANI', "BERKAS PERKARA SIDANG TA'DIB", 'I. DAFTAR PANGGIL', 'II. RINCIAN PERKARA', 'III. MAJELIS SIDANG',
-        'Hakim Ketua', 'Muhammad Haikal', 'Teuku Raihan', 'Zikri Alfarisi', 'Kelas VII-D', 'Bidang Mudabbir'].every(x => T.includes(x)));
+      cek('B9 isi PDF: kop, judul, dua bagian (v2.68), kolom putusan, majelis bernama', ['DAYAH RUHUL QURANI', "BERKAS PERKARA SIDANG TA'DIB", 'I. DAFTAR PANGGIL & PERKARA', 'II. MAJELIS SIDANG',
+        'P1 - 1 perkara', 'Putus', 'Banding', 'Lewati', 'Hakim Ketua', 'Muhammad Haikal', 'Teuku Raihan', 'Zikri Alfarisi', 'VII-D'].every(x => T.includes(x)), T.slice(0, 400));
       cek('B10 teks PDF aman Latin-1 (tanda pisah/kutip lengkung dirapikan)', !/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/.test(T) && T.includes('Tidak ikut shalat berjamaah - "Subuh"'));
-      const st = await p.evaluate(() => { const U = window.RQSidang._uji; const l = U.S.data.butir.filter(b => b.status === 'menunggu');
-        const isi = U.isiBerkas(l, {}, 'x'); return { n: l.length, santri: isi.nSantri, unik: new Set(l.map(b => b.nama + '|' + b.kelas)).size,
-          panggil: isi.panggil.reduce((a, g) => a + g.santri.length, 0), rinci: isi.rincian.reduce((a, r) => a + r.sub.reduce((b, s) => b + s.baris.length, 0), 0) }; });
-      cek('B11 daftar panggil satu baris per santri; rincian memuat semua perkara menunggu', st.santri === st.unik && st.panggil === st.unik && st.rinci === st.n, st);
+      const st = await p.evaluate(() => { const U = window.RQSidang._uji; const l = U.S.data.butir.filter(b => ['menunggu', 'dibacakan', 'diberikan'].includes(b.status));
+        const isi = U.isiBerkas(U.pilihanCakupan()[0].list, {}, 'x'); return { n: l.length, santri: isi.nSantri, unik: new Set(l.map(b => b.nama + '|' + b.kelas)).size,
+          panggil: isi.grup.reduce((a, g) => a + g.santri.length, 0), rinci: isi.nPerkara }; });
+      cek('B11 daftar panggil satu baris per santri; memuat semua perkara yang belum tuntas', st.santri === st.unik && st.panggil === st.unik && st.rinci === st.n, st);
       await p.waitForTimeout(400);
       cek('B12 majelis tersimpan → berita acara & isian berikutnya terisi dari server', await p.evaluate(() => window.RQSidang._uji.S.data.majelis?.ketua === 'Muhammad Haikal'));
       if (POTRET && v === 'sumber') try { require('child_process').execFileSync('pdftoppm', ['-png', '-r', '60', '-f', '1', '-l', '3', berkas, path.join(KELUAR, 'v265-berkas-hal')]); } catch (e) {}
@@ -226,14 +229,13 @@ const bukaSidang = async (page) => {
       cek('B14 persiapan: bukan reses, status "Persiapan", catatan persiapan, tombol berkas ada', await p.evaluate(() =>
         !document.querySelector('.sd-reses') && !!document.querySelector('.sd-status.persiapan') && !!document.querySelector('.sd-catatan-persiapan')
         && !!document.querySelector('.sd-atas [data-aksi="berkas"]')));
-      await p.click('[data-aksi="bidang"]'); await p.waitForTimeout(300);
-      cek('B15 persiapan: daftar bisa dilihat, tanpa kotak pilih & tanpa bilah putusan', await p.evaluate(() =>
-        document.querySelectorAll('.sd-santri').length > 0 && !document.querySelector('input[data-aksi="pilih"]') && document.getElementById('sdAksi').hidden));
+      cek('B15 persiapan: daftar bisa dilihat, antrean hanya mode lihat (tanpa tombol putus)', await p.evaluate(() =>
+        document.querySelectorAll('.sd-baris').length > 0 && /Lihat/.test(document.querySelector('[data-aksi="mulai"]')?.textContent || '')));
       await p.click('.sd-atas [data-aksi="berkas"]');
       await p.waitForSelector('.swal2-popup .sd-berkas-form');
-      cek('B16 jendela berkas menandai persiapan & sesi besok; cakupan bidang tersedia', await p.evaluate(() =>
+      cek('B16 jendela berkas menandai persiapan & sesi besok; cakupan semua & per kode tersedia', await p.evaluate(() =>
         /persiapan/i.test(document.querySelector('.sd-berkas-sesi').textContent) && /2 November/.test(document.querySelector('.sd-berkas-sesi').textContent)
-        && !!document.querySelector('input[name="sdCakupan"][value="bidang"]')));
+        && !!document.querySelector('input[name="sdCakupan"][value="semua"]') && !!document.querySelector('input[name="sdCakupan"][value="p1"]')));
       await potret(p, `v265-hp-persiapan-berkas-${v}`);
       await p.click('.swal2-cancel');
       cek('B17 tanpa galat halaman', s.galat.length === 0, s.galat.slice(0, 4));

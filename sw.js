@@ -49,7 +49,7 @@
    hapus singgahan versi lama, lalu beri tahu halaman yang terbuka.
    ===================================================================== */
 
-const VERSI       = 'rq-v2.67';     // v2.67: Peta Amanah — navigasi berbasis tugas, Lentera, riwayat halaman (v2.66: database saja)
+const VERSI       = 'rq-v2.68';     // v2.68: antrean panggil & banding Ruang Sidang (v2.67: Peta Amanah; v2.66: database saja)
 const CACHE_INTI  = `${VERSI}-inti`;
 const CACHE_ASET  = 'rq-aset-v1';   // nama tetap: bertahan melewati kenaikan VERSI
 

@@ -2735,6 +2735,7 @@ async function navigateTo(view) {
     else if (view === 'sidang')      await viewSidang();       // v2.64
     else if (view === 'saran')       await viewSaran();        // v2.65
     else if (view === 'kotaksaran')  await viewKotakSaran();   // v2.65
+    else if (view === 'banding')     await viewBanding();      // v2.68
     tandaiTabelBisaGeser();
   } catch (err) { fireError(err); }
   finally { loading(false); APP.navSibuk--; tutupTirai(); LayarMuat.tutupAwal(); }
@@ -33715,7 +33716,7 @@ const grupDari = (v) => PA.GRUP.find(g => g.views.includes(v)) || null;
 const indeksGrup = (v) => { const g = grupDari(v); return g ? PA.GRUP.indexOf(g) : -1; };
 const namaHal = (v) => (PA.NAMA[v] && PA.NAMA[v].nama) || (JUDUL[v] && JUDUL[v].teks) || v;
 const bolehHal = (v) => (MENU_ROLE[v] || []).includes(role())
-  && !(v === 'kotaksaran' && document.querySelector('#navMenu [data-view="kotaksaran"]')?.classList.contains('hidden'));
+  && !((v === 'kotaksaran' || v === 'banding') && document.querySelector(`#navMenu [data-view="${v}"]`)?.classList.contains('hidden'));   // v2.68: + banding
 const kunciPA = (k) => `rq.${k}.v1.${idSaya()}`;
 
 /* ---------- D · Satu nama: judul halaman & eyebrow = kelompok ---------- */
@@ -34617,3 +34618,213 @@ function pemicuLentera() {
   };
   tunggu();
 })();
+
+/* =====================================================================
+ * v2.68 — ANTREAN PANGGIL · BANDING · EKSEKUSI SUPER ADMIN
+ * ---------------------------------------------------------------------
+ *  Rancangan: claude/rancangan-v2.68-antrean-banding.md (disetujui 5 Nov).
+ *  · Ruang Sidang (sidang.js) kini berupa antrean per santri: Enter = ketuk
+ *    palu (dibacakan + diserahkan ke musyrif), ↓ = banding, Spasi = lewati,
+ *    Del = mundur. Tab "Penasihat Hukum" untuk memutus banding.
+ *  · Halaman "Eksekusi Banding" (khusus super admin): banding yang
+ *    dikabulkan penasihat dieksekusi — pelanggaran diarsipkan, perkara
+ *    sesudahnya turun satu tahap, musyrif menerima pesan koreksi. Seluruh
+ *    aturan ada di RPC banding_* (migrasi v2.68); di sini hanya tampilan.
+ *  Super admin tetap ditanyakan ke adalah_super_admin() (v2.65).
+ * ===================================================================== */
+APP.versi = 'rq-v2.68';   // v2.68: antrean panggil Ruang Sidang, banding & penasihat hukum OSDA, eksekusi super admin
+
+MENU_ROLE.banding = ['Admin'];   // + adalah_super_admin() — Admin lain tidak melihat menunya
+PA.NAMA.banding = { nama: 'Eksekusi Banding', tab: 'Banding', ket: 'Banding OSDA yang dikabulkan penasihat, menunggu eksekusi', kata: 'banding penasihat hukum eksekusi arsip salah catat sidang tadib osda' };
+(function daftarkanBanding() {
+  const g = PA.GRUP.find(x => x.id === 'tindak');
+  if (g && !g.views.includes('banding')) g.views.push('banding');
+  PA.TANPA_SARING.add('banding');
+  if (!LACI_TINDAK.includes('banding')) LACI_TINDAK.push('banding');
+  JUDUL.banding = { ar: 'الاستئناف', teks: 'Eksekusi Banding', lat: g ? g.label : 'Tindak Lanjut' };
+})();
+
+Object.assign(window.RQ_SIDANG, {
+  superAdmin: () => !!APP.superAdmin,
+  bukaHalaman: (v) => navigateTo(v)
+});
+
+/* ---------- menu & lencana: hanya super admin ---------- */
+(function bungkusMenuSuperBanding() {
+  const asli = aturMenuSuper;
+  aturMenuSuper = function () {
+    const h = asli.apply(this, arguments);
+    document.querySelectorAll('[data-view="banding"]').forEach(b => b.classList.toggle('hidden', !APP.superAdmin));
+    return h;
+  };
+})();
+async function refreshBadgeBanding() {
+  const b = $('badgeBanding'); if (!b) return;
+  if (!APP.superAdmin) return b.classList.add('hidden');
+  try {
+    const { data, error } = await db.rpc('banding_hitung');
+    if (error) throw error;
+    const n = Number(data) || 0;
+    b.textContent = n > 99 ? '99+' : String(n);
+    b.classList.toggle('hidden', !n);
+    b.title = n ? `${n} banding menunggu eksekusi` : '';
+  } catch (e) { b.classList.add('hidden'); }
+}
+(function bungkusBadgeBanding() {
+  // refreshBadgeSaran dipanggil setiap kali status super admin diperiksa / halaman tampak lagi.
+  const asli = refreshBadgeSaran;
+  refreshBadgeSaran = function () {
+    const h = asli.apply(this, arguments);
+    try { refreshBadgeBanding(); } catch (e) {}
+    return h;
+  };
+})();
+
+/* ---------- halaman Eksekusi Banding ---------- */
+const BANDING = { data: null };
+const galatBelumV268 = (e) => /banding_|does not exist|Could not find the function|PGRST202/i.test(String(e?.message || e?.code || e));
+const tglBanding = (k) => k ? new Date(String(k).slice(0, 10) + 'T12:00:00+07:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+
+async function viewBanding() {
+  if (!APP.superAdmin) await periksaSuperAdmin();
+  if (APP.view !== 'banding') return;
+  if (!APP.superAdmin) {
+    $('viewRoot').innerHTML = kartu('Eksekusi Banding', `<div class="card-body">${kosong('Khusus super admin', 'Banding yang dikabulkan Penasihat Hukum OSDA hanya dieksekusi super admin chemint.', 'fa-user-shield')}</div>`);
+    return;
+  }
+  let d = { antre: [], riwayat: [], diajukan: 0 }, galat = '';
+  try {
+    const { data, error } = await db.rpc('banding_antrean');
+    if (error) throw error;
+    d = data || d;
+  } catch (e) { galat = galatBelumV268(e) ? 'Eksekusi banding belum aktif di server. Terapkan migrasi v2.68 di Supabase.' : (e?.message || String(e)); }
+  if (APP.view !== 'banding') return;
+  BANDING.data = d;
+  gambarBanding(galat);
+  refreshBadgeBanding();
+}
+
+function kartuBanding(x) {
+  const s = x.salinan || {}, k = x.kini;
+  const dampak = Array.isArray(x.dampak) ? x.dampak : [];
+  const rinci = [
+    ['Pasal', `${s.kode ? `<span class="bd-kode">${esc(s.kode)}</span>` : ''}${esc(s.pelanggaran || '-')}`],
+    ['Kategori & tahap', `${esc(s.kategori || '-')} · ke-${esc(k?.tahap ?? s.tahap ?? '?')}`],
+    ['Putusan berjalan', `${esc(k?.bentuk || s.bentuk || '-')} <small>${k ? `(${esc(k.status)})` : '(pembinaannya sudah tidak ada)'}</small>`],
+    ['Tanggal kejadian', esc(tglBanding(s.tanggal))],
+    ['Keterangan catatan', s.catatan ? `“${esc(s.catatan)}”` : '<span class="bd-redup">tanpa keterangan</span>'],
+    ['Penindak · pencatat', `${esc(s.penindak || '-')} · ${esc(s.pencatat || '-')}${s.dicatat_pada ? ` <small>input ${esc(tglJamWib(s.dicatat_pada))}</small>` : ''}`],
+    ['Diajukan', `${x.sumber === 'manual' ? 'Manual oleh penasihat' : 'Di ruang sidang'} · ${esc(tglBanding(x.sesi))} · ${esc(x.diajukan_nama || '-')}`],
+    x.pokok ? ['Pokok keberatan', `“${esc(x.pokok)}”`] : null,
+    ['Dikabulkan', `${esc(x.diputus_nama || '-')} <small>${esc(tglJamWib(x.diputus_pada))}</small><br><b>“${esc(x.alasan || '')}”</b>`]
+  ].filter(Boolean);
+  const geser = (z) => `<li class="bd-geser j-${esc(z.jenis)}"><i class="fa-solid fa-arrow-turn-down" aria-hidden="true"></i><span>
+      <b>${esc(z.pelanggaran || '-')}</b> <small>${esc(tglBanding(z.tanggal))}</small><br>
+      ${esc(z.kategori || '')} ke-${esc(z.dari)} → <b>ke-${esc(z.ke)}</b>${z.jenis === 'bentuk' ? `: ${esc(z.bentuk_lama || '-')} → <b>${esc(z.bentuk_baru || '-')}</b>`
+        : z.jenis === 'tuntas' ? ' · sudah tuntas, hanya nomornya' : ' · hanya nomornya (pembinaan manual / musyawarah)'}
+      ${z.di_musyrif && z.jenis === 'bentuk' ? '<em>· musyrif menerima pesan koreksi</em>' : ''}</span></li>`;
+  return `<li class="bd-kartu" data-bd="${x.id}">
+    <header class="bd-kepala"><div><h3>${esc(s.nama || '-')}</h3>
+      <p>${esc(s.kelas || '')} · NISN ${esc(x.nisn || '-')} · ${x.unit === 'putri' ? 'Putri' : 'Putra'}${x.poin_bulan != null ? ` · poin bulan ini ${angka(x.poin_bulan)}` : ''}</p></div>
+      <span class="bd-status">Dikabulkan penasihat</span></header>
+    <dl class="bd-rinci">${rinci.map(([a, b]) => `<div><dt>${a}</dt><dd>${b}</dd></div>`).join('')}</dl>
+    <div class="bd-dampak"><p class="bd-dampak-judul"><i class="fa-solid fa-diagram-project"></i>Bila dieksekusi</p>
+      <ul>
+        <li><i class="fa-solid fa-box-archive" aria-hidden="true"></i><span>Catatan pelanggaran diarsipkan${s.poin ? `; poin santri berkurang ${angka(s.poin)}` : ''}. Pembinaan pasal ini gugur${k && k.status === 'Selesai' ? ' — sudah dijalankan, tetap tercatat dengan keterangan' : ''}.</span></li>
+        ${dampak.length ? dampak.map(geser).join('') : '<li class="bd-redup"><i class="fa-solid fa-check" aria-hidden="true"></i><span>Tidak ada perkara lain yang bergeser tahap.</span></li>'}
+      </ul></div>
+    <div class="bd-aksi">
+      <button type="button" class="btn btn-ghost" data-bd-kembali="${x.id}"><i class="fa-solid fa-rotate-left"></i>Kembalikan</button>
+      <button type="button" class="btn btn-primary" data-bd-eksekusi="${x.id}"><i class="fa-solid fa-gavel"></i>Eksekusi</button>
+    </div></li>`;
+}
+
+function gambarBanding(galat) {
+  const d = BANDING.data || { antre: [], riwayat: [] };
+  const antre = d.antre || [], riwayat = d.riwayat || [];
+  const LBL = { dieksekusi: ['Dieksekusi', 'ok'], dikembalikan: ['Dikembalikan', 'kembali'], ditolak: ['Ditolak penasihat', 'tolak'] };
+  const barisR = (x) => {
+    const s = x.salinan || {}, [l, k] = LBL[x.status] || [x.status, ''], h = x.hasil || {};
+    return `<li class="bd-riwayat-baris"><span class="bd-tanda t-${k}">${esc(l)}</span>
+      <div><b>${esc(s.nama || '-')}</b> <small>${esc(s.kelas || '')}</small><br>${esc(s.pelanggaran || '-')} · ${esc(tglBanding(s.tanggal))}
+        ${x.status === 'dieksekusi' ? `<small>· ${angka((h.dampak || []).length)} perkara bergeser · ${angka(h.koreksi || 0)} pesan koreksi</small>` : ''}
+        ${x.catatan_admin ? `<small>· “${esc(x.catatan_admin)}”</small>` : x.status === 'ditolak' && x.alasan ? `<small>· “${esc(x.alasan)}”</small>` : ''}</div>
+      <time>${esc(tglJamWib(x.eksekusi_pada || x.diputus_pada))}</time></li>`;
+  };
+  $('viewRoot').innerHTML = `
+    ${galat ? `<p class="saran-galat"><i class="fa-solid fa-triangle-exclamation"></i>${esc(galat)}</p>` : ''}
+    <div class="bd-kisi">
+      ${kartu('Menunggu eksekusi', `<div class="card-body">
+          <p class="bd-pengantar">Banding di bawah sudah <b>dikabulkan Penasihat Hukum OSDA</b>. Eksekusi mengarsipkan catatan pelanggarannya dan menurunkan satu tahap perkara sekategori sesudahnya pada bulan yang sama. Bila ragu, kembalikan dengan catatan.</p>
+          ${antre.length ? `<ul class="bd-daftar">${antre.map(kartuBanding).join('')}</ul>`
+            : kosong('Tidak ada banding yang menunggu', 'Banding yang dikabulkan penasihat akan masuk ke sini.', 'fa-scale-balanced')}</div>`,
+        '', `${angka(antre.length)} pasal menunggu · ${angka(d.diajukan || 0)} masih di penasihat`)}
+      ${kartu('Riwayat', `<div class="card-body">${riwayat.length ? `<ul class="bd-riwayat">${riwayat.map(barisR).join('')}</ul>`
+          : kosong('Belum ada riwayat', 'Eksekusi, pengembalian, dan penolakan penasihat tampil di sini.', 'fa-clock-rotate-left')}</div>`, '', '60 keputusan terakhir')}
+    </div>`;
+  onKlik(async (e) => {
+    const ek = e.target.closest('[data-bd-eksekusi]');
+    if (ek) return eksekusiBanding(Number(ek.dataset.bdEksekusi));
+    const kb = e.target.closest('[data-bd-kembali]');
+    if (kb) return kembalikanBanding(Number(kb.dataset.bdKembali));
+  });
+}
+
+function segarkanSesudahBanding() {
+  try { cacheHapus('detail', 'pembinaan', 'siswa', 'laporan_bina', 'pesan_bk'); } catch (e) {}
+  try { refreshBadgePesan(); } catch (e) {}
+  refreshBadgeBanding();
+}
+
+async function eksekusiBanding(id) {
+  const x = (BANDING.data?.antre || []).find(z => Number(z.id) === id); if (!x) return;
+  const s = x.salinan || {}, n = (x.dampak || []).length;
+  const res = await Swal.fire({
+    title: 'Eksekusi banding?', width: 600, showCancelButton: true, icon: 'warning',
+    confirmButtonText: '<i class="fa-solid fa-gavel"></i> Eksekusi', cancelButtonText: 'Batal', confirmButtonColor: '#8E1B32',
+    showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
+    html: `<div class="ks-swal">
+      <p><b>${esc(s.nama || '-')}</b> · ${esc(s.kelas || '')}<br>${esc(s.pelanggaran || '-')} · ${esc(tglBanding(s.tanggal))}</p>
+      <p>Catatan pelanggaran ini diarsipkan${n ? ` dan <b>${angka(n)} perkara</b> sesudahnya turun satu tahap` : ''}. Tindakan ini tercatat di Jejak Audit.</p>
+      <label class="saran-label" for="bdCatatan">Catatan (boleh dikosongkan)</label>
+      <textarea id="bdCatatan" rows="2" maxlength="500" placeholder="Contoh: dicocokkan dengan buku klinik."></textarea></div>`,
+    preConfirm: async () => {
+      try {
+        const { data, error } = await db.rpc('banding_eksekusi', { p_id: id, p_catatan: (Swal.getPopup().querySelector('#bdCatatan')?.value || '').trim() || null });
+        if (error) throw error;
+        return data;
+      } catch (e) { Swal.showValidationMessage(e.message || 'Eksekusi gagal.'); return false; }
+    }
+  });
+  if (!res.isConfirmed || !res.value) return;
+  const r = res.value;
+  toast('success', `Banding dieksekusi · ${angka(r.digeser || 0)} perkara bergeser${r.koreksi ? ` · ${angka(r.koreksi)} pesan koreksi ke musyrif` : ''}`);
+  segarkanSesudahBanding();
+  navigateTo('banding');
+}
+
+async function kembalikanBanding(id) {
+  const x = (BANDING.data?.antre || []).find(z => Number(z.id) === id); if (!x) return;
+  const res = await Swal.fire({
+    title: 'Kembalikan banding?', width: 560, showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-rotate-left"></i> Kembalikan', cancelButtonText: 'Batal', confirmButtonColor: '#334155',
+    showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
+    html: `<div class="ks-swal"><p>Pasal tidak diarsipkan dan kembali ke antrean sidang OSDA dengan catatan antum.</p>
+      <label class="saran-label" for="bdAlasan">Alasan pengembalian</label>
+      <textarea id="bdAlasan" rows="3" maxlength="500" placeholder="Contoh: catatan dibenarkan dua saksi; mohon dibacakan."></textarea></div>`,
+    didOpen: (el) => setTimeout(() => el.querySelector('#bdAlasan')?.focus(), 60),
+    preConfirm: async () => {
+      const v = (Swal.getPopup().querySelector('#bdAlasan')?.value || '').trim();
+      if (v.length < 3) { Swal.showValidationMessage('Tuliskan alasan pengembalian untuk penasihat.'); return false; }
+      try {
+        const { data, error } = await db.rpc('banding_kembalikan', { p_id: id, p_catatan: v });
+        if (error) throw error;
+        return data;
+      } catch (e) { Swal.showValidationMessage(e.message || 'Gagal.'); return false; }
+    }
+  });
+  if (!res.isConfirmed) return;
+  toast('success', 'Banding dikembalikan ke antrean sidang');
+  refreshBadgeBanding();
+  navigateTo('banding');
+}

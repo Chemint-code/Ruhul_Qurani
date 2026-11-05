@@ -4,10 +4,12 @@
  *
  * A · berkas: sidang.js ikut INTI sw.js, build Vite, rilis, migrasi menegakkan batas.
  * B · aplikasi utuh (sumber & build, Supabase tiruan, RPC sidang_* tiruan):
- *     OSDA: pintu sidang di Ringkasan, tab Sidang, ruang layar penuh, saran bidang →
- *     kategori → tahap, pembacaan putusan satu per satu, "sudah diberikan" → RPC;
- *     OSDA di luar hari sidang: reses; pengamat (Guru): tanpa pilihan & tanpa tombol;
+ *     OSDA: pintu sidang di Ringkasan, tab Sidang, ruang layar penuh, berkas per santri →
+ *     antrean panggil (v2.68): ketuk palu → sidang_putus, berikutnya, lewati, Del → urungkan;
+ *     OSDA di luar hari sidang: reses; pengamat (Guru): mode lihat, tanpa tombol putus;
  *     Admin putri: hakim berjilbab; Klinik: menu tidak tampil; keluar → kerangka kembali.
+ *   v2.68: alur lama (bidang → kategori → tahap → centang → Bacakan → Sudah diberikan)
+ *   dihapus; B5–B13, B20, B23–B24 diperbarui ke antrean panggil. Uji rinci: uji-v268.cjs.
  */
 const fs = require('fs'), path = require('path'), http = require('http');
 const { chromium } = require('playwright');
@@ -35,7 +37,7 @@ function layani(dir, port) {
   });
 }
 
-/* RPC sidang_* tiruan — meniru bentuk jawaban migrasi v2.64. */
+/* RPC sidang_* tiruan — meniru bentuk jawaban migrasi v2.64 (+ v2.68: versi 268 & antrean). */
 function pasangRpc(o) {
   const BIDANG = ['Mudabbir', 'Mudabbir', 'Mudabbir', 'Ubudiyah', 'Ubudiyah', 'Bahasa'];
   const KELAS = o.unit === 'putri' ? ['VII-C', 'VIII-A', 'X-A'] : ['VII-D', 'VIII-D', 'IX-F', 'X-C'];
@@ -58,7 +60,8 @@ function pasangRpc(o) {
       const osis = peran === 'Osis', buka = window.__BUKA !== false;
       const unit = osis ? 'putra' : (a && a.p_unit) || null;
       const d = { hari: '2026-10-28', buka, berikut: '2026-10-30', jadwal: [1, 3, 5, 6], peran: ['Admin', 'Osis'].includes(peran) ? 'majelis' : 'pengamat',
-        role: peran, nama: osis ? 'OSDA-RQ' : 'Penguji', unit, unit_terkunci: osis, reses: !buka };
+        role: peran, nama: osis ? 'OSDA-RQ' : 'Penguji', unit, unit_terkunci: osis, reses: !buka,
+        versi: 268, sesi_berkas: buka ? '2026-10-28' : '2026-10-30', banding_baru: 0, potong: '2026-10-26T15:00:00Z', santri: {}, tangga: {} };
       if (osis && !buka) return { data: { ...d, butir: [], musyrif: {} }, error: null };
       const l = window.__SIDANG.butir.filter(b => !unit || b.unit === unit).filter(b => peran !== 'Guru' || b.kelas === 'VIII-D')
         .map(b => { const x = { ...b }; if (osis) delete x.nisn; else x.nisn = '00' + b.id.slice(-3); return x; });
@@ -73,6 +76,23 @@ function pasangRpc(o) {
       window.__SIDANG.panggil.push(['serahkan', a]);
       let n = 0; window.__SIDANG.butir.forEach(b => { if (a.p_ids.includes(b.id) && b.status === 'dibacakan') { b.status = 'diberikan'; b.diberikan_pada = '2026-10-28T09:15:00+07:00'; b.penerima = musyrif[b.kelas]; n++; } });
       return { data: { ok: true, diberikan: n, pesan: n, diminta: a.p_ids.length, dilewati: [] }, error: null };
+    },
+    sidang_putus: (a) => {
+      const pid = 500 + window.__SIDANG.panggil.length; window.__SIDANG.panggil.push(['putus', a]);
+      window.__SIDANG.snap = window.__SIDANG.snap || {}; window.__SIDANG.snap[pid] = a.p_ids.map(id => ({ ...window.__SIDANG.butir.find(b => b.id === id) }));
+      a.p_ids.forEach(id => { const b = window.__SIDANG.butir.find(x => x.id === id); b.status = 'diberikan'; b.hari_ini = 'putus'; b.panggilan = pid; b.penerima = musyrif[b.kelas]; });
+      return { data: { ok: true, panggilan: pid, dibacakan: a.p_ids.length, diberikan: a.p_ids.length, ulang: 0, pengingat: 0, dilewati: [], penerima: musyrif[window.__SIDANG.butir.find(b => b.id === a.p_ids[0]).kelas] }, error: null };
+    },
+    sidang_lewati: (a) => {
+      const pid = 500 + window.__SIDANG.panggil.length; window.__SIDANG.panggil.push(['lewati', a]);
+      window.__SIDANG.snap = window.__SIDANG.snap || {}; window.__SIDANG.snap[pid] = a.p_ids.map(id => ({ ...window.__SIDANG.butir.find(b => b.id === id) }));
+      a.p_ids.forEach(id => { const b = window.__SIDANG.butir.find(x => x.id === id); b.hari_ini = 'lewati'; b.panggilan = pid; });
+      return { data: { ok: true, panggilan: pid, dilewati: a.p_ids.length }, error: null };
+    },
+    sidang_urungkan: (a) => {
+      window.__SIDANG.panggil.push(['urung', a]);
+      ((window.__SIDANG.snap || {})[a.p_id] || []).forEach(x => { const i = window.__SIDANG.butir.findIndex(b => b.id === x.id); if (i >= 0) window.__SIDANG.butir[i] = x; });
+      return { data: { ok: true, aksi: 'x', pesan_ditarik: 0 }, error: null };
     },
     sidang_batal: (a) => { window.__SIDANG.panggil.push(['batal', a]); const b = window.__SIDANG.butir.find(x => x.id === a.p_id); if (b) b.status = 'menunggu'; return { data: { ok: true }, error: null }; }
   };
@@ -111,6 +131,9 @@ const bukaSidang = async (page) => {
   await page.waitForFunction(() => document.querySelector('#ruangSidang') && !document.querySelector('#sdIsi .sd-muat'), null, { timeout: 30000 });
   await page.waitForTimeout(500);
 };
+const kartuNama = (p) => p.evaluate(() => document.querySelector('#sdAntre .sd-kartu h2')?.textContent || (document.querySelector('#sdAntre .sd-akhir') ? 'AKHIR' : ''));
+const panggilan = (p, j) => p.evaluate((j) => window.__SIDANG.panggil.filter(x => x[0] === j), j);
+const tungguRpc = (p, j, n = 1) => p.waitForFunction(([j, n]) => window.__SIDANG.panggil.filter(x => x[0] === j).length >= n, [j, n], { timeout: 15000 });
 
 (async () => {
   console.log('\nA · Berkas');
@@ -153,43 +176,40 @@ const bukaSidang = async (page) => {
       cek('B4 hakim putra (berpeci) besar & landasan palu tampak', await p.evaluate(() => {
         const h = document.querySelector('#sdPanggung .sd-hakim.besar'); return !!h && h.dataset.unit === 'putra' && h.getBoundingClientRect().width >= 220;
       }));
-      const chips = await p.$$eval('[data-aksi="bidang"]', l => l.map(b => ({ t: b.textContent.replace(/\s+/g, ' ').trim(), saran: !!b.querySelector('.sd-saran') })));
-      cek('B5 bidang tersusun dari data; yang teratas "Disarankan"', chips.length === 3 && chips[0].saran && /Mudabbir/.test(chips[0].t), chips.map(c => c.t));
+      cek('B5 berkas per santri: kelompok kode jumlah perkara & tombol "Mulai sidang"', await p.evaluate(() =>
+        document.querySelectorAll('.sd-kel').length >= 1 && document.querySelectorAll('.sd-baris').length > 0 && /Mulai sidang/.test(document.querySelector('[data-aksi="mulai"]')?.textContent || '')));
       cek('B6 OSDA tidak menerima NISN', await p.evaluate(() => window.RQSidang._uji.S.data.butir.every(b => !('nisn' in b))));
       await potret(p, `v264-hp-panggung-${v}`);
-      await p.click('[data-aksi="bidang"]');
-      await p.waitForTimeout(400);
-      cek('B7 setelah bidang dipilih: kategori & tahap disarankan otomatis, daftar putusan tampil', await p.evaluate(() =>
-        !!document.querySelector('[data-aksi="kategori"].on') && !!document.querySelector('[data-aksi="tahap"].on') && document.querySelectorAll('.sd-santri').length > 0));
-      cek('B8 daftar dikelompokkan per bentuk pembinaan (amar)', (await p.$$('.sd-amar-kepala b')).length >= 1);
-      await p.click('[data-aksi="pilih-hadir"]');
-      const nPilih = await p.evaluate(() => window.RQSidang._uji.S.pilih.size);
-      const absenTerpilih = await p.evaluate(() => [...window.RQSidang._uji.S.pilih].some(id => { const b = window.RQSidang._uji.S.data.butir.find(x => x.id === id); return b && b.hadir !== 'Hadir'; }));
-      cek('B9 "Pilih semua yang hadir" melewatkan santri izin/sakit', nPilih > 0 && !absenTerpilih, nPilih);
-      await potret(p, `v264-hp-daftar-${v}`);
-      await p.click('[data-aksi="bacakan"]');
-      await p.waitForSelector('#sdBaca .sd-amar-baca');
-      await potret(p, `v264-hp-pembacaan-${v}`);
-      for (let i = 0; i < nPilih; i++) {
-        await p.click('#sdBaca [data-aksi="baca-lanjut"]:not([disabled])', { timeout: 10000 });
-        await p.waitForTimeout(v === 'sumber' ? 520 : 150);
-      }
-      await p.waitForFunction(() => !document.querySelector('#sdBaca'), null, { timeout: 15000 });
+      await p.click('[data-aksi="mulai"]');
+      await p.waitForFunction(() => document.querySelector('#sdAntre .sd-kartu'), null, { timeout: 15000 });
+      const nama1 = await kartuNama(p);
+      cek('B7 Mulai sidang → antrean: kartu santri pertama & empat tombol layar', !!nama1 && await p.evaluate(() =>
+        [...document.querySelectorAll('.sd-antre-tombol .sd-kunci')].filter(b => b.offsetWidth > 60).length === 4), nama1);
+      cek('B8 kartu memuat perkara santri itu', await p.evaluate(() => document.querySelectorAll('#sdAntre .sd-pk').length >= 1));
+      await potret(p, `v264-hp-antre-${v}`);
+      await p.click('[data-aksi="a-enter"]');
+      cek('B9 ketuk palu → stempel "Diputus" seketika', await p.evaluate(() => /Diputus/.test(document.querySelector('#sdAntre .sd-stempel')?.textContent || '')));
+      await tungguRpc(p, 'putus');
+      const pu = await panggilan(p, 'putus');
+      cek('B10 satu RPC sidang_putus, hanya perkara santri yang dipanggil', pu.length === 1 && await p.evaluate((ids) =>
+        new Set(ids.map(id => { const b = window.__SIDANG.butir.find(x => x.id === id); return b.nama + '|' + b.kelas; })).size === 1, pu[0][1].p_ids), pu.map(x => x[1].p_ids));
+      await p.click('[data-aksi="a-enter"]');
+      const nama2 = await kartuNama(p);
+      cek('B11 Enter kedua → santri berikutnya', !!nama2 && nama2 !== nama1, [nama1, nama2]);
+      await p.click('[data-aksi="a-lewati"]');
+      await tungguRpc(p, 'lewati');
+      cek('B11b Lewati → RPC sidang_lewati, langsung ke santri berikutnya', (await kartuNama(p)) !== nama2);
+      await p.click('[data-aksi="a-del"]');
+      await p.waitForTimeout(150);
+      cek('B12 Del (belum diketuk) → mundur ke santri sebelumnya, stempel "Dilewati"', (await kartuNama(p)) === nama2
+        && await p.evaluate(() => /Dilewati/.test(document.querySelector('#sdAntre .sd-stempel')?.textContent || '')));
+      await p.click('[data-aksi="a-del"]');
+      await tungguRpc(p, 'urung');
+      cek('B12b Del lagi → RPC sidang_urungkan, stempel hilang', await p.evaluate(() => !document.querySelector('#sdAntre .sd-stempel')));
+      await p.click('[data-aksi="antre-tutup"]');
       await p.waitForTimeout(500);
-      const pg = await p.evaluate(() => window.__SIDANG.panggil.filter(x => x[0] === 'bacakan'));
-      cek('B10 pembacaan selesai → satu RPC sidang_bacakan berisi semua santri terpilih', pg.length === 1 && pg[0][1].p_ids.length === nPilih, pg.map(x => x[1].p_ids.length));
-      cek('B11 status berubah "Sudah dibacakan" setelah muat ulang', await p.evaluate(() => document.querySelectorAll('.sd-santri.st-dibacakan').length > 0));
-      cek('B11b putusan yang baru dibacakan tetap terpilih → "Sudah diberikan" langsung aktif', await p.evaluate(() => !document.querySelector('[data-aksi="berikan"]').disabled));
-      await p.click('[data-aksi="berikan"]');
-      await p.waitForSelector('.swal2-popup .sd-swal');
-      await potret(p, `v264-hp-berikan-${v}`);
-      await p.click('.swal2-confirm');
-      await p.waitForFunction(() => window.__SIDANG.panggil.some(x => x[0] === 'serahkan'), null, { timeout: 15000 });
-      await p.waitForTimeout(1600);
-      cek('B12 "Sudah diberikan" → RPC sidang_serahkan, baris pindah ke "Di tangan musyrif"', await p.evaluate(() =>
-        window.__SIDANG.butir.some(b => b.status === 'diberikan' && b.penerima)));
-      await p.click('[data-aksi="tampil"]'); await p.waitForTimeout(200);
-      cek('B13 tombol Batalkan tersedia untuk putusan sesi hari ini', (await p.$$('[data-aksi="batal"]')).length > 0);
+      cek('B13 tutup antrean → kembali ke daftar; santri yang diputus bertanda', await p.evaluate(() =>
+        !document.querySelector('#sdAntre') && document.querySelectorAll('.sd-baris.k-putus').length === 1));
       await potret(p, `v264-hp-setelah-${v}`);
       await p.click('[data-aksi="keluar"]');
       await p.waitForTimeout(700);
@@ -203,8 +223,8 @@ const bukaSidang = async (page) => {
       const p = s.page;
       await bukaSidang(p);
       cek('B16 reses: tanpa berkas, hakim tertidur, tanpa tombol putusan', await p.evaluate(() =>
-        !!document.querySelector('.sd-reses') && !document.querySelector('[data-aksi="bidang"]')
-        && document.querySelector('.sd-hakim').dataset.ekspresi === 'tidur' && document.getElementById('sdAksi').hidden));
+        !!document.querySelector('.sd-reses') && !document.querySelector('[data-aksi="mulai"]') && !document.querySelector('.sd-baris')
+        && document.querySelector('.sd-hakim').dataset.ekspresi === 'tidur'));
       await potret(p, `v264-hp-reses-${v}`);
       cek('B17 tanpa galat halaman', s.galat.length === 0, s.galat.slice(0, 4));
       await s.ctx.close();
@@ -215,10 +235,13 @@ const bukaSidang = async (page) => {
       cek('B18 menu Ruang Sidang tampil untuk musyrif', await p.evaluate(() => !document.querySelector('#navMenu [data-view="sidang"]').classList.contains('hidden')));
       cek('B19 tab Sidang TIDAK tampil untuk selain OSDA', await p.evaluate(() => document.querySelector('#tabBar .tab-sidang').classList.contains('hidden')));
       await bukaSidang(p);
-      await p.click('[data-aksi="bidang"]'); await p.waitForTimeout(300);
-      cek('B20 pengamat: tanpa kotak pilih, tanpa bilah aksi, ada catatan pengamat', await p.evaluate(() =>
-        document.querySelectorAll('.sd-santri').length > 0 && !document.querySelector('input[data-aksi="pilih"]')
-        && document.getElementById('sdAksi').hidden && /pengamat/i.test(document.querySelector('.sd-catatan')?.textContent || '')));
+      await p.click('[data-aksi="mulai"]');
+      await p.waitForFunction(() => document.querySelector('#sdAntre .sd-kartu'), null, { timeout: 15000 });
+      await p.keyboard.press('Enter'); await p.keyboard.press('Space'); await p.keyboard.press('ArrowDown');
+      await p.waitForTimeout(300);
+      cek('B20 pengamat: mode lihat — daftar & kartu terbuka, tanpa RPC putus/lewati/banding', await p.evaluate(() =>
+        !window.__SIDANG.panggil.some(x => ['putus', 'lewati', 'banding'].includes(x[0])) && !!document.querySelector('[data-aksi="a-kanan"]')));
+      await p.keyboard.press('Escape'); await p.waitForTimeout(300);
       await potret(p, `v264-desktop-pengamat-${v}`);
       cek('B21 tanpa galat halaman', s.galat.length === 0, s.galat.slice(0, 4));
       await s.ctx.close();
@@ -228,20 +251,19 @@ const bukaSidang = async (page) => {
       const p = s.page;
       await bukaSidang(p);
       await p.click('[data-aksi="unit"][data-nilai="putri"]');
-      await p.waitForFunction(() => document.querySelector('[data-aksi="bidang"]'), null, { timeout: 15000 });
+      await p.waitForFunction(() => window.RQSidang._uji.S.data?.unit === 'putri' && document.querySelector('.sd-baris'), null, { timeout: 15000 });
       await p.waitForTimeout(300);
       cek('B22 Admin memilih unit putri → hakim berjilbab', await p.evaluate(() => document.querySelector('#sdPanggung .sd-hakim').dataset.unit === 'putri'));
-      await p.click('[data-aksi="bidang"]'); await p.waitForTimeout(300);
       await potret(p, `v264-desktop-putri-${v}`);
-      await p.click('[data-aksi="pilih-hadir"]');
-      await p.click('[data-aksi="bacakan"]');
-      await p.waitForSelector('#sdBaca .sd-amar-baca');
-      await p.click('[data-aksi="baca-ringkas"]');
-      cek('B23 pembacaan "Lihat semua sekaligus" menampilkan daftar', (await p.$$('.sd-baca-semua li')).length > 1);
-      await potret(p, `v264-desktop-pembacaan-${v}`);
+      await p.click('[data-aksi="mulai"]');
+      await p.waitForFunction(() => document.querySelector('#sdAntre .sd-kartu'), null, { timeout: 15000 });
+      cek('B23 Admin (desktop): antrean terbuka, hakim di mimbar berjilbab', await p.evaluate(() =>
+        !!document.querySelector('#sdAntre .sd-kartu h2') && document.querySelector('#sdAntre .sd-hakim')?.dataset.unit === 'putri'));
+      await potret(p, `v264-desktop-antre-${v}`);
       await p.keyboard.press('Escape');
       await p.waitForTimeout(400);
-      cek('B24 Esc menunda pembacaan tanpa RPC', await p.evaluate(() => !document.querySelector('#sdBaca') && !window.__SIDANG.panggil.some(x => x[0] === 'bacakan')));
+      cek('B24 Esc menutup antrean tanpa RPC putusan', await p.evaluate(() => !document.querySelector('#sdAntre')
+        && !window.__SIDANG.panggil.some(x => ['putus', 'lewati', 'banding', 'bacakan'].includes(x[0]))));
       cek('B25 tanpa galat halaman', s.galat.length === 0, s.galat.slice(0, 4));
       await s.ctx.close();
     }
@@ -253,7 +275,6 @@ const bukaSidang = async (page) => {
     if (v === 'sumber') { // desktop OSDA untuk potret panggung
       const s = await masuk(browser, URL_[v], { peran: 'Osis', korps: 'Osis Putra' });
       await bukaSidang(s.page);
-      await s.page.click('[data-aksi="bidang"]'); await s.page.waitForTimeout(400);
       await s.page.evaluate(() => document.getElementById('sdGulir').scrollTo(0, 0));
       await potret(s.page, 'v264-desktop-osda-sumber');
       await s.ctx.close();

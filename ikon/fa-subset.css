@@ -1,6 +1,6 @@
 /* chemint · Font Awesome Free 6.5.1 — SUBSET (alat/subset-ikon.py)
  * Lisensi ikon CC BY 4.0, fon SIL OFL 1.1, kode MIT — https://fontawesome.com/license/free
- * 170 ikon. Jangan diedit manual; jalankan ulang skripnya. */
+ * 174 ikon. Jangan diedit manual; jalankan ulang skripnya. */
 /*!
  * Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com
  * License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License)
@@ -5535,6 +5535,7 @@ readers do not read off random characters that represent icons */
 .fa-arrow-rotate-left::before{content:"\f0e2"}
 .fa-arrow-trend-down::before{content:"\e097"}
 .fa-arrow-trend-up::before{content:"\e098"}
+.fa-arrow-turn-down::before{content:"\f149"}
 .fa-arrow-turn-up::before{content:"\f148"}
 .fa-arrows-left-right::before{content:"\f07e"}
 .fa-at::before{content:"\40"}
@@ -5591,6 +5592,7 @@ readers do not read off random characters that represent icons */
 .fa-compress::before{content:"\f066"}
 .fa-copy::before{content:"\f0c5"}
 .fa-database::before{content:"\f1c0"}
+.fa-delete-left::before{content:"\f55a"}
 .fa-diagram-project::before{content:"\f542"}
 .fa-dice::before{content:"\f522"}
 .fa-door-open::before{content:"\f52b"}
@@ -5657,6 +5659,7 @@ readers do not read off random characters that represent icons */
 .fa-plug-circle-xmark::before{content:"\e560"}
 .fa-plus::before{content:"\2b"}
 .fa-print::before{content:"\f02f"}
+.fa-quote-left::before{content:"\f10d"}
 .fa-ranking-star::before{content:"\e561"}
 .fa-right-from-bracket::before{content:"\f2f5"}
 .fa-right-left::before{content:"\f362"}
@@ -5674,6 +5677,7 @@ readers do not read off random characters that represent icons */
 .fa-signature::before{content:"\f5b7"}
 .fa-sitemap::before{content:"\f0e8"}
 .fa-sliders::before{content:"\f1de"}
+.fa-stairs::before{content:"\e289"}
 .fa-star::before{content:"\f005"}
 .fa-stethoscope::before{content:"\f0f1"}
 .fa-table::before{content:"\f0ce"}
