@@ -49,7 +49,7 @@
    hapus singgahan versi lama, lalu beri tahu halaman yang terbuka.
    ===================================================================== */
 
-const VERSI       = 'rq-v2.69';     // v2.69: majelis bernama, apresiasi keadilan, Disahkan OSDA (v2.68: antrean dan banding; v2.67: Peta Amanah)
+const VERSI       = 'rq-v2.70';     // v2.70: Alur Mahkamah — Meja Majelis, bilah lengket, Pelantikan, gerak sidang; v2.69: majelis bernama, apresiasi keadilan, Disahkan OSDA (v2.68: antrean dan banding; v2.67: Peta Amanah)
 const CACHE_INTI  = `${VERSI}-inti`;
 const CACHE_ASET  = 'rq-aset-v1';   // nama tetap: bertahan melewati kenaikan VERSI
 

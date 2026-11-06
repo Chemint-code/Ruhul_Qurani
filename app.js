@@ -34854,6 +34854,7 @@ async function kembalikanBanding(id) {
  *  · Formulir catat pelanggaran: bidang Bahasa → "Ucapan yang terdengar".
  * ===================================================================== */
 APP.versi = 'rq-v2.69';   // v2.69: majelis bernama + apresiasi keadilan, pengesahan OSDA & sanggah, kelalaian pengesahan, utas Tutup Buku ditutup
+APP.versi = 'rq-v2.70';   // v2.70: Alur Mahkamah — Meja Majelis, bilah lengket, Pelantikan, gerak sidang; Kelalaian selebar penuh
 
 MENU_ROLE.kelalaian = ['Admin'];   // + adalah_super_admin()
 PA.NAMA.kelalaian = { nama: 'Kelalaian Pengesahan', tab: 'Kelalaian', ket: 'Putusan sidang yang belum disahkan musyrif, disahkan OSDA, dan disanggah', kata: 'kelalaian pengesahan musyrif lalai disahkan osda sanggah sidang tadib' };
@@ -34906,29 +34907,34 @@ function gambarKelalaian(galat) {
     return `<span class="kl-bilah" role="img" aria-label="${angka(x.sendiri)} disahkan sendiri, ${angka(x.osda)} disahkan OSDA, ${angka(x.belum)} belum, ${angka(x.terkunci)} terkunci">
       <i class="s" style="width:${x.sendiri / n * 100}%"></i><i class="o" style="width:${x.osda / n * 100}%"></i><i class="b" style="width:${x.belum / n * 100}%"></i><i class="t" style="width:${x.terkunci / n * 100}%"></i></span>`; };
   const nada = (x) => (x.terkunci + x.osda + x.belum) / Math.max(1, x.diterima) >= .5 ? 'merah' : (x.belum + x.terkunci) ? 'kuning' : 'hijau';
-  $('viewRoot').innerHTML = `
+  // v2.70: angka naik dari bawah (teks tetap angka akhir), tata letak selebar penuh, gerak sekali per kunjungan
+  const naik = (v) => `<span class="kk"><span class="kk-i">${v}</span></span>`;
+  const gembok = (x) => x.terkunci ? `<i class="fa-solid fa-lock kl-gembok" title="${angka(x.terkunci)} terkunci Tutup Buku"></i>` : '';
+  $('viewRoot').innerHTML = `<div class="kl-halaman kl-gerak">
     ${galat ? `<p class="saran-galat"><i class="fa-solid fa-triangle-exclamation"></i>${esc(galat)}</p>` : ''}
     <section class="kl-angka" aria-label="Ringkasan">
-      <div><b>${angka(tot.diterima)}</b><small>putusan diserahkan ke musyrif</small></div>
-      <div class="s"><b>${persen(tot.sendiri, tot.diterima)}%</b><small>disahkan musyrif sendiri</small></div>
-      <div class="o"><b>${angka(tot.osda)}</b><small>disahkan OSDA (musyrif lalai mengesahkan)</small></div>
-      <div class="b"><b>${angka(tot.belum)}</b><small>belum disahkan, bulan berjalan</small></div>
-      <div class="t"><b>${angka(tot.terkunci)}</b><small>tidak pernah disahkan, sudah Tutup Buku</small></div>
+      <div style="--i:0"><b>${naik(angka(tot.diterima))}</b><small>putusan diserahkan ke musyrif</small></div>
+      <div class="s" style="--i:1"><b>${naik(`${persen(tot.sendiri, tot.diterima)}%`)}</b><small>disahkan musyrif sendiri</small></div>
+      <div class="o" style="--i:2"><b>${naik(angka(tot.osda))}</b><small>disahkan OSDA (musyrif lalai mengesahkan)</small></div>
+      <div class="b" style="--i:3"><b>${naik(angka(tot.belum))}</b><small>belum disahkan, bulan berjalan</small></div>
+      <div class="t" style="--i:4"><b>${naik(angka(tot.terkunci))}</b><small>tidak pernah disahkan, sudah Tutup Buku</small></div>
     </section>
-    <div class="kl-kisi">
+    ${kartu('Per bulan', `<div class="card-body">${B.length ? `<ul class="kl-bulan">${B.map((x, i) => `<li style="--r:${Math.min(i, 8)}"><b>${esc(labelBln(x.bulan))}</b><span class="kl-bilah-baris">${bilah(x)}${gembok(x)}</span>
+          <small>${angka(x.diterima)} diterima · ${angka(x.sendiri)} sendiri · ${angka(x.osda)} OSDA · ${angka(x.belum)} belum${x.terkunci ? ` · <em>${angka(x.terkunci)} terkunci</em>` : ''}</small></li>`).join('')}</ul>`
+          : kosong('Belum ada data', '', 'fa-calendar')}
+        <p class="kl-catatan"><i class="fa-solid fa-lock"></i>Utas pesan pembinaan bulan yang sudah Tutup Buku ditutup otomatis; pembinaannya tetap tercatat belum disahkan sebagai bahan evaluasi.</p></div>`, '', '')}
+    <div class="kl-kisi kl-penuh">
       ${kartu('Per musyrif', `<div class="card-body">
         <p class="bd-pengantar">Setiap putusan Sidang Ta'dib yang diserahkan ke musyrif. <b>Disahkan OSDA</b> berarti pembinaan sudah dijalankan tetapi baru disahkan majelis pada sidang berikutnya; <b>terkunci</b> berarti bulan itu sudah Tutup Buku sebelum disahkan.</p>
         <p class="kl-legenda"><span class="s">disahkan sendiri</span><span class="o">disahkan OSDA</span><span class="b">belum</span><span class="t">terkunci</span></p>
         ${M.length ? `<div class="table-wrap"><table class="kl-tabel"><thead><tr><th>Musyrif</th><th class="num">Diterima</th><th>Sebaran</th><th class="num">OSDA</th><th class="num">Disanggah</th><th class="num">Belum</th><th class="num">Terkunci</th><th class="num">Rata-rata</th><th class="num">Tertua</th></tr></thead>
-          <tbody>${M.map(x => `<tr class="kl-${nada(x)}"><td><b>${esc(x.nama || '-')}</b></td><td class="num">${angka(x.diterima)}</td><td>${bilah(x)}</td>
+          <tbody>${M.map((x, i) => `<tr class="kl-${nada(x)}" style="--r:${Math.min(i, 12)}"><td><b>${esc(x.nama || '-')}</b></td><td class="num">${angka(x.diterima)}</td><td><span class="kl-bilah-baris">${bilah(x)}${gembok(x)}</span></td>
             <td class="num">${angka(x.osda)}</td><td class="num">${angka(x.disanggah)}</td><td class="num">${angka(x.belum)}</td><td class="num">${angka(x.terkunci)}</td>
             <td class="num">${x.rata_hari != null ? `${String(x.rata_hari).replace('.', ',')} hari` : '-'}</td><td class="num">${x.tertua_hari != null ? `${angka(x.tertua_hari)} hari` : '-'}</td></tr>`).join('')}</tbody></table></div>`
           : kosong('Belum ada putusan', 'Putusan sidang yang diserahkan ke musyrif akan terekap di sini.', 'fa-gavel')}</div>`, '', 'diurutkan dari yang paling banyak belum/terlambat disahkan')}
-      ${kartu('Per bulan', `<div class="card-body">${B.length ? `<ul class="kl-bulan">${B.map(x => `<li><b>${esc(labelBln(x.bulan))}</b>${bilah(x)}
-          <small>${angka(x.diterima)} diterima · ${angka(x.sendiri)} sendiri · ${angka(x.osda)} OSDA · ${angka(x.belum)} belum${x.terkunci ? ` · <em>${angka(x.terkunci)} terkunci</em>` : ''}</small></li>`).join('')}</ul>`
-          : kosong('Belum ada data', '', 'fa-calendar')}
-        <p class="kl-catatan"><i class="fa-solid fa-lock"></i>Utas pesan pembinaan bulan yang sudah Tutup Buku ditutup otomatis; pembinaannya tetap tercatat belum disahkan sebagai bahan evaluasi.</p></div>`, '', '')}
-    </div>`;
+    </div></div>`;
+  // gerak hanya sekali per kunjungan: kelas dilepas sesudah selesai, render ulang tidak memutar lagi
+  setTimeout(() => document.querySelector('#viewRoot .kl-gerak')?.classList.remove('kl-gerak'), 2200);
 }
 
 /* ---------- Pembinaan: tanda "Disahkan OSDA" & sanggah musyrif ---------- */

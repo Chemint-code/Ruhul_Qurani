@@ -46,6 +46,19 @@
  *       dijalankan → "Disahkan OSDA" (musyrif boleh menyanggah 3 hari).
  *    M  susunan majelis.   Ucapan tercatat (bidang Bahasa) = alat bukti.
  *
+ *  v2.70 · ALUR MAHKAMAH (rancangan-v2.70-alur-mahkamah)
+ *    Tata letak: Meja Majelis (kursi bisa diklik) di bawah panggung; Bilah
+ *    Majelis lengket sesudah panggung tergulir (titik kursi, lompat P1–P4,
+ *    cari, Mulai); bilah jempol di HP; Rekap tidak lagi terpotong. Papan tik
+ *    daftar: M = susunan majelis, / = cari.
+ *    Gerak bermakna, tidak pernah menahan hakim: ① Pelantikan Majelis
+ *    (sekali per sesi per unit) ② pembukaan: lengkung & ayat dijahit ③ palu
+ *    pertama → cap apresiasi terbang ke kursi ④ diputus → berkas dilipat &
+ *    diserahkan ⑤ kartu datang dari "Berikutnya"; lewati disisihkan; banding
+ *    menimbang ⑥ cap "Disahkan OSDA" ⑦ penutupan: sapuan emas + 3 ketukan.
+ *    Pembimbing dipilih dari Para Pendidik (tim_pendidik_rpc) beserta fotonya;
+ *    tetap tersimpan sebagai nama seperti v2.69 (tanpa migrasi).
+ *
  *  Batas sesungguhnya ada di database (migrasi v2.64, v2.65, v2.68, v2.69).
  *  Gerak: hanya transform & opacity. "Kurangi gerak" → tanpa tirai, palu,
  *  dan stempel. Bunyi palu (WebAudio) bisa dimatikan; mati di mode hemat.
@@ -86,6 +99,11 @@
     rantai: new Map(),         // kunci santri → janji simpan berurutan
     gagal: new Map(),          // kunci santri → pesan galat simpan
     tunda: 0,                  // simpanan yang belum selesai
+    pendidik: null,            // v2.70: janji daftar Para Pendidik (nama + foto) untuk Pembimbing
+    guru: null,                // v2.70: daftar yang sudah termuat
+    lantik: null,              // v2.70: { tutup } selama Pelantikan Majelis tampil
+    kilauMj: 0,                // v2.70: kursi majelis berkilau sampai cap waktu ini
+    ditutup: new Set(),        // v2.70: sesi yang penutupannya sudah dimainkan
     pen: { data: null, sibuk: false, galat: '', saring: 'diajukan', token: 0 }
   };
 
@@ -448,7 +466,7 @@
       for (const b of s.semua) if (ids.includes(b.id)) { b.panggilan = langkah.panggilan; delete b._tunda; }
       if (aksi === 'putus') {
         // v2.69: ketukan pertama yang tersimpan → server mencatat apresiasi majelis
-        if (S.data?.panitia?.lengkap && !S.data.panitia.kredit) { S.data.panitia.kredit = true; if (!S.antre) gambarIsi(); }
+        if (S.data?.panitia?.lengkap && !S.data.panitia.kredit) { S.data.panitia.kredit = true; if (!S.antre) gambarIsi(); else capApresiasi(); }
         const pen = Array.isArray(data?.penerima) ? data.penerima : [];
         for (const b of s.semua) if (ids.includes(b.id) && !b._ulangKini && pen.length) b.penerima = pen;
         // kelas tanpa musyrif: putusan dibacakan, laporannya belum terkirim
@@ -526,10 +544,12 @@
         <div class="sd-atas-kanan" id="sdKanan"></div>
       </header>
       <div class="sd-gulir" id="sdGulir">
+        <div class="sd-bilah" id="sdBilah" hidden inert></div>
         <div class="sd-panggung" id="sdPanggung"></div>
         <nav class="sd-tab" id="sdTab" aria-label="Bagian ruang sidang"></nav>
         <div class="sd-isi" id="sdIsi"></div>
       </div>
+      <nav class="sd-jempol" id="sdJempol" aria-label="Aksi cepat majelis" hidden></nav>
       <div class="sd-tirai" id="sdTirai" aria-hidden="true"><i></i><i></i></div>`;
     return el;
   }
@@ -557,7 +577,8 @@
       </div>` : '';
     const bunyi = majelis() ? `<button type="button" class="sd-ikon" data-aksi="bunyi" aria-pressed="${bunyiAktif()}" title="${bunyiAktif() ? 'Matikan bunyi palu' : 'Nyalakan bunyi palu'}">
         <i class="fa-solid fa-gavel"></i><span class="sr-only">Bunyi palu</span></button>` : '';
-    kanan.innerHTML = status + unit + berkas + bunyi +
+    const mj = d && S.tab === 'majelis' && !reses(d) && S.urutan.length ? titikKursi('sdAtasMj') : '';
+    kanan.innerHTML = mj + status + unit + berkas + bunyi +
       `<button type="button" class="sd-ikon" data-aksi="segarkan" title="Muat ulang berkas"><i class="fa-solid fa-rotate"></i><span class="sr-only">Muat ulang</span></button>`;
   }
 
@@ -578,6 +599,8 @@
     if (!majelis()) return 'Anda hadir sebagai pengamat. Putusan dibacakan dan diserahkan oleh majelis OSDA.';
     if (S.bubble) return S.bubble;
     if (!c.total) return 'Alhamdulillah, tidak ada perkara Ringan atau Sedang yang menunggu sidang.';
+    if (perluMajelis() && c.dipanggil) { const t = kursiTerisi();
+      return `Bismillah. Sebelum palu diketuk, lengkapi dulu susunan majelis — ${angka(t.dari - t.n)} kursi masih kosong. Tekan M atau klik kursinya.`; }
     if (!c.dipanggil) return c.lewati
       ? `Semua sudah dipanggil. ${angka(c.lewati)} santri dilewati — panggil ulang bila sudah hadir.`
       : 'Alhamdulillah, seluruh antrean sudah diputus. Salin berita acara untuk arsip syura.';
@@ -680,11 +703,11 @@
         ${kodeHtml(P)}<span class="sd-kel-isi"><b>${angka(n)} santri</b><small>${esc(KODE[P].l)}</small></span>
         <span class="sd-kel-bilah" style="--isi:${n ? Math.round(sudah / n * 100) : 0}%"><i></i></span></button>`;
     }).join('');
-    const mulaiLbl = bolehPutus() ? (c.dipanggil ? 'Mulai sidang' : c.lewati ? 'Panggil ulang yang dilewati' : 'Lihat antrean') : 'Lihat kartu santri';
+    const mulaiLbl = labelMulai(c);
     const grup = [1, 2, 3, 4].map(P => {
       const l = tampil.filter(s => s.P === P);
       if (!l.length) return '';
-      return `<li class="sd-grup"><h4>${kodeHtml(P)}<span>${esc(KODE[P].l)}</span><small>${angka(l.length)} santri</small></h4>
+      return `<li class="sd-grup" data-p="${P}"><h4>${kodeHtml(P)}<span>${esc(KODE[P].l)}</span><small>${angka(l.length)} santri</small></h4>
         <ol class="sd-berkas">${l.map(barisSantri).join('')}</ol></li>`;
     }).join('');
     const bdg = S.diBanding.length ? `<section class="sd-kertas sd-tertahan">
@@ -692,9 +715,13 @@
         <p class="sd-kecil">Santri berikut tidak dipanggil sampai Penasihat Hukum memutus bandingnya.</p>
         <ul>${S.diBanding.map(s => `<li><b>${esc(s.nama)}</b> <span>${esc(s.kelas)}</span> <em>${s.tertahan.map(b => esc(LABEL_BANDING[b.banding] || '')).filter((x, i, a) => a.indexOf(x) === i).join(' · ')}</em></li>`).join('')}</ul>
       </section>` : '';
+    const pita = `<p class="sd-pita-rekap" aria-hidden="true"><span><b>${angka(c.total)}</b> antrean</span><span><b>${angka(c.dipanggil)}</b> menunggu</span>
+        <span><i class="fa-solid fa-check"></i><b>${angka(c.putus)}</b></span><span><i class="fa-solid fa-scale-balanced"></i><b>${angka(c.banding)}</b></span><span><i class="fa-solid fa-forward"></i><b>${angka(c.lewati)}</b></span></p>`;
 
     el.innerHTML = `<div class="sd-utama">${pengamat}${catatan}
+        ${htmlMajelisRingkas()}
         <section class="sd-kelompok" aria-label="Kelompok jumlah perkara">${kelompok}</section>
+        ${pita}
         <div class="sd-mulai">
           <button type="button" class="sd-btn sd-btn-emas sd-btn-mulai" data-aksi="mulai"${antre.length ? '' : ' disabled'}>
             <i class="fa-solid fa-gavel"></i><span>${mulaiLbl}</span><kbd>Enter</kbd></button>
@@ -707,6 +734,76 @@
         ${bdg}
       </div>${htmlRekap(c)}`;
     if (S.sibuk) el.classList.add('sd-redup'); else el.classList.remove('sd-redup');
+    rapikanFoto(el);
+    gambarBilah();
+  }
+  function labelMulai(c) {
+    return bolehPutus() ? (c.dipanggil ? 'Mulai sidang' : c.lewati ? 'Panggil ulang yang dilewati' : 'Lihat antrean') : 'Lihat kartu santri';
+  }
+
+  /* =================================================================
+   *  v2.70 · BILAH MAJELIS (lengket) & BILAH JEMPOL (HP)
+   *  Muncul begitu tombol Mulai tergulir lewat. Tidak menggeser tata letak
+   *  (tinggi 0, isinya meluncur turun dengan transform).
+   * ================================================================= */
+  function titikKursi(id) {
+    if (!adaPanitia() || !majelis()) return '';
+    const p = S.data.panitia, t = kursiTerisi();
+    const k = kursiMajelis().filter(x => x.wajib || x.isi?.nama);
+    const kilau = Date.now() < S.kilauMj ? ' kilau' : '';
+    return `<button type="button" class="sd-bm-mj${p.lengkap ? ' lengkap' : ''}${kilau}"${id ? ` id="${id}"` : ''} data-aksi="majelis" title="Susunan majelis (M)">
+      <span class="sd-bm-titik" aria-hidden="true">${k.map(x => `<i class="${x.isi?.nama ? 'isi' : 'kosong'}${x.id === 'ketua' ? ' ketua' : ''}"></i>`).join('')}</span>
+      <span class="sd-bm-mj-teks">${p.lengkap ? (p.kredit ? 'Majelis · apresiasi tercatat' : 'Majelis lengkap') : `Majelis ${angka(t.n)}/${angka(t.dari)}`}</span></button>`;
+  }
+  function gambarBilah() {
+    const b = S.akar?.querySelector('#sdBilah'), j = S.akar?.querySelector('#sdJempol');
+    if (!b || !j) return;
+    const d = S.data;
+    const aktif = !!d && !S.galat && S.tab === 'majelis' && !reses(d) && S.urutan.length > 0;
+    b.hidden = !aktif; j.hidden = !aktif;
+    if (!aktif) { b.innerHTML = ''; j.innerHTML = ''; b.classList.remove('tampak'); b.inert = true; S.akar.classList.remove('sd-bilah-tampak'); return; }
+    const c = hitungSesi();
+    const mulai = `<button type="button" class="sd-btn sd-btn-emas sd-bm-mulai" data-aksi="mulai-bilah"><i class="fa-solid fa-gavel"></i><span>${esc(labelMulai(c))}</span><kbd>Enter</kbd></button>`;
+    const lompat = [1, 2, 3, 4].filter(P => c.P[P][0]).map(P => `<button type="button" class="sd-bm-p p${P}" data-aksi="lompat" data-nilai="${P}" title="Lompat ke ${esc(KODE[P].l)}">${KODE[P].k}<small>${angka(c.P[P][0])}</small></button>`).join('');
+    b.innerHTML = `<div class="sd-bilah-isi">
+        <span class="sd-bm-wajah" aria-hidden="true">${hakimHtml('wajah')}</span>
+        <span class="sd-bm-judul"><b>${esc(d.buka ? 'Sidang' : persiapan(d) ? 'Persiapan' : 'Berkas')}</b><small>${angka(c.dipanggil)} menunggu · ${angka(c.putus)} diputus</small></span>
+        ${titikKursi()}
+        <span class="sd-bm-lompat" role="group" aria-label="Lompat ke kelompok">${lompat}</span>
+        <button type="button" class="sd-ikon sd-bm-cari" data-aksi="fokus-cari" title="Cari santri (/)"><i class="fa-solid fa-magnifying-glass"></i><span class="sr-only">Cari</span></button>
+        ${mulai}
+        <button type="button" class="sd-ikon sd-bm-atas" data-aksi="ke-atas" title="Kembali ke atas"><i class="fa-solid fa-arrow-turn-up"></i><span class="sr-only">Ke atas</span></button>
+      </div>`;
+    j.innerHTML = titikKursi() + mulai;
+    aturBilah(true);
+  }
+  let rafBilah = 0;
+  function aturBilah(segera) {
+    const jalan = () => {
+      rafBilah = 0;
+      const g = S.akar?.querySelector('#sdGulir'), b = S.akar?.querySelector('#sdBilah'), m = S.akar?.querySelector('.sd-mulai');
+      if (!g || !b) return;
+      const tampak = !b.hidden && !!m && m.getBoundingClientRect().bottom < g.getBoundingClientRect().top + 6;
+      if (tampak === b.classList.contains('tampak')) return;
+      b.classList.toggle('tampak', tampak); b.inert = !tampak;
+      S.akar.classList.toggle('sd-bilah-tampak', tampak);
+    };
+    if (segera) { cancelAnimationFrame(rafBilah); return jalan(); }
+    if (!rafBilah) rafBilah = requestAnimationFrame(jalan);
+  }
+  const gulirHalus = () => bolehGerak() && !A.hemat() ? 'smooth' : 'auto';
+  function lompatKe(P) {
+    if (S.saring && S.saring !== P) { S.saring = 0; gambarIsi(); }
+    const h = S.akar?.querySelector(`.sd-grup[data-p="${P}"]`); if (!h) return;
+    h.scrollIntoView({ block: 'start', behavior: gulirHalus() });
+    h.classList.remove('disorot'); void h.offsetWidth; h.classList.add('disorot');
+    setTimeout(() => h.classList.remove('disorot'), 1400);
+    h.querySelector('.sd-baris')?.focus({ preventScroll: true });
+  }
+  function fokusCari() {
+    const i = S.akar?.querySelector('#sdCari'); if (!i) return;
+    i.scrollIntoView({ block: 'center', behavior: gulirHalus() });
+    i.focus({ preventScroll: true }); i.select();
   }
 
   function htmlReses() {
@@ -732,10 +829,9 @@
       ${bolehBerkas() ? `<button type="button" class="sd-btn sd-btn-emas sd-btn-berkas" data-aksi="berkas"><i class="fa-solid fa-file-pdf"></i>Unduh berkas perkara</button>
         <p class="sd-kecil">Daftar panggil per kode jumlah perkara, rincian tiap santri, dan kolom tanda tangan majelis. A4 atau F4.</p>` : ''}
       ${c.putus || c.banding || c.lewati ? `<button type="button" class="sd-btn sd-btn-tipis" data-aksi="berita-acara"><i class="fa-solid fa-copy"></i>Salin berita acara hari ini</button>` : ''}
-      ${htmlMajelisRingkas()}
       <div class="sd-papan" aria-hidden="true">
         <p>Papan tik majelis</p>
-        <ul><li><kbd>Enter</kbd>ketuk palu · lanjut</li><li><kbd>↓</kbd>banding</li><li><kbd>Spasi</kbd>lewati</li><li><kbd>Del</kbd>mundur</li>${adaPanitia() ? '<li><kbd>S</kbd>sahkan pelaksanaan</li><li><kbd>M</kbd>susunan majelis</li>' : ''}</ul>
+        <ul><li><kbd>Enter</kbd>ketuk palu · lanjut</li><li><kbd>↓</kbd>banding</li><li><kbd>Spasi</kbd>lewati</li><li><kbd>Del</kbd>mundur</li>${adaPanitia() ? '<li><kbd>S</kbd>sahkan pelaksanaan</li><li><kbd>M</kbd>susunan majelis</li>' : ''}<li><kbd>/</kbd>cari santri</li></ul>
       </div>
     </aside>`;
   }
@@ -777,14 +873,33 @@
     gambarSemua();
     setTimeout(() => S.akar?.querySelector('[data-aksi="mulai"]')?.focus({ preventScroll: true }), 30);
   }
-  function maju() {
+  /** v2.70: ingat letak nama pertama di "Berikutnya" — kartu baru terbang dari sana. */
+  function ingatBerikut() {
+    const a = S.antre; if (!a || !bolehGerak() || A.hemat()) return;
+    const li = S.akar?.querySelector('#sdAntre .sd-berikut li');
+    const r = li?.getBoundingClientRect();
+    a.flip = r && r.width > 0 ? r : null;
+  }
+  /** v2.70: kartu yang dilewati disisihkan turun-kiri (salinan sesaat). */
+  function sisihkanKartu() {
+    if (!bolehGerak() || A.hemat()) return;
+    const k = S.akar?.querySelector('#sdAntre .sd-kartu'); if (!k) return;
+    const r = k.getBoundingClientRect(), h = k.cloneNode(true);
+    h.classList.add('sd-kartu-hantu'); h.removeAttribute('aria-label'); h.setAttribute('aria-hidden', 'true');
+    Object.assign(h.style, { position: 'fixed', left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px`, margin: 0, zIndex: 5, pointerEvents: 'none', overflow: 'hidden', animation: 'none' });
+    S.akar.appendChild(h);
+    const an = h.animate([{ transform: 'none', opacity: 1 }, { transform: 'translate(-38px, 54px) rotate(-4deg) scale(.95)', opacity: 0 }], { duration: 280, easing: 'cubic-bezier(.4,0,.8,.4)', fill: 'forwards' });
+    an.onfinish = () => h.remove(); setTimeout(() => h.remove(), 600);
+  }
+  function maju(peristiwa) {
     const a = S.antre; if (!a) return;
+    ingatBerikut();
     let j = a.i + 1;
     if (a.mode === 'putus') while (j < a.urutan.length && !menunggu(santriDi(a.urutan[j]), a.ulang)) j++;
     if (j >= a.urutan.length) { if (a.mode === 'putus') a.akhir = true; else j = a.urutan.length - 1; }
     if (!a.akhir) a.i = j;
     a.arah = 'maju';
-    gambarAntre();
+    gambarAntre(peristiwa);
   }
   function geser(d) {
     const a = S.antre; if (!a) return;
@@ -792,6 +907,7 @@
     const j = a.i + d;
     if (j < 0) return;
     if (j >= a.urutan.length) { if (a.mode === 'putus') { a.akhir = true; a.arah = 'maju'; gambarAntre(); } return; }
+    if (d > 0) ingatBerikut();
     a.i = j; a.arah = d > 0 ? 'maju' : 'mundur';
     gambarAntre();
   }
@@ -813,7 +929,8 @@
     if (!rekam(s, 'lewati')) return;
     const a = S.antre;
     a.jejak = s.kunci;
-    maju();
+    sisihkanKartu();
+    maju('lewati');
   }
   function delAntre() {
     const a = S.antre; if (!a) return;
@@ -960,22 +1077,36 @@
         <kbd>${kbd}</kbd><span><i class="fa-solid ${ikon}"></i>${label}</span></button>`;
     const stempel = { putus: 'Diputus', banding: 'Banding', lewati: 'Dilewati', kosong: 'Disahkan' }[f] || '';
     const nSah = bisa && s ? siapSah(s).length : 0;
+    // ⑦ penutupan: sekali per sesi, ketika tidak ada lagi yang menunggu maupun dilewati
+    const kunciTutup = `${S.data?.hari}|${S.data?.unit || ''}`;
+    const tutupSidang = a.akhir && putusMode && !c.dipanggil && !c.lewati && c.putus + c.banding > 0 && !S.ditutup.has(kunciTutup);
+    if (tutupSidang) { S.ditutup.add(kunciTutup); peristiwa = 'tutup'; }
+    // ④ diputus → berkas dilipat & diserahkan
+    const pen = s ? [...new Set(s.sesi.flatMap(b => b.penerima || []))] : [];
+    const sampul = peristiwa === 'putus' && f === 'putus' && bolehGerak() ? `<div class="sd-sampul" aria-hidden="true"><i class="fa-solid fa-paper-plane"></i>
+        <span><b>Berkas diserahkan</b><small>${esc(pen.length ? pen.join(', ') : 'kepada musyrif kelas')}</small></span></div>` : '';
+    // ⑥ disahkan OSDA
+    const sahBaru = peristiwa === 'sah' && Array.isArray(a.sahBaru) ? a.sahBaru : null; a.sahBaru = null;
+    const capSah = sahBaru && sahBaru.length ? `<div class="sd-cap-sah" aria-hidden="true">
+        <span class="sd-cap-sah-cap"><span><b>Disahkan</b><small>OSDA</small></span></span>
+        <ul>${sahBaru.map((x, i) => `<li style="--i:${i}"><i class="fa-solid fa-stamp"></i>${esc(x)}</li>`).join('')}</ul></div>` : '';
+    const flip = a.flip; a.flip = null;
 
-    el.className = `sd-antre buka${peristiwa ? ' ev-' + peristiwa : ''}${a.arah ? ' arah-' + a.arah : ''}`;
+    el.className = `sd-antre buka${peristiwa ? ' ev-' + peristiwa : ''}${a.arah ? ' arah-' + a.arah : ''}${flip && a.arah === 'maju' ? ' flip' : ''}`;
     el.innerHTML = `
       <div class="sd-antre-atas">
         <button type="button" class="sd-keluar" data-aksi="antre-tutup"><i class="fa-solid fa-list"></i><span>Daftar</span><kbd>Esc</kbd></button>
         <div class="sd-antre-jalur">${htmlJalur()}
           <p class="sd-antre-hitung">${a.ulang ? '<b>Panggil ulang</b> · ' : ''}<b>${angka(Math.min(a.i + 1, a.urutan.length))}</b>/${angka(a.urutan.length)}
-            <span><i class="fa-solid fa-check"></i>${angka(c.putus)}</span><span><i class="fa-solid fa-scale-balanced"></i>${angka(c.banding)}</span><span><i class="fa-solid fa-forward"></i>${angka(c.lewati)}</span>
+            <span class="h-putus"><i class="fa-solid fa-check"></i><b>${angka(c.putus)}</b></span><span class="h-banding"><i class="fa-solid fa-scale-balanced"></i><b>${angka(c.banding)}</b></span><span class="h-lewati"><i class="fa-solid fa-forward"></i><b>${angka(c.lewati)}</b></span>
             <span class="sd-simpan" id="sdSimpan"></span></p>
         </div>
         ${putusMode && perluMajelis() ? `<button type="button" class="sd-mj-spanduk" data-aksi="majelis"><i class="fa-solid fa-users-rectangle"></i>
-          <span>Susunan majelis belum lengkap: <b>${esc((S.data.panitia.kurang || []).join(', '))}</b></span><kbd>M</kbd></button>` : ''}
+          <span>Susunan majelis belum lengkap: <b>${esc((S.data.panitia.kurang || []).join(', '))}</b></span><kbd>M</kbd></button>` : putusMode ? titikKursi('sdAntreMj') : ''}
       </div>
       <div class="sd-antre-isi">
-        <div class="sd-antre-hakim">${hakimHtml('mimbar')}<p class="sd-bicara" aria-live="polite">${esc(a.akhir ? '' : kalimatAntre(s, f))}</p></div>
-        ${a.akhir ? htmlAkhir(c) : `
+        <div class="sd-antre-hakim">${hakimHtml('mimbar')}<p class="sd-bicara" aria-live="polite">${esc(a.akhir ? (tutupSidang || (!c.dipanggil && !c.lewati) ? 'Barakallahu fikum, majelis. Sidang ditutup.' : '') : kalimatAntre(s, f))}</p></div>
+        ${a.akhir ? htmlAkhir(c, tutupSidang) : `
         <article class="sd-kartu p${s.P} f-${f}" aria-label="Berkas ${esc(s.nama)}">
           <header class="sd-kartu-kepala">
             ${kodeHtml(s.P)}
@@ -985,6 +1116,7 @@
           ${S.gagal.has(s.kunci) ? `<div class="sd-izin gagal"><i class="fa-solid fa-triangle-exclamation"></i><span><b>Belum tersimpan.</b> ${esc(S.gagal.get(s.kunci))}<small>Tekan Enter untuk mengetuk ulang.</small></span></div>` : ''}
           ${htmlIzin(s)}
           <ol class="sd-perkara">${s.sesi.map(htmlPerkara).join('')}</ol>
+          ${sampul}${capSah}
           ${htmlTangga(s)}
         </article>
         <aside class="sd-berikut" aria-label="Berikutnya">
@@ -1009,16 +1141,53 @@
     el.querySelectorAll('.sd-hakim').forEach(h => { h.dataset.ekspresi = a.akhir ? 'senang' : S.ekspresi; });
     gambarSimpan();
     if (!a.akhir) el.querySelector('.sd-antre-isi')?.scrollTo?.({ top: 0 });
+    // ⑤ FLIP: kartu baru berangkat dari letak namanya di "Berikutnya"
+    const kartu = el.querySelector('.sd-kartu');
+    if (flip && kartu && a.arah === 'maju' && kartu.animate) {
+      const r = kartu.getBoundingClientRect();
+      if (r.width > 0) {
+        const sk = Math.max(.18, Math.min(1, flip.width / r.width));
+        kartu.animate([
+          { transformOrigin: '0 0', transform: `translate(${(flip.left - r.left).toFixed(1)}px, ${(flip.top - r.top).toFixed(1)}px) scale(${sk.toFixed(3)})`, opacity: .2 },
+          { transformOrigin: '0 0', transform: 'none', opacity: 1 }], { duration: 340, easing: 'cubic-bezier(.2,.8,.2,1)' });
+      }
+    }
+    if (tutupSidang && bolehGerak()) setTimeout(() => { if (S.antre?.akhir) ketukPalu(3, el); }, 650);
   }
 
-  function htmlAkhir(c) {
-    return `<div class="sd-kertas sd-akhir">
+  /** v2.70 · ③ cap apresiasi emas terbang dari palu ke titik kursi majelis. */
+  function capApresiasi() {
+    S.kilauMj = Date.now() + 1800;
+    const ke = S.akar?.querySelector('#sdAntreMj');
+    const dari = S.akar?.querySelector('#sdAntre .sd-hakim .sd-palu') || S.akar?.querySelector('#sdAntre .sd-hakim');
+    if (ke) { ke.classList.add('kilau'); const t = ke.querySelector('.sd-bm-mj-teks'); if (t) t.textContent = 'Majelis · apresiasi tercatat'; }
+    if (!ke || !dari || !bolehGerak() || A.hemat()) return;
+    const a = dari.getBoundingClientRect(), b = ke.getBoundingClientRect();
+    const c = document.createElement('span');
+    c.className = 'sd-cap-terbang'; c.setAttribute('aria-hidden', 'true');
+    c.innerHTML = '<i class="fa-solid fa-medal"></i>';
+    c.style.left = `${a.left + a.width / 2 - 18}px`; c.style.top = `${a.top + a.height / 2 - 18}px`;
+    S.akar.appendChild(c);
+    const dx = b.left + b.width / 2 - (a.left + a.width / 2), dy = b.top + b.height / 2 - (a.top + a.height / 2);
+    const an = c.animate([
+      { transform: 'translate(0,0) scale(.4) rotate(-30deg)', opacity: 0 },
+      { transform: `translate(${dx * .35}px, ${dy * .35 - 70}px) scale(1.25) rotate(-8deg)`, opacity: 1, offset: .35 },
+      { transform: `translate(${dx}px, ${dy}px) scale(.55) rotate(0deg)`, opacity: .9 }], { duration: 900, easing: 'cubic-bezier(.45,0,.25,1)', fill: 'forwards' });
+    an.onfinish = () => { c.remove(); ke.classList.remove('kilau'); void ke.offsetWidth; ke.classList.add('kilau'); };
+    setTimeout(() => c.remove(), 1400);
+  }
+
+  function htmlAkhir(c, tutup) {
+    const guling = (n) => `<span class="kk"><span class="kk-i">${angka(n)}</span></span>`;
+    const sakura = tutup && unitHakim() === 'putri' && bolehGerak() && !A.hemat()
+      ? `<span class="sd-sakura" aria-hidden="true">${Array.from({ length: 12 }, (_, i) => `<i style="--x:${(i * 37) % 100}%;--d:${(i * 113) % 900}ms;--r:${(i * 47) % 360}deg"></i>`).join('')}</span>` : '';
+    return `<div class="sd-kertas sd-akhir${tutup ? ' tutup' : ''}">${sakura}
       <i class="fa-solid fa-scale-balanced"></i>
-      <b>${c.dipanggil ? 'Akhir antrean' : 'Alhamdulillah, antrean selesai'}</b>
+      <b>${c.dipanggil ? 'Akhir antrean' : c.lewati ? 'Alhamdulillah, antrean selesai' : 'Alhamdulillah, sidang ditutup'}</b>
       <dl>
-        <div><dt>Diputus</dt><dd>${angka(c.putus)} santri · ${angka(c.perkara)} perkara</dd></div>
-        <div><dt>Banding</dt><dd>${angka(c.banding)} santri</dd></div>
-        <div><dt>Dilewati</dt><dd>${angka(c.lewati)} santri</dd></div>
+        <div style="--i:0"><dt>Diputus</dt><dd>${guling(c.putus)} santri · ${guling(c.perkara)} perkara</dd></div>
+        <div style="--i:1"><dt>Banding</dt><dd>${guling(c.banding)} santri</dd></div>
+        <div style="--i:2"><dt>Dilewati</dt><dd>${guling(c.lewati)} santri</dd></div>
       </dl>
       <p>${c.lewati ? 'Santri yang dilewati tetap ada di berkas. Bila sudah hadir, panggil ulang sekarang (Enter); bila tidak, mereka dipanggil pada sidang berikutnya.' : 'Laporan sudah dikirim ke musyrif masing-masing. Salin berita acara untuk arsip syura.'}</p>
       <button type="button" class="sd-btn sd-btn-tipis" data-aksi="berita-acara"><i class="fa-solid fa-copy"></i>Salin berita acara</button>
@@ -1261,27 +1430,92 @@
     o.pembimbing = p.pembimbing || '';
     return o;
   }
+  /** v2.70: kursi majelis — inti (selalu wajib) + PJ per kelompok bentuk yang ada di berkas. */
+  function kursiMajelis() {
+    const p = S.data?.panitia || {}, w = p.wajib || {};
+    return [...JABATAN_INTI.map(([k, l]) => ({ id: k, label: l, isi: p.isi?.[k], wajib: true, poin: k === 'ketua' ? 15 : 10 })),
+      ...kelompokTampil().map(k => ({ id: 'pj-' + k, pj: k, label: `PJ ${KELOMPOK[k]}`, isi: p.isi?.pj?.[k], wajib: !!w[k], poin: 10, nPk: Number(w[k]) || 0 }))];
+  }
+  const kursiTerisi = () => { const l = kursiMajelis().filter(k => k.wajib); return { n: l.filter(k => k.isi?.nama).length, dari: l.length }; };
+  /** Inisial dua huruf untuk medali kursi ("Muhammad" & gelar dilompati). */
+  const inisial = (nama) => {
+    const k = String(nama || '').replace(/[,.]/g, ' ').split(/\s+/).filter(w => w && !/^(muhammad|muhammmad|m|t|teuku|cut|ust|ustz|ustadz|ustaz|ustadzah|ustazah|tgk)$/i.test(w));
+    return (k.length ? k : String(nama || '?').split(/\s+/)).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  };
+
+  /* ---------- v2.70 · Para Pendidik untuk Pembimbing (nama + foto) ---------- */
+  function muatPendidik() {
+    if (!S.pendidik) S.pendidik = Promise.resolve(A.db.rpc('tim_pendidik_rpc'))
+      .then(({ data, error }) => { if (error) throw error; return (data?.pendidik || []).filter(g => g && g.nama).map(g => ({ nama: g.nama, foto: g.foto || '', role: g.role || '' })); })
+      .catch(() => [])
+      .then(l => { S.guru = l; return l; });
+    return S.pendidik;
+  }
+  const GELAR = /\b(ust|ustz|ustadz|ustaz|ustadzah|ustazah|ustadzat|tgk|teungku|s|pd|sos|sh|lc|ma|hi|th|ag|si|kom|ss|se|mpd|spd|ssos|sag|spdi|mag|mpdi)\b/g;
+  const normNama = (s) => String(s || '').toLowerCase().replace(/[^a-z\s]/g, ' ').replace(GELAR, ' ').replace(/\s+/g, ' ').trim();
+  function cariPendidik(nama) {
+    const k = normNama(nama); if (!k || !Array.isArray(S.guru)) return null;
+    return S.guru.find(g => normNama(g.nama) === k)
+      || S.guru.find(g => { const n = normNama(g.nama); return n.length > 3 && (n.includes(k) || k.includes(n)); }) || null;
+  }
+  function fotoGuruHtml(nama, kelas = '') {
+    const g = cariPendidik(nama);
+    return `<span class="sd-guru-foto ${kelas}" aria-hidden="true">${esc(inisial(nama) || '?')}${g?.foto ? `<img src="${esc(g.foto)}" alt="" loading="lazy" decoding="async" draggable="false" data-foto>` : ''}</span>`;
+  }
+  /** Foto yang gagal dimuat diganti inisial (tanpa onerror sebaris). */
+  function rapikanFoto(akar) {
+    akar?.querySelectorAll?.('img[data-foto]:not([data-siap])').forEach(img => {
+      img.dataset.siap = '1';
+      const ok = () => img.closest('.sd-guru-foto')?.classList.add('termuat');
+      if (img.complete && img.naturalWidth) ok(); else img.addEventListener('load', ok, { once: true });
+      img.addEventListener('error', () => img.remove(), { once: true });
+    });
+  }
+
+  /* =================================================================
+   *  v2.70 · MEJA MAJELIS — kursi-kursi majelis di bawah panggung.
+   *  Kelas `sd-mj-ringkas` dipertahankan (uji & gaya v2.69).
+   * ================================================================= */
   function htmlMajelisRingkas() {
     if (!adaPanitia()) return '';
-    const n = namaMajelis(), p = S.data.panitia;
-    const baris = [...JABATAN_INTI.map(([k, l]) => [l, n[k]]), ...kelompokTampil().map(k => [`PJ ${KELOMPOK[k]}`, n.pj[k], p.wajib?.[k]])];
-    return `<section class="sd-mj-ringkas${p.lengkap ? ' lengkap' : ''}" aria-label="Susunan majelis">
-      <h4><i class="fa-solid fa-users-rectangle"></i>Susunan majelis${p.kredit ? '<span class="sd-tanda putus" title="Apresiasi amanah keadilan sudah tercatat">apresiasi tercatat</span>' : ''}</h4>
-      <dl>${baris.map(([l, v, nPk]) => `<div><dt>${esc(l)}${nPk ? ` <small>${angka(nPk)}</small>` : ''}</dt><dd>${v ? esc(v) : '<em>belum diisi</em>'}</dd></div>`).join('')}
-        ${n.pembimbing ? `<div><dt>Pembimbing</dt><dd>${esc(n.pembimbing)}</dd></div>` : ''}</dl>
-      ${majelis() ? `<button type="button" class="sd-btn sd-btn-tipis" data-aksi="majelis"><i class="fa-solid fa-user-pen"></i>${p.lengkap ? 'Ubah susunan majelis' : 'Isi susunan majelis'}</button>` : ''}
+    const p = S.data.panitia, t = kursiTerisi(), bisa = majelis();
+    if (p.pembimbing && !S.guru) muatPendidik().then(() => { if (S.akar && !S.antre) gambarIsi(); });
+    const kursi = (x, i) => {
+      const nama = x.isi?.nama || '', tag = bisa ? 'button' : 'div';
+      const atr = bisa ? ` type="button" data-aksi="kursi" data-nilai="${esc(x.id)}" title="${esc(nama ? `${x.label}: ${nama} — ubah` : `Isi ${x.label}`)}"` : '';
+      return `<li style="--i:${i}"><${tag}${atr} class="sd-mjk${x.id === 'ketua' ? ' ketua' : ''}${x.pj ? ' pj' : ''} ${nama ? 'isi' : x.wajib ? 'kosong' : 'opsional'}">
+        <span class="sd-mjk-medali" aria-hidden="true">${nama ? esc(inisial(nama)) : '<i class="fa-solid fa-plus"></i>'}</span>
+        <span class="sd-mjk-teks"><small>${esc(x.label)}${x.nPk ? ` <em>${angka(x.nPk)}</em>` : ''}</small><b>${nama ? esc(nama) : `<em>${x.wajib ? 'belum diisi' : 'boleh kosong'}</em>`}</b>${x.isi?.kelas ? `<i>${esc(x.isi.kelas)}</i>` : ''}</span>
+      </${tag}></li>`;
+    };
+    const kilau = Date.now() < S.kilauMj ? ' kilau' : '';
+    return `<section class="sd-mj-ringkas sd-mejamj${p.lengkap ? ' lengkap' : ''}${kilau}" id="sdMejaMj" aria-label="Susunan majelis">
+      <header class="sd-mejamj-kepala">
+        <h3><i class="fa-solid fa-users-rectangle"></i>Susunan majelis</h3>
+        <span class="sd-mejamj-hitung${p.lengkap ? ' ok' : ''}">${p.lengkap ? '<i class="fa-solid fa-circle-check"></i>Lengkap' : `${angka(t.n)}/${angka(t.dari)} kursi wajib`}</span>
+        ${p.kredit ? '<span class="sd-tanda putus" title="Apresiasi amanah keadilan sudah tercatat">apresiasi tercatat</span>' : ''}
+        ${bisa ? `<button type="button" class="sd-btn sd-btn-tipis sd-mejamj-ubah" data-aksi="majelis"><i class="fa-solid fa-user-pen"></i>${p.lengkap ? 'Ubah susunan majelis' : 'Isi susunan majelis'}<kbd>M</kbd></button>` : ''}
+      </header>
+      ${!p.lengkap && bisa && !S.data.super ? '<p class="sd-mejamj-pesan"><i class="fa-solid fa-hand-pointer"></i>Klik kursi bertanda + untuk mengisinya. Majelis wajib lengkap sebelum palu pertama dan unduh berkas.</p>' : ''}
+      <ol class="sd-mjk-daftar">${kursiMajelis().map(kursi).join('')}</ol>
+      ${p.pembimbing ? `<p class="sd-mejamj-pembimbing">${fotoGuruHtml(p.pembimbing)}<span><small>Pembimbing</small><b>${esc(p.pembimbing)}</b></span></p>` : ''}
       ${S.data.super && !p.lengkap ? '<p class="sd-kecil">Super admin boleh bersidang tanpa susunan majelis; apresiasi hanya tercatat bila susunan diisi.</p>' : ''}
     </section>`;
   }
 
   /** Buka formulir susunan majelis. Mengembalikan true bila tersimpan. */
-  async function bukaMajelis(sebab) {
+  async function bukaMajelis(sebab, fokus) {
     if (!adaPanitia() || !majelis()) return true;
-    const p = S.data.panitia, w = p.wajib || {};
+    const p = S.data.panitia;
     const pilih = {};
-    const baris = [...JABATAN_INTI.map(([k, l]) => ({ id: k, label: l, isi: p.isi?.[k], ket: k === 'ketua' ? '15 poin' : '10 poin', wajib: true })),
-      ...kelompokTampil().map(k => ({ id: 'pj-' + k, pj: k, label: `PJ ${KELOMPOK[k]}`, isi: p.isi?.pj?.[k], wajib: !!w[k],
-        ket: w[k] ? `${angka(w[k])} perkara · 10 poin` : 'tidak ada perkara · boleh dikosongkan' }))];
+    muatPendidik();
+    const baris = kursiMajelis().map(k => ({ ...k,
+      ket: k.pj ? (k.wajib ? `${angka(k.nPk)} perkara · 10 poin` : 'tidak ada perkara · boleh dikosongkan') : `${k.poin} poin` }));
+    const JUDUL_GRUP = { ketua: ['fa-gavel', 'Majelis hakim'], panitera: ['fa-feather-pointed', 'Panitera & Penasihat'] };
+    const pjPertama = baris.find(b => b.pj)?.id;
+    const judulGrup = (b) => { const g = JUDUL_GRUP[b.id] || (b.id === pjPertama ? ['fa-user-check', 'Penanggung jawab eksekusi'] : null);
+      return g ? `<li class="sd-mj-judul" aria-hidden="true"><i class="fa-solid ${g[0]}"></i>${g[1]}</li>` : ''; };
+    const nWajib = baris.filter(b => b.wajib).length;
     baris.forEach(b => { if (b.isi?.kunci) pilih[b.id] = { kunci: b.isi.kunci, nama: b.isi.nama, kelas: b.isi.kelas }; });
     const ket = { berkas: 'sebelum berkas diunduh', mulai: 'sebelum sidang dibuka', ketuk: 'sebelum palu diketuk' }[sebab] || '';
     const res = await A.Swal.fire({
@@ -1290,19 +1524,52 @@
       showLoaderOnConfirm: true, allowOutsideClick: () => !A.Swal.isLoading(), customClass: { popup: 'sd-mj-pop' },
       html: `<div class="sd-swal sd-mj">
         <p class="sd-berkas-sesi"><i class="fa-solid fa-scale-balanced"></i><span>Sidang <b>${esc(labelHari(sesiBerkas(), true))}</b> · OSDA ${esc(unitBerkas())}${ket ? ` · <em>${esc(ket)}</em>` : ''}</span></p>
+        <p class="sd-mj-hitung" aria-live="polite"><span class="sd-mj-hitung-bilah"><i style="--isi:0%"></i></span><span><b id="sdMjN">0</b>/${angka(nWajib)} kursi wajib terisi</span></p>
         ${!p.lengkap && (p.kurang || []).length ? `<p class="sd-mj-kurang"><i class="fa-solid fa-circle-exclamation"></i><span>Belum lengkap: <b>${esc(p.kurang.join(', '))}</b></span></p>` : ''}
         <p class="sd-kecil">Pilih dari santri angkatan XI${unitBerkas() !== 'Putra & Putri' ? ` ${esc(unitBerkas().toLowerCase())}` : ''}; satu santri satu jabatan. Nilai tanggung jawab keadilan menjadi apresiasi otomatis saat palu pertama diketuk: Hakim Ketua 15 poin, lainnya 10 poin. Jumlah PJ mengikuti bentuk pembinaan yang ada di berkas.</p>
-        <ol class="sd-mj-daftar">${baris.map(b => `<li class="sd-mj-baris${b.pj ? ' pj pj-' + b.pj : ''}">
+        <ol class="sd-mj-daftar">${baris.map(b => `${judulGrup(b)}<li class="sd-mj-baris${b.pj ? ' pj pj-' + b.pj : ''}">
           <label for="sdMj-${b.id}">${esc(b.label)}${b.wajib ? ' <span class="sd-wajib">wajib</span>' : ''}<small>${esc(b.ket)}</small></label>
           <div class="sd-mj-isi"><input type="text" id="sdMj-${b.id}" data-mj="${b.id}" autocomplete="off" maxlength="60" placeholder="Ketik nama santri XI…" value="${esc(b.isi?.nama || '')}"${b.isi?.kunci ? ' data-ok="1"' : ''}>
             <span class="sd-mj-kelas">${esc(b.isi?.kelas || '')}</span>
             <ul class="sd-calon" role="listbox" hidden></ul></div></li>`).join('')}
+          <li class="sd-mj-judul" aria-hidden="true"><i class="fa-solid fa-person-chalkboard"></i>Pembimbing</li>
           <li class="sd-mj-baris pembimbing"><label for="sdMj-pembimbing">Pembimbing<small>opsional · ustadz/ustazah · tanpa apresiasi</small></label>
-            <div class="sd-mj-isi"><input type="text" id="sdMj-pembimbing" maxlength="80" autocomplete="off" placeholder="Nama ustadz/ustazah pendamping" value="${esc(p.pembimbing || '')}"></div></li>
+            <div class="sd-mj-isi"><input type="text" id="sdMj-pembimbing" maxlength="80" autocomplete="off" placeholder="Pilih dari Para Pendidik…" value="${esc(p.pembimbing || '')}">
+              <ul class="sd-calon sd-calon-guru" role="listbox" hidden></ul></div></li>
         </ol></div>`,
       didOpen: (el) => {
         let t = 0, tok = 0;
         const tutupSemua = () => el.querySelectorAll('.sd-calon').forEach(u => { u.hidden = true; u.innerHTML = ''; });
+        // v2.70: penghitung kursi wajib
+        const hitungIsi = () => { const n = baris.filter(b => b.wajib && pilih[b.id]).length;
+          const nb = el.querySelector('#sdMjN'); if (nb) nb.textContent = angka(n);
+          el.querySelector('.sd-mj-hitung-bilah i')?.style.setProperty('--isi', `${nWajib ? Math.round(n / nWajib * 100) : 100}%`);
+          el.querySelector('.sd-mj-hitung')?.classList.toggle('ok', n >= nWajib); };
+        el.addEventListener('input', () => setTimeout(hitungIsi, 0));
+        el.addEventListener('click', () => setTimeout(hitungIsi, 0));
+        // v2.70: Pembimbing — saran dari Para Pendidik (nama + foto); ketik bebas tetap boleh
+        const inpG = el.querySelector('#sdMj-pembimbing'), ulG = el.querySelector('.sd-calon-guru');
+        const saranGuru = () => muatPendidik().then(l => {
+          if (document.activeElement !== inpG) return;
+          const q = normNama(inpG.value);
+          const cocok = l.filter(g => !q || normNama(g.nama).includes(q)).slice(0, 8);
+          ulG.innerHTML = cocok.length ? cocok.map(g => `<li><button type="button" role="option" data-guru="${esc(g.nama)}">${fotoGuruHtml(g.nama, 'kecil')}
+              <span><b>${esc(g.nama)}</b><small>${esc(g.role === 'Guru' ? 'Para Pendidik' : g.role || 'Para Pendidik')}</small></span></button></li>`).join('')
+            : (l.length ? '<li class="sd-calon-kosong">Tidak ada di Para Pendidik — nama yang diketik tetap tersimpan.</li>' : '');
+          ulG.hidden = !ulG.innerHTML; rapikanFoto(ulG);
+        });
+        inpG?.addEventListener('focus', saranGuru);
+        inpG?.addEventListener('input', () => { clearTimeout(t); t = setTimeout(saranGuru, 120); });
+        el.addEventListener('click', (e) => {
+          const g = e.target.closest('.sd-calon-guru button[data-guru]'); if (!g) return;
+          inpG.value = g.dataset.guru; ulG.hidden = true; ulG.innerHTML = '';
+          A.Swal.getConfirmButton()?.focus();
+        });
+        inpG?.addEventListener('keydown', (e) => {
+          if (e.key !== 'Enter') return;
+          const pertama = ulG.querySelector('button[data-guru]');
+          if (pertama && !ulG.hidden) { e.preventDefault(); e.stopPropagation(); pertama.click(); }
+        });
         el.addEventListener('input', (e) => {
           const inp = e.target.closest('input[data-mj]'); if (!inp) return;
           const id = inp.dataset.mj, ul = inp.parentElement.querySelector('.sd-calon');
@@ -1341,7 +1608,14 @@
           const pertama = inp.parentElement.querySelector('.sd-calon:not([hidden]) button[data-kunci]:not([disabled])');
           if (pertama) { e.preventDefault(); e.stopPropagation(); pertama.click(); }
         }, true);
-        setTimeout(() => ([...el.querySelectorAll('input[data-mj]')].find(x => !x.dataset.ok) || el.querySelector('input[data-mj]'))?.focus(), 80);
+        hitungIsi();
+        setTimeout(() => {
+          const f = fokus && (el.querySelector('#sdMj-' + fokus) || (fokus === 'pembimbing' && inpG));
+          const sasaran = f || [...el.querySelectorAll('input[data-mj]')].find(x => !x.dataset.ok) || el.querySelector('input[data-mj]');
+          sasaran?.focus(); if (f && f.value) f.select();
+          f?.closest('.sd-mj-baris')?.classList.add('disorot');
+          if (f) f.scrollIntoView?.({ block: 'nearest' });
+        }, 80);
       },
       preConfirm: async () => {
         const pop = A.Swal.getPopup();
@@ -1363,9 +1637,98 @@
     S.data.panitia = res.value;
     const n = namaMajelis();
     S.data.majelis = { ...(S.data.majelis || {}), sesi: sesiBerkas(), ketua: n.ketua, anggota1: n.anggota1, anggota2: n.anggota2, panitera: n.panitera };
-    A.toast('success', res.value.kredit ? 'Susunan majelis tersimpan · apresiasi diperbarui' : 'Susunan majelis tersimpan');
+    const akanLantik = res.value.lengkap && !sudahDilantik();
+    if (!akanLantik) A.toast('success', res.value.kredit ? 'Susunan majelis tersimpan · apresiasi diperbarui' : 'Susunan majelis tersimpan');
     gambarSemua(); if (S.antre) gambarAntre();
+    if (akanLantik) await pelantikan();
     return true;
+  }
+
+  /* =================================================================
+   *  v2.70 · ① PELANTIKAN MAJELIS — sekali per sesi per unit.
+   *  Benang Emas menjahit kursi Hakim Ketua ke setiap anggota; nama naik
+   *  kata demi kata; Cap "Majelis Sah" + satu ketukan palu. Ketuk / Enter
+   *  / Spasi / Esc untuk melanjutkan. Kurangi gerak & hemat: kartu diam.
+   * ================================================================= */
+  const kunciLantik = () => `rq-sidang-lantik-${sesiBerkas()}-${S.data?.unit || 'semua'}`;
+  const sudahDilantik = () => { try { return localStorage.getItem(kunciLantik()) === '1'; } catch (e) { return false; } };
+  function pelantikan(paksa) {
+    if (!S.akar || !adaPanitia() || S.lantik) return Promise.resolve();
+    if (sudahDilantik() && !paksa) return Promise.resolve();
+    try { localStorage.setItem(kunciLantik(), '1'); } catch (e) {}
+    const diam = !bolehGerak() || A.hemat();
+    const k = kursiMajelis().filter(x => x.isi?.nama);
+    const cari = (id) => k.find(x => x.id === id);
+    const baris = [[cari('anggota1'), cari('ketua'), cari('anggota2')], [cari('panitera'), cari('penasihat')], k.filter(x => x.pj)]
+      .map(r => r.filter(Boolean)).filter(r => r.length);
+    // urutan jahitan (pola ular, tanpa menyilang): Ketua → Anggota I; Ketua → Anggota II → Penasihat → Panitera → PJ
+    const urut = ['ketua', 'anggota1', 'anggota2', 'penasihat', 'panitera', ...k.filter(x => x.pj).map(x => x.id)].filter(id => cari(id));
+    const kata = (nama) => String(nama).split(/\s+/).map((w, j) => `<span class="kk"><span class="kk-i" style="--j:${j}">${esc(w)}</span></span>`).join(' ');
+    const kursi = (x) => `<li class="sd-lt-kursi${x.id === 'ketua' ? ' ketua' : ''}${x.pj ? ' pj' : ''}" data-id="${esc(x.id)}" style="--u:${urut.indexOf(x.id)}">
+        <span class="sd-lt-medali"><span>${esc(inisial(x.isi.nama))}</span></span>
+        <small>${esc(x.label)}</small><b>${kata(x.isi.nama)}</b>${x.isi.kelas ? `<i>${esc(x.isi.kelas)}</i>` : ''}<em>+${x.poin}</em></li>`;
+    const pb = S.data.panitia.pembimbing;
+    const el = document.createElement('div');
+    el.className = `sd-lantik${diam ? ' diam' : ''}`;
+    el.dataset.unit = unitHakim();
+    el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', 'Pelantikan majelis');
+    el.innerHTML = `<div class="sd-lt-panggung">
+        <p class="sd-lt-kop"><span class="ar" lang="ar" dir="rtl">مَجْلِسُ التَّأْدِيبِ</span><small>Sidang ${esc(labelHari(sesiBerkas(), true))} · OSDA ${esc(unitBerkas())}</small></p>
+        <h2 class="sd-lt-judul"><span class="kk"><span class="kk-i">Majelis</span></span> <span class="kk"><span class="kk-i" style="--j:1">Ta'dib</span></span> <span class="kk"><span class="kk-i" style="--j:2">dilantik</span></span></h2>
+        <div class="sd-lt-bangku">
+          <svg class="sd-lt-benang" aria-hidden="true"><path class="sd-lt-cahaya" pathLength="1"/><path class="sd-lt-garis" pathLength="1"/></svg>
+          ${baris.map(r => `<ol class="sd-lt-baris">${r.map(kursi).join('')}</ol>`).join('')}
+        </div>
+        <p class="sd-lt-amanah"><i class="fa-solid fa-medal"></i><span>Amanah keadilan · Hakim Ketua <b>15</b> · anggota <b>10</b> poin — tercatat saat palu pertama diketuk.</span></p>
+        ${pb ? `<p class="sd-lt-pembimbing">${fotoGuruHtml(pb, 'besar')}<span><small>Dibimbing oleh</small><b>${esc(pb)}</b></span></p>` : ''}
+        <span class="sd-lt-cap" aria-hidden="true"><span><b lang="ar">عَدْل</b>Majelis<br>Sah</span></span>
+      </div>
+      <p class="sd-lt-lewati">Ketuk atau tekan Enter untuk membuka sidang</p>`;
+    S.akar.appendChild(el);
+    rapikanFoto(el);
+    // benang: lengkung tergantung dari medali ke medali (dihitung sesudah tata letak)
+    const bangku = el.querySelector('.sd-lt-bangku');
+    const pusat = (id) => { const m = el.querySelector(`.sd-lt-kursi[data-id="${id}"] .sd-lt-medali`); if (!m) return null;
+      const r = m.getBoundingClientRect(), b = bangku.getBoundingClientRect(); return [r.left - b.left + r.width / 2, r.top - b.top + r.height / 2]; };
+    const titik = urut.map(pusat);
+    let d = '', panjang = [0];
+    titik.forEach((t, i) => {
+      if (!t) { panjang.push(panjang[i - 1] || 0); return; }
+      const [x, y] = t;
+      if (!i) { d = `M${x.toFixed(1)} ${y.toFixed(1)}`; return; }
+      // Anggota II bercabang dari Ketua (sub-jalur baru), selebihnya bersambung
+      const dari = urut[i] === 'anggota2' && titik[0] ? titik[0] : titik[i - 1];
+      if (!dari) return;
+      const [x0, y0] = dari, mx = (x0 + x) / 2, my = Math.max(y0, y) + 26;
+      if (dari !== titik[i - 1]) d += ` M${x0.toFixed(1)} ${y0.toFixed(1)}`;
+      d += ` Q${mx.toFixed(1)} ${my.toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      panjang.push(panjang[i - 1] + Math.hypot(x - x0, y - y0) + 18);
+    });
+    el.querySelectorAll('.sd-lt-benang path').forEach(p_ => p_.setAttribute('d', d));
+    const total = panjang[panjang.length - 1] || 1;
+    const MULAI = 380, JAHIT = Math.min(1250, 260 + titik.length * 130);
+    urut.forEach((id, i) => el.querySelector(`.sd-lt-kursi[data-id="${id}"]`)?.style.setProperty('--t', `${Math.round(MULAI + (panjang[i] || 0) / total * JAHIT)}ms`));
+    el.style.setProperty('--jahit', `${JAHIT}ms`); el.style.setProperty('--cap', `${MULAI + JAHIT + 160}ms`);
+    // layar pendek: seluruh panggung diskalakan agar muat (jalur benang sudah diukur sebelum skala)
+    const pg = el.querySelector('.sd-lt-panggung'), ruang = el.clientHeight - 72, tinggi = pg.offsetHeight;
+    if (tinggi > ruang && ruang > 200) { const sk = Math.max(.58, ruang / tinggi);
+      pg.style.transformOrigin = '50% 0'; pg.style.transform = `scale(${sk.toFixed(3)})`; pg.style.marginBottom = `${(-tinggi * (1 - sk)).toFixed(0)}px`; }
+    return new Promise(selesai => {
+      let habis = false, tCap = 0, tAkhir = 0;
+      const mulaiPada = performance.now();
+      const tutup = () => {
+        if (habis || performance.now() - mulaiPada < 220) return;
+        habis = true; clearTimeout(tCap); clearTimeout(tAkhir);
+        S.lantik = null;
+        el.classList.add('pergi');
+        setTimeout(() => { el.remove(); selesai(); }, diam ? 0 : 260);
+      };
+      S.lantik = { tutup };
+      el.addEventListener('click', tutup);
+      requestAnimationFrame(() => el.classList.add('tayang'));
+      tCap = setTimeout(() => ketukPalu(1, el), diam ? 0 : MULAI + JAHIT + 220);
+      tAkhir = setTimeout(tutup, diam ? 2600 : MULAI + JAHIT + 2100);
+    });
   }
 
   /** Mulai / lanjutkan sidang: majelis dilengkapi dulu bila perlu. */
@@ -1406,7 +1769,9 @@
     const tolak = new Set(lewat.map(x => x.id));
     const t = santriDi(kunci) || s;
     let n = 0;
-    for (const b of t.semua) if (res.value.ids.includes(b.id) && !tolak.has(b.id)) { b.status = 'tuntas'; b.sah_osda = true; delete b.hari_ini; n++; }
+    const sahNama = [];
+    for (const b of t.semua) if (res.value.ids.includes(b.id) && !tolak.has(b.id)) { b.status = 'tuntas'; b.sah_osda = true; delete b.hari_ini; n++; sahNama.push(b.pelanggaran); }
+    if (S.antre && bolehGerak()) S.antre.sahBaru = sahNama;
     if (lewat.length) A.toast('warning', `${lewat[0].nama || t.nama}: ${lewat[0].sebab}`);
     if (n) A.toast('success', `${angka(n)} pembinaan ${t.nama} disahkan OSDA`);
     susun();
@@ -1834,7 +2199,11 @@
     if (a === 'bunyi') { try { localStorage.setItem('rq-sidang-bunyi', bunyiAktif() ? 'mati' : 'nyala'); } catch (er) {} gambarAtas(); if (bunyiAktif()) ketukBunyi(1); return; }
     if (a === 'tab') { S.tab = v === 'penasihat' ? 'penasihat' : 'majelis'; S.bubble = ''; gambarSemua(); if (S.tab === 'penasihat') muatPenasihat(!!S.pen.data); return; }
     if (a === 'saring') { const P = Number(v); S.saring = S.saring === P ? 0 : P; return gambarIsi(); }
-    if (a === 'mulai') { const c = hitungSesi(); return mulaiSidang(null, bolehPutus() && !c.dipanggil && c.lewati > 0); }
+    if (a === 'mulai' || a === 'mulai-bilah') { const c = hitungSesi(); return mulaiSidang(null, bolehPutus() && !c.dipanggil && c.lewati > 0); }
+    if (a === 'kursi') return bukaMajelis(null, v);
+    if (a === 'lompat') return lompatKe(Number(v));
+    if (a === 'fokus-cari') return fokusCari();
+    if (a === 'ke-atas') { S.akar.querySelector('#sdGulir')?.scrollTo({ top: 0, behavior: gulirHalus() }); return S.akar.querySelector('[data-aksi="mulai"]')?.focus({ preventScroll: true }); }
     if (a === 'buka-santri') return mulaiSidang(v);
     if (a === 'majelis') return bukaMajelis().then(() => { if (S.antre) fokusAntre(); });
     if (a === 'a-sahkan') return sahkan(kini());
@@ -1867,6 +2236,10 @@
   function onTombol(e) {
     // Hanya jendela modal yang menahan papan tik; toast (galat/tersimpan) tidak boleh menghentikan sidang.
     if (!S.akar || document.querySelector('.swal2-popup:not(.swal2-toast)')) return;
+    if (S.lantik) {                                  // v2.70: Pelantikan — tombol hanya untuk melanjutkan
+      if (['Enter', ' ', 'Spacebar', 'Escape'].includes(e.key)) { e.preventDefault(); if (!e.repeat) S.lantik.tutup(); }
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const ketik = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '') || e.target?.isContentEditable;
     if (S.antre) {
@@ -1889,11 +2262,23 @@
     }
     if (ketik) return;
     if (e.key === 'Escape') { A.keluar(); return; }
+    if (S.tab === 'majelis' && S.data && !reses()) {
+      if ((e.key === 'm' || e.key === 'M') && adaPanitia() && majelis() && !e.repeat) { e.preventDefault(); bukaMajelis(); return; }
+    }
     if (e.key === 'Enter' && S.tab === 'majelis' && S.data && !reses() && S.urutan.length && !e.target.closest?.('button, a, input, [tabindex]')) {
       e.preventDefault();
       const c = hitungSesi();
       mulaiSidang(null, bolehPutus() && !c.dipanggil && c.lewati > 0);
     }
+  }
+  /** v2.70: "/" di Ruang Sidang = cari santri. Ditangkap lebih dulu (fase capture) supaya
+   *  pencarian umum Lentera tidak terbuka tersembunyi di belakang layar sidang. */
+  function onGaris(e) {
+    if (e.key !== '/' || !S.akar || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '') || e.target?.isContentEditable) return;
+    if (document.querySelector('.swal2-popup:not(.swal2-toast)')) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (!S.antre && !S.lantik && S.tab === 'majelis' && S.akar.querySelector('#sdCari')) fokusCari();
   }
   function onTampak() {
     if (document.visibilityState !== 'visible' || !S.akar || S.tunda) return;
@@ -1909,7 +2294,8 @@
     if (sudah || !bolehGerak()) { tirai.remove(); return false; }
     try { sessionStorage.setItem(kunci, '1'); } catch (e) {}
     S.akar.classList.add('sd-pembukaan');
-    const selesai = () => { tirai.remove(); S.akar?.classList.remove('sd-pembukaan'); };
+    // v2.70: kelas pembukaan bertahan sebentar sesudah tirai hilang agar lengkung & ayat selesai dijahit
+    const selesai = () => { if (!tirai.isConnected) return; tirai.remove(); setTimeout(() => S.akar?.classList.remove('sd-pembukaan'), 900); };
     requestAnimationFrame(() => requestAnimationFrame(() => tirai.classList.add('buka')));
     tirai.addEventListener('click', selesai, { once: true });
     setTimeout(selesai, 1500);
@@ -1923,19 +2309,21 @@
     if (S.akar && document.body.contains(S.akar)) { muat(true); return; }
     S.akar = kerangka();
     S.data = null; S.galat = ''; S.bubble = ''; S.ekspresi = 'normal'; S.antre = null; S.santri = new Map(); S.urutan = [];
-    S.tab = 'majelis'; S.saring = 0; S.cari = ''; S.pen.data = null; S.pen.galat = '';
+    S.tab = 'majelis'; S.saring = 0; S.cari = ''; S.pen.data = null; S.pen.galat = ''; S.lantik = null;
     if (!S.unit) S.unit = A.unitAwal() || null;
     document.body.appendChild(S.akar);
     document.body.classList.add('di-sidang');
     S.akar.addEventListener('click', onKlik);
     S.akar.addEventListener('input', onKetik);
+    S.akar.querySelector('#sdGulir').addEventListener('scroll', () => aturBilah(), { passive: true });
     document.addEventListener('keydown', onTombol);
+    window.addEventListener('keydown', onGaris, true);
     document.addEventListener('visibilitychange', onTampak);
     gambarSemua();
     const tirai = bukaTirai();
     muat().then(() => {
       // palu pembuka: tiga ketukan saat sidang dibuka (majelis, hari sidang)
-      if (tirai && majelis() && S.data?.buka) setTimeout(() => ketukPalu(3), 500);
+      if (tirai && majelis() && S.data?.buka) setTimeout(() => ketukPalu(3), 1350);
       // Enter pertama langsung memulai sidang: fokus ke tombol "Mulai sidang"
       const f = document.activeElement;
       if (!S.antre && (!f || f === document.body || f.classList?.contains('sd-keluar'))) S.akar?.querySelector('[data-aksi="mulai"]')?.focus({ preventScroll: true });
@@ -1949,7 +2337,9 @@
     S.akar.removeEventListener('click', onKlik);
     S.akar.removeEventListener('input', onKetik);
     document.removeEventListener('keydown', onTombol);
+    window.removeEventListener('keydown', onGaris, true);
     document.removeEventListener('visibilitychange', onTampak);
+    if (S.lantik) { S.lantik = null; }
     S.akar.remove(); S.akar = null; S.antre = null;
     document.body.classList.remove('di-sidang');
     if (S.histori) { S.histori = false; try { if (history.state && history.state.rqSidang) history.back(); } catch (e) {} }
@@ -1959,5 +2349,6 @@
 
   window.RQSidang = { buka, tutup, terbuka: () => !!S.akar,
     _uji: { S, susun, daftarAntre, urutSantri, hitungSesi, isiBerkas, gambarBerkasPdf, teksPdf, bukaAntre, pilihanCakupan, kini,
-            bukaMajelis, sahkan, siapSah, perluMajelis, namaMajelis } };
+            bukaMajelis, sahkan, siapSah, perluMajelis, namaMajelis,
+            kursiMajelis, pelantikan, cariPendidik, muatPendidik, gambarBilah, aturBilah, lompatKe } };
 })();
