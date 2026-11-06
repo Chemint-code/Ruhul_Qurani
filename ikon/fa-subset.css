@@ -1,6 +1,6 @@
 /* chemint · Font Awesome Free 6.5.1 — SUBSET (alat/subset-ikon.py)
  * Lisensi ikon CC BY 4.0, fon SIL OFL 1.1, kode MIT — https://fontawesome.com/license/free
- * 174 ikon. Jangan diedit manual; jalankan ulang skripnya. */
+ * 178 ikon. Jangan diedit manual; jalankan ulang skripnya. */
 /*!
  * Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com
  * License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License)
@@ -5621,6 +5621,7 @@ readers do not read off random characters that represent icons */
 .fa-gauge-high::before{content:"\f625"}
 .fa-gavel::before{content:"\f0e3"}
 .fa-graduation-cap::before{content:"\f19d"}
+.fa-hand::before{content:"\f256"}
 .fa-hand-pointer::before{content:"\f25a"}
 .fa-hands-holding-child::before{content:"\e4fa"}
 .fa-hands-praying::before{content:"\f684"}
@@ -5678,6 +5679,7 @@ readers do not read off random characters that represent icons */
 .fa-sitemap::before{content:"\f0e8"}
 .fa-sliders::before{content:"\f1de"}
 .fa-stairs::before{content:"\e289"}
+.fa-stamp::before{content:"\f5bf"}
 .fa-star::before{content:"\f005"}
 .fa-stethoscope::before{content:"\f0f1"}
 .fa-table::before{content:"\f0ce"}
@@ -5690,10 +5692,12 @@ readers do not read off random characters that represent icons */
 .fa-triangle-exclamation::before{content:"\f071"}
 .fa-umbrella-beach::before{content:"\f5ca"}
 .fa-user::before{content:"\f007"}
+.fa-user-check::before{content:"\f4fc"}
 .fa-user-clock::before{content:"\f4fd"}
 .fa-user-doctor::before{content:"\f0f0"}
 .fa-user-graduate::before{content:"\f501"}
 .fa-user-group::before{content:"\f500"}
+.fa-user-pen::before{content:"\f4ff"}
 .fa-user-shield::before{content:"\f505"}
 .fa-user-tie::before{content:"\f508"}
 .fa-users::before{content:"\f0c0"}

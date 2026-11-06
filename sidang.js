@@ -1,5 +1,5 @@
 /* =====================================================================
- * sidang.js — v2.68 · RUANG SIDANG TA'DIB: ANTREAN PANGGIL & BANDING
+ * sidang.js — v2.69 · RUANG SIDANG TA'DIB: ANTREAN, BANDING, MAJELIS BERNAMA
  * ---------------------------------------------------------------------
  *  Halaman layar penuh yang terpisah dari kerangka aplikasi (bilah sisi,
  *  bilah atas, dan tab bawah disembunyikan). Dimuat lambat oleh app.js
@@ -36,7 +36,17 @@
  *    Banding manual untuk perkara lama. Yang dikabulkan dieksekusi super
  *    admin di halaman "Eksekusi Banding" (app.js).
  *
- *  Batas sesungguhnya ada di database (migrasi v2.64, v2.65, v2.68).
+ *  v2.69 · MAJELIS BERNAMA · PENGESAHAN OSDA (rancangan-v2.69-majelis-pengesahan)
+ *    Susunan majelis dipilih dari santri angkatan XI (tanpa NISN): Hakim
+ *    Ketua, dua Hakim Anggota, Panitera, Penasihat, PJ eksekusi per kelompok
+ *    bentuk (pembersihan · hafalan · shalat sunnah · pidato), Pembimbing
+ *    (ustadz, opsional). Wajib sebelum unduh berkas & palu pertama (kecuali
+ *    super admin). Apresiasi tercatat di server saat palu pertama diketuk.
+ *    S  sahkan: perkara di tangan musyrif sejak sidang sebelumnya yang sudah
+ *       dijalankan → "Disahkan OSDA" (musyrif boleh menyanggah 3 hari).
+ *    M  susunan majelis.   Ucapan tercatat (bidang Bahasa) = alat bukti.
+ *
+ *  Batas sesungguhnya ada di database (migrasi v2.64, v2.65, v2.68, v2.69).
  *  Gerak: hanya transform & opacity. "Kurangi gerak" → tanpa tirai, palu,
  *  dan stempel. Bunyi palu (WebAudio) bisa dimatikan; mati di mode hemat.
  *  Satu-satunya pintu ke aplikasi: window.RQ_SIDANG (app.js).
@@ -61,7 +71,11 @@
     diajukan: 'Banding · di penasihat', dikabulkan: 'Banding dikabulkan · menunggu eksekusi',
     ditolak: 'Banding ditolak', dikembalikan: 'Banding dikembalikan super admin', dieksekusi: 'Banding dieksekusi'
   };
-  const LABEL_KEADAAN = { dipanggil: 'Belum dipanggil', putus: 'Diputus', banding: 'Banding', lewati: 'Dilewati' };
+  const LABEL_KEADAAN = { dipanggil: 'Belum dipanggil', putus: 'Diputus', banding: 'Banding', lewati: 'Dilewati', kosong: 'Disahkan' };
+  /* v2.69: kelompok bentuk pembinaan → penanggung jawab eksekusi (sama dengan sidang_kelompok() di database) */
+  const KELOMPOK = { bersih: 'Pembersihan', hafal: 'Hafalan', shalat: 'Shalat Sunnah', pidato: 'Pidato' };
+  const URUT_KELOMPOK = ['bersih', 'hafal', 'shalat', 'pidato'];
+  const JABATAN_INTI = [['ketua', 'Hakim Ketua'], ['anggota1', 'Hakim Anggota I'], ['anggota2', 'Hakim Anggota II'], ['panitera', 'Panitera'], ['penasihat', 'Penasihat']];
 
   const S = {
     akar: null, data: null, unit: null, token: 0, sibuk: false, galat: '',
@@ -297,6 +311,12 @@
   /** Sudah diketuk sesi ini (putus) atau ditahan banding yang diajukan sesi ini. */
   const selesaiSesi = (b) => b.hari_ini === 'putus' || (b.hari_ini === 'banding' && tahan(b));
   const bisaDipanggil = (b) => terbuka(b) && !tahan(b) && b.hari_ini !== 'putus';
+  /** v2.69: server mengirim susunan majelis bernama (sidang_berkas versi ≥ 269). */
+  const adaPanitia = () => !!S.data?.panitia;
+  /** Majelis wajib dilengkapi dulu (super admin dikecualikan). */
+  const perluMajelis = () => majelis() && adaPanitia() && !S.data.super && !S.data.panitia.lengkap;
+  /** Perkara di tangan musyrif sejak sidang SEBELUMNYA — bisa disahkan OSDA bila sudah dijalankan. */
+  const siapSah = (s) => (s?.sesi || []).filter(b => b.status === 'diberikan' && b.sesi && b.sesi < S.data.hari && !tahan(b));
   const urutTeks = (a, b) => String(a || '').localeCompare(String(b || ''), 'id', { numeric: true, sensitivity: 'base' });
   /** Kelas berangka Romawi: VII-D < VIII-A < IX-F < X-C (bukan urutan abjad). */
   const ROMAWI = { I: 1, V: 5, X: 10, L: 50 };
@@ -427,6 +447,8 @@
       langkah.panggilan = data?.panggilan || null;
       for (const b of s.semua) if (ids.includes(b.id)) { b.panggilan = langkah.panggilan; delete b._tunda; }
       if (aksi === 'putus') {
+        // v2.69: ketukan pertama yang tersimpan → server mencatat apresiasi majelis
+        if (S.data?.panitia?.lengkap && !S.data.panitia.kredit) { S.data.panitia.kredit = true; if (!S.antre) gambarIsi(); }
         const pen = Array.isArray(data?.penerima) ? data.penerima : [];
         for (const b of s.semua) if (ids.includes(b.id) && !b._ulangKini && pen.length) b.penerima = pen;
         // kelas tanpa musyrif: putusan dibacakan, laporannya belum terkirim
@@ -443,8 +465,16 @@
       if (s.langkah === langkah) s.langkah = null;
       pulihkan(s, potret);
       if (aksi === 'banding') S.data.banding_baru = Math.max(0, (Number(S.data.banding_baru) || 0) - ids.length);
-      S.gagal.set(s.kunci, pesanGalat(e));
-      A.toast('error', `${s.nama}: belum tersimpan — ${pesanGalat(e)}`);
+      const mentah = String(e?.message || e || '');
+      if (/Susunan majelis/.test(mentah)) {          // v2.69: gerbang server (kelompok baru / majelis berubah)
+        if (S.data?.panitia) S.data.panitia.lengkap = false;
+        S.gagal.set(s.kunci, mentah);
+        A.toast('error', mentah);
+        muat(true);
+      } else {
+        S.gagal.set(s.kunci, pesanGalat(e));
+        A.toast('error', `${s.nama}: belum tersimpan — ${pesanGalat(e)}`);
+      }
       susun(); gambarSemua(); if (S.antre) gambarAntre();
     });
     susun();
@@ -595,6 +625,10 @@
     if (s.baru) t.push(`<span class="sd-tanda baru">${angka(s.baru)} baru</span>`);
     const ul = s.sesi.filter(b => b.status === 'diberikan' && !b._ulangKini && b.hari_ini !== 'putus').length;
     if (ul) t.push(`<span class="sd-tanda ulang">${angka(ul)} dibacakan ulang</span>`);
+    const sah = S.data?.hari ? siapSah(s).length : 0;
+    if (sah) t.push(`<span class="sd-tanda siap-sah"><i class="fa-solid fa-stamp"></i>${angka(sah)} siap disahkan</span>`);
+    const osda = s.semua.filter(b => b.sah_osda).length;
+    if (osda) t.push(`<span class="sd-tanda sah-osda"><i class="fa-solid fa-stamp"></i>${angka(osda)} disahkan OSDA</span>`);
     const tol = s.sesi.filter(b => b.banding === 'ditolak' || b.banding === 'dikembalikan').length;
     if (tol) t.push(`<span class="sd-tanda tolak">banding ditolak</span>`);
     if (s.tertahan.length) t.push(`<span class="sd-tanda tahan"><i class="fa-solid fa-scale-balanced"></i>${angka(s.tertahan.length)} dalam banding</span>`);
@@ -698,9 +732,10 @@
       ${bolehBerkas() ? `<button type="button" class="sd-btn sd-btn-emas sd-btn-berkas" data-aksi="berkas"><i class="fa-solid fa-file-pdf"></i>Unduh berkas perkara</button>
         <p class="sd-kecil">Daftar panggil per kode jumlah perkara, rincian tiap santri, dan kolom tanda tangan majelis. A4 atau F4.</p>` : ''}
       ${c.putus || c.banding || c.lewati ? `<button type="button" class="sd-btn sd-btn-tipis" data-aksi="berita-acara"><i class="fa-solid fa-copy"></i>Salin berita acara hari ini</button>` : ''}
+      ${htmlMajelisRingkas()}
       <div class="sd-papan" aria-hidden="true">
         <p>Papan tik majelis</p>
-        <ul><li><kbd>Enter</kbd>ketuk palu · lanjut</li><li><kbd>↓</kbd>banding</li><li><kbd>Spasi</kbd>lewati</li><li><kbd>Del</kbd>mundur</li></ul>
+        <ul><li><kbd>Enter</kbd>ketuk palu · lanjut</li><li><kbd>↓</kbd>banding</li><li><kbd>Spasi</kbd>lewati</li><li><kbd>Del</kbd>mundur</li>${adaPanitia() ? '<li><kbd>S</kbd>sahkan pelaksanaan</li><li><kbd>M</kbd>susunan majelis</li>' : ''}</ul>
       </div>
     </aside>`;
   }
@@ -762,6 +797,7 @@
   }
 
   function ketuk(s) {                       // Enter pada santri yang dipanggil
+    if (perluMajelis()) { bukaMajelis('ketuk').then(ok => { if (ok && santriDi(s.kunci)) ketuk(santriDi(s.kunci)); else fokusAntre(); }); return; }
     if (!rekam(s, 'putus')) return;
     S.ekspresi = 'serius';
     gambarAntre('putus');
@@ -829,6 +865,8 @@
     if (b.baru) t.push('<span class="sd-tanda baru">baru</span>');
     if (b.lewat && b.hari_ini !== 'putus') t.push(`<span class="sd-tanda tunda">tertunda ${angka(b.lewat)}×</span>`);
     if (b.banding && LABEL_BANDING[b.banding]) t.push(`<span class="sd-tanda ${TAHAN.has(b.banding) ? 'tahan' : 'tolak'}" title="${esc(b.banding_alasan || '')}"><i class="fa-solid fa-scale-balanced"></i>${esc(LABEL_BANDING[b.banding])}</span>`);
+    if (b.sanggah) t.push(`<span class="sd-tanda tolak" title="${esc(b.sanggah)}"><i class="fa-solid fa-hand"></i>pengesahan OSDA disanggah musyrif</span>`);
+    if (b.status === 'diberikan' && Array.isArray(b.pj) && b.pj.length) t.push(`<span class="sd-tanda pj"><i class="fa-solid fa-user-check"></i>PJ ${esc(b.pj.join(', '))}</span>`);
     return t.join('');
   }
   function htmlPerkara(b) {
@@ -836,6 +874,7 @@
       <div class="sd-pk-atas"><b>${esc(b.pelanggaran)}</b><time>${esc(labelTgl(b.tanggal))}</time></div>
       <div class="sd-pk-bawah"><span class="sd-pk-kat">${esc(b.kategori)} · ke-${esc(b.tahap || '?')}</span><span class="sd-pk-bentuk">${esc(b.bentuk || '-')}</span></div>
       ${b.ket ? `<p class="sd-pk-ket">${esc(b.ket)}</p>` : ''}
+      ${b.ucapan ? `<blockquote class="sd-ucapan"><span><i class="fa-solid fa-quote-left"></i>Alat bukti · ucapan tercatat</span>“${esc(b.ucapan)}”</blockquote>` : ''}
       <div class="sd-pk-tanda">${tandaPerkara(b)}</div>
       ${b.banding_alasan && !TAHAN.has(b.banding) ? `<p class="sd-pk-ket"><i class="fa-solid fa-quote-left"></i> ${esc(b.banding_alasan)}</p>` : ''}
     </li>`;
@@ -883,9 +922,12 @@
     }
     if (f === 'banding') return `Banding ananda ${s.nama} dicatat. Berkasnya diserahkan kepada Penasihat Hukum OSDA.`;
     if (f === 'lewati') return `Ananda ${s.nama} dilewati${s.info?.izin?.kondisi === 'aktif' ? ' karena berizin' : ''}.`;
+    if (f === 'kosong') return `Pembinaan ananda ${s.nama} sudah disahkan OSDA. Enter untuk ananda berikutnya.`;
     if (S.antre?.mode !== 'putus') return `Ananda ${s.nama}, ${s.kelas}. ${angka(s.jumlah)} perkara.`;
     const ul = s.sesi.filter(b => b.status === 'diberikan' && b.hari_ini !== 'putus').length;
+    const sah = siapSah(s).length;
     return `Dipanggil: ananda ${s.nama}, kelas ${s.kelas}. ${angka(s.jumlah)} perkara${ul ? `, ${angka(ul)} di antaranya dibacakan ulang` : ''}.`
+      + (sah ? ` Bila sudah dijalankan, tekan S untuk mengesahkan ${angka(sah)} pembinaan.` : '')
       + (s.info?.izin?.kondisi === 'aktif' ? ' Tercatat berizin — bila tidak hadir, tekan Spasi.' : '');
   }
   function ucapAntre(s) {
@@ -916,7 +958,8 @@
     const berikut = a.akhir ? [] : a.urutan.slice(a.i + 1).map(santriDi).filter(x => x && (!putusMode || menunggu(x, a.ulang))).slice(0, 3);
     const tombol = (aksi, kbd, ikon, label, on, kelas = '') => `<button type="button" class="sd-kunci ${kelas}" data-aksi="${aksi}"${on ? '' : ' disabled'} aria-keyshortcuts="${kbd.replace('Spasi', 'Space').replace('↓', 'ArrowDown')}">
         <kbd>${kbd}</kbd><span><i class="fa-solid ${ikon}"></i>${label}</span></button>`;
-    const stempel = { putus: 'Diputus', banding: 'Banding', lewati: 'Dilewati' }[f] || '';
+    const stempel = { putus: 'Diputus', banding: 'Banding', lewati: 'Dilewati', kosong: 'Disahkan' }[f] || '';
+    const nSah = bisa && s ? siapSah(s).length : 0;
 
     el.className = `sd-antre buka${peristiwa ? ' ev-' + peristiwa : ''}${a.arah ? ' arah-' + a.arah : ''}`;
     el.innerHTML = `
@@ -927,6 +970,8 @@
             <span><i class="fa-solid fa-check"></i>${angka(c.putus)}</span><span><i class="fa-solid fa-scale-balanced"></i>${angka(c.banding)}</span><span><i class="fa-solid fa-forward"></i>${angka(c.lewati)}</span>
             <span class="sd-simpan" id="sdSimpan"></span></p>
         </div>
+        ${putusMode && perluMajelis() ? `<button type="button" class="sd-mj-spanduk" data-aksi="majelis"><i class="fa-solid fa-users-rectangle"></i>
+          <span>Susunan majelis belum lengkap: <b>${esc((S.data.panitia.kurang || []).join(', '))}</b></span><kbd>M</kbd></button>` : ''}
       </div>
       <div class="sd-antre-isi">
         <div class="sd-antre-hakim">${hakimHtml('mimbar')}<p class="sd-bicara" aria-live="polite">${esc(a.akhir ? '' : kalimatAntre(s, f))}</p></div>
@@ -952,7 +997,8 @@
           ${tombol('a-enter', 'Enter', f === 'panggil' ? 'fa-gavel' : 'fa-arrow-right', f === 'panggil' ? 'Ketuk palu' : 'Berikutnya', true, 'k-enter')}
           ${tombol('a-banding', '↓', 'fa-scale-balanced', 'Banding', f === 'panggil', 'k-banding')}
           ${tombol('a-lewati', 'Spasi', 'fa-forward', 'Lewati', f === 'panggil', 'k-lewati')}
-          ${tombol('a-del', 'Del', 'fa-delete-left', f === 'panggil' ? 'Sebelumnya' : 'Urungkan', a.i > 0 || f !== 'panggil', 'k-del')}`
+          ${tombol('a-del', 'Del', 'fa-delete-left', f === 'panggil' ? 'Sebelumnya' : 'Urungkan', a.i > 0 || f !== 'panggil', 'k-del')}
+          ${nSah ? tombol('a-sahkan', 'S', 'fa-stamp', `Sahkan ${angka(nSah)}`, true, 'k-sahkan') : ''}`
         : a.akhir ? `
           ${tombol('a-enter', 'Enter', c.lewati ? 'fa-rotate-left' : 'fa-list', c.lewati ? `Panggil ulang ${angka(c.lewati)} santri` : 'Kembali ke daftar', true, 'k-enter')}
           ${tombol('a-del', 'Del', 'fa-delete-left', 'Santri terakhir', true, 'k-del')}`
@@ -1197,6 +1243,176 @@
     await muatPenasihat(true); muat(true);
   }
 
+
+  /* =================================================================
+   *  v2.69 · SUSUNAN MAJELIS — santri XI dari daftar saran (tanpa NISN)
+   *  Wajib lengkap sebelum unduh berkas & palu pertama (kecuali super
+   *  admin). Server memeriksa ulang; apresiasi dicatat server.
+   * ================================================================= */
+  const kelompokTampil = () => { const p = S.data?.panitia || {}; const w = p.wajib || {};
+    return URUT_KELOMPOK.filter(k => w[k] || p.isi?.pj?.[k]); };
+  /** Nama majelis untuk PDF & berita acara. */
+  function namaMajelis() {
+    const p = S.data?.panitia;
+    if (!p) return { ...(S.data?.majelis || {}), pj: {} };
+    const o = { pj: {} };
+    JABATAN_INTI.forEach(([k]) => { o[k] = p.isi?.[k]?.nama || ''; });
+    Object.entries(p.isi?.pj || {}).forEach(([k, v]) => { o.pj[k] = v?.nama || ''; });
+    o.pembimbing = p.pembimbing || '';
+    return o;
+  }
+  function htmlMajelisRingkas() {
+    if (!adaPanitia()) return '';
+    const n = namaMajelis(), p = S.data.panitia;
+    const baris = [...JABATAN_INTI.map(([k, l]) => [l, n[k]]), ...kelompokTampil().map(k => [`PJ ${KELOMPOK[k]}`, n.pj[k], p.wajib?.[k]])];
+    return `<section class="sd-mj-ringkas${p.lengkap ? ' lengkap' : ''}" aria-label="Susunan majelis">
+      <h4><i class="fa-solid fa-users-rectangle"></i>Susunan majelis${p.kredit ? '<span class="sd-tanda putus" title="Apresiasi amanah keadilan sudah tercatat">apresiasi tercatat</span>' : ''}</h4>
+      <dl>${baris.map(([l, v, nPk]) => `<div><dt>${esc(l)}${nPk ? ` <small>${angka(nPk)}</small>` : ''}</dt><dd>${v ? esc(v) : '<em>belum diisi</em>'}</dd></div>`).join('')}
+        ${n.pembimbing ? `<div><dt>Pembimbing</dt><dd>${esc(n.pembimbing)}</dd></div>` : ''}</dl>
+      ${majelis() ? `<button type="button" class="sd-btn sd-btn-tipis" data-aksi="majelis"><i class="fa-solid fa-user-pen"></i>${p.lengkap ? 'Ubah susunan majelis' : 'Isi susunan majelis'}</button>` : ''}
+      ${S.data.super && !p.lengkap ? '<p class="sd-kecil">Super admin boleh bersidang tanpa susunan majelis; apresiasi hanya tercatat bila susunan diisi.</p>' : ''}
+    </section>`;
+  }
+
+  /** Buka formulir susunan majelis. Mengembalikan true bila tersimpan. */
+  async function bukaMajelis(sebab) {
+    if (!adaPanitia() || !majelis()) return true;
+    const p = S.data.panitia, w = p.wajib || {};
+    const pilih = {};
+    const baris = [...JABATAN_INTI.map(([k, l]) => ({ id: k, label: l, isi: p.isi?.[k], ket: k === 'ketua' ? '15 poin' : '10 poin', wajib: true })),
+      ...kelompokTampil().map(k => ({ id: 'pj-' + k, pj: k, label: `PJ ${KELOMPOK[k]}`, isi: p.isi?.pj?.[k], wajib: !!w[k],
+        ket: w[k] ? `${angka(w[k])} perkara · 10 poin` : 'tidak ada perkara · boleh dikosongkan' }))];
+    baris.forEach(b => { if (b.isi?.kunci) pilih[b.id] = { kunci: b.isi.kunci, nama: b.isi.nama, kelas: b.isi.kelas }; });
+    const ket = { berkas: 'sebelum berkas diunduh', mulai: 'sebelum sidang dibuka', ketuk: 'sebelum palu diketuk' }[sebab] || '';
+    const res = await A.Swal.fire({
+      title: 'Susunan majelis', width: 700, showCancelButton: true,
+      confirmButtonText: '<i class="fa-solid fa-floppy-disk"></i> Simpan susunan', cancelButtonText: 'Batal', confirmButtonColor: '#8E1B32',
+      showLoaderOnConfirm: true, allowOutsideClick: () => !A.Swal.isLoading(), customClass: { popup: 'sd-mj-pop' },
+      html: `<div class="sd-swal sd-mj">
+        <p class="sd-berkas-sesi"><i class="fa-solid fa-scale-balanced"></i><span>Sidang <b>${esc(labelHari(sesiBerkas(), true))}</b> · OSDA ${esc(unitBerkas())}${ket ? ` · <em>${esc(ket)}</em>` : ''}</span></p>
+        ${!p.lengkap && (p.kurang || []).length ? `<p class="sd-mj-kurang"><i class="fa-solid fa-circle-exclamation"></i><span>Belum lengkap: <b>${esc(p.kurang.join(', '))}</b></span></p>` : ''}
+        <p class="sd-kecil">Pilih dari santri angkatan XI${unitBerkas() !== 'Putra & Putri' ? ` ${esc(unitBerkas().toLowerCase())}` : ''}; satu santri satu jabatan. Nilai tanggung jawab keadilan menjadi apresiasi otomatis saat palu pertama diketuk: Hakim Ketua 15 poin, lainnya 10 poin. Jumlah PJ mengikuti bentuk pembinaan yang ada di berkas.</p>
+        <ol class="sd-mj-daftar">${baris.map(b => `<li class="sd-mj-baris${b.pj ? ' pj pj-' + b.pj : ''}">
+          <label for="sdMj-${b.id}">${esc(b.label)}${b.wajib ? ' <span class="sd-wajib">wajib</span>' : ''}<small>${esc(b.ket)}</small></label>
+          <div class="sd-mj-isi"><input type="text" id="sdMj-${b.id}" data-mj="${b.id}" autocomplete="off" maxlength="60" placeholder="Ketik nama santri XI…" value="${esc(b.isi?.nama || '')}"${b.isi?.kunci ? ' data-ok="1"' : ''}>
+            <span class="sd-mj-kelas">${esc(b.isi?.kelas || '')}</span>
+            <ul class="sd-calon" role="listbox" hidden></ul></div></li>`).join('')}
+          <li class="sd-mj-baris pembimbing"><label for="sdMj-pembimbing">Pembimbing<small>opsional · ustadz/ustazah · tanpa apresiasi</small></label>
+            <div class="sd-mj-isi"><input type="text" id="sdMj-pembimbing" maxlength="80" autocomplete="off" placeholder="Nama ustadz/ustazah pendamping" value="${esc(p.pembimbing || '')}"></div></li>
+        </ol></div>`,
+      didOpen: (el) => {
+        let t = 0, tok = 0;
+        const tutupSemua = () => el.querySelectorAll('.sd-calon').forEach(u => { u.hidden = true; u.innerHTML = ''; });
+        el.addEventListener('input', (e) => {
+          const inp = e.target.closest('input[data-mj]'); if (!inp) return;
+          const id = inp.dataset.mj, ul = inp.parentElement.querySelector('.sd-calon');
+          delete pilih[id]; inp.dataset.ok = ''; inp.parentElement.querySelector('.sd-mj-kelas').textContent = '';
+          const q = inp.value.replace(/\s+/g, ' ').trim();
+          clearTimeout(t);
+          if (q.length < 2) { ul.hidden = true; ul.innerHTML = ''; return; }
+          t = setTimeout(async () => {
+            const my = ++tok;
+            try {
+              const { data, error } = await A.db.rpc('sidang_calon_panitia', { p_cari: q, p_unit: S.data?.unit || S.unit || null });
+              if (error) throw error;
+              if (my !== tok) return;
+              const dipakai = new Set(Object.entries(pilih).filter(([k]) => k !== id).map(([, v]) => v.kunci));
+              ul.innerHTML = (data || []).length ? data.map(c => `<li><button type="button" role="option" data-kunci="${esc(c.kunci)}" data-nama="${esc(c.nama)}" data-kelas="${esc(c.kelas || '')}"${dipakai.has(c.kunci) ? ' disabled' : ''}>
+                  <b>${esc(c.nama)}</b><small>${esc(c.kelas || '')}${c.kamar ? ` · Kamar ${esc(c.kamar)}` : ''}${dipakai.has(c.kunci) ? ' · sudah memegang jabatan' : c.tugas ? ` · bertugas ${angka(c.tugas)}× bulan ini` : ''}</small></button></li>`).join('')
+                : '<li class="sd-calon-kosong">Tidak ada santri angkatan XI dengan nama itu.</li>';
+              ul.hidden = false;
+            } catch (er) { ul.innerHTML = `<li class="sd-calon-kosong">${esc(String(er?.message || er))}</li>`; ul.hidden = false; }
+          }, 220);
+        });
+        el.addEventListener('click', (e) => {
+          const b = e.target.closest('.sd-calon button[data-kunci]');
+          if (!b) { if (!e.target.closest('.sd-mj-isi')) tutupSemua(); return; }
+          const inp = b.closest('.sd-mj-isi').querySelector('input[data-mj]');
+          pilih[inp.dataset.mj] = { kunci: b.dataset.kunci, nama: b.dataset.nama, kelas: b.dataset.kelas };
+          inp.value = b.dataset.nama; inp.dataset.ok = '1';
+          inp.parentElement.querySelector('.sd-mj-kelas').textContent = b.dataset.kelas;
+          tutupSemua();
+          ([...el.querySelectorAll('input[data-mj]')].find(x => !x.dataset.ok) || el.querySelector('#sdMj-pembimbing'))?.focus();
+        });
+        // Enter di isian memilih saran pertama (bukan menyimpan formulir)
+        el.addEventListener('keydown', (e) => {
+          const inp = e.target.closest?.('input[data-mj]');
+          if (!inp || e.key !== 'Enter') return;
+          const pertama = inp.parentElement.querySelector('.sd-calon:not([hidden]) button[data-kunci]:not([disabled])');
+          if (pertama) { e.preventDefault(); e.stopPropagation(); pertama.click(); }
+        }, true);
+        setTimeout(() => ([...el.querySelectorAll('input[data-mj]')].find(x => !x.dataset.ok) || el.querySelector('input[data-mj]'))?.focus(), 80);
+      },
+      preConfirm: async () => {
+        const pop = A.Swal.getPopup();
+        const salah = baris.filter(b => !pilih[b.id] && (pop.querySelector('#sdMj-' + b.id)?.value || '').trim()).map(b => b.label);
+        if (salah.length) { A.Swal.showValidationMessage(`${salah.join(', ')}: pilih nama dari daftar saran.`); return false; }
+        const kosong = baris.filter(b => b.wajib && !pilih[b.id]).map(b => b.label);
+        if (kosong.length) { A.Swal.showValidationMessage(`Belum diisi: ${kosong.join(', ')}.`); return false; }
+        const isi = { pj: {} };
+        baris.forEach(b => { const v = pilih[b.id]; if (!v) return; if (b.pj) isi.pj[b.pj] = v.kunci; else isi[b.id] = v.kunci; });
+        isi.pembimbing = (pop.querySelector('#sdMj-pembimbing')?.value || '').replace(/\s+/g, ' ').trim();
+        try {
+          const { data, error } = await A.db.rpc('sidang_panitia_simpan', { p_sesi: sesiBerkas(), p_unit: S.data?.unit || S.unit || null, p_isi: isi });
+          if (error) throw error;
+          return data;
+        } catch (er) { A.Swal.showValidationMessage(String(er?.message || er)); return false; }
+      }
+    });
+    if (!res.isConfirmed || !res.value) return false;
+    S.data.panitia = res.value;
+    const n = namaMajelis();
+    S.data.majelis = { ...(S.data.majelis || {}), sesi: sesiBerkas(), ketua: n.ketua, anggota1: n.anggota1, anggota2: n.anggota2, panitera: n.panitera };
+    A.toast('success', res.value.kredit ? 'Susunan majelis tersimpan · apresiasi diperbarui' : 'Susunan majelis tersimpan');
+    gambarSemua(); if (S.antre) gambarAntre();
+    return true;
+  }
+
+  /** Mulai / lanjutkan sidang: majelis dilengkapi dulu bila perlu. */
+  async function mulaiSidang(kunci, ulang) {
+    if (bolehPutus() && perluMajelis() && !(await bukaMajelis('mulai'))) return;
+    bukaAntre(kunci, ulang);
+  }
+
+  /** S: sahkan pelaksanaan pembinaan yang sudah di tangan musyrif sejak sidang sebelumnya. */
+  async function sahkan(s) {
+    if (!s || !bolehPutus() || !adaPanitia()) return;
+    const l = siapSah(s);
+    if (!l.length) { A.toast('info', `Tidak ada pembinaan ${s.nama} dari sidang sebelumnya yang menunggu pengesahan.`); return; }
+    if (perluMajelis() && !(await bukaMajelis('ketuk'))) return;
+    const kunci = s.kunci;
+    const res = await A.Swal.fire({
+      title: 'Sahkan pelaksanaan pembinaan', width: 640, showCancelButton: true,
+      confirmButtonText: '<i class="fa-solid fa-stamp"></i> Sahkan yang dicentang', cancelButtonText: 'Batal', confirmButtonColor: '#3730A3',
+      showLoaderOnConfirm: true, allowOutsideClick: () => !A.Swal.isLoading(),
+      html: `<div class="sd-swal sd-sah">
+        <p class="sd-kecil">Ananda <b>${esc(s.nama)}</b> · ${esc(s.kelas)}. Centang pembinaan yang <b>benar-benar sudah dijalankan</b> sejak dibacakan, sesuai kesaksian penanggung jawab eksekusi. Pembinaan tercatat <b>Disahkan OSDA</b>; musyrif menerima pesan dan boleh menyanggah dalam 3 hari.</p>
+        <ul class="sd-sah-daftar">${l.map(b => `<li><label><input type="checkbox" value="${esc(b.id)}">
+          <span><b>${esc(b.pelanggaran)}</b><small>${esc(b.kategori)} ke-${esc(b.tahap || '?')} · ${esc(b.bentuk || '-')}</small>
+          <small>Diserahkan ${esc(labelTgl(b.sesi))}${b.penerima ? ` kepada ${esc(b.penerima.join(', '))}` : ''}${Array.isArray(b.pj) && b.pj.length ? ` · saksi PJ ${esc(b.pj.join(', '))}` : ''}</small></span></label></li>`).join('')}</ul></div>`,
+      didOpen: (el) => setTimeout(() => el.querySelector('.sd-sah-daftar input')?.focus(), 60),
+      preConfirm: async () => {
+        const ids = [...A.Swal.getPopup().querySelectorAll('.sd-sah-daftar input:checked')].map(x => x.value);
+        if (!ids.length) { A.Swal.showValidationMessage('Centang minimal satu pembinaan yang sudah dijalankan.'); return false; }
+        try {
+          const { data, error } = await A.db.rpc('sidang_sahkan_osda', { p_ids: ids });
+          if (error) throw error;
+          return { ids, data: data || {} };
+        } catch (er) { A.Swal.showValidationMessage(String(er?.message || er)); return false; }
+      }
+    });
+    if (!res.isConfirmed || !res.value) { fokusAntre(); return; }
+    const lewat = res.value.data.dilewati || [];
+    const tolak = new Set(lewat.map(x => x.id));
+    const t = santriDi(kunci) || s;
+    let n = 0;
+    for (const b of t.semua) if (res.value.ids.includes(b.id) && !tolak.has(b.id)) { b.status = 'tuntas'; b.sah_osda = true; delete b.hari_ini; n++; }
+    if (lewat.length) A.toast('warning', `${lewat[0].nama || t.nama}: ${lewat[0].sebab}`);
+    if (n) A.toast('success', `${angka(n)} pembinaan ${t.nama} disahkan OSDA`);
+    susun();
+    if (S.antre) { gambarAntre(n ? 'sah' : ''); fokusAntre(); } else gambarSemua();
+  }
+
   /* =================================================================
    *  BERKAS PERKARA (PDF) + SUSUNAN MAJELIS (v2.65, disusun ulang v2.68)
    *  Digambar langsung dengan jsPDF: teks vektor, tajam, berkas kecil.
@@ -1238,13 +1454,23 @@
       izin: s.info?.izin || null, tertahan: s.tertahan.length,
       perkara: s.sesi.filter(b => !selesaiSesi(b)).map(b => ({
         pelanggaran: b.pelanggaran, tanggal: b.tanggal, kategori: b.kategori, tahap: b.tahap, bentuk: b.bentuk,
+        ucapan: b.ucapan || null, kelompok: b.kelompok || [], diberikan: b.status === 'diberikan',
         label: [b.baru ? 'baru' : '', b.status === 'diberikan' ? `baca ulang (pertama ${labelTgl(b.sesi)})` : '', b.status === 'dibacakan' ? 'belum diserahkan' : '',
           b.banding === 'ditolak' ? 'banding ditolak' : '', b.banding === 'dikembalikan' ? 'banding dikembalikan' : ''].filter(Boolean).join(', ')
       }))
     }));
     const grup = [1, 2, 3, 4].map(P => ({ P, santri: santri.filter(s => s.P === P) })).filter(g => g.santri.length);
+    // v2.69: susunan majelis bernama, tanggungan PJ eksekusi, dan perkara siap disahkan
+    const panitia = adaPanitia() ? namaMajelis() : null;
+    const pj = !panitia ? [] : URUT_KELOMPOK.map(k => ({ k, label: KELOMPOK[k], nama: panitia.pj[k] || '',
+      santri: santri.flatMap(s => s.perkara.filter(p => !p.diberikan && p.kelompok.includes(k))
+        .map(p => ({ nama: s.nama, kelas: s.kelas, kamar: s.kamar, bentuk: p.bentuk }))) })).filter(x => x.santri.length || x.nama);
+    const batas = sesiBerkas();
+    const siap = !panitia ? [] : list.slice().sort(urutSantri).flatMap(s => s.sesi.filter(b => b.status === 'diberikan' && b.sesi && b.sesi < batas && !tahan(b))
+      .map(b => ({ nama: s.nama, kelas: s.kelas, pelanggaran: b.pelanggaran, bentuk: b.bentuk, sesi: b.sesi, pj: b.pj || [], penerima: b.penerima || [] })));
     return { sesi: sesiBerkas(), unit: unitBerkas(), cakupan: cakupanLabel, nSantri: santri.length,
-      nPerkara: santri.reduce((a, s) => a + s.perkara.length, 0), grup, majelis: majelisNama || {}, persiapan: persiapan(), dicetak: new Date() };
+      nPerkara: santri.reduce((a, s) => a + s.perkara.length, 0), grup, majelis: majelisNama || {}, panitia, pj, siap,
+      persiapan: persiapan(), dicetak: new Date() };
   }
 
   /**
@@ -1378,7 +1604,7 @@
           warna: WARNA_PDF[g.P],
           sel: ['#',
             [`${s.nama} [${KODE[s.P].k}]`, `${s.kelas}${s.kamar ? ` · Kamar ${s.kamar}` : ''}`, iz, s.tertahan ? `${s.tertahan} perkara lain dalam banding` : ''],
-            s.perkara.map(p => `${p.kategori} ke-${p.tahap || '?'}: ${p.pelanggaran} (${labelTgl(p.tanggal)}) -> ${p.bentuk}${p.label ? ` [${p.label}]` : ''}`),
+            s.perkara.map(p => `${p.kategori} ke-${p.tahap || '?'}: ${p.pelanggaran} (${labelTgl(p.tanggal)}) -> ${p.bentuk}${p.label ? ` [${p.label}]` : ''}${p.ucapan ? ` · Ucapan tercatat: "${p.ucapan}"` : ''}`),
             '', '', '']
         });
       });
@@ -1392,22 +1618,60 @@
       { judul: 'Lewati', lebar: 12, rata: 'center', cek: true }
     ], baris);
 
-    /* ---- II · majelis sidang ---- */
+    let bab = 1;
+    const ROMAWI_BAB = ['I', 'II', 'III', 'IV', 'V'];
+    /* ---- v2.69 · penanggung jawab eksekusi ---- */
+    if (isi.pj && isi.pj.length) {
+      judulBagian(`${ROMAWI_BAB[bab++]}. PENANGGUNG JAWAB EKSEKUSI`, 'Dibawa PJ ke lapangan; centang bila pembinaan sudah dijalankan');
+      const bPj = [];
+      isi.pj.forEach(x => {
+        bPj.push({ grup: `PJ ${x.label}: ${x.nama || '(belum ditunjuk)'}`, kanan: `${angka(x.santri.length)} perkara`, warna: [232, 225, 205] });
+        x.santri.forEach(z => bPj.push({ sel: ['#', [z.nama, `${z.kelas}${z.kamar ? ` · Kamar ${z.kamar}` : ''}`], z.bentuk || '-', ''] }));
+      });
+      tabel([
+        { judul: 'No', lebar: 9, rata: 'center', redup: true },
+        { judul: 'Santri', bobot: 0.9, tebalPertama: true, kecilSisa: true },
+        { judul: 'Bentuk pembinaan', bobot: 1.4 },
+        { judul: 'Dijalankan', lebar: 20, rata: 'center', cek: true }
+      ], bPj);
+    }
+    /* ---- v2.69 · perkara siap disahkan OSDA ---- */
+    if (isi.siap && isi.siap.length) {
+      judulBagian(`${ROMAWI_BAB[bab++]}. PERKARA SIAP DISAHKAN`, 'Di tangan musyrif sejak sidang sebelumnya; disahkan bila sudah dijalankan');
+      tabel([
+        { judul: 'No', lebar: 9, rata: 'center', redup: true },
+        { judul: 'Santri', bobot: 0.8, tebalPertama: true, kecilSisa: true },
+        { judul: 'Perkara & putusan', bobot: 1.3 },
+        { judul: 'Diserahkan & saksi', bobot: 0.9 },
+        { judul: 'Sudah', lebar: 14, rata: 'center', cek: true }
+      ], isi.siap.map(z => ({ sel: ['#', [z.nama, z.kelas], `${z.pelanggaran} -> ${z.bentuk || '-'}`,
+        [`${labelTgl(z.sesi)}${z.penerima.length ? ` · ${z.penerima.join(', ')}` : ''}`, z.pj.length ? `PJ ${z.pj.join(', ')}` : ''], ''] })));
+    }
+
+    /* ---- majelis sidang (selalu terakhir: tanda tangan) ---- */
+    const JAB = isi.panitia ? JABATAN_INTI : JABATAN;
+    const namaJab = isi.panitia || isi.majelis;
     if (sisa() < 58) halamanBaru();
-    judulBagian('II. MAJELIS SIDANG');
+    judulBagian(`${ROMAWI_BAB[bab++]}. MAJELIS SIDANG`);
     huruf(9); tinta(28, 26, 46);
     pdf.text(teksPdf(`Meulaboh, ${tglPanjang(isi.sesi)}`), W - mR, y + 2, { align: 'right' });
     y += 8;
-    const kol = L / JABATAN.length;
-    JABATAN.forEach(([k, label], i) => {
+    const kol = L / JAB.length;
+    JAB.forEach(([k, label], i) => {
       const cx = mL + kol * i + kol / 2;
-      huruf(8.6, 'bold'); tinta(74, 71, 99); pdf.text(label, cx, y, { align: 'center' });
-      pdf.setDrawColor(28, 26, 46); pdf.setLineWidth(0.3); pdf.line(cx - kol / 2 + 5, y + 24, cx + kol / 2 - 5, y + 24);
-      const nama = teksPdf(isi.majelis[k] || '');
+      huruf(JAB.length > 4 ? 8 : 8.6, 'bold'); tinta(74, 71, 99); pdf.text(label, cx, y, { align: 'center' });
+      pdf.setDrawColor(28, 26, 46); pdf.setLineWidth(0.3); pdf.line(cx - kol / 2 + 4, y + 24, cx + kol / 2 - 4, y + 24);
+      const nama = teksPdf(namaJab[k] || '');
       if (nama) { huruf(8.8, 'bold'); tinta(28, 26, 46); pdf.text(pdf.splitTextToSize(nama, kol - 8), cx, y + 28.5, { align: 'center', lineHeightFactor: 1.2 }); }
       else { huruf(8.4); tinta(150, 156, 170); pdf.text('(nama & tanda tangan)', cx, y + 28.5, { align: 'center' }); }
     });
     y += 38;
+    if (isi.panitia) {
+      const pjNama = URUT_KELOMPOK.filter(k => isi.panitia.pj[k]).map(k => `${KELOMPOK[k]}: ${isi.panitia.pj[k]}`);
+      huruf(8); tinta(74, 71, 99);
+      const t = [pjNama.length ? `PJ eksekusi - ${pjNama.join(' · ')}` : '', isi.panitia.pembimbing ? `Pembimbing - ${isi.panitia.pembimbing}` : ''].filter(Boolean);
+      if (t.length) { const l = pdf.splitTextToSize(teksPdf(t.join('   ')), L); pdf.text(l, mL, y); y += l.length * 3.6 + 2; }
+    }
     huruf(7.4); tinta(110, 116, 130);
     const jam = (() => { try { return isi.dicetak.toLocaleString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }); } catch (e) { return ''; } })();
     pdf.text(pdf.splitTextToSize(teksPdf(`Berkas disusun chemint ${jam} WIB${isi.persiapan ? ' (persiapan malam sebelum sidang)' : ''}. Perkara yang masuk sesudah waktu itu belum tercantum. Banding (santri menyanggah catatan) diserahkan ke Penasihat Hukum OSDA. Majelis membubuhkan tanda tangan dengan pena setelah sidang selesai.`), L), mL, y);
@@ -1426,11 +1690,12 @@
   async function bukaBerkas() {
     if (!bolehBerkas()) return A.toast('info', 'Tidak ada santri yang menunggu dipanggil.');
     if (!A.pdfBaru) return A.toast('error', 'Pembuat PDF belum tersedia. Muat ulang aplikasi.');
+    if (perluMajelis() && !(await bukaMajelis('berkas'))) return;     // v2.69: syarat unduh berkas
     const m = majelisAwal();
     const ops = pilihanCakupan();
     const kertasL = A.kertasDaftar ? A.kertasDaftar() : [{ kode: 'A4', nama: 'A4', ukuran: '210 × 297 mm' }];
     const kAwal = A.kertasTersimpan ? A.kertasTersimpan() : 'A4';
-    const isiMajelis = majelis();
+    const isiMajelis = majelis() && !adaPanitia();     // v2.69: nama dipilih di "Susunan majelis", bukan diketik di sini
     const sesi = sesiBerkas();
     const radio = (nama, nilai, judul, kecil, on) => `<label class="sd-opsi${on ? ' on' : ''}"><input type="radio" name="${nama}" value="${esc(nilai)}"${on ? ' checked' : ''}>
         <b>${esc(judul)}</b>${kecil ? `<small>${esc(kecil)}</small>` : ''}</label>`;
@@ -1447,7 +1712,11 @@
           <div class="sd-majelis-isian">${JABATAN.map(([k, l]) => `<label>${esc(l)}${k === 'ketua' ? ' <span class="sd-wajib">wajib</span>' : ''}
             <input type="text" id="sdM-${k}" maxlength="80" autocomplete="off" value="${esc(m[k] || '')}" placeholder="${k === 'panitera' ? 'Pencatat sidang' : 'Nama lengkap'}"></label>`).join('')}</div>
           <p class="sd-kecil">Nama tercetak di bawah ruang tanda tangan. Tanda tangan dibubuhkan dengan pena setelah berkas dicetak.</p>
-        </fieldset>` : `<p class="sd-kecil">Majelis: ${m.ketua ? esc(JABATAN.map(([k, l]) => m[k] ? `${l} ${m[k]}` : '').filter(Boolean).join(' · ')) : 'belum diisi OSDA; kolom tanda tangan dicetak kosong.'}</p>`}
+        </fieldset>` : adaPanitia() ? `<fieldset><legend>Majelis sidang</legend><p class="sd-kecil sd-mj-baca">${(() => { const n = namaMajelis();
+            const l = [...JABATAN_INTI.map(([k, lb]) => n[k] ? `${lb} <b>${esc(n[k])}</b>` : ''), ...URUT_KELOMPOK.map(k => n.pj[k] ? `PJ ${KELOMPOK[k]} <b>${esc(n.pj[k])}</b>` : ''), n.pembimbing ? `Pembimbing <b>${esc(n.pembimbing)}</b>` : ''].filter(Boolean);
+            return l.length ? l.join(' · ') : 'Belum diisi; kolom tanda tangan dicetak kosong.'; })()}</p>
+            <p class="sd-kecil">Untuk mengubah, tutup jendela ini lalu tekan <b>Susunan majelis</b>.</p></fieldset>`
+          : `<p class="sd-kecil">Majelis: ${m.ketua ? esc(JABATAN.map(([k, l]) => m[k] ? `${l} ${m[k]}` : '').filter(Boolean).join(' · ')) : 'belum diisi OSDA; kolom tanda tangan dicetak kosong.'}</p>`}
         <fieldset><legend>Isi berkas</legend>
           <div class="sd-opsi-daftar">${ops.map((o, i) => radio('sdCakupan', o.k, o.label, `${angka(o.list.length)} santri · ${angka(o.list.reduce((a, s) => a + s.sesi.filter(b => !selesaiSesi(b)).length, 0))} perkara`, i === 0)).join('')}</div>
         </fieldset>
@@ -1473,8 +1742,9 @@
   async function siapkanBerkas(aksi) {
     const pop = A.Swal.getPopup();
     const ambil = (id) => (pop.querySelector('#' + id)?.value || '').replace(/\s+/g, ' ').trim();
-    const mj = majelis() ? Object.fromEntries(JABATAN.map(([k]) => [k, ambil('sdM-' + k)])) : (S.data?.majelis || {});
-    if (majelis() && mj.ketua.length < 2) {
+    const lama = majelis() && !adaPanitia();
+    const mj = lama ? Object.fromEntries(JABATAN.map(([k]) => [k, ambil('sdM-' + k)])) : adaPanitia() ? namaMajelis() : (S.data?.majelis || {});
+    if (lama && mj.ketua.length < 2) {
       A.Swal.showValidationMessage('Nama Hakim Ketua wajib diisi.');
       pop.querySelector('#sdM-ketua')?.focus();
       return false;
@@ -1483,7 +1753,7 @@
     const cak = pilihanCakupan().find(o => o.k === (pop.querySelector('input[name="sdCakupan"]:checked')?.value || 'semua')) || pilihanCakupan()[0];
     if (!cak) { A.Swal.showValidationMessage('Tidak ada santri yang menunggu dipanggil.'); return false; }
 
-    if (majelis()) {
+    if (lama) {
       try { localStorage.setItem(kunciMajelis(), JSON.stringify(mj)); } catch (e) {}
       try {
         const { data, error } = await A.db.rpc('sidang_majelis_simpan', {
@@ -1531,8 +1801,16 @@
         t += `${i + 1}. ${s.nama} (${s.kelas}) — ${LABEL_KEADAAN[s.keadaan]} — ${pk}\n`;
       });
     });
-    const mj = d.majelis;
-    if (mj && mj.ketua && d.sesi_berkas === d.hari) {
+    const osda = butir().filter(b => b.sah_osda && b.status === 'tuntas').length;
+    if (osda) t += `Disahkan OSDA (pembinaan sudah dijalankan, belum disahkan musyrif): ${osda} perkara\n`;
+    const mj = adaPanitia() ? namaMajelis() : d.majelis;
+    if (adaPanitia() && mj.ketua && d.sesi_berkas === d.hari) {
+      t += `\nMajelis: Hakim Ketua ${mj.ketua} · Hakim Anggota ${[mj.anggota1, mj.anggota2].filter(Boolean).join(', ')}`
+        + ` · Panitera ${mj.panitera || '-'} · Penasihat ${mj.penasihat || '-'}\n`;
+      const pj = URUT_KELOMPOK.filter(k => mj.pj[k]).map(k => `${KELOMPOK[k]} ${mj.pj[k]}`);
+      if (pj.length) t += `PJ eksekusi: ${pj.join(' · ')}\n`;
+      if (mj.pembimbing) t += `Pembimbing: ${mj.pembimbing}\n`;
+    } else if (mj && mj.ketua && d.sesi_berkas === d.hari) {
       t += `\nMajelis: Hakim Ketua ${mj.ketua}` + (mj.anggota1 || mj.anggota2 ? ` · Hakim Anggota ${[mj.anggota1, mj.anggota2].filter(Boolean).join(', ')}` : '')
         + (mj.panitera ? ` · Panitera ${mj.panitera}` : '') + '\n';
     }
@@ -1556,8 +1834,10 @@
     if (a === 'bunyi') { try { localStorage.setItem('rq-sidang-bunyi', bunyiAktif() ? 'mati' : 'nyala'); } catch (er) {} gambarAtas(); if (bunyiAktif()) ketukBunyi(1); return; }
     if (a === 'tab') { S.tab = v === 'penasihat' ? 'penasihat' : 'majelis'; S.bubble = ''; gambarSemua(); if (S.tab === 'penasihat') muatPenasihat(!!S.pen.data); return; }
     if (a === 'saring') { const P = Number(v); S.saring = S.saring === P ? 0 : P; return gambarIsi(); }
-    if (a === 'mulai') { const c = hitungSesi(); return bukaAntre(null, bolehPutus() && !c.dipanggil && c.lewati > 0); }
-    if (a === 'buka-santri') return bukaAntre(v);
+    if (a === 'mulai') { const c = hitungSesi(); return mulaiSidang(null, bolehPutus() && !c.dipanggil && c.lewati > 0); }
+    if (a === 'buka-santri') return mulaiSidang(v);
+    if (a === 'majelis') return bukaMajelis().then(() => { if (S.antre) fokusAntre(); });
+    if (a === 'a-sahkan') return sahkan(kini());
     if (a === 'antre-tutup') return tutupAntre();
     if (a === 'a-enter') { enterAntre(); return fokusAntre(); }
     if (a === 'a-banding') { const s = kini(); if (S.antre?.mode === 'putus' && faseOf(s) === 'panggil') banding(s); return fokusAntre(); }
@@ -1598,10 +1878,13 @@
         ArrowDown: sekali(() => { const s = kini(); if (S.antre.mode === 'putus' && faseOf(s) === 'panggil') banding(s); }),
         ' ': sekali(() => { const s = kini(); if (S.antre.mode === 'putus' && faseOf(s) === 'panggil') lewati(s); }),
         Delete: sekali(delAntre), Backspace: sekali(delAntre),
+        s: sekali(() => { if (S.antre.mode === 'putus' && !S.antre.akhir) sahkan(kini()); }),
+        m: sekali(() => { if (adaPanitia() && majelis()) bukaMajelis().then(fokusAntre); }),
         ArrowRight: () => geser(1), ArrowLeft: () => geser(-1),
         Escape: tutupAntre
       };
-      if (peta[k]) { e.preventDefault(); peta[k](); }
+      const kk = k.length === 1 ? k.toLowerCase() : k;
+      if (peta[kk]) { e.preventDefault(); peta[kk](); }
       return;
     }
     if (ketik) return;
@@ -1609,7 +1892,7 @@
     if (e.key === 'Enter' && S.tab === 'majelis' && S.data && !reses() && S.urutan.length && !e.target.closest?.('button, a, input, [tabindex]')) {
       e.preventDefault();
       const c = hitungSesi();
-      bukaAntre(null, bolehPutus() && !c.dipanggil && c.lewati > 0);
+      mulaiSidang(null, bolehPutus() && !c.dipanggil && c.lewati > 0);
     }
   }
   function onTampak() {
@@ -1675,5 +1958,6 @@
   window.addEventListener('beforeunload', (e) => { if (S.tunda) { e.preventDefault(); e.returnValue = ''; } });
 
   window.RQSidang = { buka, tutup, terbuka: () => !!S.akar,
-    _uji: { S, susun, daftarAntre, urutSantri, hitungSesi, isiBerkas, gambarBerkasPdf, teksPdf, bukaAntre, pilihanCakupan, kini } };
+    _uji: { S, susun, daftarAntre, urutSantri, hitungSesi, isiBerkas, gambarBerkasPdf, teksPdf, bukaAntre, pilihanCakupan, kini,
+            bukaMajelis, sahkan, siapSah, perluMajelis, namaMajelis } };
 })();

@@ -2736,6 +2736,7 @@ async function navigateTo(view) {
     else if (view === 'saran')       await viewSaran();        // v2.65
     else if (view === 'kotaksaran')  await viewKotakSaran();   // v2.65
     else if (view === 'banding')     await viewBanding();      // v2.68
+    else if (view === 'kelalaian')   await viewKelalaian();    // v2.69
     tandaiTabelBisaGeser();
   } catch (err) { fireError(err); }
   finally { loading(false); APP.navSibuk--; tutupTirai(); LayarMuat.tutupAwal(); }
@@ -6236,7 +6237,7 @@ async function gambarBina() {
     if (terkunciR) aksi.unshift(`<span class="tag tag-kunci" title="Bulan ini sudah Tutup Buku. Admin dapat membuka kuncinya di menu Tutup Buku."><i class="fa-solid fa-lock"></i>Terkunci</span>`);
     if (!aksi.length) aksi.push('<span class="tag tag-off">Hanya baca</span>');
 
-    return `<tr class="${tunggu ? 'menunggu' : ''}${dipilih ? ' dipilih' : ''}${terkunciR ? ' terkunci' : ''}">
+    return `<tr class="${tunggu ? 'menunggu' : ''}${dipilih ? ' dipilih' : ''}${terkunciR ? ' terkunci' : ''}" data-bina-id="${esc(id)}">
       ${lapor ? `<td class="center pilih-kol">${bisaDipilih
         ? `<input type="checkbox" class="cek" data-pilih="${esc(id)}" ${dipilih ? 'checked' : ''}
              aria-label="Pilih pembinaan ${esc(r.nama_siswa)}">` : ''}</td>` : ''}
@@ -15290,7 +15291,10 @@ function kelompokUtas(rows) {
     // Utas laporan pembinaan bisa dibuka lagi bila guru membatalkan
     // pengesahan — statusnya mengikuti baris terbaru, bukan "pernah selesai".
     if (u.jenis === 'pembinaan') u.selesai = akhir.status === 'Selesai';
-    u.status   = u.selesai ? 'Selesai' : (u.belum ? 'Baru' : 'Berjalan');
+    // v2.69: utas pembinaan bulan yang sudah Tutup Buku ditutup server (status "Ditutup")
+    u.ditutup = u.jenis === 'pembinaan' && akhir.status === 'Ditutup';
+    if (u.ditutup) { u.selesai = true; u.belum = 0; }
+    u.status   = u.ditutup ? 'Ditutup' : u.selesai ? 'Selesai' : (u.belum ? 'Baru' : 'Berjalan');
     return u;
   }).sort((a, b) => String(b.waktu).localeCompare(String(a.waktu)));
 }
@@ -15308,7 +15312,7 @@ async function tandaiDibaca(utas) {
   const kini = new Date().toISOString();
   await db.from(PESAN_TABEL)
     .update({ dibaca_pada: kini, status: 'Dibaca' })
-    .eq('utas', utas).eq('penerima_id', idSaya()).is('dibaca_pada', null).neq('status', 'Selesai');
+    .eq('utas', utas).eq('penerima_id', idSaya()).is('dibaca_pada', null).neq('status', 'Selesai').neq('status', 'Ditutup');
   await db.from(PESAN_TABEL)
     .update({ dibaca_pada: kini })
     .eq('utas', utas).eq('penerima_id', idSaya()).is('dibaca_pada', null);
@@ -15326,7 +15330,7 @@ async function refreshBadgePesan() {
   try {
     const { count } = await db.from(PESAN_TABEL)
       .select('id', { count:'exact', head:true })
-      .eq('penerima_id', idSaya()).is('dibaca_pada', null);
+      .eq('penerima_id', idSaya()).is('dibaca_pada', null).neq('status', 'Ditutup');   // v2.69
     b.textContent = count > 99 ? '99+' : String(count || 0);
     b.classList.toggle('hidden', !count);
     b.title = count ? `${count} pesan belum dibaca` : '';
@@ -15631,7 +15635,8 @@ function gambarDaftarUtas() {
         <span class="msg-prev">${esc(String(u.terakhir?.isi || '').replace(/\s+/g, ' ').slice(0, 76))}…</span>
         <span class="msg-tags">
           ${u.jenis === 'pembinaan'
-            ? (u.selesai ? '<span class="tag tag-ok">Disahkan</span>'
+            ? (u.ditutup ? '<span class="tag tag-kunci"><i class="fa-solid fa-lock"></i>Ditutup · Tutup Buku</span>'
+               : u.selesai ? '<span class="tag tag-ok">Disahkan</span>'
                : '<span class="tag tag-sah">Menunggu pengesahan</span>')
               + (u.belum ? ` <span class="tag tag-wait">${u.belum} baru</span>` : '')
             : u.selesai ? '<span class="tag tag-ok">Sudah diantar</span>'
@@ -15690,7 +15695,9 @@ function gambarUtas() {
         ${u.jenis === 'pembinaan' ? `
           <button class="btn btn-ghost btn-sm" data-ke-bina="${esc(u.id_pembinaan || '')}">
             <i class="fa-solid fa-list-check"></i>Lihat di Log</button>
-          ${u.selesai
+          ${u.ditutup
+            ? `<span class="tag tag-kunci"><i class="fa-solid fa-lock"></i>Ditutup · bulan sudah Tutup Buku</span>`
+            : u.selesai
             ? `<button class="btn btn-ghost btn-sm" disabled><i class="fa-solid fa-signature"></i>Disahkan</button>`
             : bolehPembinaan()
             ? `<button class="btn btn-sah btn-sm" id="msgSahkan"><i class="fa-solid fa-file-signature"></i>Sahkan Selesai</button>`
@@ -15708,11 +15715,13 @@ function gambarUtas() {
           r.pengirim_id === uid ? (r.dibaca_pada ? ' · dibaca' : ' · terkirim') : ''}</div>
       </article>`).join('')}
     </div>
-    <div class="msg-tulis">
+    ${u.ditutup ? `<div class="msg-tulis msg-ditutup"><i class="fa-solid fa-lock"></i>
+      <span>Utas ini ditutup karena bulan pembinaannya sudah <b>Tutup Buku</b>. Pembinaan yang belum disahkan tercatat sebagai bahan evaluasi.</span></div>`
+    : `<div class="msg-tulis">
       <textarea id="msgIsi" class="input" rows="2"
         placeholder="Tulis balasan untuk ${esc(u.lawan?.nama || 'guru')}…"></textarea>
       <button class="btn btn-primary" id="msgKirim"><i class="fa-solid fa-paper-plane"></i>Kirim</button>
-    </div>`;
+    </div>`}`;
 
   const t = $('msgThread'); if (t) t.scrollTop = t.scrollHeight;
   $('msgIsi')?.addEventListener('keydown', (e) => {
@@ -15721,7 +15730,7 @@ function gambarUtas() {
 }
 
 async function kirimBalasan() {
-  const u = stPesan.utas.find(x => x.utas === stPesan.aktif); if (!u) return;
+  const u = stPesan.utas.find(x => x.utas === stPesan.aktif); if (!u || u.ditutup) return;
   const box = $('msgIsi'); const isi = box?.value.trim();
   if (!isi) return toast('info', 'Isi balasan masih kosong.');
   const btn = $('msgKirim'); const asli = mulaiSimpan(btn, 'Mengirim…');
@@ -33716,7 +33725,7 @@ const grupDari = (v) => PA.GRUP.find(g => g.views.includes(v)) || null;
 const indeksGrup = (v) => { const g = grupDari(v); return g ? PA.GRUP.indexOf(g) : -1; };
 const namaHal = (v) => (PA.NAMA[v] && PA.NAMA[v].nama) || (JUDUL[v] && JUDUL[v].teks) || v;
 const bolehHal = (v) => (MENU_ROLE[v] || []).includes(role())
-  && !((v === 'kotaksaran' || v === 'banding') && document.querySelector(`#navMenu [data-view="${v}"]`)?.classList.contains('hidden'));   // v2.68: + banding
+  && !((v === 'kotaksaran' || v === 'banding' || v === 'kelalaian') && document.querySelector(`#navMenu [data-view="${v}"]`)?.classList.contains('hidden'));   // v2.68: + banding · v2.69: + kelalaian
 const kunciPA = (k) => `rq.${k}.v1.${idSaya()}`;
 
 /* ---------- D · Satu nama: judul halaman & eyebrow = kelompok ---------- */
@@ -34828,3 +34837,197 @@ async function kembalikanBanding(id) {
   refreshBadgeBanding();
   navigateTo('banding');
 }
+
+/* =====================================================================
+ * v2.69 — MAJELIS BERNAMA · APRESIASI KEADILAN · PENGESAHAN OSDA
+ * ---------------------------------------------------------------------
+ *  Rancangan: claude/rancangan-v2.69-majelis-pengesahan.md (disetujui 7 Nov).
+ *  · Ruang Sidang (sidang.js): susunan majelis dipilih dari santri XI,
+ *    apresiasi otomatis (Hakim Ketua 15, lainnya 10), PJ eksekusi per
+ *    kelompok bentuk, tombol S = "Disahkan OSDA", ucapan Bahasa sebagai
+ *    alat bukti. Semua aturan di RPC (migrasi v2.69).
+ *  · Halaman Pembinaan: tanda "Disahkan OSDA" + tombol Sanggah (≤ 3 hari)
+ *    untuk musyrif kelas santri.
+ *  · Halaman "Kelalaian Pengesahan" (khusus super admin).
+ *  · Pesan Tindak Lanjut: utas pembinaan bulan Tutup Buku berstatus
+ *    "Ditutup" (lihat kelompokUtas/tandaiDibaca/refreshBadgePesan).
+ *  · Formulir catat pelanggaran: bidang Bahasa → "Ucapan yang terdengar".
+ * ===================================================================== */
+APP.versi = 'rq-v2.69';   // v2.69: majelis bernama + apresiasi keadilan, pengesahan OSDA & sanggah, kelalaian pengesahan, utas Tutup Buku ditutup
+
+MENU_ROLE.kelalaian = ['Admin'];   // + adalah_super_admin()
+PA.NAMA.kelalaian = { nama: 'Kelalaian Pengesahan', tab: 'Kelalaian', ket: 'Putusan sidang yang belum disahkan musyrif, disahkan OSDA, dan disanggah', kata: 'kelalaian pengesahan musyrif lalai disahkan osda sanggah sidang tadib' };
+(function daftarkanKelalaian() {
+  const g = PA.GRUP.find(x => x.id === 'tindak');
+  if (g && !g.views.includes('kelalaian')) g.views.push('kelalaian');
+  PA.TANPA_SARING.add('kelalaian');
+  if (!LACI_TINDAK.includes('kelalaian')) LACI_TINDAK.push('kelalaian');
+  JUDUL.kelalaian = { ar: 'التقصير', teks: 'Kelalaian Pengesahan', lat: g ? g.label : 'Tindak Lanjut' };
+})();
+(function bungkusMenuSuperKelalaian() {
+  const asli = aturMenuSuper;
+  aturMenuSuper = function () {
+    const h = asli.apply(this, arguments);
+    document.querySelectorAll('[data-view="kelalaian"]').forEach(b => b.classList.toggle('hidden', !APP.superAdmin));
+    return h;
+  };
+})();
+
+/* ---------- halaman Kelalaian Pengesahan (super admin) ---------- */
+const KELALAIAN = { data: null };
+const NAMA_BLN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+const labelBln = (ym) => { const m = /^(\d{4})-(\d{2})/.exec(ym || ''); return m ? `${NAMA_BLN[Number(m[2]) - 1]} ${m[1]}` : (ym || '-'); };
+
+async function viewKelalaian() {
+  if (!APP.superAdmin) await periksaSuperAdmin();
+  if (APP.view !== 'kelalaian') return;
+  if (!APP.superAdmin) {
+    $('viewRoot').innerHTML = kartu('Kelalaian Pengesahan', `<div class="card-body">${kosong('Khusus super admin', 'Rekap kelalaian pengesahan musyrif hanya dibuka super admin chemint.', 'fa-user-shield')}</div>`);
+    return;
+  }
+  let d = null, galat = '';
+  try {
+    const { data, error } = await db.rpc('kelalaian_pengesahan');
+    if (error) throw error;
+    d = data || { musyrif: [], bulan: [] };
+  } catch (e) { galat = /kelalaian_pengesahan|does not exist|Could not find the function|PGRST202/i.test(String(e?.message || e?.code || e)) ? 'Rekap belum aktif di server. Terapkan migrasi v2.69 di Supabase.' : (e?.message || String(e)); }
+  if (APP.view !== 'kelalaian') return;
+  KELALAIAN.data = d;
+  gambarKelalaian(galat);
+}
+
+function gambarKelalaian(galat) {
+  const d = KELALAIAN.data || { musyrif: [], bulan: [] };
+  const M = d.musyrif || [], B = d.bulan || [];
+  const tot = M.reduce((a, x) => ({ diterima: a.diterima + x.diterima, sendiri: a.sendiri + x.sendiri, osda: a.osda + x.osda, belum: a.belum + x.belum, terkunci: a.terkunci + x.terkunci }),
+    { diterima: 0, sendiri: 0, osda: 0, belum: 0, terkunci: 0 });
+  const persen = (a, b) => b ? Math.round(a / b * 100) : 0;
+  const bilah = (x) => { const n = x.diterima || 1;
+    return `<span class="kl-bilah" role="img" aria-label="${angka(x.sendiri)} disahkan sendiri, ${angka(x.osda)} disahkan OSDA, ${angka(x.belum)} belum, ${angka(x.terkunci)} terkunci">
+      <i class="s" style="width:${x.sendiri / n * 100}%"></i><i class="o" style="width:${x.osda / n * 100}%"></i><i class="b" style="width:${x.belum / n * 100}%"></i><i class="t" style="width:${x.terkunci / n * 100}%"></i></span>`; };
+  const nada = (x) => (x.terkunci + x.osda + x.belum) / Math.max(1, x.diterima) >= .5 ? 'merah' : (x.belum + x.terkunci) ? 'kuning' : 'hijau';
+  $('viewRoot').innerHTML = `
+    ${galat ? `<p class="saran-galat"><i class="fa-solid fa-triangle-exclamation"></i>${esc(galat)}</p>` : ''}
+    <section class="kl-angka" aria-label="Ringkasan">
+      <div><b>${angka(tot.diterima)}</b><small>putusan diserahkan ke musyrif</small></div>
+      <div class="s"><b>${persen(tot.sendiri, tot.diterima)}%</b><small>disahkan musyrif sendiri</small></div>
+      <div class="o"><b>${angka(tot.osda)}</b><small>disahkan OSDA (musyrif lalai mengesahkan)</small></div>
+      <div class="b"><b>${angka(tot.belum)}</b><small>belum disahkan, bulan berjalan</small></div>
+      <div class="t"><b>${angka(tot.terkunci)}</b><small>tidak pernah disahkan, sudah Tutup Buku</small></div>
+    </section>
+    <div class="kl-kisi">
+      ${kartu('Per musyrif', `<div class="card-body">
+        <p class="bd-pengantar">Setiap putusan Sidang Ta'dib yang diserahkan ke musyrif. <b>Disahkan OSDA</b> berarti pembinaan sudah dijalankan tetapi baru disahkan majelis pada sidang berikutnya; <b>terkunci</b> berarti bulan itu sudah Tutup Buku sebelum disahkan.</p>
+        <p class="kl-legenda"><span class="s">disahkan sendiri</span><span class="o">disahkan OSDA</span><span class="b">belum</span><span class="t">terkunci</span></p>
+        ${M.length ? `<div class="table-wrap"><table class="kl-tabel"><thead><tr><th>Musyrif</th><th class="num">Diterima</th><th>Sebaran</th><th class="num">OSDA</th><th class="num">Disanggah</th><th class="num">Belum</th><th class="num">Terkunci</th><th class="num">Rata-rata</th><th class="num">Tertua</th></tr></thead>
+          <tbody>${M.map(x => `<tr class="kl-${nada(x)}"><td><b>${esc(x.nama || '-')}</b></td><td class="num">${angka(x.diterima)}</td><td>${bilah(x)}</td>
+            <td class="num">${angka(x.osda)}</td><td class="num">${angka(x.disanggah)}</td><td class="num">${angka(x.belum)}</td><td class="num">${angka(x.terkunci)}</td>
+            <td class="num">${x.rata_hari != null ? `${String(x.rata_hari).replace('.', ',')} hari` : '-'}</td><td class="num">${x.tertua_hari != null ? `${angka(x.tertua_hari)} hari` : '-'}</td></tr>`).join('')}</tbody></table></div>`
+          : kosong('Belum ada putusan', 'Putusan sidang yang diserahkan ke musyrif akan terekap di sini.', 'fa-gavel')}</div>`, '', 'diurutkan dari yang paling banyak belum/terlambat disahkan')}
+      ${kartu('Per bulan', `<div class="card-body">${B.length ? `<ul class="kl-bulan">${B.map(x => `<li><b>${esc(labelBln(x.bulan))}</b>${bilah(x)}
+          <small>${angka(x.diterima)} diterima · ${angka(x.sendiri)} sendiri · ${angka(x.osda)} OSDA · ${angka(x.belum)} belum${x.terkunci ? ` · <em>${angka(x.terkunci)} terkunci</em>` : ''}</small></li>`).join('')}</ul>`
+          : kosong('Belum ada data', '', 'fa-calendar')}
+        <p class="kl-catatan"><i class="fa-solid fa-lock"></i>Utas pesan pembinaan bulan yang sudah Tutup Buku ditutup otomatis; pembinaannya tetap tercatat belum disahkan sebagai bahan evaluasi.</p></div>`, '', '')}
+    </div>`;
+}
+
+/* ---------- Pembinaan: tanda "Disahkan OSDA" & sanggah musyrif ---------- */
+const OSDA_BINA = { peta: null, waktu: 0 };
+async function petaOsdaBina(paksa) {
+  if (!paksa && OSDA_BINA.peta && Date.now() - OSDA_BINA.waktu < 60000) return OSDA_BINA.peta;
+  try {
+    const { data, error } = await db.rpc('pengesahan_osda_daftar', { p_dari: null });
+    if (error) throw error;
+    OSDA_BINA.peta = new Map((data || []).map(x => [String(x.id), x]));
+    OSDA_BINA.waktu = Date.now();
+  } catch (e) { if (!OSDA_BINA.peta) OSDA_BINA.peta = new Map(); }
+  return OSDA_BINA.peta;
+}
+async function tandaiBinaOsda() {
+  const tb = $('tbBina'); if (!tb) return;
+  const peta = await petaOsdaBina();
+  if (!peta.size) return;
+  tb.querySelectorAll('tr[data-bina-id]').forEach(tr => {
+    const x = peta.get(tr.dataset.binaId); if (!x || tr.dataset.osda) return;
+    tr.dataset.osda = x.status;
+    const tdStatus = tr.children[tr.children.length - 2];
+    const saksi = (x.saksi || []).length ? ` · saksi ${x.saksi.join(', ')}` : '';
+    tdStatus?.insertAdjacentHTML('beforeend', x.status === 'sah'
+      ? `<div class="jejak-sah osda"><i class="fa-solid fa-stamp"></i>Disahkan OSDA · sidang ${esc(tgl(x.sesi_sah))}${esc(saksi)}${x.tertunda_hari != null ? ` · ${angka(x.tertunda_hari)} hari belum disahkan musyrif` : ''}</div>`
+      : `<div class="jejak-sah sanggah"><i class="fa-solid fa-hand"></i>Pengesahan OSDA disanggah ${esc(x.sanggah_nama || '')}: “${esc(x.sanggah_alasan || '')}”</div>`);
+    if (x.status === 'sah' && x.boleh_sanggah) {
+      const wadah = tr.querySelector('.aksi-bina');
+      const buka = wadah?.querySelector('[data-pbn$="|Dalam Proses"]');
+      const tombol = `<button class="btn btn-sanggah btn-sm" data-sanggah-osda="${esc(tr.dataset.binaId)}"
+        title="Pembinaan belum dijalankan? Sanggah sampai ${esc(tglJamWib(x.batas))}"><i class="fa-solid fa-hand"></i>Sanggah OSDA</button>`;
+      if (buka) buka.outerHTML = tombol; else wadah?.insertAdjacentHTML('beforeend', tombol);
+    }
+  });
+}
+(function bungkusBinaOsda() {
+  const asli = gambarBina;
+  gambarBina = async function () {
+    const h = await asli.apply(this, arguments);
+    try { await tandaiBinaOsda(); } catch (e) { console.warn('[osda]', e); }
+    return h;
+  };
+})();
+async function sanggahOsda(id) {
+  const x = (await petaOsdaBina())?.get(String(id));
+  if (!x) return toast('info', 'Data pengesahan OSDA tidak ditemukan. Muat ulang halaman.');
+  const res = await Swal.fire({
+    title: 'Sanggah pengesahan OSDA?', icon: 'warning', width: 580, showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-hand"></i> Sanggah', cancelButtonText: 'Batal', confirmButtonColor: '#9F1239',
+    showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
+    html: `<div class="ks-swal">
+      <p>Majelis OSDA mengesahkan pembinaan ini pada sidang <b>${esc(tgl(x.sesi_sah))}</b>${(x.saksi || []).length ? ` dengan saksi PJ <b>${esc(x.saksi.join(', '))}</b>` : ''}.
+      Sanggah bila ananda <b>belum</b> menjalankannya: status kembali “Dalam Proses”, OSDA menerima pesan, dan perkara dibacakan ulang pada sidang berikutnya.</p>
+      <p class="secondary" style="margin:0 0 8px">Batas sanggah: ${esc(tglJamWib(x.batas))} WIB</p>
+      <label class="saran-label" for="sgAlasan">Alasan sanggahan</label>
+      <textarea id="sgAlasan" rows="3" maxlength="500" placeholder="Contoh: ananda belum membersihkan kamar mandi."></textarea></div>`,
+    didOpen: (el) => setTimeout(() => el.querySelector('#sgAlasan')?.focus(), 60),
+    preConfirm: async () => {
+      const v = (Swal.getPopup().querySelector('#sgAlasan')?.value || '').trim();
+      if (v.length < 5) { Swal.showValidationMessage('Tuliskan alasan sanggahan (minimal 5 huruf).'); return false; }
+      try {
+        const { data, error } = await db.rpc('sidang_sanggah_pengesahan', { p_id: String(id), p_alasan: v });
+        if (error) throw error;
+        return data;
+      } catch (e) { Swal.showValidationMessage(e.message || 'Sanggahan gagal.'); return false; }
+    }
+  });
+  if (!res.isConfirmed) return;
+  toast('success', 'Pengesahan OSDA disanggah · perkara kembali ke sidang berikutnya');
+  OSDA_BINA.waktu = 0;
+  try { cacheHapus('pembinaan', 'laporan_bina', 'pesan_bk'); refreshBadgePesan(); } catch (e) {}
+  if (APP.view === 'pembinaan') gambarBina();
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest?.('[data-sanggah-osda]');
+  if (b) { e.preventDefault(); e.stopPropagation(); sanggahOsda(b.dataset.sanggahOsda); }
+}, true);
+
+/* ---------- catat pelanggaran bidang Bahasa: "Ucapan yang terdengar" ---------- */
+const CATATAN_UNTUK = { fKode: 'fCatatan', mpKode: 'mpCatatan', pgKode: 'pgCatatan', msKode: 'msCatatan' };
+function terapkanLabelUcapan(input, m) {
+  const c = $(CATATAN_UNTUK[input?.id] || ''); if (!c) return;
+  const bahasa = String(m?.bidang || '').trim().toLowerCase() === 'bahasa';
+  if (c.dataset.phAsli == null) c.dataset.phAsli = c.getAttribute('placeholder') || '';
+  c.setAttribute('placeholder', bahasa ? 'Tulis kalimatnya persis seperti yang terdengar, mis. “aku mau ke kamar mandi dulu”' : c.dataset.phAsli);
+  c.classList.toggle('input-ucapan', bahasa);
+  const lb = c.closest('.field')?.querySelector('.label');
+  if (lb) { if (lb.dataset.asli == null) lb.dataset.asli = lb.textContent; lb.textContent = bahasa ? 'Ucapan yang terdengar' : lb.dataset.asli; }
+  let h = c.parentElement.querySelector('.ucapan-hint');
+  if (bahasa && !h) {
+    c.insertAdjacentHTML('afterend', `<p class="hint ucapan-hint"><i class="fa-solid fa-quote-left"></i> Bidang Bahasa: tulis <b>ucapan yang terdengar</b>, bukan ringkasannya. Kalimat ini dibacakan di Sidang Ta'dib sebagai alat bukti.</p>`);
+  } else if (!bahasa && h) h.remove();
+}
+(function bungkusSaranUcapan() {
+  const asli = saranPelanggaran;
+  saranPelanggaran = function (input, onPilih) {
+    return asli.call(this, input, function (m) {
+      try { terapkanLabelUcapan(input, m); } catch (e) {}
+      return typeof onPilih === 'function' ? onPilih.apply(this, arguments) : undefined;
+    });
+  };
+})();
