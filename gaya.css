@@ -10020,3 +10020,65 @@ html.hemat #ruangSidang :is(.sd-sakura, .sd-sampul) { display:none; }
 /* v2.70: saran di formulir majelis tidak tertutup tombol Batal/Simpan; saran Pembimbing (isian terakhir) membuka ke atas */
 .sd-mj-pop .swal2-html-container { position:relative; z-index:3; overflow:visible; }
 .sd-calon.sd-calon-guru { top:auto; bottom:44px; box-shadow:0 -14px 30px -12px rgba(28,26,46,.35); }
+
+/* =====================================================================
+   v2.71 · Catat lengkap, keterangan di laporan, motor izin
+   ===================================================================== */
+/* Formulir Catat: catatan selebar penuh + jalan ke Input Massal */
+#fCatatan { resize:vertical; min-height:56px; }
+.catat-ke-massal {
+  display:flex; align-items:center; gap:10px; width:100%; padding:9px 12px; margin-top:2px;
+  border:1px dashed color-mix(in oklab, var(--sea) 40%, white); border-radius:var(--r);
+  background:color-mix(in oklab, var(--sea) 5%, white); color:var(--navy); font:inherit; font-size:13px;
+  text-align:left; cursor:pointer; transition:background .15s, border-color .15s;
+}
+.catat-ke-massal span { flex:1; }
+.catat-ke-massal > i:first-child { color:var(--sea); }
+.catat-ke-massal > i:last-child { color:var(--text-3); font-size:11px; transition:transform .15s; }
+.catat-ke-massal:hover { background:color-mix(in oklab, var(--sea) 11%, white); border-color:var(--sea); }
+.catat-ke-massal:hover > i:last-child { transform:translateX(3px); }
+.wajib-ket { color:var(--maroon); font-weight:600; font-size:.92em; }
+
+/* Massal: kolom ucapan per santri */
+.mchips.ms-ucapan { flex-direction:column; flex-wrap:nowrap; max-height:260px; }
+.mchips.ms-ucapan .mchip { display:grid; grid-template-columns:minmax(0, 11em) auto minmax(0, 1fr) auto; width:100%;
+  border-radius:12px; padding:5px 6px 5px 11px; }
+.mchips.ms-ucapan .mchip .nis { white-space:nowrap; }
+.mchip-ucapan { min-width:0; padding:6px 9px; font-family:'Instrument Serif', Georgia, serif; font-size:15px;
+  border-color:#F59E0B; background:#FFFBEB; }
+@media (max-width: 520px) {
+  .mchips.ms-ucapan .mchip { grid-template-columns:minmax(0, 1fr) auto auto; }
+  .mchips.ms-ucapan .mchip-ucapan { grid-column:1 / -1; grid-row:2; }
+}
+
+/* Pedoman: sakelar keterangan di laporan */
+.ket-lap { display:inline-flex; align-items:center; gap:5px; margin-top:4px; padding:2px 8px; border-radius:20px;
+  border:1px dashed var(--line); background:transparent; color:var(--text-3); font:inherit; font-size:11px; cursor:pointer; }
+.ket-lap i { font-size:9px; }
+.ket-lap.on { border-style:solid; border-color:#F59E0B; background:#FFFBEB; color:#92400E; }
+span.ket-lap { cursor:default; }
+button.ket-lap:hover { border-color:var(--sea); color:var(--navy); }
+.ket-sakelar { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border-radius:var(--r);
+  border:1px solid #FCD9A0; background:#FFFBEB; text-align:left; font-size:13px; cursor:pointer; }
+.ket-sakelar input { margin-top:3px; accent-color:#B45309; }
+.ket-sakelar small { color:var(--text-3); }
+
+/* Motor izin — monster melaju, asap knalpot tertinggal (≤ 1,6 dtk) */
+.mt-pentas { position:fixed; inset:0; z-index:1240; pointer-events:none; overflow:hidden; contain:strict; }
+.mt-pengendara { position:absolute; left:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 92px); width:168px; height:108px;
+  will-change:transform; --mt-warna:#9F1239; --mt-garis:#E8CC6B; }
+.mt-pentas.putri .mt-pengendara { --mt-warna:#7C3AED; --mt-garis:#F9C2D8; }
+.mt-svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible;
+  transform-box:fill-box; transform-origin:20% 75%; filter:drop-shadow(0 6px 6px rgb(6 24 38 / .22)); }
+.mt-svg .mt-roda { transform-box:fill-box; transform-origin:center; }
+.mt-svg .mt-mon { transform-box:fill-box; transform-origin:50% 90%; }
+.mt-garis { position:absolute; left:-46px; top:36%; width:58px; height:34px; opacity:0; }
+.mt-garis i { position:absolute; right:0; height:3px; border-radius:3px;
+  background:linear-gradient(90deg, transparent, color-mix(in oklab, var(--mt-garis) 85%, white)); }
+.mt-garis i:nth-child(1) { top:0; width:70%; }
+.mt-garis i:nth-child(2) { top:14px; width:100%; }
+.mt-garis i:nth-child(3) { top:28px; width:55%; }
+.mt-asap { position:fixed; border-radius:50%; opacity:0; transform:translate(-50%, -50%);
+  background:radial-gradient(circle at 38% 36%, #e8ecf4, #a3adc2 55%, rgb(110 122 148 / 0) 72%); }
+@media (min-width: 900px) { .mt-pengendara { bottom:36px; width:200px; height:128px; } }
+@media (prefers-reduced-motion: reduce) { .mt-pentas { display:none; } }

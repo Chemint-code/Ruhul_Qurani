@@ -4914,17 +4914,20 @@ async function modalCatatPelanggaran(prefill) {
                placeholder="Ketik kode, nama, kategori, atau bidang…" value="${esc(p.labelKode||'')}">
         <div id="fKodeInfo" class="hint"></div>
       </div>
-      <div class="duo">
-        <div class="field"><label class="label">Tanggal</label>
-          <input id="fTanggal" type="date" class="input" value="${p.tanggal||hariIni()}"></div>
-        <div class="field"><label class="label">Catatan</label>
-          <input id="fCatatan" class="input" placeholder="opsional" value="${esc(p.catatan||'')}"></div>
-      </div></div>`,
+      <div class="field"><label class="label">Tanggal</label>
+        <input id="fTanggal" type="date" class="input" value="${p.tanggal||hariIni()}"></div>
+      <div class="field"><label class="label">Catatan</label>
+        <textarea id="fCatatan" class="input" rows="2" maxlength="500" placeholder="opsional">${esc(p.catatan||'')}</textarea></div>
+      ${bolehTulis() ? `<button type="button" class="catat-ke-massal" id="fKeMassal">
+        <i class="fa-solid fa-users-rectangle"></i><span>Banyak santri sekaligus? <b>Input Massal</b></span>
+        <i class="fa-solid fa-arrow-right"></i></button>` : ''}
+      </div>`,
     didOpen: () => {
       const fNisn = $('fNisn'), fKode = $('fKode');
       if (p.nisn) fNisn.dataset.picked = p.nisn;
       if (p.kode) fKode.dataset.kode = p.kode;
       saranSantri(fNisn);
+      $('fKeMassal')?.addEventListener('click', () => catatKeMassal());   // v2.71
       saranPelanggaran(fKode, (m) => {
         $('fKodeInfo').innerHTML =
           `<span class="tag ${tagKategori(m.kategori)}">${esc(m.kategori)}</span>
@@ -7374,7 +7377,7 @@ async function gambarMaster() {
   if (cnt) cnt.textContent = `${angka(rows.length)} jenis`;
   tb.innerHTML = rows.map(m => `<tr>
     <td class="secondary nowrap">${esc(m.kode_pelanggaran)}</td>
-    <td><div class="primary">${esc(m.nama_pelanggaran)}</div></td>
+    <td><div class="primary">${esc(m.nama_pelanggaran)}</div>${tombolKetLaporan(m)}</td>
     <td><span class="tag ${tagKategori(m.kategori)}">${esc(m.kategori)}</span></td>
     <td class="num center">${m.bobot_poin}</td>
     <td>${esc(m.sumber||'-')}<br>
@@ -7458,6 +7461,9 @@ async function modalMaster(existing) {
         <input id="mBidang" class="input" autocomplete="off" value="${esc(m.bidang||'')}"
                placeholder="Ketik: ubu, bahasa, atribut…">
         <p class="hint">Dipilih dari Master Bidang. ${bidang.length ? '' : 'Master Bidang masih kosong. Isi terlebih dahulu.'}</p></div>
+      <label class="ket-sakelar"><input id="mKet" type="checkbox" ${m.tampil_keterangan ? 'checked' : ''}>
+        <span><b>Tampilkan keterangan di laporan individu</b><br>
+        <small>Catatan/ucapan pencatat dicetak di bawah nama pelanggaran dan wajib diisi saat mencatat.</small></span></label>
     </div>`,
     didOpen: () => saranBidang($('mBidang')),
     preConfirm: async () => {
@@ -7469,7 +7475,8 @@ async function modalMaster(existing) {
         sumber: $('mSumber').value,
         bidang: $('mBidang').value.trim(),
         jenjang: $('mJenjang').value,
-        unit_gender: $('mUnit').value
+        unit_gender: $('mUnit').value,
+        tampil_keterangan: !!$('mKet')?.checked   // v2.71
       };
       if (!payload.kode_pelanggaran || !payload.nama_pelanggaran) {
         Swal.showValidationMessage('Kode dan nama pelanggaran wajib diisi.'); return false;
@@ -8879,24 +8886,11 @@ function bangunLaporanHTML(data) {
                                data.pembinaanPenuh || data.pembinaan, data.instrumen);
   const kesimpulan = kesimpulanSementara(data, rekap);
 
-  // ---- Bahan bagian 4 (prestasi), 5 (tahfiz) & 7 (target) ----
+  // ---- Bahan bagian 4 (prestasi) & 6 (target) ----
+  // v2.71: Capaian Tahfiz tidak lagi dicetak di laporan individu
+  // (fitur & data tahfiz tetap aktif di aplikasi).
   const prestasi = data.prestasi || [];
   const totalPoinPrestasi = prestasi.reduce((a, r) => a + (Number(r.poin) || 0), 0);
-
-  const tahfiz = data.tahfiz || [];
-  const tahfizPenuh = data.tahfizPenuh || tahfiz;
-  const jml = (arr, f) => arr.reduce((a, r) => a + (Number(r[f]) || 0), 0);
-  const thfZiyadah  = tahfiz.filter(r => /ziyadah/i.test(r.jenis || '')).length;
-  const thfMurajaah = tahfiz.filter(r => /muraja/i.test(r.jenis || '')).length;
-  const thfHalaman  = Math.round(jml(tahfiz, 'capaian_halaman') * 10) / 10;
-  const thfJuz      = Math.round((thfHalaman / HALAMAN_PER_JUZ) * 100) / 100;
-  const thfTotalHalaman = Math.round(jml(tahfizPenuh, 'capaian_halaman') * 10) / 10;
-  const thfTotalJuz = Math.round((thfTotalHalaman / HALAMAN_PER_JUZ) * 100) / 100;
-  const thfLancar = (() => {
-    const h = {};
-    tahfiz.forEach(r => { const k = String(r.kelancaran || '').trim(); if (k) h[k] = (h[k] || 0) + 1; });
-    return Object.entries(h).sort((a, b) => b[1] - a[1])[0]?.[0] || NA_DATA;
-  })();
 
   const goalGabungan = [...(data.goalLalu || []), ...(data.goal || [])];
 
@@ -8971,7 +8965,7 @@ function bangunLaporanHTML(data) {
                <span style="display:block;font-weight:normal;font-size:9px;color:#94a3b8;">
                  (ke-${p.urutanKategori} dari batas ${p.batas})</span></td>`
           : td(p.bentukPembinaan, bg);
-        return `<tr>${td(tgl(p.tanggal), bg)}${td(p.bidang||'-', bg)}${td(p.judul, bg)}`
+        return `<tr>${td(tgl(p.tanggal), bg)}${td(p.bidang||'-', bg)}${selCatatanLaporan(p, bg, data.namaBerketerangan)}`
              + `${td(p.kategori, bg)}${td(p.poin, bg + 'text-align:center')}${selPembinaan}</tr>`;
       }, 'Tidak ada catatan perkembangan pada periode ini.', 6)}</tbody>
     </table>
@@ -8992,41 +8986,11 @@ function bangunLaporanHTML(data) {
     </table>
 
     <h3 style="${H3}">
-      5. Capaian Tahfiz${aktif ? ' (' + esc(labelPer) + ')' : ''}</h3>
-    <table style="${TABEL}font-size:11px;margin-bottom:7px;">
-      <tbody>
-        <tr><td style="border:1px solid #cbd5e1;padding:5px;width:60%;">Setoran ziyadah (hafalan baru)</td>
-            <td style="border:1px solid #cbd5e1;padding:5px;text-align:right;font-weight:bold;">${thfZiyadah} kali</td></tr>
-        <tr><td style="border:1px solid #cbd5e1;padding:5px;">Murajaah (pengulangan)</td>
-            <td style="border:1px solid #cbd5e1;padding:5px;text-align:right;font-weight:bold;">${thfMurajaah} kali</td></tr>
-        <tr><td style="border:1px solid #cbd5e1;padding:5px;">Halaman terkumpul pada periode ini</td>
-            <td style="border:1px solid #cbd5e1;padding:5px;text-align:right;font-weight:bold;">${thfHalaman} hlm (± ${thfJuz} juz)</td></tr>
-        <tr><td style="border:1px solid #cbd5e1;padding:5px;">Akumulasi seluruh riwayat</td>
-            <td style="border:1px solid #cbd5e1;padding:5px;text-align:right;font-weight:bold;">${thfTotalHalaman} hlm (± ${thfTotalJuz} juz)</td></tr>
-        <tr><td style="border:1px solid #cbd5e1;padding:5px;">Kelancaran dominan</td>
-            <td style="border:1px solid #cbd5e1;padding:5px;text-align:right;font-weight:bold;">${esc(thfLancar)}</td></tr>
-      </tbody>
-    </table>
-    <table style="${TABEL}font-size:10.5px;">
-      <thead><tr>${['Tanggal','Jenis','Surah / Ayat','Halaman','Kelancaran','Musyrif'].map(th).join('')}</tr></thead>
-      <tbody>${baris(tahfiz.slice(0, 20), r =>
-        `<tr>${td(tgl(r.tanggal))}${td(r.jenis||'-')}`
-        + `${td(`${r.surah || '-'}${r.ayat_dari ? ` : ${r.ayat_dari}${r.ayat_ke ? '–' + r.ayat_ke : ''}` : ''}`)}`
-        + `${td(Number(r.capaian_halaman)||0, 'text-align:center')}${td(r.kelancaran||'-')}${td(r.musyrif||'-')}</tr>`,
-        'Belum ada setoran tahfiz pada periode ini.', 6)}</tbody>
-    </table>
+      5. Riwayat Perizinan${aktif ? ' (' + esc(labelPer) + ')' : ''}</h3>
+    ${izinLaporanHTML(data.perizinan, data.izinKlinik, { th, TABEL })}
 
     <h3 style="${H3}">
-      6. Riwayat Perizinan${aktif ? ' (' + esc(labelPer) + ')' : ''}</h3>
-    <table style="${TABEL}font-size:11px;">
-      <thead><tr>${['Mulai','Selesai','Jenis','Alasan','Status'].map(th).join('')}</tr></thead>
-      <tbody>${baris(data.perizinan, z =>
-        `<tr>${td(tgl(z.tanggal_mulai))}${td(tgl(z.tanggal_selesai))}${td(z.jenis_izin)}${td(z.alasan||'-')}${td(z.status_persetujuan)}</tr>`,
-        'Tidak ada perizinan pada periode ini.', 5)}</tbody>
-    </table>
-
-    <h3 style="${H3}">
-      7. Target Pembinaan &amp; Tindak Lanjut</h3>
+      6. Target Pembinaan &amp; Tindak Lanjut</h3>
     <table style="${TABEL}font-size:10.5px;">
       <thead><tr>${['Periode','Target','Indikator Keberhasilan','Status','Evaluasi'].map(th).join('')}</tr></thead>
       <tbody>${baris(goalGabungan, g => {
@@ -9041,7 +9005,7 @@ function bangunLaporanHTML(data) {
     </table>
 
     <h3 style="${H3}">
-      8. Kesimpulan Sementara${aktif ? ' (' + esc(labelPer) + ')' : ''}</h3>
+      7. Kesimpulan Sementara${aktif ? ' (' + esc(labelPer) + ')' : ''}</h3>
     ${bagianKesimpulanCetak(kesimpulan)}
 
     ${blokPenutupCetak(data.penanggungJawab, dicetak)}
@@ -9209,19 +9173,21 @@ async function ambilLaporan(nisn) {
     }
   }
 
-  // Tabel baru (prestasi, tahfiz, target) belum ada di RPC lama —
+  // Tabel baru (prestasi, target) belum ada di RPC lama —
   // diambil terpisah dan tidak menggagalkan laporan bila belum dipasang.
-  const [prestasi, tahfiz, goal] = await Promise.all([
+  // v2.71: tahfiz tidak lagi dibaca untuk laporan individu; sebagai
+  // gantinya master (keterangan bersakelar) & asal izin klinik.
+  const [prestasi, master, izinKlinik, goal] = await Promise.all([
     amanKosong(async () => {
       const { data: r, error } = await db.from('log_prestasi').select('*')
         .eq('nisn', String(nisn)).order('tanggal', { ascending:false });
       if (error) throw error; return (r || []).filter(aktifPrestasi);
     }, 'prestasi santri'),
+    amanKosong(muatMaster, 'master pelanggaran'),
     amanKosong(async () => {
-      const { data: r, error } = await db.from('log_tahfiz').select('*')
-        .eq('nisn', String(nisn)).order('tanggal', { ascending:false });
-      if (error) throw error; return (r || []).filter(aktifTahfiz);
-    }, 'tahfiz santri'),
+      const { data: r, error } = await db.rpc('izin_asal_klinik', { p_nisn: String(nisn) });
+      if (error) throw error; return r || [];
+    }, 'asal izin klinik'),
     amanKosong(async () => {
       const { data: r, error } = await db.from('goal_santri').select('*')
         .eq('nisn', String(nisn)).order('periode', { ascending:false });
@@ -9230,8 +9196,9 @@ async function ambilLaporan(nisn) {
   ]);
 
   data.prestasi = prestasi;
-  data.tahfiz = tahfiz;
   data.goal = goal;
+  data.namaBerketerangan = namaBerketeranganSantri(master, data.siswa);
+  data.izinKlinik = izinKlinik;
   return data;
 }
 
@@ -31410,8 +31377,9 @@ bukaBantuan = function () {
  * ===================================================================== */
 APP.versi = 'rq-v2.54.1';
 
-MENU_ROLE.asatidz  = [...SEMUA_ROLE];
-MENU_ROLE.pendidik = [...SEMUA_ROLE];
+// v2.71: OSIM (peran Osis) tidak membuka Para Pendidik — juga ditolak di RPC.
+MENU_ROLE.asatidz  = SEMUA_ROLE.filter(r => r !== 'Osis');
+MENU_ROLE.pendidik = SEMUA_ROLE.filter(r => r !== 'Osis');
 JUDUL.asatidz  = { lat:'Asatidz', ar:'الأساتذة',     teks:'Para Pendidik' };
 JUDUL.pendidik = { lat:'Asatidz', ar:'سيرة الأستاذ', teks:'Profil Pendidik' };
 
@@ -35035,5 +35003,446 @@ function terapkanLabelUcapan(input, m) {
       try { terapkanLabelUcapan(input, m); } catch (e) {}
       return typeof onPilih === 'function' ? onPilih.apply(this, arguments) : undefined;
     });
+  };
+})();
+
+/* =====================================================================
+ * v2.71 · LAPORAN RAMPING, MOTOR IZIN, CATAT LENGKAP
+ * ---------------------------------------------------------------------
+ *  Rancangan: claude/rancangan-v2.71-laporan-ramping.md (disetujui 9 Nov 2026)
+ *  A · Keterangan pelanggaran bersakelar (master_pelanggaran.tampil_keterangan)
+ *      dicetak di laporan individu dan wajib diisi saat mencatat.
+ *  B · Riwayat izin di laporan: keterangan + satu baris jejak
+ *      (asal klinik › pemberi izin › perpanjangan n× s.d. … (terakhir: …)).
+ *      Data log_perizinan TIDAK diubah; hanya cara mencetaknya.
+ *  C · Capaian Tahfiz keluar dari laporan individu (fitur tahfiz tetap aktif).
+ *  D · Motor izin: monster berpeci/berjilbab melaju saat izin BARU tersimpan.
+ *  E · OSIM tidak membuka Para Pendidik (MENU_ROLE + penjaga RPC).
+ *  F · Tombol Catat: catatan selebar penuh ("Ucapan yang terdengar" untuk
+ *      bidang Bahasa), pindah ke Input Massal, ucapan per santri di Massal.
+ *  Fungsi lama tidak ditimpa: suntingan terarah + pembungkus.
+ * ===================================================================== */
+APP.versi = 'rq-v2.71';   // v2.71: laporan ramping (keterangan, jejak izin, tanpa tahfiz), motor izin, Catat lengkap, OSIM tanpa Para Pendidik
+
+/* ---------- A · Keterangan pelanggaran di laporan -------------------- */
+const KET71 = { MAKS: 120, MIN_ISI: 2 };
+
+/** Baris master untuk satu kode, dari cache (sinkron). null bila belum termuat. */
+function masterKode71(kode) {
+  const k = String(kode || '').trim(); if (!k) return null;
+  const daftar = (CACHE.master && CACHE.master.v) || [];
+  return daftar.find(m => String(m.kode_pelanggaran).trim() === k) || null;
+}
+const kodeBerketerangan = (kode) => !!masterKode71(kode)?.tampil_keterangan;
+const bidangBahasa71 = (b) => String(b || '').trim().toLowerCase() === 'bahasa';
+
+/** Nama pelanggaran (huruf kecil) yang keterangannya dicetak untuk unit santri ini.
+ *  Baris laporan tidak membawa kode, jadi dicocokkan lewat nama + unit:
+ *  butir kembar putra–putri (mis. P216 vs PI-010) tetap terpisah. */
+function namaBerketeranganSantri(master, siswa) {
+  const set = new Set();
+  if (!Array.isArray(master) || !master.length) return set;
+  const unit = unitBaris(siswa) || UNIT_PUTRA;
+  const perNama = new Map();
+  master.forEach(m => {
+    const k = String(m.nama_pelanggaran || '').trim().toLowerCase(); if (!k) return;
+    if (!perNama.has(k)) perNama.set(k, []);
+    perNama.get(k).push(m);
+  });
+  perNama.forEach((arr, k) => {
+    const pilih = arr.find(m => normalUnit(m.unit_gender) === unit)
+               || arr.find(m => !normalUnit(m.unit_gender)) || arr[0];
+    if (pilih && pilih.tampil_keterangan) set.add(k);
+  });
+  return set;
+}
+
+/** Sel "Catatan" bagian 3 laporan: nama pelanggaran (+ keterangan bila bersakelar). */
+function selCatatanLaporan(p, bg, set) {
+  const ket = String(p.catatan || '').trim();
+  const kunci = String(p.judul || '').trim().toLowerCase();
+  let tambah = '';
+  if (ket && set && set.has(kunci)) {
+    const potong = ket.length > KET71.MAKS ? ket.slice(0, KET71.MAKS - 1).trimEnd() + '…' : ket;
+    const label = bidangBahasa71(p.bidang) ? 'Ucapan' : 'Keterangan';
+    tambah = `<span style="display:block;font-size:9.5px;font-style:italic;color:#475569;margin-top:1px;">${label}: «${esc(potong)}»</span>`;
+  }
+  return `<td style="border:1px solid #cbd5e1;padding:5px;${bg || ''}">${esc(p.judul || '-')}${tambah}</td>`;
+}
+
+/** Penanda/sakelar di daftar Pedoman Pelanggaran. */
+function tombolKetLaporan(m) {
+  const on = !!m.tampil_keterangan;
+  if (!isAdmin()) return on
+    ? `<span class="ket-lap on" title="Keterangan pencatat dicetak di laporan individu"><i class="fa-solid fa-quote-left"></i>Keterangan di laporan</span>` : '';
+  return `<button type="button" class="ket-lap${on ? ' on' : ''}" data-ketlap="${esc(m.kode_pelanggaran)}" aria-pressed="${on}"
+    title="${on ? 'Keterangan dicetak di laporan individu dan wajib diisi. Klik untuk mematikan.' : 'Klik agar keterangan pencatat dicetak di laporan individu (dan wajib diisi).'}">
+    <i class="fa-solid fa-quote-left"></i>${on ? 'Keterangan di laporan' : 'Tampilkan keterangan'}</button>`;
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest?.('[data-ketlap]'); if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  if (!isAdmin() || b.disabled) return;
+  const kode = b.dataset.ketlap;
+  const m = (await muatMaster()).find(x => String(x.kode_pelanggaran) === kode);
+  if (!m) return;
+  const baru = !m.tampil_keterangan;
+  b.disabled = true;
+  const { error } = await db.from('master_pelanggaran').update({ tampil_keterangan: baru }).eq('kode_pelanggaran', kode);
+  b.disabled = false;
+  if (error) {
+    return toast('error', /tampil_keterangan/.test(error.message || '')
+      ? 'Kolom keterangan belum dipasang. Jalankan migrasi 20261109_v2_71_laporan_ramping.sql.' : error.message);
+  }
+  cacheHapus('master');
+  toast('success', `${kode}: keterangan ${baru ? 'dicetak' : 'tidak lagi dicetak'} di laporan individu`);
+  try { await gambarMaster(); } catch (err) {}
+}, true);
+
+/* ---------- B · Jejak izin ------------------------------------------- */
+const BLN71 = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+// Alasan perpanjangan boleh memuat baris baru, jadi blok dicari pada teks utuh:
+// berakhir di "]" yang disusul blok perpanjangan berikutnya atau akhir teks.
+const RE_PERPANJANG71 = /\[Perpanjangan\s+(.+?)\s+→\s+(.+?)\s+oleh\s+(.+?)\s+pada\s+(\d{1,2}\s+\S+\s+\d{4}):\s*([\s\S]*?)\]\s*(?=\[Perpanjangan\s|$)/g;
+const RE_KLINIK_AWAL71 = /^(Dipulangkan|Pemeriksaan lanjutan)\s+atas saran klinik\s*[—–-]?\s*/i;
+const RE_KLINIK_LAP71 = /\s*\(laporan klinik\s+([^)]+)\)\s*/i;
+const MAKS_KET_IZIN71 = 160;
+const LABEL_STATUS71 = { 'Sesuai Waktu': 'Kembali tepat waktu', 'Telat Balik': 'Telat kembali', 'Pending': 'Belum kembali' };
+
+function pecahTgl71(v) {
+  const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? { y: +m[1], m: +m[2], d: +m[3] } : null;
+}
+const ddmm71 = (v) => { const t = pecahTgl71(v); return t ? `${String(t.d).padStart(2, '0')}/${String(t.m).padStart(2, '0')}` : ''; };
+const tglPendek71 = (t, tahun) => `${String(t.d).padStart(2, '0')} ${BLN71[t.m - 1]}${tahun ? ' ' + t.y : ''}`;
+
+/** "04–08 Nov (5 hr)" · "29 Okt–10 Nov (13 hr)" · "30 Des 2026–02 Jan 2027 (4 hr)" · "04 Nov". */
+function rentangIzin71(mulai, selesai) {
+  const a = pecahTgl71(mulai), b = pecahTgl71(selesai) || a;
+  if (!a) return b ? tglPendek71(b) : '-';
+  const hari = Math.round((Date.UTC(b.y, b.m - 1, b.d) - Date.UTC(a.y, a.m - 1, a.d)) / 864e5) + 1;
+  let teks;
+  if (hari <= 1) return tglPendek71(a);
+  if (a.y !== b.y) teks = `${tglPendek71(a, true)}–${tglPendek71(b, true)}`;
+  else if (a.m !== b.m) teks = `${tglPendek71(a)}–${tglPendek71(b)}`;
+  else teks = `${String(a.d).padStart(2, '0')}–${tglPendek71(b)}`;
+  return `${teks} (${hari} hr)`;
+}
+
+/**
+ * Urai satu baris log_perizinan menjadi bahan cetak ramping.
+ * `klinik` = baris izin_asal_klinik() untuk izin ini (atau null).
+ * Murni: tidak membaca DOM/jaringan — diuji terhadap seluruh izin berperpanjangan.
+ */
+function jejakIzin71(z, klinik) {
+  const pj = [];
+  const rapat = (t) => String(t || '').replace(/\s+/g, ' ').trim();
+  const sisa = String(z.alasan || '').replace(RE_PERPANJANG71, (_, dari, ke, oleh, pada, alasan) => {
+    pj.push({ dari, ke, oleh: oleh.replace(/\s*\([^()]*\)\s*$/, '').trim(), pada, alasan: rapat(alasan) });
+    return '\n';
+  });
+
+  let teks = sisa.split(/\r?\n/).map(t => t.trim()).filter(Boolean).join(' · ');
+  let asal = null;                               // { jenis: 'pulang'|'rujuk', tgl: 'dd/mm' }
+  const mAwal = teks.match(RE_KLINIK_AWAL71);
+  if (mAwal) { asal = { jenis: /^Dipulangkan/i.test(mAwal[1]) ? 'pulang' : 'rujuk' }; teks = teks.slice(mAwal[0].length); }
+  const mLap = teks.match(RE_KLINIK_LAP71);
+  if (mLap) { asal = asal || {}; asal.tgl = mLap[1].trim(); teks = teks.replace(mLap[0], ' '); }
+  if (klinik) {
+    asal = asal || {};
+    asal.tgl = asal.tgl || ddmm71(klinik.tgl_klinik);
+    asal.jenis = asal.jenis || (klinik.jenis === 'rujuk' ? 'rujuk' : klinik.jenis === 'pulang' ? 'pulang' : null);
+  }
+  teks = teks.replace(/\s+/g, ' ').replace(/^[\s·—–-]+|[\s·—–-]+$/g, '');
+  // Izin lama tanpa alasan awal: alasan perpanjangan pertama paling dekat dengan alasannya.
+  if (!teks) teks = asal ? (asal.jenis === 'rujuk' ? 'Pemeriksaan lanjutan' : 'Dipulangkan') : (pj[0]?.alasan || '-');
+  if (teks.length > MAKS_KET_IZIN71) teks = teks.slice(0, MAKS_KET_IZIN71 - 1).trimEnd() + '…';
+
+  const simpul = [];
+  if (asal) simpul.push(`Klinik${asal.tgl ? ' ' + asal.tgl : ''}${asal.jenis ? ` (${asal.jenis === 'rujuk' ? 'dirujuk' : 'dipulangkan'})` : ''}`);
+  const pemberi = String(z.pemberi_izin || '').trim();
+  if (pemberi) simpul.push(asal ? `disetujui ${pemberi}` : `Diizinkan ${pemberi}`);
+  if (pj.length) {
+    const akhir = pj[pj.length - 1];
+    const oleh = [...new Set(pj.map(x => x.oleh))].filter(n => n && n !== pemberi);
+    const sd = pecahTgl71(z.tanggal_selesai);
+    simpul.push(`diperpanjang ${pj.length}×${oleh.length ? ' oleh ' + oleh.join(', ') : ''}`
+      + `${sd ? ' s.d. ' + tglPendek71(sd) : ''}${akhir.alasan ? ` (terakhir: ${akhir.alasan.length > 80 ? akhir.alasan.slice(0, 79).trimEnd() + '…' : akhir.alasan})` : ''}`);
+  }
+
+  const st = String(z.status_persetujuan || '').trim();
+  return {
+    tanggal: rentangIzin71(z.tanggal_mulai, z.tanggal_selesai),
+    jenis: String(z.jenis_izin || '-'),
+    keterangan: teks,
+    jejak: simpul.join(' › '),
+    status: LABEL_STATUS71[st] || st || '-',
+    perpanjangan: pj.length,
+    dariKlinik: !!asal
+  };
+}
+
+/** Tabel bagian 5 (Riwayat Perizinan) — ramping, jejak tetap terbaca. */
+function izinLaporanHTML(list, klinikRows, { th, TABEL }) {
+  const peta = new Map((Array.isArray(klinikRows) ? klinikRows : []).map(r => [String(r.id_izin), r]));
+  const sel = 'border:1px solid #cbd5e1;padding:5px;vertical-align:top;';
+  const isi = (list || []).map(z => {
+    const j = jejakIzin71(z, peta.get(String(z.id_izin)) || null);
+    return `<tr><td style="${sel}white-space:nowrap;">${esc(j.tanggal)}</td><td style="${sel}">${esc(j.jenis)}</td>`
+      + `<td style="${sel}">${esc(j.keterangan)}${j.jejak
+          ? `<span style="display:block;font-size:9.5px;color:#64748b;margin-top:1px;">${esc(j.jejak)}</span>` : ''}</td>`
+      + `<td style="${sel}white-space:nowrap;">${esc(j.status)}</td></tr>`;
+  }).join('');
+  return `<table style="${TABEL}font-size:11px;">
+      <thead><tr>${['Tanggal', 'Jenis', 'Keterangan & Jejak', 'Status'].map(th).join('')}</tr></thead>
+      <tbody>${isi || `<tr><td colspan="4" style="text-align:center;padding:10px;color:#94a3b8;">Tidak ada perizinan pada periode ini.</td></tr>`}</tbody>
+    </table>`;
+}
+
+/* ---------- F · Catat: wajib keterangan, pindah ke Massal, ucapan per santri ---------- */
+MASSAL.ucapan = {};
+
+/** Tanda "wajib" pada kolom catatan bila peraturan bersakelar dipilih. */
+function tandaiWajibKet71(input, m) {
+  const c = $(CATATAN_UNTUK[input?.id] || ''); if (!c) return;
+  const wajib = !!m?.tampil_keterangan;
+  c.toggleAttribute('data-wajib-ket', wajib);
+  const lb = c.closest('.field')?.querySelector('.label');
+  lb?.querySelector('.wajib-ket')?.remove();
+  if (wajib && lb) lb.insertAdjacentHTML('beforeend', ' <span class="wajib-ket">· wajib</span>');
+  if (wajib && !bidangBahasa71(m.bidang)) c.setAttribute('placeholder', 'Wajib diisi — keterangan ini dicetak di laporan individu');
+  else if (!wajib && !bidangBahasa71(m?.bidang) && c.dataset.phAsli != null) c.setAttribute('placeholder', c.dataset.phAsli);
+}
+(function bungkusSaranWajib() {
+  const asli = saranPelanggaran;
+  saranPelanggaran = function (input, onPilih) {
+    return asli.call(this, input, function (m) {
+      const r = typeof onPilih === 'function' ? onPilih.apply(this, arguments) : undefined;
+      try {
+        tandaiWajibKet71(input, m);
+        if (input && input.id === 'msKode') aiGambarChip();
+      } catch (e) { console.warn('[v2.71 wajib]', e); }
+      return r;
+    });
+  };
+})();
+
+/** Dari formulir Catat (tombol Catat) ke Input Massal, isian terbawa. */
+async function catatKeMassal() {
+  const fNisn = $('fNisn'), fKode = $('fKode');
+  const nisn = fNisn?.dataset.picked || '';
+  const kode = fKode?.dataset.kode || '';
+  const labelKode = fKode?.value || '';
+  const tanggal = $('fTanggal')?.value || hariIni();
+  const catatan = ($('fCatatan')?.value || '').trim();
+  Swal.close();
+  const [siswa, master] = await Promise.all([amanKosong(muatSiswa, 'santri'), amanKosong(muatMaster, 'master pelanggaran')]);
+  const s = nisn ? siswa.find(x => String(x.nisn) === String(nisn)) : null;
+  const m = kode ? master.find(x => String(x.kode_pelanggaran) === String(kode)) : null;
+  const ucapan = {};
+  if (s && m?.tampil_keterangan && catatan) ucapan[String(s.nisn)] = catatan;
+  const terbuka = modalMassalPelanggaran({ pilih: s ? [s] : [], ucapan });
+  // Isi jenis & tanggal setelah dialog massal terpasang (≤ 1,5 dtk).
+  for (let i = 0; i < 30 && !$('msKode'); i++) await tundaMs(50);
+  const ms = $('msKode');
+  if (ms) {
+    if (m) {
+      ms.value = labelKode; ms.dataset.kode = m.kode_pelanggaran; MASSAL.master = m;
+      const info = $('msInfo');
+      if (info) info.innerHTML = `<span class="tag ${tagKategori(m.kategori)}">${esc(m.kategori)}</span>
+        <b>${m.bobot_poin} poin</b> · ${esc(m.bidang || '-')} · ${esc(m.sumber || '-')} · ${esc(m.jenjang || 'Semua')}`;
+      try { terapkanLabelUcapan(ms, m); tandaiWajibKet71(ms, m); } catch (e) {}
+      if (!m.tampil_keterangan && catatan && $('msCatatan')) $('msCatatan').value = catatan;
+    }
+    if ($('msTgl')) $('msTgl').value = tanggal;
+    aiGambarChip();
+    setTimeout(() => $('msSantri')?.focus(), 220);   // sesudah fokus bawaan ke msKode (120 ms)
+  }
+  return terbuka;
+}
+
+(function bungkusModalMassal() {
+  const asli = modalMassalPelanggaran;
+  modalMassalPelanggaran = function (o = {}) {
+    MASSAL.ucapan = { ...((o && o.ucapan) || {}) };
+    return asli.call(this, o);
+  };
+})();
+
+/** Chip santri di Massal: kolom ucapan sendiri bila peraturannya bersakelar. */
+(function bungkusChipUcapan() {
+  const asli = aiGambarChip;
+  aiGambarChip = function () {
+    asli.apply(this, arguments);
+    try {
+      const el = $('msChips'); if (!el) return;
+      const m = MASSAL.master;
+      const ucap = !!m?.tampil_keterangan;
+      el.classList.toggle('ms-ucapan', ucap);
+      $('msCatatan')?.closest('.field')?.classList.toggle('hidden', ucap);
+      if (!ucap) return;
+      const bahasa = bidangBahasa71(m.bidang);
+      el.querySelectorAll('.mchip').forEach(ch => {
+        const n = ch.querySelector('[data-hapus]')?.dataset.hapus; if (!n) return;
+        const inp = document.createElement('input');
+        inp.className = 'input mchip-ucapan'; inp.dataset.ucapan = n; inp.maxLength = 500;
+        inp.placeholder = bahasa ? 'Ucapan yang terdengar' : 'Keterangan (wajib)';
+        inp.value = MASSAL.ucapan[n] || '';
+        ch.insertBefore(inp, ch.querySelector('[data-hapus]'));
+      });
+    } catch (e) { console.warn('[v2.71 chip ucapan]', e); }
+  };
+})();
+document.addEventListener('input', (e) => {
+  const i = e.target.closest?.('[data-ucapan]'); if (!i) return;
+  MASSAL.ucapan[i.dataset.ucapan] = i.value;
+});
+
+/** Validasi massal: ucapan per santri menggantikan "Catatan Bersama". */
+(function bungkusValidasiUcapan() {
+  const asli = aiValidasiBulk;
+  aiValidasiBulk = function (p) {
+    const m = p && p.master_terpilih;
+    if (!m || !kodeBerketerangan(m.kode_pelanggaran) || !$('msChips')) return asli.apply(this, arguments);
+    const list = (p.input && p.input.nisn_list) || [];
+    const kurang = list.filter(n => String(MASSAL.ucapan[n] || '').trim().length < KET71.MIN_ISI);
+    const catAsli = p.input.catatan;
+    p.input.catatan = catAsli || 'ucapan per santri';     // lolos syarat catatan bersama Sedang/Berat
+    let h;
+    try { h = asli.apply(this, arguments); } finally { p.input.catatan = catAsli; }
+    if (kurang.length) {
+      const nama = kurang.map(n => MASSAL.pilih.find(s => String(s.nisn) === String(n))?.nama_siswa || n);
+      const apa = bidangBahasa71(m.bidang) ? 'Ucapan yang terdengar' : 'Keterangan';
+      return { status: 'error', message: 'Ucapan belum lengkap.',
+        errors: [...((h && h.errors) || []), { field: 'catatan', issue: `${apa} wajib diisi untuk: ${nama.join(', ')}.` }] };
+    }
+    if (h && h.status === 'ok') h.panggilan.forEach(c => { c.params.p_catatan = String(MASSAL.ucapan[c.nisn] || '').trim(); });
+    return h;
+  };
+})();
+
+/* ---------- Penjaga wajib isi + perekam izin baru (satu pembungkus db.rpc) ---------- */
+const IZIN71 = { rpc: null };
+(function bungkusRpcV271() {
+  const asli = db.rpc;
+  db.rpc = function (nama, args) {
+    try {
+      if (nama === 'catat_pelanggaran' && args && kodeBerketerangan(args.p_kode)
+          && String(args.p_catatan || '').trim().length < KET71.MIN_ISI) {
+        const m = masterKode71(args.p_kode);
+        const bahasa = bidangBahasa71(m?.bidang);
+        return Promise.resolve({ data: null, error: { message:
+          `${bahasa ? 'Ucapan yang terdengar' : 'Keterangan'} wajib diisi untuk ${args.p_kode}: kalimat ini dicetak di laporan individu`
+          + `${bahasa ? " dan dibacakan di Sidang Ta'dib" : ''}.` } });
+      }
+      if (nama === 'ajukan_perizinan' && args && args.p_nisn) IZIN71.rpc = { nisn: String(args.p_nisn), t: Date.now() };
+    } catch (e) {}
+    return asli.apply(this, arguments);
+  };
+})();
+
+/* ---------- D · Motor izin -------------------------------------------- */
+function unitSantri71(nisn) {
+  const n = String(nisn || '');
+  const peta = CACHE.petaSiswa && CACHE.petaSiswa.v;
+  const s = (peta && peta[n]) || ((CACHE.siswa && CACHE.siswa.v) || []).find(x => String(x.nisn) === n);
+  return unitBaris(s) || unitDariKorps(APP.profil?.korps) || UNIT_PUTRA;
+}
+
+function svgMotor71(idMon) {
+  return `<svg class="mt-svg" viewBox="0 0 150 96" aria-hidden="true" focusable="false">
+    <g class="mt-badan">
+      <path d="M8 66h18l3-4H10z" fill="#5b6472"/>
+      <path d="M14 62c4-14 18-20 34-20h22l8 6h22l10-10h8l-6 16c-2 6-8 10-14 10H44c-8 0-12-4-16-8z" fill="var(--mt-warna,#9F1239)"/>
+      <path d="M48 48h48l-4 5H52z" fill="var(--mt-garis,#E8CC6B)"/>
+      <path d="M40 42c2-4 6-6 12-6h22c3 0 4 3 2 6z" fill="#1B1030"/>
+      <path d="M106 38l10-22" stroke="#3b4250" stroke-width="4" stroke-linecap="round"/>
+      <path d="M110 16h12" stroke="#1B1030" stroke-width="4" stroke-linecap="round"/>
+      <path d="M118 42l14 26" stroke="#3b4250" stroke-width="4" stroke-linecap="round"/>
+      <path d="M116 36l12-4 4 8-12 4z" fill="var(--mt-warna,#9F1239)"/>
+      <circle cx="132" cy="38" r="3.6" fill="#FFE9A8"/>
+    </g>
+    <g class="mt-mon"><use href="#${idMon}" x="40" y="-6" width="52" height="52"/></g>
+    <g class="mt-roda belakang"><circle cx="30" cy="72" r="15" fill="#1B1030"/><circle cx="30" cy="72" r="8" fill="#9aa3b2"/>
+      <path d="M30 64v16M22 72h16" stroke="#1B1030" stroke-width="2.4"/></g>
+    <g class="mt-roda depan"><circle cx="128" cy="72" r="15" fill="#1B1030"/><circle cx="128" cy="72" r="8" fill="#9aa3b2"/>
+      <path d="M128 64v16M120 72h16" stroke="#1B1030" stroke-width="2.4"/></g>
+  </svg>`;
+}
+
+/** Monster naik motor melaju melintasi layar, asap knalpot tertinggal. ≤ 1,6 dtk. */
+function motorIzin(nisn) {
+  if (!pentasBoleh() || modeHemat() || document.hidden) return false;
+  try { pasangSpriteMonster(); } catch (e) {}
+  const putri = unitSantri71(nisn) === UNIT_PUTRI;
+  const pentas = document.createElement('div');
+  pentas.className = 'mt-pentas' + (putri ? ' putri' : '');
+  pentas.setAttribute('aria-hidden', 'true');
+  pentas.innerHTML = `<div class="mt-pengendara"><span class="mt-garis"><i></i><i></i><i></i></span>${svgMotor71(putri ? 'rqMonJilbab' : 'rqMonPeci')}</div>`;
+  document.body.appendChild(pentas);
+
+  const L = 168, W = innerWidth, DUR = 1300;
+  const r = pentas.querySelector('.mt-pengendara');
+  const svg = r.querySelector('.mt-svg');
+  const lajuX = [-L, W * .16, W * .38, W + L * 1.2];
+  r.animate([
+    { transform: `translateX(${lajuX[0]}px)` },
+    { transform: `translateX(${lajuX[1]}px)`, offset: .2, easing: 'cubic-bezier(.2,.7,.4,1)' },
+    { transform: `translateX(${lajuX[2]}px)`, offset: .48, easing: 'cubic-bezier(.6,0,.9,.6)' },
+    { transform: `translateX(${lajuX[3]}px)` }
+  ], { duration: DUR, fill: 'forwards' });
+  // Sentak maju → wheelie kecil → menunduk ngebut.
+  svg.animate([
+    { transform: 'rotate(0deg) translateY(0)' },
+    { transform: 'rotate(2deg) translateY(1px)', offset: .16 },
+    { transform: 'rotate(-9deg) translateY(-3px)', offset: .34 },
+    { transform: 'rotate(-7deg) translateY(-2px)', offset: .46 },
+    { transform: 'rotate(1.5deg) translateY(1px)', offset: .58 },
+    { transform: 'rotate(0deg) translateY(0)' }
+  ], { duration: DUR, easing: 'ease-in-out' });
+  svg.querySelector('.mt-mon').animate([
+    { transform: 'rotate(0deg)' }, { transform: 'rotate(-7deg)', offset: .2 },
+    { transform: 'rotate(-3deg)', offset: .5 }, { transform: 'rotate(-10deg)', offset: .7 }, { transform: 'rotate(-6deg)' }
+  ], { duration: DUR, easing: 'ease-in-out' });
+  svg.querySelectorAll('.mt-roda').forEach(w => w.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(1440deg)' }],
+    { duration: DUR, easing: 'cubic-bezier(.3,0,.8,1)' }));
+  r.querySelector('.mt-garis').animate([{ opacity: 0 }, { opacity: 0, offset: .45 }, { opacity: 1, offset: .6 }, { opacity: .8 }],
+    { duration: DUR, fill: 'forwards' });
+
+  // Asap knalpot: kepulan dilepas di posisi knalpot saat itu, lalu membesar & memudar.
+  const t0 = performance.now();
+  const kepulan = [90, 170, 250, 360, 470, 590, 700, 800, 900, 1000];
+  kepulan.forEach((t, i) => setTimeout(() => {
+    if (!pentas.isConnected) return;
+    const b = r.getBoundingClientRect();
+    const x = b.left + 8, y = b.top + b.height * .66;
+    const p = document.createElement('i');
+    p.className = 'mt-asap';
+    const u = 14 + (i % 3) * 5;
+    p.style.cssText = `left:${x.toFixed(1)}px;top:${y.toFixed(1)}px;width:${u}px;height:${u}px`;
+    pentas.appendChild(p);
+    const dx = -(22 + (i % 4) * 9), dy = -(10 + (i % 3) * 7);
+    p.animate([
+      { transform: 'translate(-50%,-50%) scale(.35)', opacity: .8 },
+      { transform: `translate(calc(-50% + ${dx * .5}px), calc(-50% + ${dy * .5}px)) scale(1.2)`, opacity: .55, offset: .4 },
+      { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(2)`, opacity: 0 }
+    ], { duration: Math.max(240, Math.min(520, 1560 - (performance.now() - t0) - 20)), easing: 'cubic-bezier(.2,.7,.3,1)', fill: 'forwards' });
+  }, t));
+  setTimeout(() => pentas.remove(), 1600);           // aturan v2.53: tidak lebih dari 1,6 dtk
+  return true;
+}
+
+/** Izin BARU tersimpan (ketiga jalur ajukan_perizinan) → motor menggantikan Cap besar. */
+(function bungkusSyncIzin() {
+  const asli = sync;
+  sync = function (status, teks) {
+    const r = asli.apply(this, arguments);
+    try {
+      if (status === 'done' && teks === 'Izin tersimpan' && IZIN71.rpc && Date.now() - IZIN71.rpc.t < 15000) {
+        const nisn = IZIN71.rpc.nisn; IZIN71.rpc = null;
+        if (motorIzin(nisn)) CAP.terakhir = performance.now();   // cap besar menahan diri; cap mini di kartu tetap
+      }
+    } catch (e) { console.warn('[v2.71 motor]', e); }
+    return r;
   };
 })();
