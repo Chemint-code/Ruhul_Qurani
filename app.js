@@ -7868,17 +7868,31 @@ function petaBentukTercatat(pembinaan) {
 
 /**
  * Susun baris bagian 3.
- * Nomor ke-N dihitung dari riwayat PENUH supaya "ke-16" tetap benar
- * walaupun lembar cetak hanya memuat satu bulan.
  *
- * Prioritas isi kolom Bentuk Pembinaan:
- *   1. n > maxFrequency        -> "Sudah melebihi modul Instrumen"
- *   2. log_pembinaan tercatat  -> apa yang benar-benar dijalankan
- *   3. master_pembinaan        -> aturan yang seharusnya berlaku
- *   4. tidak ada rujukan       -> "Data tidak tersedia"
+ * v2.71.1 — Nomor tahap memakai aturan yang SAMA dengan halaman
+ * Pembinaan (petaTahapPelanggaran): per kategori, dihitung dari awal
+ * jendela tiap catatan — sejak Oktober 2026 jendela itu adalah tanggal 1
+ * bulan catatan, jadi tahap kembali ke ke-1 setiap bulan. Sebelumnya
+ * lembar cetak menghitung dari seluruh riwayat sehingga tahapnya
+ * menumpuk dari bulan-bulan lalu dan bentuk pembinaannya tidak sama
+ * dengan yang tampil di layar. Urutan hitung juga disamakan: tanggal,
+ * lalu id_log.
+ *
+ * Prioritas isi kolom Bentuk Pembinaan (sama dengan bentukMenurutAturan):
+ *   1. manual / menunggu musyawarah (cocok lewat id_log)
+ *   2. n > maxFrequency        -> "Sudah melebihi modul Instrumen"
+ *   3. master_pembinaan        -> tangga tertinggi yang <= n
+ *   4. log_pembinaan tercatat  -> bentuk yang tersimpan untuk id_log itu
+ *   5. tidak ada rujukan       -> "Data tidak tersedia"
  */
 function riwayatCetak(tampil, penuh, pembinaan, instrumen) {
-  const tercatat = petaBentukTercatat(pembinaan);
+  // Bentuk yang tersimpan per id_log — cadangan bila master tak punya tangga.
+  const tercatatLog = new Map();
+  (pembinaan || []).forEach(b => {
+    const id = String(b.id_log_pelanggaran || '').trim();
+    const teks = b.instrumen_pembinaan || b.bentuk_pembinaan;
+    if (id && teks && !tercatatLog.has(id)) tercatatLog.set(id, teks);
+  });
   // v2.43: pembinaan manual (hasil musyawarah) & yang menunggu musyawarah
   // dicocokkan langsung lewat id_log — laporan_santri() kini membawanya.
   const perLog = new Map();
@@ -7891,10 +7905,23 @@ function riwayatCetak(tampil, penuh, pembinaan, instrumen) {
     (URUT_KAT[a.kategori] ?? 99) - (URUT_KAT[b.kategori] ?? 99) ||
     String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal))));
 
-  const hitung = {};
-  urut(penuh && penuh.length ? penuh : tampil).forEach(p => {
+  // Nomor tahap per kategori dengan jendela berlabuh pada tiap catatan.
+  const grup = new Map();
+  (penuh && penuh.length ? penuh : tampil || []).forEach(p => {
     const kat = String(p.kategori || '-').trim();
-    p.__n = (hitung[kat] = (hitung[kat] || 0) + 1);
+    if (!grup.has(kat)) grup.set(kat, []);
+    grup.get(kat).push(p);
+  });
+  grup.forEach(daftar => {
+    daftar.sort((a, b) =>
+      String(kunciTgl(a.tanggal)).localeCompare(String(kunciTgl(b.tanggal))) ||
+      String(a.id_log || '').localeCompare(String(b.id_log || '')));
+    let kepala = 0;
+    daftar.forEach((p, i) => {
+      const batasJendela = awalJendelaTahap(kunciTgl(p.tanggal));
+      while (kepala < i && String(kunciTgl(daftar[kepala].tanggal)) < batasJendela) kepala++;
+      p.__n = i - kepala + 1;
+    });
   });
 
   return urut(tampil).map(p => {
@@ -7914,7 +7941,7 @@ function riwayatCetak(tampil, penuh, pembinaan, instrumen) {
     return { ...p, kategori, urutanKategori: n, batas, overflow,
       bentukPembinaan: overflow
         ? 'Sudah melebihi modul Instrumen'
-        : (tercatat.get(`${kategori}|${n}`) || bentukAturan(info, n) || NA_DATA) };
+        : (bentukAturan(info, n) || tercatatLog.get(String(p.id_log || '')) || NA_DATA) };
   });
 }
 
@@ -8553,7 +8580,7 @@ function teksVerifikasiQr(nama, dicetak) {
  * penutup laporan tidak pernah terbelah antar halaman — masalah yang
  * membuat kotak catatan sebelumnya terpotong di tengah.
  */
-function blokPenutupCetak(pj, dicetak) {
+function blokPenutupCetak(pj, dicetak, judul) {
   const p     = pj || {};
   const nama  = p.nama || '—';
   const qr    = qrDataUri(teksVerifikasiQr(nama, dicetak));
@@ -8582,20 +8609,30 @@ function blokPenutupCetak(pj, dicetak) {
   const T_GARIS = 'border-top:1px solid #334155;font-size:0;line-height:0;';
   const T_NAMA  = 'height:23px;padding-top:5px;font-size:11.5px;line-height:18px;'
                 + 'font-weight:bold;color:#0f172a;';
-  const T_SUB   = 'font-size:9.5px;line-height:14px;color:#94a3b8;';
+
+  /* v2.71.1 — Kotak penilaian musyrif, diisi tulisan tangan.
+     Menggantikan "Kesimpulan Sementara" (angka jenjang/angkatan) dan
+     kotak catatan lama. Judul bagian ikut di dalam blok-utuh supaya
+     tidak tertinggal sendirian di ujung halaman. */
+  const kotakCentang = (t) => `<span style="display:inline-block;margin-right:20px;white-space:nowrap;">
+      <span style="display:inline-block;width:10px;height:10px;border:1px solid #475569;
+                   vertical-align:-1px;margin-right:6px;"></span>${t}</span>`;
+  const label = (t) => `<div style="font-size:10.5px;font-weight:bold;color:#334155;margin:0 0 2px;">${t}</div>`;
 
   return `
-  <div class="blok-utuh" style="margin-top:22px;page-break-inside:avoid;break-inside:avoid;">
-
-    <div style="border:1px solid #cbd5e1;border-radius:4px;background:#fcfdfe;
-                padding:11px 14px 13px;">
-      <p style="margin:0 0 9px;font-size:10px;font-weight:bold;letter-spacing:.7px;
-                text-transform:uppercase;color:#334155;">
-        ${korpsMusyrifPutra()
-          ? `<img src="${KORPS_CAP}" alt="" style="height:13px;width:auto;
-               vertical-align:-2px;margin-right:8px;">` : ''
-        }Catatan &amp; Rekomendasi Musyrif Asrama</p>
-      ${garis(5)}
+  <div class="blok-utuh" style="margin-top:21px;page-break-inside:avoid;break-inside:avoid;">
+    ${judul || ''}
+    <div style="border:1px solid #cbd5e1;border-radius:4px;padding:11px 14px 13px;">
+      <div style="font-size:11px;color:#1e293b;padding:0 0 9px;margin:0 0 8px;
+                  border-bottom:1px solid #e2e8f0;">
+        <b style="display:inline-block;width:76px;">Predikat</b>
+        ${['Sangat Baik', 'Baik', 'Cukup', 'Perlu Bimbingan'].map(kotakCentang).join('')}
+      </div>
+      ${label('Perkembangan Akhlak &amp; Kedisiplinan')}
+      ${garis(3)}
+      <div style="height:9px;"></div>
+      ${label('Saran &amp; Tindak Lanjut')}
+      ${garis(3)}
     </div>
 
     <table style="width:100%;font-size:11px;margin-top:20px;border-collapse:collapse;
@@ -8603,7 +8640,7 @@ function blokPenutupCetak(pj, dicetak) {
       <tr>
         <!-- ================= Musyrif Asrama (penanggung jawab) ================= -->
         <td style="width:50%;vertical-align:top;padding:0 16px 0 0;text-align:center;">
-          <div style="${T_KET}text-align:left;">Mengetahui dan bertanggung jawab,</div>
+          <div style="${T_KET}text-align:left;">Meulaboh, ${esc(dicetak)}</div>
           <div style="${T_JAB}text-align:left;">Musyrif Asrama</div>
           <div style="${T_SELA}"></div>
           <div style="${T_RUANG}">
@@ -8614,7 +8651,6 @@ function blokPenutupCetak(pj, dicetak) {
           </div>
           <div style="${T_GARIS}">&nbsp;</div>
           <div style="${T_NAMA}">${esc(nama)}</div>
-          <div style="${T_SUB}">Diterbitkan ${esc(dicetak)}</div>
         </td>
 
         <!-- ================= Wali Santri ================= -->
@@ -8625,17 +8661,9 @@ function blokPenutupCetak(pj, dicetak) {
           <div style="${T_RUANG}"></div>
           <div style="${T_GARIS}">&nbsp;</div>
           <div style="${T_NAMA}">(&nbsp;………………………………&nbsp;)</div>
-          <div style="${T_SUB}">Nama terang &amp; tanda tangan</div>
         </td>
       </tr>
     </table>
-
-    <p style="margin:18px 0 0;padding-top:7px;border-top:1px solid #e2e8f0;
-              font-size:8.5px;line-height:1.6;color:#94a3b8;">
-      Diterbitkan oleh Sistem Informasi Pengembangan Santri Dayah Ruhul Qurani
-      pada ${esc(dicetak)}, atas tanggung jawab ${esc(nama)}.
-      Laporan ini sah setelah ditandatangani musyrif asrama.
-    </p>
   </div>`;
 }
 
@@ -8726,9 +8754,11 @@ function saringDataLaporanBulanan(mentah, bulanPilihan) {
 
 /** Lengkapi data laporan dengan master instrumen + agregasi jenjang/angkatan. */
 async function lengkapiLaporan(data) {
-  const [aturan, agregasi, penanggungJawab, logoKorps] = await Promise.all([
+  // v2.71.1: agregasi jenjang/angkatan hanya dipakai bagian Kesimpulan
+  // yang sudah ditiadakan, jadi tidak lagi dimuat.
+  const agregasi = null;
+  const [aturan, penanggungJawab, logoKorps] = await Promise.all([
     muatMasterPembinaan(),
-    hitungAgregasiSantri(data.siswa || {}),
     ambilPenanggungJawab(),
     dataUriGambar(ASET.korps)
   ]);
@@ -8797,7 +8827,6 @@ function kopLaporan(logoKorps) {
  */
 function presensiLaporanHTML(data, { th, td, TABEL, kelas }) {
   const SEL = 'border:1px solid #cbd5e1;padding:5px;';
-  const KET = 'margin:4px 0 0;font-size:9px;line-height:1.5;color:#64748b;';
   const bulan = data.presensi || [];
   const tot = data.presensiTotal;
   const jpHr = (jp) => `${angka(Math.round(jp))} JP (${prHari(jp)} hr)`;
@@ -8806,7 +8835,7 @@ function presensiLaporanHTML(data, { th, td, TABEL, kelas }) {
 
   if (data.presensiGagal) {
     return `<table style="${TABEL}font-size:11px;"><tbody><tr><td style="${SEL}color:#64748b;">
-      Rekap presensi tidak dapat dimuat saat laporan dibuat. Silakan cetak ulang.</td></tr></tbody></table>`;
+      Rekap presensi tidak dapat dimuat.</td></tr></tbody></table>`;
   }
 
   let ringkas;
@@ -8816,7 +8845,7 @@ function presensiLaporanHTML(data, { th, td, TABEL, kelas }) {
       (${prHari(tot.jp)} hari, ${tot.pekan} pekan direkap)${penuh ? ', <b>hadir penuh</b>' : ''}.
       Alpa <b>${tot.A} JP</b>, sakit dan izin pulang ${tot.S + tot.IP} JP${tot.IK ? `, izin kegiatan ${tot.IK} JP` : ''}.`;
   } else {
-    ringkas = `Belum ada pekan presensi yang direkap untuk kelas ${esc(kelas || '-')}.`;
+    ringkas = 'Belum direkap wali kelas.';
   }
   const kotakRingkas = `<table style="${TABEL}font-size:11px;"><tbody><tr>
       <td style="${SEL}background:#f8fafc;">${ringkas}</td></tr></tbody></table>`;
@@ -8845,10 +8874,7 @@ function presensiLaporanHTML(data, { th, td, TABEL, kelas }) {
     <table style="${TABEL}font-size:11px;margin-top:6px;">
       <thead><tr>${['Bulan','JP Efektif','Sakit','Izin Kegiatan','Izin Pulang','Alpa','Kehadiran'].map(th).join('')}</tr></thead>
       <tbody>${barisBulan}${barisTotal}</tbody>
-    </table>
-    <p style="${KET}">Kehadiran dihitung dari pekan yang sudah direkap wali kelas. Satu pekan berisi 6 hari
-      (${6 * JP_PER_HARI} JP), dan pekan libur tidak dihitung. Izin kegiatan termasuk hadir karena santri
-      mengikuti kegiatan resmi dayah.</p>`;
+    </table>`;
 }
 
 function bangunLaporanHTML(data) {
@@ -8884,7 +8910,6 @@ function bangunLaporanHTML(data) {
   const rekap = (data.rekap && data.rekap.length) ? data.rekap : akumulasiUnik(perkembangan);
   const riwayat = riwayatCetak(perkembangan, data.perkembanganPenuh,
                                data.pembinaanPenuh || data.pembinaan, data.instrumen);
-  const kesimpulan = kesimpulanSementara(data, rekap);
 
   // ---- Bahan bagian 4 (prestasi) & 6 (target) ----
   // v2.71: Capaian Tahfiz tidak lagi dicetak di laporan individu
@@ -8919,23 +8944,19 @@ function bangunLaporanHTML(data) {
       <tr><td style="${ID_K}"><b>Asrama</b></td><td style="${ID_V}">: ${esc(s.asrama||'-')}</td></tr>
       <tr><td style="${ID_K}"><b>Periode Laporan</b></td><td style="${ID_V}">: ${esc(labelPer)} (${esc(rentangTeks)})</td></tr>
       <tr><td style="${ID_K}"><b>${aktif ? 'Total Poin Periode' : 'Total Poin'}</b></td>
-          <td style="${ID_V}">: ${poinTampil}${aktif
-            ? ` <span style="color:#64748b;font-size:10px;">(akumulasi seluruh riwayat: ${s.total_poin_pelanggaran||0})</span>`
-            : ''}</td></tr>
+          <td style="${ID_V}">: ${poinTampil}</td></tr>
       <tr><td style="${ID_K}"><b>Status Saat Ini</b></td><td style="${ID_V}">: ${esc(s.status_keberadaan||'Hadir')}</td></tr>
     </table>
 
-    <h3 style="${H3}">1. Presensi Madrasah
-      <span style="font-weight:normal;font-size:10px;color:#64748b;">(satuan JP · 1 hari = ${JP_PER_HARI} JP)</span></h3>
+    <h3 style="${H3}">1. Presensi Madrasah</h3>
     ${data.presensiTerkunci ? (() => {
       const k = data.presensiRingkas;
       const isi = k
         ? `Kehadiran <b>${k.hadirPct}%</b> dari ${angka(k.jpAmati)} JP yang direkap (${k.pekan} pekan).
            Alpa <b>${k.alpa} JP</b> (${prHari(k.alpa)} hari), tidak hadir dengan izin ${k.berizin} JP.`
-        : 'Belum ada pekan presensi yang direkap untuk santri ini.';
+        : 'Belum direkap wali kelas.';
       const tdMentah = (h) => `<td style="border:1px solid #cbd5e1;padding:5px;">${h}</td>`;
-      return `<table style="${TABEL}font-size:11px;"><tbody><tr>${tdMentah(isi)}</tr>
-        <tr>${tdMentah('<span style="color:#64748b;font-size:10px;">Ini ringkasan. Rincian presensi per jenis dan per minggu hanya dapat dilihat Guru, Wali Kelas, dan Guru BK.</span>')}</tr></tbody></table>`;
+      return `<table style="${TABEL}font-size:11px;"><tbody><tr>${tdMentah(isi)}</tr></tbody></table>`;
     })() : presensiLaporanHTML(data, { th, td, TABEL, kelas: s.kelas })}
 
     <h3 style="${H3}">
@@ -8944,7 +8965,7 @@ function bangunLaporanHTML(data) {
       <thead><tr>${['Kategori','Catatan','Jumlah'].map(th).join('')}</tr></thead>
       <tbody>${baris(rekap, r =>
         `<tr>${td(r.kategori)}${td(r.deskripsi)}${td(r.jumlah,'text-align:center;font-weight:bold')}</tr>`,
-        'Tidak ada akumulasi pada periode ini.', 3)}</tbody>
+        'Nihil', 3)}</tbody>
     </table>
 
     <h3 style="${H3}">
@@ -8957,17 +8978,16 @@ function bangunLaporanHTML(data) {
           ? `<td style="border:1px solid #cbd5e1;padding:5px;color:#B45309;font-style:italic;">${esc(p.bentukPembinaan)}</td>`
           : p.manual
           ? `<td style="border:1px solid #cbd5e1;padding:5px;">${esc(p.bentukPembinaan)}
-               <span style="display:block;font-size:9px;color:#94a3b8;">(hasil musyawarah${
-                 p.overflow ? ` · ke-${p.urutanKategori}, di luar ${p.batas} tahap instrumen` : ''})</span></td>`
+               <span style="display:block;font-size:9px;color:#94a3b8;">(hasil musyawarah)</span></td>`
           : p.overflow
           ? `<td style="border:1px solid #cbd5e1;padding:5px;${bg}color:#9F1239;font-weight:bold;">
                ${esc(p.bentukPembinaan)}
                <span style="display:block;font-weight:normal;font-size:9px;color:#94a3b8;">
-                 (ke-${p.urutanKategori} dari batas ${p.batas})</span></td>`
+                 (tahap ke-${p.urutanKategori})</span></td>`
           : td(p.bentukPembinaan, bg);
         return `<tr>${td(tgl(p.tanggal), bg)}${td(p.bidang||'-', bg)}${selCatatanLaporan(p, bg, data.namaBerketerangan)}`
              + `${td(p.kategori, bg)}${td(p.poin, bg + 'text-align:center')}${selPembinaan}</tr>`;
-      }, 'Tidak ada catatan perkembangan pada periode ini.', 6)}</tbody>
+      }, 'Nihil', 6)}</tbody>
     </table>
 
     <h3 style="${H3}">
@@ -8977,7 +8997,7 @@ function bangunLaporanHTML(data) {
       <tbody>${baris(prestasi, r =>
         `<tr>${td(tgl(r.tanggal))}${td(r.kategori||'-')}${td(r.judul||'-')}${td(r.bidang||'-')}`
         + `${td('+' + (Number(r.poin)||0), 'text-align:center;font-weight:bold;color:#8A6D0B')}</tr>`,
-        'Belum ada catatan apresiasi pada periode ini.', 5)}
+        'Nihil', 5)}
         ${prestasi.length ? `<tr><td colspan="4" style="border:1px solid #cbd5e1;padding:5px;
              text-align:right;font-weight:bold;background:#fafafa;">Total poin apresiasi</td>
            <td style="border:1px solid #cbd5e1;padding:5px;text-align:center;font-weight:bold;
@@ -9001,14 +9021,11 @@ function bangunLaporanHTML(data) {
              + `<td style="border:1px solid #cbd5e1;padding:5px;font-weight:bold;color:${w};">
                   ${esc(g.status || 'Berjalan')}</td>`
              + `${td(g.evaluasi || '—')}</tr>`;
-      }, 'Belum ada target pembinaan yang ditetapkan.', 5)}</tbody>
+      }, 'Nihil', 5)}</tbody>
     </table>
 
-    <h3 style="${H3}">
-      7. Kesimpulan Sementara${aktif ? ' (' + esc(labelPer) + ')' : ''}</h3>
-    ${bagianKesimpulanCetak(kesimpulan)}
-
-    ${blokPenutupCetak(data.penanggungJawab, dicetak)}
+    ${blokPenutupCetak(data.penanggungJawab, dicetak,
+        `<h3 style="${H3}margin-top:0;">7. Penilaian Musyrif Asrama</h3>`)}
   </div>`;
 }
 
@@ -35195,7 +35212,7 @@ function izinLaporanHTML(list, klinikRows, { th, TABEL }) {
   }).join('');
   return `<table style="${TABEL}font-size:11px;">
       <thead><tr>${['Tanggal', 'Jenis', 'Keterangan & Jejak', 'Status'].map(th).join('')}</tr></thead>
-      <tbody>${isi || `<tr><td colspan="4" style="text-align:center;padding:10px;color:#94a3b8;">Tidak ada perizinan pada periode ini.</td></tr>`}</tbody>
+      <tbody>${isi || `<tr><td colspan="4" style="text-align:center;padding:10px;color:#94a3b8;">Nihil</td></tr>`}</tbody>
     </table>`;
 }
 
