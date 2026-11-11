@@ -2737,6 +2737,7 @@ async function navigateTo(view) {
     else if (view === 'kotaksaran')  await viewKotakSaran();   // v2.65
     else if (view === 'banding')     await viewBanding();      // v2.68
     else if (view === 'kelalaian')   await viewKelalaian();    // v2.69
+    else if (view === 'sarprasatur') await viewSarprasAtur();  // v2.73
     tandaiTabelBisaGeser();
   } catch (err) { fireError(err); }
   finally { loading(false); APP.navSibuk--; tutupTirai(); LayarMuat.tutupAwal(); }
@@ -35463,3 +35464,55 @@ function motorIzin(nisn) {
     return r;
   };
 })();
+
+/* =====================================================================
+ * v2.73 · SARPRAS ASRAMA — PENGATURAN (master, standar isi, penugasan)
+ * ---------------------------------------------------------------------
+ *  Rancangan: claude/rancangan-v2.73-sarpras-asrama.md (revisi 1).
+ *  Seluruh tampilan ada di sarpras.js (dimuat lambat, pola sidang.js);
+ *  di sini hanya menu, judul, dan pemuat. Aturan & hak ada di RPC
+ *  sarpras_* (migrasi v2.73): Admin melihat halaman, hanya pengelola
+ *  (super admin atau akun di setelan "pengelola") yang bisa mengubah.
+ *  Fungsi lama tidak diubah; satu baris dispatch di navigateTo.
+ * ===================================================================== */
+APP.versi = 'rq-v2.73';   // v2.73: Pengaturan Sarpras — lokasi, butir, standar isi, penugasan, kelompok pelanggaran, impor
+
+MENU_ROLE.sarprasatur = ['Admin'];
+PA.NAMA.sarprasatur = { nama: 'Pengaturan Sarpras', tab: 'Sarpras', ket: 'Lokasi, barang tanggungan, standar isi, dan penugasan pemeriksaan asrama',
+  kata: 'sarpras sarana prasarana fasilitas asrama kamar mandi lokasi butir barang standar inventaris penugasan' };
+(function daftarkanSarpras() {
+  const g = PA.GRUP.find(x => x.id === 'kelola');
+  if (g && !g.views.includes('sarprasatur')) g.views.push('sarprasatur');
+  PA.TANPA_SARING.add('sarprasatur');
+  JUDUL.sarprasatur = { ar: 'المرافق', teks: 'Pengaturan Sarpras', lat: g ? g.label : 'Pengelolaan' };
+})();
+
+const SARPRAS_JS = { muat: null };
+function muatSarprasJs() {
+  if (window.RQSarpras) return Promise.resolve(true);
+  if (!SARPRAS_JS.muat) {
+    SARPRAS_JS.muat = new Promise((ok) => {
+      const s = document.createElement('script');
+      s.src = 'sarpras.js'; s.async = true;
+      s.onload = () => ok(!!window.RQSarpras);
+      s.onerror = () => { SARPRAS_JS.muat = null; ok(false); };   // boleh dicoba lagi
+      document.head.appendChild(s);
+    });
+  }
+  return SARPRAS_JS.muat;
+}
+
+async function viewSarprasAtur() {
+  $('viewRoot').innerHTML = `<div class="card sp-muat" style="padding:28px;text-align:center">
+    <i class="fa-solid fa-circle-notch fa-spin" style="color:var(--sea)"></i><p style="margin:10px 0 0">Membuka Pengaturan Sarpras…</p></div>`;
+  const ok = await muatSarprasJs();
+  if (APP.view !== 'sarprasatur') return;
+  if (!ok) {
+    $('viewRoot').innerHTML = kartu('Pengaturan Sarpras',
+      `<div class="card-body">${kosong('Halaman belum bisa dibuka', 'Berkas halaman sarpras gagal dimuat. Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark')}
+       <p style="text-align:center"><button class="btn btn-primary" id="spUlang"><i class="fa-solid fa-rotate"></i>Coba lagi</button></p></div>`);
+    $('spUlang')?.addEventListener('click', () => navigateTo('sarprasatur'));
+    return;
+  }
+  await window.RQSarpras.atur($('viewRoot'));
+}

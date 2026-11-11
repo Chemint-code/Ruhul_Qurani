@@ -33,7 +33,7 @@ const tabBawah = (p) => p.evaluate(() => [...document.querySelectorAll('#tabBar 
   cek('A2 index.html: kelompok berbasis tugas, berurutan', JSON.stringify(grup) === JSON.stringify(['beranda', 'catat', 'tindak', 'santri', 'laporan', 'pedoman', 'kelola']), grup);
   const nav = ih.slice(ih.indexOf('id="navMenu"'), ih.indexOf('</nav>', ih.indexOf('id="navMenu"')));
   const views = [...nav.matchAll(/data-view="([a-z]+)"/g)].map(m => m[1]);
-  cek('A3 setiap halaman tepat satu kali di menu (tanpa "Unit Operasional"/"Sistem")', new Set(views).size === views.length && views.length === 27 + (views.includes('banding') ? 1 : 0) + (views.includes('kelalaian') ? 1 : 0) && !/Unit Operasional|>Sistem</.test(nav), views.length);   // v2.68: + Eksekusi Banding · v2.69: + Kelalaian Pengesahan
+  cek('A3 setiap halaman tepat satu kali di menu (tanpa "Unit Operasional"/"Sistem")', new Set(views).size === views.length && views.length === 27 + (views.includes('banding') ? 1 : 0) + (views.includes('kelalaian') ? 1 : 0) + (views.includes('sarprasatur') ? 1 : 0) && !/Unit Operasional|>Sistem</.test(nav), views.length);   // v2.68: + Eksekusi Banding · v2.69: + Kelalaian Pengesahan · v2.73: + Pengaturan Sarpras
   const ikon = JSON.parse(baca('ikon', 'daftar.json'));
   cek('A4 ikon baru masuk subset (fa-house, fa-thumbtack)', ikon.ikon.includes('fa-house') && ikon.ikon.includes('fa-thumbtack') && !ikon.tak_dikenal.length);
   const app = baca('app.js');

@@ -1,0 +1,26 @@
+nama;kategori;satuan;zona;ditanggung;urutan
+Ranjang;Perabot;unit;kamar;ya;1
+Kasur;Perabot;lembar;kamar;ya;2
+Lemari;Perabot;pintu;kamar;ya;3
+Lampu;Listrik;titik;;ya;10
+Saklar;Listrik;buah;;ya;11
+Stop kontak;Listrik;buah;;ya;12
+Kipas angin;Listrik;unit;kamar|asrama_umum;ya;13
+Pintu;Bangunan;daun;;ya;20
+Kunci pintu;Bangunan;buah;;ya;21
+Jendela;Bangunan;daun;;ya;22
+Kaca jendela;Bangunan;lembar;;ya;23
+Kloset;Plumbing;unit;kamar_mandi;ya;30
+Keran;Plumbing;buah;kamar_mandi;ya;31
+Shower;Plumbing;buah;kamar_mandi;ya;32
+Bak air;Plumbing;unit;kamar_mandi;ya;33
+Pintu bilik;Bangunan;daun;kamar_mandi;ya;34
+Saluran air;Plumbing;titik;kamar_mandi;ya;35
+Wastafel;Plumbing;unit;kamar_mandi;ya;36
+Cermin;Perabot;buah;kamar_mandi;ya;37
+Lampu koridor;Listrik;titik;asrama_umum;ya;40
+Tempat sampah;Kebersihan;buah;asrama_umum;ya;41
+Jemuran;Perabot;unit;asrama_umum;ya;42
+Rak sepatu;Perabot;unit;asrama_umum;ya;43
+Tangga;Bangunan;unit;asrama_umum;ya;44
+Pegangan tangga;Bangunan;unit;asrama_umum;ya;45

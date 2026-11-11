@@ -180,7 +180,7 @@ async function telusuriMenu(page) {
         jalur: PUSTAKA_LAMBAT.echarts.jalur };
     });
     cek(`C1 ${v}: jumlah di kalender = jumlah catatan pada rentang`, k.jumlah === k.harapan && k.jumlah > 0, { jumlah: k.jumlah, harapan: k.harapan });
-    cek(`C2 ${v}: rentang = jendela berdata s.d. hari ini (${k.awal} → ${k.akhir})`, k.awal.endsWith('-01') && k.akhir <= new Date().toISOString().slice(0, 10) && k.hari > 28);
+    cek(`C2 ${v}: rentang = jendela berdata s.d. hari ini (${k.awal} → ${k.akhir})`, k.awal.endsWith('-01') && k.akhir <= new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10) && k.hari > 28);   // v2.73: tanggal lokal, bukan UTC (dulu gagal pukul 00.00–07.00 WIB)
     cek(`C3 ${v}: kalimat cerita ada`, /Hari tersibuk: .+\(rata-rata .+ catatan\)/.test(k.cerita), k.cerita);
     cek(`C4 ${v}: kartu tepat sebelum Peta Perkembangan; ECharts lewat ${k.jalur}`, k.sebelumSebaran && k.jalur === (v === 'build' ? 'vite' : 'cdn'));
     // Pindah halaman → instans ECharts dibuang.

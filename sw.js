@@ -49,7 +49,7 @@
    hapus singgahan versi lama, lalu beri tahu halaman yang terbuka.
    ===================================================================== */
 
-const VERSI       = 'rq-v2.71.1';   // v2.71.1: laporan individu — tahap pembinaan per bulan, Penilaian Musyrif tulis tangan, tanpa teks penjelasan; v2.71: laporan ramping, motor izin, Catat lengkap, OSIM tanpa Para Pendidik; v2.70: Alur Mahkamah — Meja Majelis, bilah lengket, Pelantikan, gerak sidang; v2.69: majelis bernama, apresiasi keadilan, Disahkan OSDA (v2.68: antrean dan banding; v2.67: Peta Amanah)
+const VERSI       = 'rq-v2.73';   // v2.73: Pengaturan Sarpras (sarpras.js); v2.71.1: laporan individu — tahap pembinaan per bulan, Penilaian Musyrif tulis tangan, tanpa teks penjelasan; v2.71: laporan ramping, motor izin, Catat lengkap, OSIM tanpa Para Pendidik; v2.70: Alur Mahkamah — Meja Majelis, bilah lengket, Pelantikan, gerak sidang; v2.69: majelis bernama, apresiasi keadilan, Disahkan OSDA (v2.68: antrean dan banding; v2.67: Peta Amanah)
 const CACHE_INTI  = `${VERSI}-inti`;
 const CACHE_ASET  = 'rq-aset-v1';   // nama tetap: bertahan melewati kenaikan VERSI
 
@@ -61,6 +61,7 @@ const INTI = [
   './panggung.js',      // v2.51: panggung grafik Ringkasan (dimuat lambat oleh app.js)
   './meja.js',          // v2.52: gerak Meja Pimpinan & Meja BK (dimuat lambat oleh app.js)
   './sidang.js',        // v2.64: Ruang Sidang Ta'dib OSDA (dimuat lambat oleh app.js)
+  './sarpras.js',       // v2.73: modul Sarpras Asrama (dimuat lambat oleh app.js)
   './gaya.css',         // v2.62: seluruh gaya (dulu blok <style> di index.html)
   './ikon/fa-subset.css',            // v2.62: ikon swa-saji (pengganti cdnjs font-awesome)
   './ikon/fa-solid-subset.woff2',
@@ -76,7 +77,7 @@ const INTI = [
    isinya tidak pernah berubah) ikut cache-first. Pada berkas sumber apa adanya
    keduanya tidak ada, jadi pola ini tidak berpengaruh. Hasil build menambahkan
    './vendor.js' ke INTI secara otomatis (vite.config.mjs). */
-const POLA_INTI = /(?:^\/?$|\/$|index\.html$|app\.js$|showreel\.js$|panggung\.js$|sidang\.js$|vendor\.js$|gaya\.css$|\/ikon\/[^/]+$|\/pustaka\/[^/]+\.js$|manifest\.webmanifest$)/i;
+const POLA_INTI = /(?:^\/?$|\/$|index\.html$|app\.js$|showreel\.js$|panggung\.js$|sidang\.js$|sarpras\.js$|vendor\.js$|gaya\.css$|\/ikon\/[^/]+$|\/pustaka\/[^/]+\.js$|manifest\.webmanifest$)/i;
 
 const CDN_DIIZINKAN = [
   'https://fonts.googleapis.com',

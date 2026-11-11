@@ -21,8 +21,10 @@ import { createRequire } from 'node:module';
 
 const AKAR = path.dirname(new URL(import.meta.url).pathname);
 const UJI = process.env.RQ_UJI === '1';
-const KLASIK = ['app.js', 'meja.js', 'panggung.js', 'showreel.js', 'sidang.js'];   // v2.64: + sidang.js
-const SALIN = ['manifest.webmanifest', 'favicon-64.png', 'icon-192.png', 'icon-512.png', 'icon-512-maskable.png', 'diagnosa.html',
+const KLASIK = ['app.js', 'meja.js', 'panggung.js', 'showreel.js', 'sidang.js', 'sarpras.js'];   // v2.64: + sidang.js · v2.73: + sarpras.js
+const SALIN = ['templat-csv/templat-sarpras-butir.csv', 'templat-csv/templat-sarpras-lokasi.csv', 'templat-csv/templat-sarpras-standar.csv',
+  'templat-csv/templat-sarpras-butir-umum.csv',   // v2.73: templat impor sarpras
+  'manifest.webmanifest', 'favicon-64.png', 'icon-192.png', 'icon-512.png', 'icon-512-maskable.png', 'diagnosa.html',
   'ikon/fa-solid-subset.woff2', 'ikon/fa-regular-subset.woff2', 'ikon/fa-brands-subset.woff2'];
 /* v2.62: gaya klasik — hanya komentar yang dibuang (bukan dipadatkan lightningcss:
    pemadat mengubah `max-width` menjadi sintaks rentang & warna menjadi oklab(), yang

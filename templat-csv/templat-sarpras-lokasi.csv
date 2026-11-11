@@ -1,0 +1,5 @@
+unit;zona;induk;nama;nomor;gedung;lantai;kapasitas;titik_periksa
+Unit Contoh;kamar;;Kamar 1;1;Gedung A;1;8;ya
+Unit Contoh;kamar_mandi;;Sayap Timur;;Gedung A;1;;ya
+Unit Contoh;kamar_mandi;Sayap Timur;Bilik 1;;Gedung A;1;;tidak
+Unit Contoh;asrama_umum;;Koridor Lantai 1;;Gedung A;1;;ya
