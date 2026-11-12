@@ -4597,10 +4597,25 @@ async function modalAturKamar(nisn, s) {
         return false;
       }
       try {
-        const { error } = await db.from('siswa')
-          .update({ nomor_kamar: cek.nilai.nomor_kamar, peran_kamar: cek.nilai.peran_kamar })
-          .eq('nisn', String(nisn));
-        if (error) throw error;
+        /* v2.76: lewat RPC sarpras_penempatan_simpan (gerbang tulis yang sama dengan musyrif; memeriksa kamar ada & aktif,
+           mudabbir hanya XI, dan tercatat di audit). Unit sarpras belum disiapkan → jalur lama (Admin boleh menulis siswa). */
+        const { data: us } = await db.from('sarpras_unit').select('id').eq('kunci_siswa', unit).eq('aktif', true).limit(1);
+        const unitId = Array.isArray(us) ? us[0]?.id : us?.id;
+        let lewatRpc = false;
+        if (unitId) {
+          const { error } = await db.rpc('sarpras_penempatan_simpan', { p: { unit_id: unitId,
+            perubahan: [{ nisn: String(nisn), nomor_kamar: cek.nilai.nomor_kamar, mudabbir: cek.nilai.peran_kamar === PERAN_MUDABBIR }] } });
+          /* RPC belum dipasang (berkas dirilis sebelum migrasi, atau sesudah ROLLBACK): jatuh ke jalur lama, jangan menyandera Admin. */
+          const belumAda = error && (error.code === 'PGRST202' || error.code === '42883' || /could not find the function/i.test(String(error.message || '')));
+          if (error && !belumAda) throw error;
+          lewatRpc = !error;
+        }
+        if (!lewatRpc) {
+          const { error } = await db.from('siswa')
+            .update({ nomor_kamar: cek.nilai.nomor_kamar, peran_kamar: cek.nilai.peran_kamar })
+            .eq('nisn', String(nisn));
+          if (error) throw error;
+        }
         return cek.nilai;
       } catch (err) {
         const m = String(err?.message || '');
@@ -35576,6 +35591,7 @@ async function aturMenuSarpras() {
   const tampil = (v) => {
     if (!s || !(MENU_ROLE[v] || []).includes(role())) return false;
     if (s.pengelola) return true;
+    if (v === 'sarpras' && s.penempatan && s.penempatan_terbuka) return true;   // v2.76: penempatan kamar dibuka walau modul laporan belum aktif
     if (s.aktif !== true) return false;
     return v === 'sarpras' ? Number(s.tugas) > 0 : !!(s.admin || s.pimpinan);
   };
@@ -35596,3 +35612,20 @@ async function aturMenuSarpras() {
 /* v2.75 · SARPRAS — ranjang/lemari/laci terikat santri (NISN), sarana umum khusus Admin,
  * lembar laporan, laporan WA manual. Seluruh perubahan di sarpras.js & migrasi v2.75. */
 APP.versi = 'rq-v2.75';   // v2.75: Sarpras — barang milik santri, sarana umum Admin, pratinjau lembar, bot WA
+
+/* v2.76 · PENEMPATAN KAMAR oleh musyrif. Tampilan di penempatan.js (dimuat lambat); RPC sarpras_penempatan_*. */
+const PENEMPATAN_JS = { muat: null };
+function muatPenempatanJs() {
+  if (window.RQPenempatan) return Promise.resolve(true);
+  if (!PENEMPATAN_JS.muat) {
+    PENEMPATAN_JS.muat = new Promise((ok) => {
+      const s = document.createElement('script');
+      s.src = 'penempatan.js'; s.async = true;
+      s.onload = () => ok(!!window.RQPenempatan);
+      s.onerror = () => { PENEMPATAN_JS.muat = null; ok(false); };   // boleh dicoba lagi
+      document.head.appendChild(s);
+    });
+  }
+  return PENEMPATAN_JS.muat;
+}
+APP.versi = 'rq-v2.76';   // v2.76: Penempatan kamar oleh musyrif, Sarpras bergaya Denah

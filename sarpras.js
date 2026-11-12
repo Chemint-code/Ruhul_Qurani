@@ -224,12 +224,27 @@
   async function lapor(akar) {
     await bukaHalaman(akar, 'sarpras', 'Sarpras Asrama', async () => {
       await muat();
-      await Promise.all([muatMasalah(), muatCek()]);
+      await Promise.all([muatMasalah(), muatCek(), muatPenempatan()]);
       if (APP.view !== 'sarpras') return;
       gambarLapor(akar);
       onKlik(klikLapor);
     });
   }
+  /* v2.76 · tab Penempatan: tersedia bila basis data mengizinkan (penempatan) dan sakelar penempatan_terbuka menyala. */
+  /* sakelar penempatan_terbuka hanya menutup musyrif; pengelola tetap boleh (server sama: _sarpras_boleh_tempatkan). */
+  const bolehPenempatan = () => !!SP.saya?.penempatan && (!!SP.saya?.penempatan_terbuka || pengelola());
+  async function muatPenempatan() {
+    SP.penem = null;
+    if (!bolehPenempatan()) return;
+    try { SP.penem = await rpc('sarpras_penempatan_data', {}); }
+    catch (e) { console.error(e); SP.penem = { galat: galatTeks(e) }; }
+  }
+  /* Lencana = santri binaan yang belum punya kamar. Bila angkatan binaan dikenal, hanya angkatan itu yang dihitung
+     (santri angkatan lain tetap bisa dipilih di dialog, tetapi bukan tanggungan penempatan musyrif ini). */
+  const nBelumBerkamar = () => {
+    const ang = SP.penem?.angkatan_binaan || [];
+    return (SP.penem?.santri || []).filter(x => x.nomor_kamar == null && (!ang.length || ang.includes(x.angkatan))).length;
+  };
   const lokasiSaya = () => SP.data.lokasi.filter(l => SP.milik.has(l.id) && aktifEfektif(l));
   function zonaSaya() {
     const kode = new Set(lokasiSaya().map(l => l.zona));
@@ -245,28 +260,38 @@
 
   function gambarLapor(akar) {
     const L = UI.lapor;
-    if (!pengelola() && SP.saya.aktif !== true) {
+    const penem = bolehPenempatan();
+    const modul = pengelola() || SP.saya.aktif === true;
+    if (!modul && !penem) {
       akar.innerHTML = kartu('Sarpras Asrama', `<div class="card-body">${kosong('Belum dibuka', 'Pengelola sarpras sedang menyiapkan data kamar dan barang. Halaman ini terbuka setelah modul diaktifkan.', 'fa-lock')}</div>`);
       return;
     }
-    const milik = lokasiSaya();
-    if (!milik.length) {
+    const milik = modul ? lokasiSaya() : [];
+    if (modul && !milik.length && !penem) {
       akar.innerHTML = kartu('Sarpras Asrama', `<div class="card-body">${kosong('Belum ada lokasi amanah',
         `${istilah('kamar')} santri binaan Anda tampil di sini setelah nomor ${istilah('kamar').toLowerCase()} mereka tercatat. Asrama umum dan ${istilah('kamar').toLowerCase()} ${istilah('musyrif').toLowerCase()} mengikuti penunjukan pengelola.`, 'fa-bed')}</div>`);
       return;
     }
-    const zs = zonaSaya();
-    if (!L.tab || (L.tab !== 'riwayat' && !zs.some(z => z.kode === L.tab))) L.tab = zs[0]?.kode || 'riwayat';
+    const zs = milik.length ? zonaSaya() : [];
+    const nBelum = nBelumBerkamar();
+    const tabPenem = ['penempatan', 'Penempatan', 'fa-bed', nBelum];   // lencana hanya bila ada yang belum berkamar (nBelum 0 → tanpa angka)
+    const tabAda = (k) => (k === 'penempatan' ? penem : k === 'riwayat' ? milik.length > 0 : zs.some(z => z.kode === k));
+    if (!L.tab || !tabAda(L.tab)) L.tab = penem && (nBelum > 0 || !zs.length) ? 'penempatan' : (zs[0]?.kode || (milik.length ? 'riwayat' : 'penempatan'));
     const nBuka = SP.masalah.filter(m => terbuka(m) && SP.milik.has(m.lokasi_id)).length;
     const nLewat = milik.filter(l => statusLokasi(l).lewat).length;
     akar.innerHTML = `<div class="sp-lapor">
       <header class="sp-hero card">
-        <div class="sp-hero-teks"><span class="ar">المرافق</span><h3>Amanah sarana</h3>
+        ${modul ? `<div class="sp-hero-teks"><span class="ar">المرافق</span><h3>Amanah sarana</h3>
           <p>${angka(milik.length)} lokasi · <b class="${nBuka ? 'sp-merah' : ''}">${angka(nBuka)} masalah terbuka</b>${nLewat ? ` · ${angka(nLewat)} perlu dicek` : ''}</p></div>
-        <p class="sp-hero-ket">Laporkan yang bermasalah saja. Yang tidak dilaporkan terhitung baik.</p>
+        <p class="sp-hero-ket">Laporkan yang bermasalah saja. Yang tidak dilaporkan terhitung baik.</p>`
+        : `<div class="sp-hero-teks"><span class="ar">المرافق</span><h3>Penempatan ${esc(istilah('kamar').toLowerCase())}</h3>
+          <p><b class="${nBelum ? 'sp-merah' : ''}">${angka(nBelum)} santri binaan belum berkamar</b></p></div>
+        <p class="sp-hero-ket">Pilih ${esc(istilah('kamar').toLowerCase())}, lalu ketuk santri yang tidur di sana.</p>`}
       </header>
-      ${tabNav([...zs.map(z => [z.kode, z.nama, z.ikon || 'fa-layer-group', SP.masalah.filter(m => terbuka(m) && SP.milik.has(m.lokasi_id) && lok(m.lokasi_id)?.zona === z.kode).length]),
-                ['riwayat', 'Riwayat', 'fa-clock-rotate-left', 0]], L.tab, 'Bagian sarpras')}
+      ${tabNav([...(penem && nBelum > 0 ? [tabPenem] : []),
+                ...zs.map(z => [z.kode, z.nama, z.ikon || 'fa-layer-group', SP.masalah.filter(m => terbuka(m) && SP.milik.has(m.lokasi_id) && lok(m.lokasi_id)?.zona === z.kode).length]),
+                ...(penem && nBelum === 0 ? [tabPenem] : []),
+                ...(milik.length ? [['riwayat', 'Riwayat', 'fa-clock-rotate-left', 0]] : [])], L.tab, 'Bagian sarpras')}
       <div id="spPanel" class="sp-panel" role="tabpanel"></div>
     </div>`;
     gambarPanelLapor();
@@ -276,11 +301,28 @@
     const L = UI.lapor;
     document.querySelectorAll('[data-sp-tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.spTab === L.tab)));
     try {
+      if (L.tab === 'penempatan') return panelPenempatan(panel);
       if (L.tab === 'riwayat') return panelRiwayat(panel);
       if (L.lokasi && lok(L.lokasi)?.zona === L.tab && SP.milik.has(L.lokasi)) return panelDetail(panel, lok(L.lokasi));
       L.lokasi = null;
       panelDaftarLokasi(panel, L.tab);
     } catch (e) { console.error(e); panel.innerHTML = kosong('Bagian ini gagal digambar', e?.message || String(e), 'fa-triangle-exclamation'); }
+  }
+  async function panelPenempatan(panel) {
+    if (SP.penem?.galat) {
+      panel.innerHTML = kosong('Penempatan belum bisa dimuat', SP.penem.galat, 'fa-triangle-exclamation');
+      return;
+    }
+    const data = SP.penem; SP.penem = null;   // dipakai sekali; buka() memuat ulang sendiri sesudahnya
+    panel.innerHTML = '<div class="sp-muat" role="status" aria-label="Membuka penempatan"></div>';
+    const ok = await muatPenempatanJs();
+    if (UI.lapor.tab !== 'penempatan' || !$('spPanel')) return;
+    if (!ok) {
+      panel.innerHTML = kosong('Penempatan belum bisa dibuka', 'Berkas penempatan gagal dimuat. Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark');
+      return;
+    }
+    panel.innerHTML = '';
+    await window.RQPenempatan.buka(panel, { data });
   }
   function panelDaftarLokasi(panel, kode) {
     const daftar = lokasiSaya().filter(l => l.zona === kode)
@@ -293,6 +335,7 @@
         const s = statusLokasi(l), d = kedalaman(l);
         const ket = s.buka.length ? `${angka(s.buka.length)} masalah` : s.terakhir ? `Aman · ${relatif(s.terakhir)}` : 'Belum dicek';
         return `<button type="button" class="sp-lk${s.buka.length ? ' rusak' : s.lewat ? ' lewat' : ' aman'}${d ? ' anak' : ''}" data-sp="buka" data-id="${esc(l.id)}">
+          ${!d && l.nomor != null ? `<span class="pk-plakat sp-lk-plakat" aria-hidden="true"><span class="pk-nomor">${esc(l.nomor)}</span></span>` : ''}
           <span class="sp-lk-nama">${esc(d ? l.nama : jalur(l))}</span>
           ${d ? `<span class="sp-lk-induk">${esc(lok(l.induk_id)?.nama || '')}</span>` : ''}
           <span class="sp-lk-ket"><i class="sp-lk-titik"></i>${esc(ket)}</span>
@@ -509,7 +552,10 @@
 
   async function klikLapor(e) {
     const t = e.target.closest('[data-sp-tab]');
-    if (t) { UI.lapor.tab = t.dataset.spTab; UI.lapor.lokasi = null; return gambarPanelLapor(); }
+    if (t) {
+      if (UI.lapor.tab === 'penempatan' && window.RQPenempatan?.tanyaBuang && !(await window.RQPenempatan.tanyaBuang())) return;   // I5: draf belum disimpan
+      UI.lapor.tab = t.dataset.spTab; UI.lapor.lokasi = null; return gambarPanelLapor();
+    }
     const b = e.target.closest('[data-sp]'); if (!b || b.disabled) return;
     const d = b.dataset;
     try {
@@ -565,14 +611,18 @@
   function gambarAtur(akar) {
     const A = UI.atur;
     const aktif = setelan('aktif', false) === true;
+    const penem = setelan('penempatan_terbuka', false) === true;
     const nKamar = SP.data.lokasi.filter(l => zona(l.zona)?.akses === 'binaan' && l.aktif).length;
     akar.innerHTML = `<div class="sp-atur">
       <header class="sp-atur-kepala card">
         <div><h3>Pengaturan Sarpras</h3>
           <small>${angka(nKamar)} ${esc(istilah('kamar').toLowerCase())} · ${angka(SP.data.lokasi.filter(l => l.aktif).length)} lokasi · ${angka(SP.data.butir.filter(b => b.aktif).length)} jenis barang</small></div>
-        ${pengelola() ? `<label class="sp-sakelar"><input type="checkbox" id="spAktif" ${aktif ? 'checked' : ''}>
-            <span class="sp-sakelar-trek" aria-hidden="true"></span><span>${aktif ? 'Modul terbuka untuk musyrif' : 'Modul belum dibuka untuk musyrif'}</span></label>`
-          : `<p class="sp-baca"><i class="fa-solid fa-lock"></i>Hanya-baca. Perubahan dilakukan pengelola sarpras.</p>`}
+        ${pengelola() ? `<div class="pk-sakelar-kelompok"><label class="sp-sakelar"><input type="checkbox" id="spAktif" ${aktif ? 'checked' : ''}>
+            <span class="sp-sakelar-trek" aria-hidden="true"></span><span>${aktif ? 'Modul terbuka untuk musyrif' : 'Modul belum dibuka untuk musyrif'}</span></label>
+          <label class="sp-sakelar"><input type="checkbox" id="spPenem" ${penem ? 'checked' : ''}>
+            <span class="sp-sakelar-trek" aria-hidden="true"></span><span>${penem ? 'Penempatan terbuka untuk musyrif' : 'Penempatan belum dibuka untuk musyrif'}</span></label></div>`
+          : `<div class="pk-sakelar-kelompok"><p class="sp-baca"><i class="fa-solid fa-lock"></i>Hanya-baca. Perubahan dilakukan pengelola sarpras.</p>
+             <p class="sp-baca sp-baca-penem"><i class="fa-solid fa-bed"></i>Penempatan ${penem ? 'terbuka' : 'belum dibuka'} untuk musyrif</p></div>`}
       </header>
       ${tabNav([['kamar', `${istilah('kamar')} & lokasi`, 'fa-bed'], ['katalog', 'Katalog barang', 'fa-list-ul'], ['pelapor', 'Pelapor', 'fa-users-gear']], A.tab, 'Bagian pengaturan')}
       <div id="spPanel" class="sp-panel" role="tabpanel"></div>
@@ -582,6 +632,13 @@
       try {
         await rpc('sarpras_setelan_simpan', { p_kunci: 'aktif', p_nilai: nyala });
         segarkanAtur(nyala ? 'Modul dibuka. Musyrif melihat menu Sarpras setelah memuat ulang aplikasi.' : 'Modul ditutup untuk musyrif.');
+      } catch (err) { e.target.checked = !nyala; e.target.disabled = false; fireError(err); }
+    });
+    $('spPenem')?.addEventListener('change', async (e) => {
+      const nyala = e.target.checked; e.target.disabled = true;
+      try {
+        await rpc('sarpras_setelan_simpan', { p_kunci: 'penempatan_terbuka', p_nilai: nyala });
+        segarkanAtur(nyala ? 'Penempatan dibuka. Musyrif melihat menu Sarpras setelah memuat ulang aplikasi.' : 'Penempatan ditutup untuk musyrif.');
       } catch (err) { e.target.checked = !nyala; e.target.disabled = false; fireError(err); }
     });
     gambarPanelAtur();
@@ -1637,5 +1694,13 @@
     } catch (err) { fireError(err); }
   }
 
-  window.RQSarpras = { lapor, atur, laporan, peta, pikto, _uji: { teksPdf, terbukaPada, jumlahStandar, tglJkt, selisih, isiLaporan: () => isiLaporan(), SP, UI } };
+  /* v2.76 · pembantu untuk penempatan.js (modul terpisah; tidak mengubah perilaku halaman lain). */
+  function sesudahPenempatan(nBelum) {
+    PENGHUNI.clear();
+    const n = document.querySelector('[data-sp-tab="penempatan"] .sp-tab-n');
+    if (n) { if (nBelum > 0) n.textContent = String(nBelum); else n.remove(); }
+    SP.penem = null;
+    db.rpc('sarpras_lokasi_saya').then(({ data, error }) => { if (!error) SP.milik = new Set(data || []); }).catch(() => {});
+  }
+  window.RQSarpras = { lapor, atur, laporan, peta, pikto, istilah, galatTeks, rpc, sesudahPenempatan, _uji: { teksPdf, terbukaPada, jumlahStandar, tglJkt, selisih, isiLaporan: () => isiLaporan(), SP, UI } };
 })();
