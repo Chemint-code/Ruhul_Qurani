@@ -153,6 +153,20 @@
   const ikonBarang = (m) => m.butir_id ? (butir(m.butir_id)?.ikon || 'kotak') : 'lain';
   const namaPenyebab = (k) => (setelan('penyebab', []) || []).find(p => p.kode === k)?.label || '';
   const bolehBatal = (m) => terbuka(m) && (pengelola() || (m.pelapor === idSaya() && tglJkt(m.dilaporkan_pada) === hariIni()));
+  /* v2.75: barang milik santri — pemilik dipilih dari penghuni kamar. */
+  const milikSantri = (b, l) => !!(b?.milik_santri && zona(l?.zona)?.akses === 'binaan');
+  const pemilikTeks = (m) => m.pemilik_nama ? `${m.pemilik_nama}${m.pemilik_kelas ? ` (${m.pemilik_kelas})` : ''}` : '';
+  const inisial = (n) => String(n || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join('').toUpperCase();
+  const PENGHUNI = new Map();
+  async function muatPenghuni(lokId, segar) {
+    if (!segar && PENGHUNI.has(lokId)) return PENGHUNI.get(lokId);
+    const daftar = await rpc('sarpras_penghuni', { p_lokasi: lokId });
+    PENGHUNI.set(lokId, daftar || []);
+    return daftar || [];
+  }
+  const waspadaSebab = () => new Set((setelan('peta', {}) || {}).penyebab_waspada || ['lalai', 'rusak']);
+  const bolehCatatPelanggaran = (m) => !!(m.nisn && waspadaSebab().has(m.penyebab) && typeof modalCatatPelanggaran === 'function'
+    && ['Admin', 'Guru', 'Guru BK', 'Ustadz GEN-Z'].includes(APP.profil?.role));
 
   /* ---------- muat ---------------------------------------------------- */
   async function muat() {
@@ -188,7 +202,9 @@
     SP.cek = data || [];
   }
   async function bukaHalaman(akar, view, judul, jalan) {
-    akar.innerHTML = `<div class="card sp-muat"><i class="fa-solid fa-circle-notch fa-spin"></i><p>Membuka ${esc(judul)}…</p></div>`;
+    akar.innerHTML = `<div class="sp-kerangka" role="status" aria-label="Membuka ${esc(judul)}">
+      <span class="sp-k sp-k-hero"></span><span class="sp-k sp-k-tab"></span>
+      <span class="sp-k-kisi">${'<span class="sp-k sp-k-kartu"></span>'.repeat(6)}</span></div>`;
     try { await jalan(); }
     catch (e) {
       if (APP.view !== view) return;
@@ -300,17 +316,40 @@
       ${s.terakhir ? `<p class="sp-detail-cek"><i class="fa-solid fa-clipboard-check"></i>Terakhir dicek ${esc(relatif(s.terakhir))}</p>` : ''}
       ${s.buka.length ? `<section class="sp-buka"><h4>Masih rusak <b>${angka(s.buka.length)}</b></h4>
         <ul class="sp-msl-daftar">${s.buka.map(m => itemMasalah(m, l)).join('')}</ul></section>` : ''}
+      ${daftar.some(b => milikSantri(b, l)) ? `<section class="sp-denah" id="spDenah" data-id="${esc(l.id)}"><h4>Denah penghuni</h4>
+        <div class="sp-denah-kisi">${'<span class="sp-k sp-k-santri"></span>'.repeat(Math.min(6, l.kapasitas || 4))}</div></section>` : ''}
       <section class="sp-ubin-wadah"><h4>Laporkan masalah</h4>
         <div class="sp-ubin-kisi">${daftar.map(b => {
           const n = jumlahStandar(l, b), r = bukaPer.get(b.id) || 0;
           return `<button type="button" class="sp-ubin${r ? ' ada' : ''}" data-sp="ubin" data-butir="${esc(b.id)}" data-id="${esc(l.id)}">
-            ${pikto(b.ikon)}<b>${esc(b.nama)}</b><small>${n ? `× ${angka(n)}` : '&nbsp;'}</small>${r ? `<i class="sp-ubin-n">${r}</i>` : ''}</button>`;
+            ${pikto(b.ikon)}<b>${esc(b.nama)}</b><small>${milikSantri(b, l) ? 'per santri' : n ? `× ${angka(n)}` : '&nbsp;'}</small>${r ? `<i class="sp-ubin-n">${r}</i>` : ''}</button>`;
         }).join('')}
           <button type="button" class="sp-ubin lain" data-sp="ubin" data-butir="" data-id="${esc(l.id)}">${pikto('lain')}<b>Lainnya</b><small>tulis sendiri</small></button>
         </div></section>
       ${tertutup.length ? `<details class="sp-jejak"><summary>Sudah baik (${angka(tertutup.length)} terakhir)</summary>
         <ul class="sp-msl-daftar">${tertutup.map(m => itemMasalah(m, l)).join('')}</ul></details>` : ''}
     </article>`;
+    if ($('spDenah')) gambarDenah(l, s.buka);
+  }
+  async function gambarDenah(l, buka) {
+    const wadah = $('spDenah'); if (!wadah) return;
+    let daftar;
+    try { daftar = await muatPenghuni(l.id); }
+    catch (e) { wadah.querySelector('.sp-denah-kisi').innerHTML = `<p class="sp-kosong">${esc(galatTeks(e))}</p>`; return; }
+    if (!$('spDenah') || $('spDenah').dataset.id !== l.id) return;
+    const milik = butirDi(l).filter(b => milikSantri(b, l));
+    const rusak = new Map(); buka.filter(m => m.nisn).forEach(m => rusak.set(`${m.nisn}|${m.butir_id}`, m));
+    wadah.querySelector('h4').innerHTML = `Denah penghuni <b class="sp-h4-n">${angka(daftar.length)}${l.kapasitas ? ` / ${angka(l.kapasitas)}` : ''}</b>`;
+    wadah.querySelector('.sp-denah-kisi').innerHTML = daftar.length ? daftar.map((x, i) => {
+      const nRusak = milik.filter(b => rusak.has(`${x.nisn}|${b.id}`)).length;
+      return `<article class="sp-santri${nRusak ? ' rusak' : ''}" style="--i:${i}">
+        <span class="sp-ava" aria-hidden="true">${esc(inisial(x.nama))}</span>
+        <div class="sp-santri-id"><b>${esc(x.nama)}</b><small>${esc(x.kelas || '')}${x.peran ? ` · <em>${esc(x.peran)}</em>` : ''}</small></div>
+        <div class="sp-santri-brg">${milik.map(b => { const m = rusak.get(`${x.nisn}|${b.id}`);
+          return `<button type="button" class="sp-mini${m ? ' rusak' : ''}" data-sp="ubin" data-butir="${esc(b.id)}" data-id="${esc(l.id)}" data-nisn="${esc(x.nisn)}"
+            title="${esc(`${b.nama} ${x.nama}${m ? ' · ' + m.masalah : ''}`)}" aria-label="${esc(`Laporkan ${b.nama} milik ${x.nama}`)}">${pikto(b.ikon)}</button>`; }).join('')}</div>
+      </article>`;
+    }).join('') : `<p class="sp-kosong">Belum ada santri yang tercatat di ${esc(istilah('kamar').toLowerCase())} ini. Perbarui nomor kamar santri lebih dulu.</p>`;
   }
   function itemMasalah(m, l, opsi = {}) {
     const b = m.butir_id ? butir(m.butir_id) : null;
@@ -324,32 +363,45 @@
       <span class="sp-msl-ikon">${pikto(ikonBarang(m))}</span>
       <div class="sp-msl-isi">
         <b>${esc(namaBarang(m))} · ${esc(m.masalah)}</b>
+        ${m.pemilik_nama ? `<span class="sp-msl-milik"><i class="fa-solid fa-user"></i>${esc(pemilikTeks(m))}</span>` : ''}
         ${opsi.lokasi ? `<span class="sp-msl-lok">${esc(l ? jalur(l) : '')}</span>` : ''}
         ${ket.length ? `<span class="sp-msl-ket">${esc(ket.join(' · '))}</span>` : ''}
         <small>sejak ${esc(tglPendek(lapor))} · ${angka(umur)} hari · ${esc(m.pelapor_nama || '')} ${status}</small>
       </div>
       ${terbuka(m) ? `<span class="sp-msl-aksi">
         <button type="button" class="btn btn-sm sp-baik" data-sp="baik" data-msl="${m.id}"><i class="fa-solid fa-check"></i>Sudah baik</button>
+        ${bolehCatatPelanggaran(m) ? `<button type="button" class="btn btn-ghost btn-sm sp-plg" data-sp="pelanggaran" data-msl="${m.id}"><i class="fa-solid fa-scale-balanced"></i>Catat pelanggaran</button>` : ''}
         ${bolehBatal(m) ? `<button type="button" class="btn btn-ghost btn-sm" data-sp="batal" data-msl="${m.id}" title="Salah input">Batal</button>` : ''}
       </span>` : ''}
     </li>`;
   }
 
-  async function formLapor(l, b) {
-    const cap = b ? jumlahStandar(l, b) : null;
+  async function formLapor(l, b, nisnAwal) {
+    const milik = milikSantri(b, l);
+    let penghuni = [];
+    if (milik) {
+      try { penghuni = await muatPenghuni(l.id); } catch (e) { return fireError(e); }
+      if (!penghuni.length) return Swal.fire({ icon: 'info', title: 'Belum ada penghuni', confirmButtonColor: BIRU,
+        html: `<p>${esc(b.nama)} adalah barang milik santri. Belum ada santri yang tercatat di ${esc(l.nama)}; perbarui nomor kamar santri lebih dulu.</p>` });
+    }
+    const cap = b && !milik ? jumlahStandar(l, b) : null;
     const pilihan = b ? (b.masalah_umum || []) : [];
     const peny = setelan('penyebab', []) || [];
-    const st = { masalah: null, penyebab: null, jumlah: 1 };
+    const st = { masalah: null, penyebab: null, jumlah: 1, pemilik: new Set(nisnAwal ? [nisnAwal] : []) };
+    const awal = nisnAwal ? penghuni.find(x => x.nisn === nisnAwal) : null;
     const r = await Swal.fire({
-      ...swalDasar, width: 520, title: b ? b.nama : 'Barang lain', confirmButtonText: 'Laporkan', customClass: { popup: 'sp-swal' },
+      ...swalDasar, width: 540, title: b ? `${b.nama}${awal ? ` · ${awal.nama}` : ''}` : 'Barang lain', confirmButtonText: 'Laporkan', customClass: { popup: 'sp-swal' },
       html: `<div class="sp-flapor">
-        <p class="sp-flapor-lok">${pikto(b?.ikon || 'lain')}<span>${esc(jalur(l))}${cap ? ` · terpasang ${angka(cap)}` : ''}</span></p>
+        <p class="sp-flapor-lok">${pikto(b?.ikon || 'lain')}<span>${esc(jalur(l))}${cap ? ` · terpasang ${angka(cap)}` : milik ? ' · satu per santri' : ''}</span></p>
+        ${milik ? `<span class="label">Pemilik <small>${awal ? 'boleh ditambah bila sama rusaknya' : 'pilih satu atau beberapa santri'}</small></span>
+          <div class="sp-pil sp-pemilik" id="spFMilik">${penghuni.map(x => `<button type="button" class="sp-pil-b kecil" aria-pressed="${st.pemilik.has(x.nisn)}" data-v="${esc(x.nisn)}">
+            <span class="sp-ava kecil" aria-hidden="true">${esc(inisial(x.nama))}</span><span>${esc(x.nama)}<small>${esc(x.kelas || '')}</small></span></button>`).join('')}</div>` : ''}
         ${b ? '' : `<label class="label" for="spFBarang">Nama barang</label><input id="spFBarang" class="input" maxlength="80" placeholder="mis. Kipas angin" autocomplete="off">`}
         <span class="label">Masalahnya</span>
         <div class="sp-pil" id="spFMsl" role="radiogroup">${pilihan.map(m => `<button type="button" class="sp-pil-b" role="radio" aria-checked="false" data-v="${esc(m)}">${esc(m)}</button>`).join('')}
           <button type="button" class="sp-pil-b" role="radio" aria-checked="false" data-v="">Lainnya…</button></div>
         <input id="spFMslLain" class="input" maxlength="160" placeholder="Tulis masalahnya" autocomplete="off" ${pilihan.length ? 'hidden' : ''}>
-        <div class="sp-fjml"><span class="label">Jumlah rusak</span>
+        <div class="sp-fjml"${milik ? ' hidden' : ''}><span class="label">Jumlah rusak</span>
           <div class="sp-stepper"><button type="button" data-d="-1" aria-label="Kurangi">−</button><output id="spFJml">1</output><button type="button" data-d="1" aria-label="Tambah">+</button></div>
           ${cap ? `<small>dari ${angka(cap)}</small>` : ''}</div>
         <span class="label">Penyebab <small>bila diketahui</small></span>
@@ -358,6 +410,11 @@
       </div>`,
       didOpen: (pop) => {
         if (!pilihan.length) st.masalah = '';
+        pop.querySelector('#spFMilik')?.addEventListener('click', (e) => {
+          const t = e.target.closest('.sp-pil-b'); if (!t) return;
+          st.pemilik.has(t.dataset.v) ? st.pemilik.delete(t.dataset.v) : st.pemilik.add(t.dataset.v);
+          t.setAttribute('aria-pressed', String(st.pemilik.has(t.dataset.v)));
+        });
         pop.querySelector('#spFMsl').addEventListener('click', (e) => {
           const t = e.target.closest('.sp-pil-b'); if (!t) return;
           pop.querySelectorAll('#spFMsl .sp-pil-b').forEach(x => x.setAttribute('aria-checked', String(x === t)));
@@ -382,16 +439,21 @@
         const masalah = st.masalah === '' || st.masalah === null ? ($('spFMslLain')?.value || '').trim() : st.masalah;
         const lain = b ? null : ($('spFBarang')?.value || '').trim();
         if (!b && !lain) { Swal.showValidationMessage('Tulis nama barangnya.'); return false; }
+        if (milik && !st.pemilik.size) { Swal.showValidationMessage('Pilih santri pemiliknya.'); return false; }
         if (!masalah) { Swal.showValidationMessage(st.masalah === null && pilihan.length ? 'Pilih masalahnya.' : 'Tulis masalahnya.'); return false; }
+        const dasar = { lokasi_id: l.id, butir_id: b?.id || null, butir_lain: lain, masalah, penyebab: st.penyebab, catatan: ($('spFCat')?.value || '').trim() || null };
         try {
-          return await rpc('sarpras_masalah_lapor', { p: { lokasi_id: l.id, butir_id: b?.id || null, butir_lain: lain, masalah, jumlah: st.jumlah,
-            penyebab: st.penyebab, catatan: ($('spFCat')?.value || '').trim() || null } });
+          if (!milik) return await rpc('sarpras_masalah_lapor', { p: { ...dasar, jumlah: st.jumlah } });
+          let ada = 0;
+          for (const nisn of st.pemilik) { const h = await rpc('sarpras_masalah_lapor', { p: { ...dasar, jumlah: 1, nisn } }); if (h?.ada) ada++; }
+          return { ada: ada === st.pemilik.size, n: st.pemilik.size };
         } catch (e) { Swal.showValidationMessage(e.message); return false; }
       }
     });
     if (!r.isConfirmed) return;
+    const siapa = milik ? [...st.pemilik].map(n => penghuni.find(x => x.nisn === n)?.nama).filter(Boolean) : [];
     toast('success', r.value?.ada ? 'Laporan diperbarui' : 'Masalah dilaporkan',
-      { nada: 'catat', sub: `${b ? b.nama : 'Barang lain'} · ${l.nama}${r.value?.ada ? ' · masih tercatat terbuka' : ''}` });
+      { nada: 'catat', sub: `${b ? b.nama : 'Barang lain'} · ${siapa.length ? (siapa.length > 2 ? `${siapa.length} santri` : siapa.join(', ')) : l.nama}${r.value?.ada ? ' · masih tercatat terbuka' : ''}` });
     await segarkanLapor();
   }
   async function segarkanLapor() {
@@ -453,7 +515,13 @@
     try {
       if (d.sp === 'buka') { UI.lapor.lokasi = d.id; gambarPanelLapor(); return window.scrollTo({ top: 0, behavior: 'smooth' }); }
       if (d.sp === 'kembali') { UI.lapor.lokasi = null; return gambarPanelLapor(); }
-      if (d.sp === 'ubin') return formLapor(lok(d.id), d.butir ? butir(d.butir) : null);
+      if (d.sp === 'ubin') return formLapor(lok(d.id), d.butir ? butir(d.butir) : null, d.nisn || null);
+      if (d.sp === 'pelanggaran') {
+        const m = SP.masalah.find(x => x.id === Number(d.msl)); if (!m) return;
+        const kode = (setelan('kode_pelanggaran_rusak', {}) || {})[m.penyebab] || null;
+        return modalCatatPelanggaran({ nisn: m.nisn, labelSantri: pemilikTeks(m), kode, labelKode: kode || '',
+          catatan: `${namaBarang(m)}: ${m.masalah} (${lok(m.lokasi_id)?.nama || 'sarpras'}, dilaporkan ${tglPendek(tglJkt(m.dilaporkan_pada))})` });
+      }
       if (d.sp === 'baik') { b.disabled = true; return tandaiBaik([Number(d.msl)]); }
       if (d.sp === 'baik-pilih') { b.disabled = true; return tandaiBaik([...UI.lapor.pilih]); }
       if (d.sp === 'batal') {
@@ -588,7 +656,7 @@
   }
   function daftarZona(u, z) {
     const akar = SP.peta.akar.filter(l => l.unit_id === u.id && l.zona === z.kode);
-    const akses = { penunjukan: 'pelapor: yang ditunjuk', semua_musyrif: `pelapor: semua ${istilah('musyrif').toLowerCase()} unit ini`, binaan: '' }[z.akses] || '';
+    const akses = { penunjukan: 'pelapor: yang ditunjuk', semua_musyrif: `pelapor: semua ${istilah('musyrif').toLowerCase()} unit ini`, admin: 'pelapor: Admin & pengelola', binaan: '' }[z.akses] || '';
     const baris = (l, d) => {
       const anak = SP.peta.anak.get(l.id) || [];
       const nIsi = SP.data.standar.filter(s => s.lokasi_id === l.id).length;
@@ -633,7 +701,7 @@
     if (r.isConfirmed) { UI.atur.unit = r.value?.id || UI.atur.unit; segarkanAtur('Tersimpan.'); }
   }
   async function formZona(z) {
-    const AKSES = [['binaan', `${istilah('musyrif')} santri penghuni (otomatis)`], ['semua_musyrif', `Semua ${istilah('musyrif').toLowerCase()} unit itu`], ['penunjukan', 'Hanya yang ditunjuk']];
+    const AKSES = [['binaan', `${istilah('musyrif')} santri penghuni (otomatis)`], ['semua_musyrif', `Semua ${istilah('musyrif').toLowerCase()} unit itu`], ['penunjukan', 'Hanya yang ditunjuk'], ['admin', 'Hanya Admin & pengelola']];
     const r = await Swal.fire({
       ...swalDasar, width: 540, title: z ? 'Ubah zona' : 'Tambah zona', confirmButtonText: 'Simpan',
       html: `<div class="stack sp-form">
@@ -794,6 +862,7 @@
           <span class="sp-kat-ikon">${pikto(b.ikon)}</span>
           <div class="sp-kat-isi"><b>${esc(b.nama)}</b>${b.aktif ? '' : ' <span class="sp-off">nonaktif</span>'}
             <small>${esc(namaZona(b.zona))} · ${esc(aturanTeks(b))}${pakai.get(b.id) ? ` · ${angka(pakai.get(b.id))} isi khusus` : ''}</small>
+            ${b.milik_santri ? `<span class="sp-lencana"><i class="fa-solid fa-user"></i>milik ${esc(istilah('penghuni').toLowerCase())}</span>` : ''}
             ${(b.masalah_umum || []).length ? `<span class="sp-kat-msl">${b.masalah_umum.map(m => `<i>${esc(m)}</i>`).join('')}</span>` : '<span class="sp-kat-msl kosong">Belum ada pilihan masalah</span>'}</div>
           <span class="sp-kat-aksi">${tulis(tombol('butir-ubah', 'Ubah', 'fa-pen-to-square', { id: b.id })
             + (b.aktif ? tombol('butir-hapus', 'Hapus', 'fa-trash-can', { id: b.id }) : tombol('butir-aktif', 'Aktifkan', 'fa-rotate', { id: b.id })))}</span>
@@ -827,6 +896,8 @@
             <input id="spButJml" class="input" type="number" min="1" max="9999" value="${esc(b?.jumlah_tetap ?? 1)}" aria-label="Jumlah tetap"></label>
           <label class="switch-row"><input type="radio" name="spAturan" value="bebas" ${aturan === 'bebas' ? 'checked' : ''}><span>Tidak dibatasi</span></label>
         </div>
+        <label class="switch-row sp-milik-sw"><input type="checkbox" id="spButMilik" ${b?.milik_santri ? 'checked' : ''}>
+          <span>Milik ${esc(istilah('penghuni').toLowerCase())}: pemilik dipilih saat melapor (ranjang, lemari, laci)</span></label>
         <label class="label" for="spButMsl">Pilihan masalah <small>(satu per baris)</small></label>
         <textarea id="spButMsl" class="input" rows="4" placeholder="Tidak dingin&#10;Bocor air&#10;Mati total">${esc((b?.masalah_umum || []).join('\n'))}</textarea>
       </div>`,
@@ -843,7 +914,7 @@
         const msl = [...new Set($('spButMsl').value.split('\n').map(s => s.trim()).filter(Boolean))];
         const p = { id: b?.id || null, nama, kategori: $('spButKat').value.trim() || null, satuan: b?.satuan || null, ikon,
           zona: [...document.querySelectorAll('.spButZona:checked')].map(x => x.value), per_anak: at === 'anak',
-          jumlah_tetap: at === 'tetap' ? jml : null, masalah_umum: msl, ditanggung: b ? b.ditanggung : true };
+          jumlah_tetap: at === 'tetap' ? jml : null, masalah_umum: msl, ditanggung: b ? b.ditanggung : true, milik_santri: $('spButMilik').checked };
         try { return await rpc('sarpras_butir_simpan', { p }); } catch (e) { Swal.showValidationMessage(e.message); return false; }
       }
     });
@@ -881,7 +952,7 @@
     if (APP.view !== 'sarprasatur' || UI.atur.tab !== 'pelapor') return;
     const nama = (id) => prof.find(p => p.id === id)?.nama || 'akun nonaktif';
     const u = unit(UI.atur.unit) || SP.data.unit[0];
-    const tunjuk = SP.data.lokasi.filter(l => l.aktif && (!u || l.unit_id === u.id) && zona(l.zona)?.akses !== 'binaan')
+    const tunjuk = SP.data.lokasi.filter(l => l.aktif && (!u || l.unit_id === u.id) && !['binaan', 'admin'].includes(zona(l.zona)?.akses))
       .sort((a, b) => (zona(a.zona)?.urutan - zona(b.zona)?.urutan) || jalur(a).localeCompare(jalur(b), 'id', { numeric: true }));
     const kamar = u ? SP.data.lokasi.filter(l => l.aktif && l.unit_id === u.id && zona(l.zona)?.akses === 'binaan' && l.nomor != null).sort((a, b) => a.nomor - b.nomor) : [];
     const santri = (siswa || []).filter(s => s.status_santri === 'Aktif' && u && s.unit_gender === u.kunci_siswa && s.nomor_kamar != null);
@@ -891,7 +962,7 @@
     const musyTanpa = musy.filter(p => !kamar.some(l => pegang(l).includes(p)));
     panel.innerHTML = `<section class="sp-zona-blok card">
         <header class="sp-zona-kepala"><h4><i class="fa-solid fa-user-check"></i>Ditunjuk</h4>
-          <small>Asrama umum dan ${esc(istilah('kamar').toLowerCase())} ${esc(istilah('musyrif').toLowerCase())} hanya dilapor yang ditunjuk. Penunjukan pada sayap berlaku juga untuk biliknya.</small></header>
+          <small>${esc(istilah('kamar'))} ${esc(istilah('musyrif').toLowerCase())} hanya dilapor yang ditunjuk; kamar mandi ditambah ${esc(istilah('musyrif').toLowerCase())} unitnya. Penunjukan pada sayap berlaku juga untuk biliknya. Sarana umum dilapor Admin.</small></header>
         ${tunjuk.length ? `<ul class="sp-tugas">${tunjuk.map(l => `<li class="sp-tugas-baris">
             <div><b>${esc(jalur(l))}</b><small>${esc(zona(l.zona)?.nama || '')}${zona(l.zona)?.akses === 'semua_musyrif' ? ` · semua ${esc(istilah('musyrif').toLowerCase())} unit ini, ditambah:` : ''}</small></div>
             <span class="sp-chip-daftar">${(l.pelapor || []).length ? l.pelapor.map(id => `<span class="sp-chip">${esc(nama(id))}</span>`).join('') : '<span class="sp-kosong">belum ada</span>'}</span>
@@ -1076,7 +1147,6 @@
     const S = UI.lap, h = isiLaporan();
     const kertas = window.RQ_SIDANG?.kertasDaftar?.() || [{ kode: 'A4', nama: 'A4' }, { kode: 'F4', nama: 'F4' }];
     const kSimpan = window.RQ_SIDANG?.kertasTersimpan?.() || 'A4';
-    let grupLok = null;
     el.innerHTML = `<div class="sp-lap-ringkas">
         <div class="sp-stat"><b>${angka(h.buka.length)}</b><span>masalah terbuka</span></div>
         <div class="sp-stat"><b>${angka(h.buka.reduce((a, m) => a + m.jumlah, 0))}</b><span>unit rusak</span></div>
@@ -1091,18 +1161,44 @@
           ${tombol('l-pdf', 'PDF', 'fa-file-pdf', {}, 'btn-primary')}${tombol('l-xlsx', 'Excel', 'fa-file-excel')}
         </span>
       </div>
-      ${h.buka.length ? `<div class="tbl sp-lap-tbl"><table class="sp-tbl"><thead><tr><th>No</th><th>Lokasi</th><th>Barang</th><th>Masalah</th><th>Jml</th><th>Sejak</th><th>Umur</th><th>Keterangan</th></tr></thead><tbody>
-          ${h.buka.map((m, i) => { const l = lok(m.lokasi_id), b = m.butir_id ? butir(m.butir_id) : null, p = b && l ? jumlahStandar(l, b) : null;
-            const sama = S.urut === 'lokasi' && grupLok === m.lokasi_id; grupLok = m.lokasi_id;
-            return `<tr class="${sama ? 'sp-sama' : ''}"><td>${i + 1}</td><td>${sama ? '' : `<b>${esc(jalur(l || {}))}</b><small>${esc(labelLantai(lantaiDari(l || {})))}</small>`}</td>
-              <td><span class="sp-sel-barang">${pikto(ikonBarang(m))}${esc(namaBarang(m))}</span></td><td>${esc(m.masalah)}</td>
-              <td>${angka(m.jumlah)}${p ? `<small>/${angka(p)}</small>` : ''}</td><td>${esc(tglPendek(tglJkt(m.dilaporkan_pada)))}</td>
-              <td class="${h.umur(m) > 30 ? 'sp-merah' : ''}">${angka(h.umur(m))} hr</td><td>${esc([namaPenyebab(m.penyebab), m.catatan].filter(Boolean).join(' · '))}</td></tr>`; }).join('')}
-        </tbody></table></div>`
-        : kosong('Tidak ada masalah terbuka', 'Pada cakupan dan tanggal ini seluruh sarana tercatat baik.', 'fa-circle-check')}
-      ${h.baik.length ? `<details class="sp-jejak" open><summary>Sudah baik sejak ${esc(tglId(S.baikSejak))} (${angka(h.baik.length)})</summary>
-        <ul class="sp-msl-daftar">${h.baik.map(m => itemMasalah(m, lok(m.lokasi_id), { lokasi: true })).join('')}</ul></details>` : ''}`;
+      ${lembarLaporan(h)}`;
     $('spLapKertas')?.addEventListener('change', (e) => window.RQ_SIDANG?.simpanKertas?.(e.target.value));
+  }
+  /** Pratinjau berbentuk lembar kertas — susunannya sama dengan PDF. */
+  function lembarLaporan(h) {
+    const S = UI.lap, lb = lembagaKop(), pn = setelan('penerima', {}) || {}, td = (setelan('penandatangan', []) || []).filter(t => t.nama || t.jabatan);
+    let g = null;
+    const baris = h.buka.map((m, i) => {
+      const l = lok(m.lokasi_id), b = m.butir_id ? butir(m.butir_id) : null, p = b && l ? jumlahStandar(l, b) : null, u = h.umur(m);
+      const grup = S.urut === 'lokasi' && g !== m.lokasi_id ? (g = m.lokasi_id, `<tr class="grup"><td colspan="7">${esc(jalur(l || {}))} <span>${esc(labelLantai(lantaiDari(l || {})))}</span></td></tr>`) : '';
+      return grup + `<tr class="baris"><td class="c">${i + 1}</td>
+        <td><span class="sp-sel-barang">${pikto(ikonBarang(m))}<span><b>${esc(namaBarang(m))}</b>${m.pemilik_nama ? `<small>${esc(pemilikTeks(m))}</small>` : ''}${S.urut === 'lokasi' ? '' : `<small>${esc(jalur(l || {}))}</small>`}</span></span></td>
+        <td>${esc(m.masalah)}</td><td class="c">${angka(m.jumlah)}${p ? `<small>/${angka(p)}</small>` : ''}</td>
+        <td class="c">${esc(tglPendek(tglJkt(m.dilaporkan_pada)))}</td><td class="c${u > 30 ? ' sp-merah' : ''}">${angka(u)} hr</td>
+        <td class="ket">${esc([namaPenyebab(m.penyebab), m.catatan].filter(Boolean).join('; '))}</td></tr>`;
+    }).join('');
+    return `<div class="sp-lembar-wadah"><article class="sp-lembar" aria-label="Pratinjau laporan">
+      <header class="sp-lembar-kop"><small>SARANA DAN PRASARANA ${esc(istilah('asrama').toUpperCase())}</small><b>${esc(String(lb.nama || '').toUpperCase())}</b>${lb.alamat ? `<span>${esc(lb.alamat)}</span>` : ''}</header>
+      <h3>LAPORAN KONDISI SARANA ASRAMA</h3>
+      <p class="sp-lembar-sub">Posisi per ${esc(tglId(S.per, 'long'))}</p>
+      <p class="sp-lembar-ket">${esc(judulCakupan())}${pn.nama ? `<br>Kepada: ${esc(pn.nama)}` : ''}</p>
+      <p class="sp-lembar-par">${h.buka.length ? `Terdapat ${angka(h.buka.length)} masalah terbuka (${angka(h.buka.reduce((a, m) => a + m.jumlah, 0))} unit) di ${angka(h.lokasiN)} lokasi. Masalah tertua sudah ${angka(h.terlama)} hari. Barang yang tidak tercantum dalam laporan ini tercatat dalam keadaan baik.`
+        : 'Pada cakupan dan tanggal ini tidak ada masalah sarana yang tercatat. Seluruh barang dalam keadaan baik.'}</p>
+      ${h.buka.length ? `<h4>A. Masalah yang perlu ditangani</h4>
+        <div class="sp-lembar-gulir"><table class="sp-lembar-tbl"><thead><tr><th class="c">No</th><th>Barang</th><th>Masalah</th><th class="c">Jml</th><th class="c">Sejak</th><th class="c">Umur</th><th>Keterangan</th></tr></thead>
+        <tbody>${baris}</tbody></table></div>
+        <h4>B. Rekap per barang</h4>
+        <div class="sp-lembar-gulir"><table class="sp-lembar-tbl sp-lembar-rekap"><thead><tr><th>Barang</th><th class="c">Masalah</th><th class="c">Unit rusak</th><th class="c">Lokasi</th></tr></thead>
+        <tbody>${h.rekap.map(r => `<tr class="baris"><td><span class="sp-sel-barang">${pikto(r.ikon)}<b>${esc(r.barang)}</b></span></td><td class="c">${r.kasus}</td><td class="c">${r.unit}</td><td class="c">${r.lokasi.size}</td></tr>`).join('')}</tbody></table></div>` : ''}
+      ${h.baik.length ? `<h4>${h.buka.length ? 'C' : 'A'}. Sudah baik sejak ${esc(tglId(S.baikSejak))}</h4>
+        <div class="sp-lembar-gulir"><table class="sp-lembar-tbl sp-lembar-baik"><thead><tr><th>Lokasi</th><th>Barang</th><th>Masalah</th><th class="c">Dilaporkan</th><th class="c">Baik</th></tr></thead>
+        <tbody>${h.baik.map(m => `<tr class="baris"><td><b>${esc(jalur(lok(m.lokasi_id) || {}))}</b></td><td>${esc(namaBarang(m))}${m.pemilik_nama ? `<small>${esc(pemilikTeks(m))}</small>` : ''}</td><td>${esc(m.masalah)}</td>
+          <td class="c">${esc(tglPendek(tglJkt(m.dilaporkan_pada)))}</td><td class="c">${esc(tglPendek(tglJkt(m.selesai_pada)))}</td></tr>`).join('')}</tbody></table></div>` : ''}
+      ${td.length ? `<footer class="sp-lembar-ttd">
+        ${td[1] ? `<div><span aria-hidden="true">&nbsp;</span><span>Mengetahui,</span><span>${esc(td[1].jabatan || '')}</span><b>${esc(td[1].nama || '')}</b></div>` : '<div></div>'}
+        <div><span>${esc([(setelan('lembaga', {}) || {}).kota, tglId(S.per, 'long')].filter(Boolean).join(', '))}</span><span>Pelapor,</span><span>${esc(td[0].jabatan || '')}</span><b>${esc(td[0].nama || '')}</b></div>
+      </footer>` : '<p class="sp-lembar-tanpa">Penandatangan belum diisi.</p>'}
+    </article></div>`;
   }
   async function formKop() {
     const lb = setelan('lembaga', {}) || {}, pn = setelan('penerima', {}) || {}, td = setelan('penandatangan', []) || [];
@@ -1273,7 +1369,8 @@
           const l = lok(m.lokasi_id), b = m.butir_id ? butir(m.butir_id) : null, p = b && l ? jumlahStandar(l, b) : null;
           if (S.urut === 'lokasi' && g !== m.lokasi_id) { g = m.lokasi_id; baris.push({ grup: `${jalur(l || {})}  -  ${labelLantai(lantaiDari(l || {}))}` }); }
           const u = h.umur(m);
-          baris.push({ sel: [String(i + 1), S.urut === 'lokasi' ? namaBarang(m) : `${jalur(l || {})}\n${namaBarang(m)}`, m.masalah,
+          const brg = namaBarang(m) + (m.pemilik_nama ? `\n${pemilikTeks(m)}` : '');
+          baris.push({ sel: [String(i + 1), S.urut === 'lokasi' ? brg : `${jalur(l || {})}\n${brg}`, m.masalah,
             `${m.jumlah}${p ? '/' + p : ''}`, tglPendek(tglJkt(m.dilaporkan_pada)), `${u} hr`, [namaPenyebab(m.penyebab), m.catatan].filter(Boolean).join('; ')],
             warna: [null, null, null, null, null, u > 30 ? [180, 35, 60] : null, [90, 96, 112]] });
         });
@@ -1286,7 +1383,7 @@
       if (h.baik.length) {
         M.subjudul(`${h.buka.length ? 'C' : 'A'}. Sudah baik sejak ${tglId(S.baikSejak)}`);
         M.tabel([{ judul: 'Lokasi', bobot: 1.4, tebal: true }, { judul: 'Barang', bobot: 1.1 }, { judul: 'Masalah', bobot: 1.6 }, { judul: 'Dilaporkan', lebar: 20, rata: 'center' }, { judul: 'Baik', lebar: 18, rata: 'center' }],
-          h.baik.map(m => ({ sel: [jalur(lok(m.lokasi_id) || {}), namaBarang(m), m.masalah, tglPendek(tglJkt(m.dilaporkan_pada)), tglPendek(tglJkt(m.selesai_pada))] })));
+          h.baik.map(m => ({ sel: [jalur(lok(m.lokasi_id) || {}), namaBarang(m) + (m.pemilik_nama ? `\n${pemilikTeks(m)}` : ''), m.masalah, tglPendek(tglJkt(m.dilaporkan_pada)), tglPendek(tglJkt(m.selesai_pada))] })));
       }
       M.ttd(tglId(S.per, 'long'), (setelan('lembaga', {}) || {}).kota, setelan('penandatangan', []));
       M.kaki(`Laporan Sarpras - disusun chemint ${jamCetak()} WIB`);
@@ -1303,12 +1400,12 @@
       const XLSX = await prMuatXlsx();
       const lb = lembagaKop(), pn = setelan('penerima', {}) || {};
       const kepala = [[String(lb.nama || '').toUpperCase()], ['LAPORAN KONDISI SARANA ASRAMA'], [`Posisi per ${tglId(S.per, 'long')}`], [judulCakupan()], pn.nama ? [`Kepada: ${pn.nama}`] : [], []];
-      const judul = ['No', 'Unit', istilah('lantai'), 'Lokasi', 'Barang', 'Masalah', 'Jumlah rusak', 'Terpasang', 'Dilaporkan', 'Umur (hari)', 'Penyebab', 'Catatan', 'Pelapor'];
+      const judul = ['No', 'Unit', istilah('lantai'), 'Lokasi', 'Barang', 'Pemilik', 'Kelas', 'Masalah', 'Jumlah rusak', 'Terpasang', 'Dilaporkan', 'Umur (hari)', 'Penyebab', 'Catatan', 'Pelapor'];
       const isi = h.buka.map((m, i) => { const l = lok(m.lokasi_id), b = m.butir_id ? butir(m.butir_id) : null;
-        return [i + 1, unit(l?.unit_id)?.nama || '', lantaiDari(l || {}) || '', jalur(l || {}), namaBarang(m), m.masalah, m.jumlah, b && l ? jumlahStandar(l, b) ?? '' : '',
+        return [i + 1, unit(l?.unit_id)?.nama || '', lantaiDari(l || {}) || '', jalur(l || {}), namaBarang(m), m.pemilik_nama || '', m.pemilik_kelas || '', m.masalah, m.jumlah, b && l ? jumlahStandar(l, b) ?? '' : '',
           tglJkt(m.dilaporkan_pada), h.umur(m), namaPenyebab(m.penyebab), m.catatan || '', m.pelapor_nama || '']; });
       const ws = XLSX.utils.aoa_to_sheet([...kepala.filter(r => r.length || true), judul, ...isi]);
-      ws['!cols'] = [5, 16, 8, 26, 18, 30, 8, 9, 12, 9, 18, 30, 22].map(w => ({ wch: w }));
+      ws['!cols'] = [5, 16, 8, 26, 18, 24, 8, 30, 8, 9, 12, 9, 18, 30, 22].map(w => ({ wch: w }));
       ws['!merges'] = [0, 1, 2, 3, 4].map(r => ({ s: { r, c: 0 }, e: { r, c: 8 } }));
       ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: kepala.length, c: 0 }, e: { r: kepala.length + isi.length, c: judul.length - 1 } }) };
       const wb = XLSX.utils.book_new();
@@ -1317,9 +1414,9 @@
       ws2['!cols'] = [24, 10, 10, 10].map(w => ({ wch: w }));
       XLSX.utils.book_append_sheet(wb, ws2, 'Rekap barang');
       if (h.baik.length) {
-        const ws3 = XLSX.utils.aoa_to_sheet([['Lokasi', 'Barang', 'Masalah', 'Jumlah', 'Dilaporkan', 'Sudah baik', 'Pelapor'],
-          ...h.baik.map(m => [jalur(lok(m.lokasi_id) || {}), namaBarang(m), m.masalah, m.jumlah, tglJkt(m.dilaporkan_pada), tglJkt(m.selesai_pada), m.pelapor_nama || ''])]);
-        ws3['!cols'] = [26, 18, 30, 8, 12, 12, 22].map(w => ({ wch: w }));
+        const ws3 = XLSX.utils.aoa_to_sheet([['Lokasi', 'Barang', 'Pemilik', 'Masalah', 'Jumlah', 'Dilaporkan', 'Sudah baik', 'Pelapor'],
+          ...h.baik.map(m => [jalur(lok(m.lokasi_id) || {}), namaBarang(m), pemilikTeks(m), m.masalah, m.jumlah, tglJkt(m.dilaporkan_pada), tglJkt(m.selesai_pada), m.pelapor_nama || ''])]);
+        ws3['!cols'] = [26, 18, 24, 30, 8, 12, 12, 22].map(w => ({ wch: w }));
         XLSX.utils.book_append_sheet(wb, ws3, 'Sudah baik');
       }
       XLSX.writeFile(wb, namaBerkas(`Laporan Sarpras ${judulCakupan()} ${S.per}`).slice(0, 120) + '.xlsx');
@@ -1431,6 +1528,8 @@
           <span class="sp-lap-tombol">${pengelola() ? tombol('p-ambang', `Ambang ${H.ambang}`, 'fa-sliders') : ''}
             <select id="spLapKertas" class="input" aria-label="Ukuran kertas">${(window.RQ_SIDANG?.kertasDaftar?.() || [{ kode: 'A4', nama: 'A4' }]).map(k => `<option value="${esc(k.kode)}" ${k.kode === (window.RQ_SIDANG?.kertasTersimpan?.() || 'A4') ? 'selected' : ''}>${esc(k.nama)}</option>`).join('')}</select>
             ${tombol('p-pdf', 'Bahan Rapat', 'fa-file-pdf', {}, 'btn-primary')}</span></div>
+        <p class="sp-legenda"><span><i class="sw panas"></i>warna = banyaknya catatan${P.sorot ? ` ${esc(H.kel.find(k => k.kode === P.sorot)?.nama || '')}` : ''}</span>
+          <span><i class="sw garis"></i>kurang dari 3 santri, tidak diwarnai</span><span><i class="sw bahas"></i>perlu dibahas</span></p>
         ${H.baris.length ? [...grup.entries()].sort((a, b) => urutLantai(a[0], b[0])).map(([k, isi]) => `<section class="sp-peta-lantai">
             <h4 class="sp-lantai-j">${esc(labelLantai(k))}</h4>
             <div class="sp-peta-kisi">${isi.map((r, i) => {
@@ -1451,13 +1550,17 @@
   }
   async function detailKamar(id) {
     const H = hitungPeta(); const r = H?.baris.find(x => x.l.id === id); if (!r) return;
-    const baris = (s) => `<tr${s.keluar ? ' class="sp-luar"' : ''}><td><b>${esc(s.nama)}</b><small>${esc(s.kelas || '')}${s.peran ? ' · ' + esc(s.peran) : ''}</small></td>
-      ${H.kel.map(k => `<td class="${s.kel?.[k.kode] ? 'ada' : ''}">${s.kel?.[k.kode] || ''}</td>`).join('')}</tr>`;
+    const milikRusak = (nisn) => SP.masalah.filter(m => m.nisn === nisn && m.lokasi_id === r.l.id && !m.batal
+      && (terbukaPada(m, UI.peta.sampai0) || (tglJkt(m.dilaporkan_pada) >= UI.peta.dari0 && tglJkt(m.dilaporkan_pada) <= UI.peta.sampai0)));
+    const baris = (s) => { const mr = milikRusak(s.nisn);
+      return `<tr${s.keluar ? ' class="sp-luar"' : ''}><td><b>${esc(s.nama)}</b><small>${esc(s.kelas || '')}${s.peran ? ' · ' + esc(s.peran) : ''}</small></td>
+      ${H.kel.map(k => `<td class="${s.kel?.[k.kode] ? 'ada' : ''}">${s.kel?.[k.kode] || ''}</td>`).join('')}
+      <td class="sp-peta-sarana">${mr.map(m => `<span title="${esc(`${namaBarang(m)}: ${m.masalah}`)}">${pikto(ikonBarang(m))}</span>`).join('')}</td></tr>`; };
     await Swal.fire({
       width: 760, showConfirmButton: false, showCloseButton: true, customClass: { popup: 'sp-swal' },
       title: `${esc(r.l.nama)}${r.dibahas ? ' <span class="sp-pk-tanda">Perlu dibahas</span>' : ''}`,
       html: `<p class="hint">${esc(labelLantai(r.l.lantai))} · ${angka(r.inti.length)} santri${r.l.kapasitas ? ` dari ${angka(r.l.kapasitas)}` : ''} · ${esc(tglPendek(UI.peta.dari0))} – ${esc(tglPendek(UI.peta.sampai0))}</p>
-        ${r.santri.length ? `<div class="tbl"><table class="sp-tbl sp-peta-tbl"><thead><tr><th>Santri</th>${H.kel.map(k => `<th title="${esc(k.nama)}"><i class="fa-solid ${esc(k.ikon || 'fa-circle')}"></i> ${esc(k.nama)}</th>`).join('')}</tr></thead>
+        ${r.santri.length ? `<div class="tbl"><table class="sp-tbl sp-peta-tbl"><thead><tr><th>Santri</th>${H.kel.map(k => `<th title="${esc(k.nama)}"><i class="fa-solid ${esc(k.ikon || 'fa-circle')}"></i> ${esc(k.nama)}</th>`).join('')}<th>Barang rusak</th></tr></thead>
           <tbody>${[...r.santri].sort((a, b) => (a.keluar - b.keluar) || Object.values(b.kel || {}).reduce((x, y) => x + y, 0) - Object.values(a.kel || {}).reduce((x, y) => x + y, 0)).map(baris).join('')}</tbody></table></div>`
           : '<p class="sp-kosong">Belum ada santri tercatat di kamar ini.</p>'}
         <h4 class="sp-h4">Sarana</h4>

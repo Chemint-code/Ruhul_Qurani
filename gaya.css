@@ -10521,3 +10521,134 @@ tr.sp-tanpa td { background:color-mix(in oklab, #B4233C 4%, var(--surface)); }
 }
 :root.hemat .sp-lk, :root.hemat .sp-ubin, :root.hemat .sp-pk, :root.hemat .sp-kotak, :root.hemat .sp-pil-b { transition:none; }
 @media (prefers-reduced-motion: reduce) { .sp-lk, .sp-ubin, .sp-pk, .sp-kotak, .sp-pil-b, .sp-sakelar-trek::after { transition:none; } }
+
+/* =====================================================================
+ * v2.75 · Sarpras — pemilik barang, sarana umum, lembar laporan, penyempurnaan
+ * ===================================================================== */
+/* kerangka muat (pengganti ikon berputar) */
+.sp-kerangka { display:flex; flex-direction:column; gap:12px; }
+.sp-k { display:block; border-radius:16px; background:linear-gradient(90deg, var(--paper) 0%, color-mix(in oklab, var(--line) 55%, var(--paper)) 50%, var(--paper) 100%);
+  background-size:220% 100%; }
+.sp-k-hero { height:112px; border-radius:20px; }
+.sp-k-tab { height:46px; }
+.sp-k-kisi { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 168px), 1fr)); gap:10px; }
+.sp-k-kartu { height:86px; }
+.sp-k-santri { height:64px; border-radius:14px; }
+@media (prefers-reduced-motion: no-preference) {
+  :root:not(.hemat) .sp-k { animation: sp-kilau 1.4s ease-in-out 3; }   /* tanpa infinite (aturan gerak v2.53) */
+}
+@keyframes sp-kilau { from { background-position:110% 0; } to { background-position:-110% 0; } }
+
+/* judul bagian */
+.sp-detail h4 .sp-h4-n { color:var(--navy); background:color-mix(in oklab, var(--sea) 10%, var(--surface)); border-radius:999px; padding:3px 8px;
+  font:650 10.5px/1 'IBM Plex Mono', monospace; letter-spacing:0; }
+.sp-detail > section { padding-top:2px; }
+.sp-detail > section + section { border-top:1px dashed var(--line); padding-top:14px; }
+
+/* Denah penghuni */
+.sp-denah-kisi { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 232px), 1fr)); gap:8px; }
+.sp-santri { display:grid; grid-template-columns:38px minmax(0, 1fr) auto; gap:10px; align-items:center; padding:9px 10px; border-radius:14px;
+  background:var(--surface); border:1px solid var(--line); transition:border-color .16s ease, box-shadow .16s ease; }
+.sp-santri:hover { border-color:color-mix(in oklab, var(--sea) 40%, var(--line)); box-shadow:0 8px 18px -16px color-mix(in oklab, var(--ink, #0b1324) 70%, transparent); }
+.sp-santri.rusak { border-color:color-mix(in oklab, #B4233C 35%, var(--line)); background:color-mix(in oklab, #B4233C 4%, var(--surface)); }
+.sp-ava { width:38px; height:38px; display:grid; place-items:center; border-radius:12px; flex:none; color:#fff;
+  font:700 13px/1 'Inter Tight', system-ui, sans-serif; letter-spacing:.02em;
+  background:linear-gradient(145deg, color-mix(in oklab, var(--navy) 78%, var(--sea)), var(--pa-tinta, #14213D));
+  box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--brass) 35%, transparent); }
+.sp-ava.kecil { width:24px; height:24px; border-radius:8px; font-size:10px; }
+.sp-santri-id { min-width:0; display:flex; flex-direction:column; gap:1px; }
+.sp-santri-id b { font-size:13px; line-height:1.25; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sp-santri-id small { font-size:11px; color:var(--text-3); }
+.sp-santri-id em { font-style:normal; color:#8A6D10; font-weight:600; }
+.sp-santri-brg { display:flex; gap:4px; }
+.sp-mini { width:32px; height:32px; display:grid; place-items:center; border-radius:10px; cursor:pointer; color:var(--text-3);
+  background:var(--paper); border:1px solid var(--line); transition:transform .15s var(--pa-pegas, ease), color .15s ease, border-color .15s ease; }
+.sp-mini .sp-pikto { width:18px; height:18px; }
+.sp-mini:hover { color:var(--sea); border-color:var(--sea); }
+.sp-mini:active { transform:scale(.92); }
+.sp-mini:focus-visible { outline:2px solid var(--sea); outline-offset:1px; }
+.sp-mini.rusak { color:#fff; background:#B4233C; border-color:#B4233C; }
+@media (prefers-reduced-motion: no-preference) {
+  :root:not(.hemat) .sp-denah-kisi > .sp-santri { animation: sp-masuk .24s ease-out both; animation-delay: calc(min(var(--i, 0), 16) * 16ms); }
+}
+
+/* pemilik di formulir & daftar */
+.sp-pemilik { max-height:220px; overflow:auto; padding:2px; }
+.sp-pemilik .sp-pil-b { padding:4px 10px 4px 4px; gap:8px; text-align:left; }
+.sp-pemilik .sp-pil-b > span:last-child { display:flex; flex-direction:column; line-height:1.15; }
+.sp-pemilik .sp-pil-b small { font-size:10.5px; color:var(--text-3); font-weight:500; }
+.sp-pemilik .sp-pil-b[aria-pressed="true"] .sp-ava { background:var(--sea); }
+.sp-msl-milik { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--navy); }
+.sp-msl-milik i { font-size:10px; color:var(--sea); }
+.sp-plg { color:#8E1B32 !important; }
+.sp-lencana { display:inline-flex; align-items:center; gap:5px; align-self:flex-start; margin-top:2px; padding:2px 8px; border-radius:999px;
+  font-size:10.5px; font-weight:650; color:#6B4E00; background:color-mix(in oklab, var(--brass) 20%, var(--surface)); }
+.sp-lencana i { font-size:9px; }
+.sp-milik-sw { margin-top:2px; }
+
+/* lembar laporan (pratinjau seperti kertas) */
+.sp-lembar-wadah { padding:18px 0 6px; display:flex; justify-content:center; }
+.sp-lembar { position:relative; width:100%; max-width:860px; padding:34px 40px 30px; background:#fff; color:#1E293B;
+  border-radius:4px; box-shadow:0 1px 0 rgb(15 23 42 / .06), 0 24px 48px -30px rgb(15 23 42 / .45), 0 0 0 1px rgb(15 23 42 / .07); }
+.sp-lembar::after { content:''; position:absolute; inset:auto 18px -10px; height:10px; border-radius:0 0 6px 6px; background:rgb(15 23 42 / .04); z-index:-1; }
+.sp-lembar-kop { display:flex; flex-direction:column; align-items:center; gap:2px; padding-bottom:10px; margin-bottom:16px; text-align:center;
+  border-bottom:3px double #0F172A; }
+.sp-lembar-kop small { font-size:9.5px; letter-spacing:.22em; color:#64748B; }
+.sp-lembar-kop b { font:700 20px/1.2 'Inter Tight', system-ui, sans-serif; color:#0F172A; letter-spacing:.01em; }
+.sp-lembar-kop span { font-size:11px; color:#64748B; }
+.sp-lembar h3 { margin:0; text-align:center; font:700 15.5px/1.3 'Inter Tight', system-ui, sans-serif; color:#14213D; letter-spacing:.02em; }
+.sp-lembar-sub { margin:4px 0 0; text-align:center; font-weight:650; font-size:12.5px; color:#28344F; }
+.sp-lembar-ket { margin:3px 0 0; text-align:center; font-size:11.5px; color:#5A6070; line-height:1.5; }
+.sp-lembar-par { margin:14px 0 4px; font-size:12px; line-height:1.6; color:#334155; }
+.sp-lembar h4 { margin:16px 0 8px; font:700 12.5px/1.2 'Inter Tight', system-ui, sans-serif; color:#14213D; }
+.sp-lembar h4::after { content:''; display:block; width:28px; height:2px; margin-top:5px; background:#C9A227; border-radius:2px; }
+.sp-lembar-gulir { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+.sp-lembar-tbl { width:100%; min-width:560px; border-collapse:collapse; font-size:11.5px; }
+.sp-lembar-tbl th { background:#14213D; color:#F7F1DC; font-weight:700; font-size:10.5px; text-align:left; padding:7px 8px; }
+.sp-lembar-tbl td { padding:7px 8px; border-bottom:1px solid #E2E8F0; vertical-align:top; color:#1E293B; }
+.sp-lembar-tbl .c { text-align:center; }
+.sp-lembar-tbl tr.baris:nth-child(even) td { background:#FAFAFC; }
+.sp-lembar-tbl tr.grup td { background:#EEF2F8; font-weight:700; color:#14213D; padding:6px 8px; }
+.sp-lembar-tbl tr.grup span { font-weight:500; color:#64748B; margin-left:6px; }
+.sp-lembar-tbl small { display:block; font-size:10.5px; color:#64748B; font-weight:500; }
+.sp-lembar-tbl .ket { color:#5A6070; }
+.sp-lembar-tbl .sp-sel-barang { align-items:flex-start; white-space:normal; }
+.sp-lembar-tbl .sp-sel-barang > span { display:flex; flex-direction:column; }
+.sp-lembar-tbl .sp-sel-barang .sp-pikto { margin-top:1px; color:#14618B; }
+.sp-lembar-rekap { min-width:360px; }
+.sp-lembar-ttd { display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-top:26px; font-size:12px; color:#1E293B; }
+.sp-lembar-ttd > div { display:flex; flex-direction:column; align-items:center; text-align:center; gap:2px; }
+.sp-lembar-ttd b { margin-top:52px; padding-bottom:2px; border-bottom:1px solid #1E293B; font-size:12.5px; }
+.sp-lembar-tanpa { margin:22px 0 0; text-align:right; font-size:11.5px; color:#B4233C; }
+@media (max-width:640px) {
+  .sp-lembar { padding:22px 16px 20px; }
+  .sp-lembar-kop b { font-size:16px; }
+  .sp-lembar-ttd { grid-template-columns:1fr; gap:6px; }
+  .sp-lembar-ttd > div:first-child:empty { display:none; }
+}
+
+/* peta: sarana per santri & legenda */
+.sp-peta-sarana { white-space:nowrap; color:#B4233C; }
+.sp-peta-sarana .sp-pikto { width:16px; height:16px; }
+.sp-legenda { display:flex; flex-wrap:wrap; gap:6px 16px; margin:-4px 0 0; font-size:11.5px; color:var(--text-3); }
+.sp-legenda span { display:inline-flex; align-items:center; gap:6px; }
+.sp-legenda .sw { width:16px; height:12px; border-radius:4px; border:1px solid var(--line); }
+.sp-legenda .sw.panas { background:linear-gradient(90deg, var(--surface), color-mix(in oklab, #B4233C 45%, var(--surface))); }
+.sp-legenda .sw.garis { background:repeating-linear-gradient(135deg, var(--surface) 0 3px, var(--paper) 3px 6px); }
+.sp-legenda .sw.bahas { border-color:#B4233C; box-shadow:0 0 0 1px #B4233C; background:var(--surface); }
+
+/* penyempurnaan umum */
+.sp-lapor .sp-tab, .sp-atur .sp-tab { box-shadow:0 1px 0 color-mix(in oklab, var(--ink, #0b1324) 4%, transparent); }
+.sp-tab-b { min-height:38px; }
+.sp-lk, .sp-ubin, .sp-pk, .sp-kotak, .sp-santri, .sp-stat { font-variant-numeric:tabular-nums; }
+.sp-lap-ringkas .sp-stat { position:relative; overflow:hidden; }
+.sp-lap-ringkas .sp-stat::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--sea); opacity:.55; }
+.sp-lap-ringkas .sp-stat.merah::before { background:#B4233C; opacity:1; }
+.sp-lap-ringkas .sp-stat.baik::before { background:#15803D; opacity:1; }
+.sp-lap-ringkas .sp-stat.sorot::before { background:var(--brass); opacity:1; }
+.sp-zona-blok, .sp-detail, .sp-lap-saring, .sp-peta-saring, .sp-atur-kepala { border-radius:20px; }
+.sp-ubin { border-radius:18px; }
+.sp-ubin .sp-pikto { transition:transform .18s var(--pa-pegas, ease); }
+@media (hover:hover) and (prefers-reduced-motion: no-preference) { :root:not(.hemat) .sp-ubin:hover .sp-pikto { transform:translateY(-2px) scale(1.06); } }
+@media (prefers-reduced-motion: reduce) { .sp-k { animation:none; } .sp-mini, .sp-santri, .sp-ubin .sp-pikto { transition:none; } }
+:root.hemat .sp-k { animation:none; }

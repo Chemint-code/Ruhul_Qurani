@@ -35592,3 +35592,7 @@ async function aturMenuSarpras() {
     return h;
   };
 })();
+
+/* v2.75 · SARPRAS — ranjang/lemari/laci terikat santri (NISN), sarana umum khusus Admin,
+ * lembar laporan, laporan WA manual. Seluruh perubahan di sarpras.js & migrasi v2.75. */
+APP.versi = 'rq-v2.75';   // v2.75: Sarpras — barang milik santri, sarana umum Admin, pratinjau lembar, bot WA

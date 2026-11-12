@@ -49,7 +49,7 @@
    hapus singgahan versi lama, lalu beri tahu halaman yang terbuka.
    ===================================================================== */
 
-const VERSI = 'rq-v2.74';   // v2.74: Sarpras ramping — lapor masalah, Laporan Sarpras PDF/Excel, Peta Kamar; v2.73: Pengaturan Sarpras (sarpras.js); v2.71.1: laporan individu — tahap pembinaan per bulan, Penilaian Musyrif tulis tangan, tanpa teks penjelasan; v2.71: laporan ramping, motor izin, Catat lengkap, OSIM tanpa Para Pendidik; v2.70: Alur Mahkamah — Meja Majelis, bilah lengket, Pelantikan, gerak sidang; v2.69: majelis bernama, apresiasi keadilan, Disahkan OSDA (v2.68: antrean dan banding; v2.67: Peta Amanah)
+const VERSI = 'rq-v2.75';   // v2.75: Sarpras — barang milik santri (NISN), sarana umum Admin, lembar laporan; v2.74: Sarpras ramping — lapor masalah, Laporan Sarpras PDF/Excel, Peta Kamar; v2.73: Pengaturan Sarpras (sarpras.js); v2.71.1: laporan individu — tahap pembinaan per bulan, Penilaian Musyrif tulis tangan, tanpa teks penjelasan; v2.71: laporan ramping, motor izin, Catat lengkap, OSIM tanpa Para Pendidik; v2.70: Alur Mahkamah — Meja Majelis, bilah lengket, Pelantikan, gerak sidang; v2.69: majelis bernama, apresiasi keadilan, Disahkan OSDA (v2.68: antrean dan banding; v2.67: Peta Amanah)
 const CACHE_INTI  = `${VERSI}-inti`;
 const CACHE_ASET  = 'rq-aset-v1';   // nama tetap: bertahan melewati kenaikan VERSI
 
