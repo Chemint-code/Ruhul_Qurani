@@ -2738,6 +2738,9 @@ async function navigateTo(view) {
     else if (view === 'banding')     await viewBanding();      // v2.68
     else if (view === 'kelalaian')   await viewKelalaian();    // v2.69
     else if (view === 'sarprasatur') await viewSarprasAtur();  // v2.73
+    else if (view === 'sarpras')     await viewSarpras('lapor');     // v2.74
+    else if (view === 'sarpraslaporan') await viewSarpras('laporan'); // v2.74
+    else if (view === 'petakamar')   await viewSarpras('peta');      // v2.74
     tandaiTabelBisaGeser();
   } catch (err) { fireError(err); }
   finally { loading(false); APP.navSibuk--; tutupTirai(); LayarMuat.tutupAwal(); }
@@ -33711,7 +33714,7 @@ const grupDari = (v) => PA.GRUP.find(g => g.views.includes(v)) || null;
 const indeksGrup = (v) => { const g = grupDari(v); return g ? PA.GRUP.indexOf(g) : -1; };
 const namaHal = (v) => (PA.NAMA[v] && PA.NAMA[v].nama) || (JUDUL[v] && JUDUL[v].teks) || v;
 const bolehHal = (v) => (MENU_ROLE[v] || []).includes(role())
-  && !((v === 'kotaksaran' || v === 'banding' || v === 'kelalaian') && document.querySelector(`#navMenu [data-view="${v}"]`)?.classList.contains('hidden'));   // v2.68: + banding · v2.69: + kelalaian
+  && !((v === 'kotaksaran' || v === 'banding' || v === 'kelalaian' || v === 'sarpras' || v === 'sarpraslaporan' || v === 'petakamar') && document.querySelector(`#navMenu [data-view="${v}"]`)?.classList.contains('hidden'));   // v2.68: + banding · v2.69: + kelalaian · v2.74: + sarpras
 const kunciPA = (k) => `rq.${k}.v1.${idSaya()}`;
 
 /* ---------- D · Satu nama: judul halaman & eyebrow = kelompok ---------- */
@@ -35516,3 +35519,76 @@ async function viewSarprasAtur() {
   }
   await window.RQSarpras.atur($('viewRoot'));
 }
+
+/* =====================================================================
+ * v2.74 · SARPRAS RAMPING — lapor masalah, laporan, Peta Kamar
+ * ---------------------------------------------------------------------
+ *  Rancangan: claude/rancangan-v2.74-sarpras-ramping.md. Tampilan di
+ *  sarpras.js (dimuat lambat). Di sini hanya menu, judul, pemuat, dan
+ *  penampil menu: sarpras_saya() menentukan siapa melihat apa —
+ *   · Sarpras Asrama: pengelola, atau modul aktif + punya lokasi amanah;
+ *   · Laporan Sarpras & Peta Kamar: pengelola, atau modul aktif + Admin/Pimpinan.
+ *  Hak tulis tetap di RPC sarpras_* (migrasi v2.74).
+ * ===================================================================== */
+APP.versi = 'rq-v2.74';   // v2.74: Sarpras ramping — lapor masalah, Laporan Sarpras (PDF/Excel), Peta Kamar
+
+MENU_ROLE.sarpras        = ['Admin', 'Guru', 'Guru BK', 'Ustadz GEN-Z'];
+MENU_ROLE.sarpraslaporan = ['Admin', 'Pimpinan'];
+MENU_ROLE.petakamar      = ['Admin', 'Pimpinan'];
+PA.NAMA.sarpras = { nama: 'Sarpras Asrama', tab: 'Sarpras', ket: 'Laporkan kerusakan sarana kamar, kamar mandi, dan asrama',
+  kata: 'sarpras sarana prasarana fasilitas asrama kamar mandi rusak kerusakan lapor ac lemari ranjang toilet' };
+PA.NAMA.sarpraslaporan = { nama: 'Laporan Sarpras', tab: 'Lap. Sarpras', ket: 'Laporan kerusakan untuk unit fasilitas, PDF dan Excel',
+  kata: 'laporan sarpras sarana fasilitas kerusakan pdf excel unit fasilitas perbaikan' };
+PA.NAMA.petakamar = { nama: 'Peta Kamar', tab: 'Peta Kamar', ket: 'Pelanggaran dan kerusakan sarana per kamar, bahan rapat evaluasi',
+  kata: 'peta kamar asrama pelanggaran perusakan piket cctv kebersihan rapat evaluasi' };
+PA.NAMA.sarprasatur.ket = 'Kamar, lantai, katalog barang, dan pelapor sarpras';
+PA.NAMA.sarprasatur.kata = 'sarpras pengaturan kamar lantai kapasitas katalog barang pelapor zona kamar mandi sayap';
+(function daftarkanSarprasRamping() {
+  const taruh = (grup, v) => { const g = PA.GRUP.find(x => x.id === grup); if (g && !g.views.includes(v)) g.views.push(v); return g; };
+  [['catat', 'sarpras', 'المرافق'], ['laporan', 'sarpraslaporan', 'تقرير المرافق'], ['laporan', 'petakamar', 'خريطة الغرف']].forEach(([grup, v, ar]) => {
+    const g = taruh(grup, v);
+    PA.TANPA_SARING.add(v);
+    JUDUL[v] = { ar, teks: PA.NAMA[v].nama, lat: g ? g.label : '' };
+  });
+})();
+
+async function viewSarpras(halaman) {
+  const v = APP.view;
+  $('viewRoot').innerHTML = `<div class="card sp-muat" style="padding:28px;text-align:center">
+    <i class="fa-solid fa-circle-notch fa-spin" style="color:var(--sea)"></i><p style="margin:10px 0 0">Membuka ${esc(PA.NAMA[v]?.nama || 'Sarpras')}…</p></div>`;
+  const ok = await muatSarprasJs();
+  if (APP.view !== v) return;
+  if (!ok || typeof window.RQSarpras?.[halaman] !== 'function') {
+    $('viewRoot').innerHTML = kartu(PA.NAMA[v]?.nama || 'Sarpras',
+      `<div class="card-body">${kosong('Halaman belum bisa dibuka', 'Berkas halaman sarpras gagal dimuat. Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark')}
+       <p style="text-align:center"><button class="btn btn-primary" id="spUlang"><i class="fa-solid fa-rotate"></i>Coba lagi</button></p></div>`);
+    $('spUlang')?.addEventListener('click', () => navigateTo(v));
+    return;
+  }
+  await window.RQSarpras[halaman]($('viewRoot'));
+}
+
+/** Tampilkan/sembunyikan menu sarpras menurut sarpras_saya(). Dipanggil sekali per akun saat masuk. */
+async function aturMenuSarpras() {
+  let s = null;
+  try { const { data, error } = await db.rpc('sarpras_saya'); if (!error) s = data; } catch (e) {}
+  APP.sarpras = s;
+  const tampil = (v) => {
+    if (!s || !(MENU_ROLE[v] || []).includes(role())) return false;
+    if (s.pengelola) return true;
+    if (s.aktif !== true) return false;
+    return v === 'sarpras' ? Number(s.tugas) > 0 : !!(s.admin || s.pimpinan);
+  };
+  ['sarpras', 'sarpraslaporan', 'petakamar'].forEach(v =>
+    document.querySelectorAll(`#navMenu [data-view="${v}"]`).forEach(b => b.classList.toggle('hidden', !tampil(v))));
+  rapikanGrupNav(APP.view);
+}
+(function bungkusBadgePesanSarpras() {
+  const asli = refreshBadgePesan;
+  let sudah = null;
+  refreshBadgePesan = function () {
+    const h = asli.apply(this, arguments);
+    try { const id = APP.profil?.id || null; if (id && sudah !== id) { sudah = id; aturMenuSarpras(); } } catch (e) {}
+    return h;
+  };
+})();
