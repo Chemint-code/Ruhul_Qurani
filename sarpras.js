@@ -1235,12 +1235,11 @@
         <td class="ket">${esc([namaPenyebab(m.penyebab), m.catatan].filter(Boolean).join('; '))}</td></tr>`;
     }).join('');
     return `<div class="sp-lembar-wadah"><article class="sp-lembar" aria-label="Pratinjau laporan">
-      <header class="sp-lembar-kop"><small>SARANA DAN PRASARANA ${esc(istilah('asrama').toUpperCase())}</small><b>${esc(String(lb.nama || '').toUpperCase())}</b>${lb.alamat ? `<span>${esc(lb.alamat)}</span>` : ''}</header>
+      ${window.RQ_SIDANG?.kopHtml ? `<header class="sp-lembar-kop-baku">${window.RQ_SIDANG.kopHtml()}</header>` : `<header class="sp-lembar-kop"><b>${esc(String(lb.nama || '').toUpperCase())}</b></header>`}
       <h3>LAPORAN KONDISI SARANA ASRAMA</h3>
       <p class="sp-lembar-sub">Posisi per ${esc(tglId(S.per, 'long'))}</p>
       <p class="sp-lembar-ket">${esc(judulCakupan())}${pn.nama ? `<br>Kepada: ${esc(pn.nama)}` : ''}</p>
-      <p class="sp-lembar-par">${h.buka.length ? `Terdapat ${angka(h.buka.length)} masalah terbuka (${angka(h.buka.reduce((a, m) => a + m.jumlah, 0))} unit) di ${angka(h.lokasiN)} lokasi. Masalah tertua sudah ${angka(h.terlama)} hari. Barang yang tidak tercantum dalam laporan ini tercatat dalam keadaan baik.`
-        : 'Pada cakupan dan tanggal ini tidak ada masalah sarana yang tercatat. Seluruh barang dalam keadaan baik.'}</p>
+      ${!h.buka.length && !h.baik.length ? '<p class="sp-lembar-par">Nihil.</p>' : ''}
       ${h.buka.length ? `<h4>A. Masalah yang perlu ditangani</h4>
         <div class="sp-lembar-gulir"><table class="sp-lembar-tbl"><thead><tr><th class="c">No</th><th>Barang</th><th>Masalah</th><th class="c">Jml</th><th class="c">Sejak</th><th class="c">Umur</th><th>Keterangan</th></tr></thead>
         <tbody>${baris}</tbody></table></div>
@@ -1252,10 +1251,17 @@
         <tbody>${h.baik.map(m => `<tr class="baris"><td><b>${esc(jalur(lok(m.lokasi_id) || {}))}</b></td><td>${esc(namaBarang(m))}${m.pemilik_nama ? `<small>${esc(pemilikTeks(m))}</small>` : ''}</td><td>${esc(m.masalah)}</td>
           <td class="c">${esc(tglPendek(tglJkt(m.dilaporkan_pada)))}</td><td class="c">${esc(tglPendek(tglJkt(m.selesai_pada)))}</td></tr>`).join('')}</tbody></table></div>` : ''}
       ${td.length ? `<footer class="sp-lembar-ttd">
-        ${td[1] ? `<div><span aria-hidden="true">&nbsp;</span><span>Mengetahui,</span><span>${esc(td[1].jabatan || '')}</span><b>${esc(td[1].nama || '')}</b></div>` : '<div></div>'}
-        <div><span>${esc([(setelan('lembaga', {}) || {}).kota, tglId(S.per, 'long')].filter(Boolean).join(', '))}</span><span>Pelapor,</span><span>${esc(td[0].jabatan || '')}</span><b>${esc(td[0].nama || '')}</b></div>
-      </footer>` : '<p class="sp-lembar-tanpa">Penandatangan belum diisi.</p>'}
+        ${td[1] ? `<div><span aria-hidden="true">&nbsp;</span><span>Mengetahui,</span><span class="sp-lembar-jab">${esc(td[1].jabatan || '')}</span><i class="sp-lembar-qr" aria-hidden="true"></i><b>${esc(td[1].nama || '')}</b></div>` : '<div></div>'}
+        <div><span>${esc([(setelan('lembaga', {}) || {}).kota || 'Meulaboh', tglId(S.per, 'long')].filter(Boolean).join(', '))}</span><span>Penanggung Jawab,</span><span class="sp-lembar-jab">${esc(td[0].jabatan || '')}</span>${qrTtd(td[0], tglId(S.per, 'long'), 'Laporan Kondisi Sarana Asrama')}<b>${esc(td[0].nama || '')}</b></div>
+      </footer>` : '<p class="sp-lembar-tanpa">Penanggung jawab belum diisi.</p>'}
     </article></div>`;
+  }
+  /** QR keabsahan pada pratinjau — sama dengan yang tercetak di PDF. */
+  function qrTtd(t, terbit, dok) {
+    const A = window.RQ_SIDANG;
+    if (!t?.nama || !A?.qr) return '<i class="sp-lembar-qr" aria-hidden="true"></i>';
+    const q = A.qr(A.qrTeks ? A.qrTeks({ nama: t.nama, jabatan: t.jabatan, dok, terbit }) : t.nama);
+    return q?.uri ? `<img class="sp-lembar-qr" src="${q.uri}" alt="Kode QR keabsahan">` : '<i class="sp-lembar-qr" aria-hidden="true"></i>';
   }
   async function formKop() {
     const lb = setelan('lembaga', {}) || {}, pn = setelan('penerima', {}) || {}, td = setelan('penandatangan', []) || [];
@@ -1263,11 +1269,9 @@
     const r = await Swal.fire({
       ...swalDasar, width: 600, title: 'Kop & tanda tangan', confirmButtonText: 'Simpan',
       html: `<div class="stack sp-form">
-        <label class="label" for="spKopNama">Nama ${esc(istilah('lembaga').toLowerCase())}</label><input id="spKopNama" class="input" maxlength="120" value="${esc(lb.nama || '')}">
-        <div class="sp-dua"><div><label class="label" for="spKopAlamat">Alamat</label><input id="spKopAlamat" class="input" maxlength="160" value="${esc(lb.alamat || '')}"></div>
-          <div><label class="label" for="spKopKota">Tempat tanda tangan</label><input id="spKopKota" class="input" maxlength="60" value="${esc(lb.kota || '')}" placeholder="nama kota"></div></div>
-        <label class="label" for="spKopPenerima">Ditujukan kepada</label><input id="spKopPenerima" class="input" maxlength="120" value="${esc(pn.nama || '')}" placeholder="mis. Unit Fasilitas">
-        <span class="label">Pelapor (tanda tangan kanan)</span>
+        <div class="sp-dua"><div><label class="label" for="spKopKota">Tempat tanda tangan</label><input id="spKopKota" class="input" maxlength="60" value="${esc(lb.kota || '')}" placeholder="nama kota"></div>
+          <div><label class="label" for="spKopPenerima">Ditujukan kepada</label><input id="spKopPenerima" class="input" maxlength="120" value="${esc(pn.nama || '')}" placeholder="mis. Unit Fasilitas"></div></div>
+        <span class="label">Penanggung jawab (kanan, ber-QR keabsahan)</span>
         <div class="sp-dua"><input id="spTtdJab" class="input" maxlength="80" value="${esc(t0.jabatan || '')}" placeholder="Jabatan">
           <input id="spTtdNama" class="input" maxlength="120" value="${esc(t0.nama || '')}" placeholder="Nama lengkap & gelar"></div>
         <span class="label">Mengetahui <small>(opsional, kiri)</small></span>
@@ -1277,10 +1281,10 @@
       preConfirm: async () => {
         const v = (id) => $(id).value.trim();
         const ttd = [{ jabatan: v('spTtdJab'), nama: v('spTtdNama') }, { jabatan: v('spTtd2Jab'), nama: v('spTtd2Nama') }].filter(t => t.jabatan || t.nama);
-        if (ttd.length === 1 && !ttd[0].nama && v('spTtd2Nama')) { Swal.showValidationMessage('Isi pelapor lebih dulu.'); return false; }
-        if (!v('spTtdNama') && v('spTtd2Nama')) { Swal.showValidationMessage('Isi nama pelapor (kanan) lebih dulu.'); return false; }
+        if (ttd.length === 1 && !ttd[0].nama && v('spTtd2Nama')) { Swal.showValidationMessage('Isi penanggung jawab lebih dulu.'); return false; }
+        if (!v('spTtdNama') && v('spTtd2Nama')) { Swal.showValidationMessage('Isi nama penanggung jawab (kanan) lebih dulu.'); return false; }
         try {
-          await rpc('sarpras_setelan_simpan', { p_kunci: 'lembaga', p_nilai: { ...lb, nama: v('spKopNama') || null, alamat: v('spKopAlamat') || null, kota: v('spKopKota') || null } });
+          await rpc('sarpras_setelan_simpan', { p_kunci: 'lembaga', p_nilai: { ...lb, kota: v('spKopKota') || null } });
           await rpc('sarpras_setelan_simpan', { p_kunci: 'penerima', p_nilai: { ...pn, nama: v('spKopPenerima') || null } });
           await rpc('sarpras_setelan_simpan', { p_kunci: 'penandatangan', p_nilai: ttd });
           return true;
@@ -1311,6 +1315,8 @@
       b.forEach(s => { M.perlu(lh); pdf.text(s, x, M.y); M.y += lh; });
     };
     M.kop = (logo, lb, sub) => {
+      const A = window.RQ_SIDANG;
+      if (A?.kopPdf) { M.y = A.kopPdf(pdf, { mL, mR, W, y: M.y, logo }); return; }
       if (logo && logo.uri) {
         const h = 17, w = Math.min(26, h * (logo.w || 160) / (logo.h || 94));
         try { pdf.addImage(logo.uri, 'PNG', mL, M.y, w, h, 'logoKopSarpras', 'FAST'); } catch (e) { console.warn('[sarpras] logo dilewati:', e.message); }
@@ -1365,24 +1371,36 @@
       });
       M.y += 4;
     };
+    /** v2.77: tanda tangan kanan = penanggung jawab, bertanda QR keabsahan chemint. */
     M.ttd = (tgl, kota, daftar, label = {}) => {
       const td = (daftar || []).filter(t => t.nama || t.jabatan); if (!td.length) return;
-      M.perlu(42); M.y += 2;
+      const A = window.RQ_SIDANG;
+      let qr = null;
+      if (td[0].nama && A?.qr) {
+        const isi = A.qrTeks ? A.qrTeks({ nama: td[0].nama, jabatan: td[0].jabatan, dok: label.dok, terbit: tgl })
+          : [td[0].nama, td[0].jabatan, label.dok, 'Diterbitkan ' + tgl].filter(Boolean).join('\n');
+        qr = A.qr(isi);
+      }
+      const sQr = qr?.uri ? Math.min(29.5, Math.max(20, (qr.modul || 37) * 0.6)) : 0;
+      const ruang = Math.max(19, sQr + 3);
       const kol = 72, xKanan = W - mR - kol / 2, xKiri = mL + kol / 2;
+      M.perlu(16 + ruang + 6); M.y += 2;
       M.huruf(8.4); M.tinta(30, 41, 59);
       M.teks(`${kota ? kota + ', ' : ''}${tgl}`, xKanan, M.y, { align: 'center' });
+      const yRuang = M.y + 12.5, yNama = yRuang + ruang + 2.5;
       const tulisTtd = (t, x, atas) => {
         M.huruf(8.4); M.tinta(30, 41, 59);
         if (atas) M.teks(atas, x, M.y + 4.4, { align: 'center' });
-        if (t.jabatan) pdf.text(pdf.splitTextToSize(teksPdf(t.jabatan), kol), x, M.y + 8.8, { align: 'center' });
+        if (t.jabatan) { M.huruf(8.4, 'bold'); pdf.text(pdf.splitTextToSize(teksPdf(t.jabatan), kol), x, M.y + 8.8, { align: 'center' }); }
         if (t.nama) {
-          M.huruf(8.6, 'bold'); M.teks(t.nama, x, M.y + 31, { align: 'center' });
-          const w = Math.min(kol, pdf.getTextWidth(teksPdf(t.nama))); pdf.setDrawColor(30, 41, 59); pdf.setLineWidth(0.25); pdf.line(x - w / 2, M.y + 31.8, x + w / 2, M.y + 31.8);
+          M.huruf(8.6, 'bold'); M.tinta(15, 23, 42); M.teks(t.nama, x, yNama, { align: 'center' });
+          const w = Math.min(kol, pdf.getTextWidth(teksPdf(t.nama))); pdf.setDrawColor(30, 41, 59); pdf.setLineWidth(0.25); pdf.line(x - w / 2, yNama + 0.8, x + w / 2, yNama + 0.8);
         }
       };
-      tulisTtd(td[0], xKanan, label.kanan ?? 'Pelapor,');
+      tulisTtd(td[0], xKanan, label.kanan ?? 'Penanggung Jawab,');
+      if (sQr) { try { pdf.addImage(qr.uri, 'PNG', xKanan - sQr / 2, yRuang, sQr, sQr, undefined, 'FAST'); } catch (e) { console.warn('[sarpras] QR dilewati:', e.message); } }
       if (td[1]) tulisTtd(td[1], xKiri, label.kiri ?? 'Mengetahui,');
-      M.y += 36;
+      M.y = yNama + 5;
     };
     M.kaki = (catatan) => {
       const n = pdf.getNumberOfPages();
@@ -1415,10 +1433,7 @@
       const pn = setelan('penerima', {}) || {};
       M.kop(logo, lembagaKop(), 'SARANA DAN PRASARANA ' + istilah('asrama').toUpperCase());
       M.judul('LAPORAN KONDISI SARANA ASRAMA', [`Posisi per ${tglId(S.per, 'long')}`, judulCakupan(), pn.nama ? `Kepada: ${pn.nama}` : '']);
-      M.paragraf(h.buka.length
-        ? `Terdapat ${angka(h.buka.length)} masalah terbuka (${angka(h.buka.reduce((a, m) => a + m.jumlah, 0))} unit) di ${angka(h.lokasiN)} lokasi. Masalah tertua sudah ${angka(h.terlama)} hari. Barang yang tidak tercantum dalam laporan ini tercatat dalam keadaan baik. Mohon dapat ditindaklanjuti.`
-        : 'Pada cakupan dan tanggal ini tidak ada masalah sarana yang tercatat. Seluruh barang dalam keadaan baik.', 8.4, M.L, M.mL, [51, 65, 85]);
-      M.y += 2.5;
+      if (!h.buka.length && !h.baik.length) { M.paragraf('Nihil.', 8.4, M.L, M.mL, [51, 65, 85]); M.y += 2.5; }
       if (h.buka.length) {
         M.subjudul('A. Masalah yang perlu ditangani');
         const baris = []; let g = null;
@@ -1442,8 +1457,8 @@
         M.tabel([{ judul: 'Lokasi', bobot: 1.4, tebal: true }, { judul: 'Barang', bobot: 1.1 }, { judul: 'Masalah', bobot: 1.6 }, { judul: 'Dilaporkan', lebar: 20, rata: 'center' }, { judul: 'Baik', lebar: 18, rata: 'center' }],
           h.baik.map(m => ({ sel: [jalur(lok(m.lokasi_id) || {}), namaBarang(m) + (m.pemilik_nama ? `\n${pemilikTeks(m)}` : ''), m.masalah, tglPendek(tglJkt(m.dilaporkan_pada)), tglPendek(tglJkt(m.selesai_pada))] })));
       }
-      M.ttd(tglId(S.per, 'long'), (setelan('lembaga', {}) || {}).kota, setelan('penandatangan', []));
-      M.kaki(`Laporan Sarpras - disusun chemint ${jamCetak()} WIB`);
+      M.ttd(tglId(S.per, 'long'), (setelan('lembaga', {}) || {}).kota || 'Meulaboh', setelan('penandatangan', []), { dok: 'Laporan Kondisi Sarana Asrama' });
+      M.kaki(`Laporan Sarpras - chemint ${jamCetak()} WIB`);
       try { pdf.setProperties({ title: 'Laporan Kondisi Sarana Asrama', creator: 'chemint' }); } catch (e) {}
       pdf.save(namaBerkas(`Laporan Sarpras ${judulCakupan()} ${S.per}`).slice(0, 120) + '.pdf');
       toast('success', 'Laporan PDF diunduh', { nada: 'akui', sub: `${kertas.nama} · ${angka(h.buka.length)} masalah` });
@@ -1456,14 +1471,18 @@
     try {
       const XLSX = await prMuatXlsx();
       const lb = lembagaKop(), pn = setelan('penerima', {}) || {};
-      const kepala = [[String(lb.nama || '').toUpperCase()], ['LAPORAN KONDISI SARANA ASRAMA'], [`Posisi per ${tglId(S.per, 'long')}`], [judulCakupan()], pn.nama ? [`Kepada: ${pn.nama}`] : [], []];
+      const K = window.RQ_SIDANG?.kop;
+      const kop = K ? [[K.sistem], [K.lembaga], [K.bagian], [`${K.alamat} · ${K.aplikasi}`], []] : [[String(lb.nama || '').toUpperCase()], []];
+      const kepala = [...kop, ['LAPORAN KONDISI SARANA ASRAMA'], [`Posisi per ${tglId(S.per, 'long')}`], [judulCakupan()], pn.nama ? [`Kepada: ${pn.nama}`] : [], []];
+      const pj = (setelan('penandatangan', []) || []).filter(t => t.nama || t.jabatan)[0];
+      const kakiTtd = pj ? [[], [], ...[`${(setelan('lembaga', {}) || {}).kota || 'Meulaboh'}, ${tglId(S.per, 'long')}`, 'Penanggung Jawab,', pj.jabatan || '', '', '', '', pj.nama || ''].map(t => [...Array(12).fill(''), t])] : [];
       const judul = ['No', 'Unit', istilah('lantai'), 'Lokasi', 'Barang', 'Pemilik', 'Kelas', 'Masalah', 'Jumlah rusak', 'Terpasang', 'Dilaporkan', 'Umur (hari)', 'Penyebab', 'Catatan', 'Pelapor'];
       const isi = h.buka.map((m, i) => { const l = lok(m.lokasi_id), b = m.butir_id ? butir(m.butir_id) : null;
         return [i + 1, unit(l?.unit_id)?.nama || '', lantaiDari(l || {}) || '', jalur(l || {}), namaBarang(m), m.pemilik_nama || '', m.pemilik_kelas || '', m.masalah, m.jumlah, b && l ? jumlahStandar(l, b) ?? '' : '',
           tglJkt(m.dilaporkan_pada), h.umur(m), namaPenyebab(m.penyebab), m.catatan || '', m.pelapor_nama || '']; });
-      const ws = XLSX.utils.aoa_to_sheet([...kepala.filter(r => r.length || true), judul, ...isi]);
+      const ws = XLSX.utils.aoa_to_sheet([...kepala, judul, ...isi, ...kakiTtd]);
       ws['!cols'] = [5, 16, 8, 26, 18, 24, 8, 30, 8, 9, 12, 9, 18, 30, 22].map(w => ({ wch: w }));
-      ws['!merges'] = [0, 1, 2, 3, 4].map(r => ({ s: { r, c: 0 }, e: { r, c: 8 } }));
+      ws['!merges'] = kepala.map((r, i) => r.length ? i : -1).filter(i => i >= 0).map(r => ({ s: { r, c: 0 }, e: { r, c: judul.length - 1 } }));
       ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: kepala.length, c: 0 }, e: { r: kepala.length + isi.length, c: judul.length - 1 } }) };
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Masalah');
@@ -1633,8 +1652,7 @@
       const M = mesinPdf(pdf, kertas);
       const u = unit(P.unit);
       M.kop(logo, lembagaKop(), 'BAHAN RAPAT EVALUASI SANTRI');
-      M.judul('PETA KAMAR: PELANGGARAN DAN SARANA', [`${tglId(P.dari0, 'long')} - ${tglId(P.sampai0, 'long')}`, u?.nama || '',
-        `Berdasarkan ${istilah('kamar').toLowerCase()} santri saat ini. Catatan peran kamar dihitung terpisah.`]);
+      M.judul('PETA KAMAR: PELANGGARAN DAN SARANA', [`${tglId(P.dari0, 'long')} - ${tglId(P.sampai0, 'long')}`, u?.nama || '']);
       M.subjudul('A. Ringkasan per ' + istilah('kamar').toLowerCase());
       const kol = [{ judul: istilah('kamar'), lebar: 15, rata: 'center', tebal: true }, { judul: istilah('lantai'), lebar: 13, rata: 'center' }, { judul: 'Santri', lebar: 14, rata: 'center' },
         ...H.kel.map(k => ({ judul: k.nama, bobot: 1, rata: 'center' })), { judul: 'Sarana rusak', lebar: 20, rata: 'center' }, { judul: 'Tanda', lebar: 26, rata: 'center' }];
@@ -1661,8 +1679,8 @@
       pdf.setDrawColor(203, 213, 225); pdf.setLineWidth(0.2);
       for (let i = 0; i < 7; i++) { M.y += 6.5; pdf.line(M.mL, M.y, M.W - M.mR, M.y); }
       M.y += 6;
-      M.ttd(tglId(hariIni(), 'long'), (setelan('lembaga', {}) || {}).kota, (setelan('penandatangan', []) || []).slice(0, 1), { kanan: '' });
-      M.kaki(`Bahan Rapat Evaluasi - Peta Kamar - disusun chemint ${jamCetak()} WIB - dokumen internal`);
+      M.ttd(tglId(hariIni(), 'long'), (setelan('lembaga', {}) || {}).kota, (setelan('penandatangan', []) || []).slice(0, 1), { dok: 'Bahan Rapat Evaluasi - Peta Kamar' });
+      M.kaki(`Bahan Rapat Evaluasi - Peta Kamar - chemint ${jamCetak()} WIB`);
       try { pdf.setProperties({ title: 'Bahan Rapat Evaluasi - Peta Kamar', creator: 'chemint' }); } catch (e) {}
       pdf.save(namaBerkas(`Bahan Rapat Peta Kamar ${u?.nama || ''} ${P.dari0} sd ${P.sampai0}`).slice(0, 120) + '.pdf');
       toast('success', 'Bahan rapat diunduh', { nada: 'akui', sub: `${kertas.nama} · ${angka(H.baris.length)} ${istilah('kamar').toLowerCase()}` });

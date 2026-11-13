@@ -10620,11 +10620,18 @@ tr.sp-tanpa td { background:color-mix(in oklab, #B4233C 4%, var(--surface)); }
 .sp-lembar-ttd > div { display:flex; flex-direction:column; align-items:center; text-align:center; gap:2px; }
 .sp-lembar-ttd b { margin-top:52px; padding-bottom:2px; border-bottom:1px solid #1E293B; font-size:12.5px; }
 .sp-lembar-tanpa { margin:22px 0 0; text-align:right; font-size:11.5px; color:#B4233C; }
+.sp-lembar-kop-baku { margin:0 0 16px; }
+.sp-lembar-kop-baku img { max-width:min(124px, 18vw); height:auto; }
+.sp-lembar-ttd .sp-lembar-jab { font-weight:700; }
+.sp-lembar-ttd .sp-lembar-qr { display:block; width:88px; height:88px; margin:8px 0 4px; image-rendering:pixelated; }
+.sp-lembar-ttd .sp-lembar-qr + b { margin-top:2px; }
 @media (max-width:640px) {
   .sp-lembar { padding:22px 16px 20px; }
   .sp-lembar-kop b { font-size:16px; }
   .sp-lembar-ttd { grid-template-columns:1fr; gap:6px; }
   .sp-lembar-ttd > div:first-child:empty { display:none; }
+  .sp-lembar-kop-baku td:first-child, .sp-lembar-kop-baku td:last-child { width:54px !important; }
+  .sp-lembar-kop-baku img { max-width:50px !important; }
 }
 
 /* peta: sarana per santri & legenda */

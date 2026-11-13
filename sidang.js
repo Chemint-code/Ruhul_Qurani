@@ -1853,7 +1853,9 @@
     const halamanBaru = () => { pdf.addPage(Array.isArray(kertas.format) ? kertas.format.slice() : kertas.format, 'portrait'); y = mT; };
     const naik = (fs) => fs * PT * 0.8;
 
-    /* ---- kop ---- */
+    /* ---- kop (v2.77: kop baku chemint dari app.js) ---- */
+    if (A.kopPdf) y = A.kopPdf(pdf, { mL, mR, W, y, logo });
+    else {
     if (logo && logo.uri) {
       const h = 18, w = Math.min(28, h * (logo.w || 160) / (logo.h || 94));
       try { pdf.addImage(logo.uri, 'PNG', mL, y, w, h, 'logoKopSidang', 'FAST'); } catch (e) { console.warn('[berkas] logo dilewati:', e.message); }
@@ -1865,6 +1867,7 @@
     pdf.setDrawColor(15, 23, 42); pdf.setLineWidth(0.7); pdf.line(mL, y, W - mR, y);
     pdf.setLineWidth(0.25); pdf.line(mL, y + 1.1, W - mR, y + 1.1);
     y += 7;
+    }
 
     /* ---- judul ---- */
     huruf(12.5, 'bold'); tinta(28, 26, 46); pdf.text("BERKAS PERKARA SIDANG TA'DIB", W / 2, y, { align: 'center' });

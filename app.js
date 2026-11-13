@@ -8803,9 +8803,24 @@ async function lengkapiLaporan(data) {
  * object-fit di html2canvas tidak seragam antarversi, sedangkan batas
  * ukuran biasa menjaga rasio asli di semua jalur render.
  */
+/**
+ * v2.77 — Kop baku semua laporan chemint (perkembangan, rekap, sarpras,
+ * berkas sidang, dan laporan berikutnya). Satu-satunya sumber teks kop:
+ * jalur HTML (kopLaporan) dan jalur jsPDF (kopPdfChemint) membaca dari sini.
+ */
+const KOP_CHEMINT = Object.freeze({
+  sistem:   'SISTEM INFORMASI PENGEMBANGAN SANTRI',
+  lembaga:  'DAYAH RUHUL QURANI',
+  bagian:   'Administrasi Musyrif Pengasuhan',
+  alamat:   'Jln. Ujong Beurasok–Putro Ijo, Desa Leuhan, Kec. Johan Pahlawan, Aceh Barat 23618',
+  aplikasi: 'Chemint App',
+  kota:     'Meulaboh'
+});
+
 function kopLaporan(logoKorps) {
   const logo = logoKorps || KORPS_WARNA;
   const sel = 'vertical-align:middle;padding:0;';
+  const K = KOP_CHEMINT;
 
   return `
   <div class="blok-utuh" style="page-break-inside:avoid;break-inside:avoid;">
@@ -8815,27 +8830,61 @@ function kopLaporan(logoKorps) {
           <img src="${logo}" alt=""
                style="max-width:124px;max-height:94px;display:block;">
         </td>
-        <td style="${sel}text-align:center;padding:0 6px;">
+        <td style="${sel}text-align:center;padding:0 4px;">
           <div style="font-size:9px;letter-spacing:2.6px;text-transform:uppercase;
-                      color:#64748b;line-height:1.5;">Sistem Informasi Pengembangan Santri</div>
+                      color:#64748b;line-height:1.5;">${esc(K.sistem)}</div>
           <div style="font-size:19px;font-weight:bold;letter-spacing:1.7px;
-                      color:#0f172a;line-height:1.28;">DAYAH RUHUL QURANI</div>
-          <div style="font-size:9px;color:#64748b;letter-spacing:.35px;line-height:1.5;">
-            Aceh Barat, Provinsi Aceh &nbsp;·&nbsp; Pengasuhan &nbsp;·&nbsp;
-            Madrasah MTs &nbsp;·&nbsp; Madrasah MA</div>
+                      color:#0f172a;line-height:1.28;">${esc(K.lembaga)}</div>
+          <div style="font-size:10.5px;font-weight:bold;color:#334155;letter-spacing:.3px;
+                      line-height:1.5;">${esc(K.bagian)}</div>
+          <div style="font-size:8.4px;color:#64748b;letter-spacing:.2px;line-height:1.45;">
+            ${esc(K.alamat)} &nbsp;·&nbsp; ${esc(K.aplikasi)}</div>
         </td>
-        <!-- Kolom kanan sengaja kosong dan selebar kolom logo. Tanpa itu,
-             blok teks di tengah bergeser ke kanan mengikuti sisa ruang —
-             kop dengan satu logo tetap harus terbaca simetris. -->
+        <!-- Kolom kanan sengaja kosong dan selebar kolom logo agar teks kop
+             tetap simetris di tengah halaman. -->
         <td style="${sel}width:132px;"></td>
       </tr>
     </table>
 
-    <!-- Garis ganda tebal–tipis: penanda kop resmi yang sudah baku, dan
-         satu-satunya pemisah yang dibutuhkan sebelum judul laporan. -->
     <div style="border-top:2.5px solid #0f172a;margin:9px 0 0;font-size:0;line-height:0;">&nbsp;</div>
     <div style="border-top:1px solid #0f172a;margin:2px 0 0;font-size:0;line-height:0;">&nbsp;</div>
   </div>`;
+}
+
+/**
+ * Kop yang sama untuk dokumen jsPDF (sarpras.js, sidang.js). Mengembalikan
+ * posisi y (mm) tempat judul laporan dimulai.
+ */
+function kopPdfChemint(pdf, o) {
+  const { mL, mR, W } = o; let y = o.y;
+  const K = KOP_CHEMINT;
+  const polos = (t) => String(t).replace(/[–—]/g, '-').replace(/·/g, '-');
+  const huruf = (n, g) => { pdf.setFont('helvetica', g || 'normal'); pdf.setFontSize(n); };
+  if (o.logo && o.logo.uri) {
+    const h = 18, w = Math.min(28, h * (o.logo.w || 160) / (o.logo.h || 94));
+    try { pdf.addImage(o.logo.uri, 'PNG', mL, y, w, h, 'logoKopChemint', 'FAST'); } catch (e) { console.warn('[kop] logo dilewati:', e.message); }
+  }
+  const x = W / 2;
+  huruf(6.8); pdf.setTextColor(100, 116, 139); pdf.text(K.sistem, x, y + 3.6, { align: 'center' });
+  huruf(15, 'bold'); pdf.setTextColor(15, 23, 42); pdf.text(K.lembaga, x, y + 9.6, { align: 'center' });
+  huruf(8.6, 'bold'); pdf.setTextColor(51, 65, 85); pdf.text(K.bagian, x, y + 14, { align: 'center' });
+  huruf(6.9); pdf.setTextColor(100, 116, 139); pdf.text(polos(`${K.alamat}  ·  ${K.aplikasi}`), x, y + 17.8, { align: 'center' });
+  y += 21.5;
+  pdf.setDrawColor(15, 23, 42); pdf.setLineWidth(0.7); pdf.line(mL, y, W - mR, y);
+  pdf.setLineWidth(0.25); pdf.line(mL, y + 1.1, W - mR, y + 1.1);
+  return y + 7;
+}
+
+/** Isi QR keabsahan untuk tanda tangan penanggung jawab dokumen. */
+function teksAbsahQr(t) {
+  return [
+    String(t.nama || '—'),
+    t.jabatan || '',
+    KOP_CHEMINT.lembaga.replace(/\b(\w)(\w*)/g, (m, a, b) => a + b.toLowerCase()) + ', Aceh Barat',
+    t.dok || '',
+    'Diterbitkan ' + String(t.terbit || '-'),
+    KOP_CHEMINT.aplikasi
+  ].filter(Boolean).join('\n');
 }
 
 
@@ -33244,6 +33293,11 @@ async function logoKopPng() {
 Object.assign(window.RQ_SIDANG, {
   pdfBaru: pdfKosong,
   logoKop: logoKopPng,
+  kop: KOP_CHEMINT,
+  kopPdf: kopPdfChemint,
+  kopHtml: () => kopLaporan(ASET.korps || KORPS_WARNA),
+  qr: (teks) => qrDataUri(teks),
+  qrTeks: teksAbsahQr,
   kertasDaftar: () => Object.values(UKURAN_KERTAS).map(k => ({ kode: k.kode, nama: k.nama, ukuran: k.ukuran })),
   kertasTersimpan: () => kertasTersimpan(),
   simpanKertas: (k) => simpanKertas(k)
@@ -35628,4 +35682,4 @@ function muatPenempatanJs() {
   }
   return PENEMPATAN_JS.muat;
 }
-APP.versi = 'rq-v2.76';   // v2.76: Penempatan kamar oleh musyrif, Sarpras bergaya Denah
+APP.versi = 'rq-v2.77';   // v2.77: Kop baku laporan + TTD ber-QR sarpras; v2.76: Penempatan kamar oleh musyrif, Sarpras bergaya Denah
