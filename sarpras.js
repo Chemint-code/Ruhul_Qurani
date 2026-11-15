@@ -1547,9 +1547,27 @@
     P.hasil = null;
     if (!P.unit) return;
     const [dari, sampai] = rentangPeta();
-    const [h] = await Promise.all([rpc('sarpras_peta_kamar', { p_dari: dari, p_sampai: sampai, p_unit: P.unit }), muatMasalah(geser(dari, -1))]);
-    P.hasil = h; P.dari0 = dari; P.sampai0 = sampai;
+    const [h, , kb] = await Promise.all([rpc('sarpras_peta_kamar', { p_dari: dari, p_sampai: sampai, p_unit: P.unit }), muatMasalah(geser(dari, -1)),
+      rpc('peta_kebersihan', { p_unit: P.unit }).catch(() => null)]);   // v2.80: lapisan Kebersihan (null = belum terpasang / tanpa hak)
+    P.kbr = Array.isArray(kb) ? new Map(kb.map(x => [x.lokasi_id, x])) : null;
+    if (!P.kbr) P.lapis = 'pelanggaran';
+    P.hasil = h; P.dari0 = dari; P.sampai0 = sampai; P.ronda = null;
+    muatDitinjau();
   }
+  /* v2.78 · logika murni denah (diuji lewat _uji) */
+  const urutanKamar = (r) => (r.l.urutan == null ? Number.POSITIVE_INFINITY : Number(r.l.urutan));
+  /** Bagi kamar ke dua sisi lorong: urut `urutan` (kosong di akhir) lalu nomor; separuh pertama di atas. */
+  function sisiLorong(baris) {
+    const u = [...(baris || [])].sort((a, b) => (urutanKamar(a) - urutanKamar(b) || 0) || (a.l.nomor - b.l.nomor));
+    const h = Math.ceil(u.length / 2);
+    return { atas: u.slice(0, h), bawah: u.slice(h) };
+  }
+  /** Anak tangga panas 0..5 terhadap nilai tertinggi. */
+  const tangga = (nilai, maks) => (!nilai || !maks ? 0 : Math.min(5, Math.ceil(5 * nilai / maks)));
+  /** Urutan Ronda: perlu dibahas dulu, lalu total turun, lalu nomor. */
+  const urutRonda = (baris) => [...(baris || [])].sort((a, b) => (b.dibahas - a.dibahas) || (b.total - a.total) || (a.l.nomor - b.l.nomor));
+  const ringkasButir = (butir, maks = 2) => ({ tampil: (butir || []).slice(0, maks), sisa: Math.max(0, (butir || []).length - maks) });
+
   function hitungPeta() {
     const P = UI.peta, h = P.hasil; if (!h) return null;
     const kel = (h.kelompok || []).filter(k => k.kode);
@@ -1571,79 +1589,293 @@
     });
     const nilai = (r) => P.sorot ? (r.n[P.sorot] || 0) : r.total;
     const maks = Math.max(1, ...baris.map(nilai));
+    // v2.78: tangga panas dihitung terhadap kamar ber-≥3 santri (kamar kecil tetap netral, bergaris)
+    const maksTangga = Math.max(0, ...baris.filter(r => r.inti.length >= 3).map(nilai));
+    baris.forEach(r => { r.tangga = r.inti.length >= 3 ? tangga(nilai(r), maksTangga) : 0; r.kbr = P.kbr?.get(r.l.id) || null; });
+    // v2.80: lapisan Kebersihan — warna dari skor inspeksi terakhir (100 netral, makin rendah makin panas); belum diperiksa netral
+    const lapisKbr = P.lapis === 'kebersihan' && !!P.kbr;
+    if (lapisKbr) baris.forEach(r => { const sk = r.kbr?.inspeksi?.skor; r.tangga = sk == null ? 0 : Math.min(5, Math.ceil((100 - Number(sk)) / 20)); });
     const totalKel = {}, luarKel = {};
     kel.forEach(k => { totalKel[k.kode] = baris.reduce((a, r) => a + r.n[k.kode], 0); luarKel[k.kode] = baris.reduce((a, r) => a + r.nLuar[k.kode], 0); });
-    return { kel, baris, nilai, maks, totalKel, luarKel, ambang, kodeRusak, waspada, belum: h.belum || {} };
+    const nilaiLapis = lapisKbr ? (r) => (r.kbr?.inspeksi?.skor ?? null) : nilai;
+    return { kel, baris, nilai: nilaiLapis, maks, totalKel, luarKel, ambang, kodeRusak, waspada, belum: h.belum || {}, lapis: lapisKbr ? 'kebersihan' : 'pelanggaran' };
   }
-  function gambarPeta(akar) {
+  /* v2.78 · DENAH HIDUP — kamar sebagai ruang di dua sisi lorong per lantai */
+  function ruangHtml(r, i, H) {
+    const P = UI.peta, v = H.nilai(r);
+    const jml = Math.max(1, H.kel.reduce((a, k) => a + (r.n[k.kode] || 0), 0));
+    const strip = H.kel.map((k, ki) => `<i data-k="${ki % 6}" style="--w:${Math.round(100 * (r.n[k.kode] || 0) / jml)}%"${P.sorot && P.sorot !== k.kode ? ' class="redup"' : ''}></i>`).join('');
+    const ditinjau = P.ditinjau?.has(r.l.id);
+    const kbr = H.lapis === 'kebersihan', nSita = (r.kbr?.sitaan || []).length;
+    const kelas = ['dh-ruang', r.dibahas && !kbr ? 'dibahas' : '', kbr && v == null ? 'belum' : '', r.inti.length < 3 ? 'sedikit' : '', ditinjau ? 'ditinjau' : '', P.buka === r.l.id ? 'aktif' : ''].filter(Boolean).join(' ');
+    const label = kbr ? `${r.l.nama}: ${v == null ? 'belum diperiksa' : `skor ${angka(v)}`}${nSita ? `, ${angka(nSita)} sitaan` : ''}`
+      : `${r.l.nama}: ${angka(v)} catatan, ${angka(r.inti.length)} santri${r.dibahas ? ', perlu dibahas' : ''}`;
+    return `<button type="button" class="${kelas}" data-sp="p-kamar" data-id="${esc(r.l.id)}" data-tangga="${r.tangga}" style="--i:${i}" aria-label="${esc(label)}">
+      <span class="dh-daun" aria-hidden="true"></span>
+      <span class="dh-kepala"><span class="pk-plakat kecil"><span class="pk-nomor">${esc(r.l.nomor)}</span></span>
+        ${ditinjau ? '<i class="fa-solid fa-check dh-centang" aria-hidden="true"></i>' : ''}${r.buka.length ? `<span class="dh-rusak" title="${angka(r.buka.length)} sarana rusak">${pikto(ikonBarang(r.buka[0]))}${r.buka.length > 1 ? angka(r.buka.length) : ''}</span>` : ''}</span>
+      <b class="dh-total" data-nilai="${v ?? 0}">${v == null ? '—' : angka(v)}</b>
+      <span class="dh-strip" aria-hidden="true">${strip}</span>
+      <span class="dh-isi">${kbr ? (r.kbr?.inspeksi ? esc(tglPendek(r.kbr.inspeksi.tanggal)) : 'belum diperiksa') + (nSita ? ` · ${angka(nSita)} sitaan` : '')
+        : `${angka(r.inti.length)}${r.l.kapasitas ? '/' + angka(r.l.kapasitas) : ''}${r.luar.length ? ` +${r.luar.length}` : ''}`}</span>
+    </button>`;
+  }
+  function lantaiHtml(k, isi, H, mulai = 0) {
+    const { atas, bawah } = sisiLorong(isi);
+    const kol = Math.max(atas.length, bawah.length, 1);
+    const total = isi.reduce((a, r) => a + H.nilai(r), 0), bahas = isi.filter(r => r.dibahas).length;
+    let i = mulai;
+    const sisi = (arr, nama) => `<div class="dh-sisi ${nama}" style="--kol:${kol}">${arr.map(r => ruangHtml(r, i++, H)).join('')}</div>`;
+    return `<section class="dh-lantai" data-lantai="${esc(k ?? '')}">
+      <header class="dh-lantai-kepala"><h4>${esc(labelLantai(k))}</h4>
+        <span>${angka(isi.length)} ${esc(istilah('kamar').toLowerCase())} · ${angka(total)} catatan${bahas ? ` · <em>${angka(bahas)} perlu dibahas</em>` : ''}</span></header>
+      <div class="dh-denah">${sisi(atas, 'atas')}<div class="dh-lorong" aria-hidden="true"><span></span></div>${sisi(bawah, 'bawah')}</div>
+    </section>`;
+  }
+  function gambarPeta(akar, gerak = 'masuk') {
     const P = UI.peta;
     const units = [...SP.data.unit].filter(u => u.kunci_siswa).sort(urutkan);
+    const lama = gerak === 'sorot' ? new Map([...document.querySelectorAll('.dh-ruang')].map(r => [r.dataset.id, Number(r.querySelector('.dh-total')?.dataset.nilai) || 0])) : null;
     if (!units.length) { akar.innerHTML = kartu('Peta Kamar', `<div class="card-body">${kosong('Belum ada unit yang terpetakan ke data santri', 'Atur di Pengaturan Sarpras.', 'fa-sitemap')}</div>`); return; }
     const H = hitungPeta();
     const PER = [['bulan', 'Bulan ini'], ['lalu', 'Bulan lalu'], ['30', '30 hari'], ['semester', 'Semester ini'], ['bebas', 'Rentang…']];
     const grup = new Map(); (H?.baris || []).forEach(r => { const k = r.l.lantai || null; if (!grup.has(k)) grup.set(k, []); grup.get(k).push(r); });
     const nBerkamar = (H?.baris || []).reduce((a, r) => a + r.santri.length, 0);
     const nDibahas = (H?.baris || []).filter(r => r.dibahas).length;
-    akar.innerHTML = `<div class="sp-peta">
+    const kelSorot = H?.kel.find(k => k.kode === P.sorot);
+    let nomorRuang = 0;
+    akar.innerHTML = `<div class="sp-peta${H?.lapis === 'kebersihan' ? ' lapis-kebersihan' : ''}${P.buka ? ' ada-berkas' : ''}${gerak === 'masuk' ? ' dh-masuk' : gerak === 'sorot' ? ' dh-ganti' : ''}">
       <section class="sp-peta-saring card">
         ${units.length > 1 ? `<div class="sp-pil">${units.map(u => `<button type="button" class="sp-pil-b${u.id === P.unit ? ' on' : ''}" data-sp="p-unit" data-id="${esc(u.id)}">${esc(u.nama)}</button>`).join('')}</div>` : ''}
         <div class="sp-pil">${PER.map(([k, l]) => `<button type="button" class="sp-pil-b${P.periode === k ? ' on' : ''}" data-sp="p-periode" data-v="${k}">${esc(l)}</button>`).join('')}</div>
         ${P.periode === 'bebas' ? `<div class="sp-lap-dua"><input id="spPetaDari" class="input" type="date" value="${esc(P.dari)}" max="${esc(hariIni())}" aria-label="Dari">
           <input id="spPetaSampai" class="input" type="date" value="${esc(P.sampai)}" max="${esc(hariIni())}" aria-label="Sampai">${tombol('p-terap', 'Terapkan', 'fa-check', {}, 'btn-primary')}</div>` : ''}
-        <div class="sp-pil sp-sorot"><span class="label">Sorot</span>
+        ${P.kbr ? `<div class="sp-pil dh-lapis"><span class="label">Lapisan</span>${[['pelanggaran', 'Pelanggaran', 'fa-scale-balanced'], ['kebersihan', 'Kebersihan', 'fa-clipboard-check']].map(([v, l, i]) =>
+          `<button type="button" class="sp-pil-b${(H?.lapis || 'pelanggaran') === v ? ' on' : ''}" data-sp="p-lapis" data-v="${v}"><i class="fa-solid ${i}"></i>${esc(l)}</button>`).join('')}</div>` : ''}
+        <div class="sp-pil sp-sorot"${H?.lapis === 'kebersihan' ? ' hidden' : ''}><span class="label">Sorot</span>
           <button type="button" class="sp-pil-b kecil${P.sorot ? '' : ' on'}" data-sp="p-sorot" data-v="">Semua kelompok</button>
-          ${(H?.kel || []).map(k => `<button type="button" class="sp-pil-b kecil${P.sorot === k.kode ? ' on' : ''}" data-sp="p-sorot" data-v="${esc(k.kode)}"><i class="fa-solid ${esc(k.ikon || 'fa-circle')}"></i>${esc(k.nama)}</button>`).join('')}</div>
+          ${(H?.kel || []).map((k, ki) => `<button type="button" class="sp-pil-b kecil dh-sorot-b${P.sorot === k.kode ? ' on' : ''}" data-sp="p-sorot" data-v="${esc(k.kode)}" data-k="${ki % 6}"><i class="fa-solid ${esc(k.ikon || 'fa-circle')}"></i>${esc(k.nama)}</button>`).join('')}</div>
       </section>
       ${H ? `<div class="sp-lap-ringkas">
           <div class="sp-stat teks"><b>${esc(tglPendek(P.dari0))} – ${esc(tglPendek(P.sampai0))}</b><span>periode</span></div>
-          ${H.kel.map(k => `<div class="sp-stat${P.sorot === k.kode ? ' sorot' : ''}"><b>${angka(H.totalKel[k.kode])}</b><span>${esc(k.nama)}</span></div>`).join('')}
+          ${H.kel.map((k, ki) => `<div class="sp-stat dh-stat${P.sorot === k.kode ? ' sorot' : ''}" data-k="${ki % 6}"><b>${angka(H.totalKel[k.kode])}</b><span>${esc(k.nama)}</span></div>`).join('')}
           <div class="sp-stat${nDibahas ? ' merah' : ''}"><b>${angka(nDibahas)}</b><span>perlu dibahas</span></div>
         </div>
-        <div class="sp-lap-aksi card"><div><b>${angka(H.baris.length)} ${esc(istilah('kamar').toLowerCase())} · ${angka(nBerkamar)} santri berkamar</b>
-            <small>Berdasarkan ${esc(istilah('kamar').toLowerCase())} santri saat ini. "Perlu dibahas": ${esc(H.kel.find(k => k.kode === H.kodeRusak)?.nama || H.kodeRusak)} ≥ ${angka(H.ambang)} dan ada kerusakan karena kelalaian/perusakan.</small></div>
-          <span class="sp-lap-tombol">${pengelola() ? tombol('p-ambang', `Ambang ${H.ambang}`, 'fa-sliders') : ''}
+        <div class="sp-lap-aksi card dh-aksi"><div><b>${angka(H.baris.length)} ${esc(istilah('kamar').toLowerCase())} · ${angka(nBerkamar)} santri berkamar</b>
+            <small class="dh-ronda-teks"${P.ditinjau?.size ? '' : ' hidden'}>${angka(P.ditinjau?.size || 0)}/${angka(H.baris.length)} ditinjau</small></div>
+          <span class="sp-lap-tombol">${H.baris.length ? tombol('p-ronda', P.ronda || P.ditinjau?.size ? 'Lanjut Ronda' : 'Mulai Ronda', 'fa-route', {}, 'btn-primary dh-ronda-b') : ''}
+            ${pengelola() ? tombol('p-ambang', `Ambang ${H.ambang}`, 'fa-sliders') : ''}
             <select id="spLapKertas" class="input" aria-label="Ukuran kertas">${(window.RQ_SIDANG?.kertasDaftar?.() || [{ kode: 'A4', nama: 'A4' }]).map(k => `<option value="${esc(k.kode)}" ${k.kode === (window.RQ_SIDANG?.kertasTersimpan?.() || 'A4') ? 'selected' : ''}>${esc(k.nama)}</option>`).join('')}</select>
-            ${tombol('p-pdf', 'Bahan Rapat', 'fa-file-pdf', {}, 'btn-primary')}</span></div>
-        <p class="sp-legenda"><span><i class="sw panas"></i>warna = banyaknya catatan${P.sorot ? ` ${esc(H.kel.find(k => k.kode === P.sorot)?.nama || '')}` : ''}</span>
-          <span><i class="sw garis"></i>kurang dari 3 santri, tidak diwarnai</span><span><i class="sw bahas"></i>perlu dibahas</span></p>
-        ${H.baris.length ? [...grup.entries()].sort((a, b) => urutLantai(a[0], b[0])).map(([k, isi]) => `<section class="sp-peta-lantai">
-            <h4 class="sp-lantai-j">${esc(labelLantai(k))}</h4>
-            <div class="sp-peta-kisi">${isi.map((r, i) => {
-              const v = H.nilai(r), warna = r.inti.length >= 3 && v ? Math.round(8 + 42 * v / H.maks) : 0;
-              return `<button type="button" class="sp-pk${r.dibahas ? ' dibahas' : ''}${r.inti.length < 3 ? ' sedikit' : ''}" data-sp="p-kamar" data-id="${esc(r.l.id)}" style="--p:${warna}%;--i:${i}">
-                <span class="sp-pk-kepala"><b>${esc(r.l.nomor)}</b><small>${angka(r.inti.length)}${r.l.kapasitas ? '/' + angka(r.l.kapasitas) : ''} santri${r.luar.length ? ` +${r.luar.length}` : ''}</small></span>
-                <span class="sp-pk-angka">${H.kel.filter(kk => r.n[kk.kode]).map(kk => `<i class="${P.sorot === kk.kode ? 'sorot' : ''}" title="${esc(kk.nama)}"><i class="fa-solid ${esc(kk.ikon || 'fa-circle')}"></i>${r.n[kk.kode]}</i>`).join('') || '<em>tanpa catatan</em>'}</span>
-                <span class="sp-pk-kaki">${r.buka.length ? `<span class="sp-pk-msl">${r.buka.slice(0, 3).map(m => pikto(ikonBarang(m))).join('')}${r.buka.length} rusak</span>` : '<span class="sp-pk-baik">sarana baik</span>'}
-                  ${r.dibahas ? '<span class="sp-pk-tanda">Perlu dibahas</span>' : ''}</span>
-              </button>`;
-            }).join('')}</div></section>`).join('')
-          : kosong(`Belum ada ${istilah('kamar').toLowerCase()} bernomor`, 'Buat kamar di Pengaturan Sarpras.', 'fa-bed')}
+            ${tombol('p-pdf', 'Bahan Rapat', 'fa-file-pdf')}</span></div>
+        ${H.lapis === 'kebersihan' ? `<p class="dh-legenda"><span><i class="dh-skala" aria-hidden="true"></i>Skor inspeksi 100 → rendah</span><span><i class="dh-sw" aria-hidden="true"></i>Belum diperiksa</span><span>Angka = skor terakhir</span></p>`
+          : `<p class="dh-legenda"><span><i class="dh-skala" aria-hidden="true"></i>${kelSorot ? esc(kelSorot.nama) : 'Sedikit → banyak catatan'}</span>
+          <span><i class="dh-sw garis" aria-hidden="true"></i>Kurang dari 3 santri</span><span><i class="dh-sw cincin" aria-hidden="true"></i>Perlu dibahas</span></p>`}
+        <div class="dh-wadah">
+          <div class="dh-peta">${H.baris.length ? [...grup.entries()].sort((a, b) => urutLantai(a[0], b[0])).map(([k, isi]) => { const h = lantaiHtml(k, isi, H, nomorRuang); nomorRuang += isi.length; return h; }).join('')
+            : kosong(`Belum ada ${istilah('kamar').toLowerCase()} bernomor`, 'Buat kamar di Pengaturan Sarpras.', 'fa-bed')}</div>
+          <div class="dh-berkas-slot"></div>
+        </div>
         <p class="sp-peta-kaki">${Object.values(H.luarKel).some(Boolean) ? `<span><b>Peran kamar (terpisah):</b> ${H.kel.filter(k => H.luarKel[k.kode]).map(k => `${esc(k.nama)} ${H.luarKel[k.kode]}`).join(' · ')}</span>` : ''}
           <span><b>Belum terpetakan:</b> ${angka(H.belum.santri || 0)} santri tanpa ${esc(istilah('kamar').toLowerCase())}${Object.keys(H.belum.kel || {}).length ? ` · ${H.kel.filter(k => H.belum.kel[k.kode]).map(k => `${esc(k.nama)} ${H.belum.kel[k.kode]}`).join(' · ')} catatan` : ''}</span></p>`
         : kosong('Peta belum bisa dihitung', 'Pilih unit yang terpetakan ke data santri.', 'fa-table-cells')}
     </div>`;
     $('spLapKertas')?.addEventListener('change', (e) => window.RQ_SIDANG?.simpanKertas?.(e.target.value));
+    if (P.buka) pasangBerkas(false);
+    pasangTombolBerkas();
+    if (lama) hitungNaik(lama);
   }
-  async function detailKamar(id) {
-    const H = hitungPeta(); const r = H?.baris.find(x => x.l.id === id); if (!r) return;
-    const milikRusak = (nisn) => SP.masalah.filter(m => m.nisn === nisn && m.lokasi_id === r.l.id && !m.batal
-      && (terbukaPada(m, UI.peta.sampai0) || (tglJkt(m.dilaporkan_pada) >= UI.peta.dari0 && tglJkt(m.dilaporkan_pada) <= UI.peta.sampai0)));
-    const baris = (s) => { const mr = milikRusak(s.nisn);
-      return `<tr${s.keluar ? ' class="sp-luar"' : ''}><td><b>${esc(s.nama)}</b><small>${esc(s.kelas || '')}${s.peran ? ' · ' + esc(s.peran) : ''}</small></td>
-      ${H.kel.map(k => `<td class="${s.kel?.[k.kode] ? 'ada' : ''}">${s.kel?.[k.kode] || ''}</td>`).join('')}
-      <td class="sp-peta-sarana">${mr.map(m => `<span title="${esc(`${namaBarang(m)}: ${m.masalah}`)}">${pikto(ikonBarang(m))}</span>`).join('')}</td></tr>`; };
-    await Swal.fire({
-      width: 760, showConfirmButton: false, showCloseButton: true, customClass: { popup: 'sp-swal' },
-      title: `${esc(r.l.nama)}${r.dibahas ? ' <span class="sp-pk-tanda">Perlu dibahas</span>' : ''}`,
-      html: `<p class="hint">${esc(labelLantai(r.l.lantai))} · ${angka(r.inti.length)} santri${r.l.kapasitas ? ` dari ${angka(r.l.kapasitas)}` : ''} · ${esc(tglPendek(UI.peta.dari0))} – ${esc(tglPendek(UI.peta.sampai0))}</p>
-        ${r.santri.length ? `<div class="tbl"><table class="sp-tbl sp-peta-tbl"><thead><tr><th>Santri</th>${H.kel.map(k => `<th title="${esc(k.nama)}"><i class="fa-solid ${esc(k.ikon || 'fa-circle')}"></i> ${esc(k.nama)}</th>`).join('')}<th>Barang rusak</th></tr></thead>
-          <tbody>${[...r.santri].sort((a, b) => (a.keluar - b.keluar) || Object.values(b.kel || {}).reduce((x, y) => x + y, 0) - Object.values(a.kel || {}).reduce((x, y) => x + y, 0)).map(baris).join('')}</tbody></table></div>`
-          : '<p class="sp-kosong">Belum ada santri tercatat di kamar ini.</p>'}
-        <h4 class="sp-h4">Sarana</h4>
-        ${r.buka.length || r.sebabWaspada.length ? `<ul class="sp-msl-daftar">${[...new Map([...r.buka, ...r.sebabWaspada].map(m => [m.id, m])).values()].map(m => itemMasalah(m, r.l)).join('')}</ul>`
-          : '<p class="sp-kosong">Tidak ada masalah sarana pada periode ini.</p>'}`
+  /* v2.78 · PANEL BERKAS KAMAR (pengganti dialog rincian kamar) */
+  /** Urutan kamar seperti tampak di denah: lantai (urutLantai), lalu sisi atas, lalu sisi bawah. */
+  function urutDenah(H) {
+    const grup = new Map(); (H?.baris || []).forEach(r => { const k = r.l.lantai || null; if (!grup.has(k)) grup.set(k, []); grup.get(k).push(r); });
+    return [...grup.entries()].sort((a, b) => urutLantai(a[0], b[0])).flatMap(([, isi]) => { const { atas, bawah } = sisiLorong(isi); return [...atas, ...bawah]; });
+  }
+  /** Singkatan kepala kolom: kata pembeda (kata kedua bila kata pertama dipakai kelompok lain), 3 huruf. */
+  function singkatKel(kel) {
+    const kata = kel.map(k => String(k.nama || k.kode).trim().split(/\s+/));
+    return kata.map((w, i) => {
+      const kembar = kata.some((v, j) => j !== i && v[0].toLowerCase() === w[0].toLowerCase());
+      const dasar = (kembar && w[1] ? w[1] : w[0]);
+      return dasar.charAt(0).toUpperCase() + dasar.slice(1, 3).toLowerCase();
     });
   }
+  const totalSantri = (s) => Object.values(s.kel || {}).reduce((a, v) => a + (Number(v) || 0), 0);
+  function gambarBerkas(r, H) {
+    const P = UI.peta, ki = new Map(H.kel.map((k, i) => [k.kode, i % 6])), sing = singkatKel(H.kel);
+    const kolom = `minmax(150px, 1fr) repeat(${H.kel.length}, 46px) 46px 54px`, lebarMin = 150 + 46 * (H.kel.length + 1) + 54;
+    const milikRusak = (nisn) => SP.masalah.filter(m => m.nisn === nisn && m.lokasi_id === r.l.id && !m.batal
+      && (terbukaPada(m, P.sampai0) || (tglJkt(m.dilaporkan_pada) >= P.dari0 && tglJkt(m.dilaporkan_pada) <= P.sampai0)));
+    const terbukaButir = P.butirTerbuka || (P.butirTerbuka = new Set());
+    const baris = (s) => {
+      const semua = s.butir || [], rb = terbukaButir.has(s.nisn) ? { tampil: semua, sisa: 0 } : ringkasButir(semua), mr = milikRusak(s.nisn);
+      return `<div class="bk-baris${s.keluar ? ' luar' : ''}" role="row" data-nisn="${esc(s.nisn)}">
+        <span class="bk-nama" role="cell"><b>${esc(s.nama)}</b><small>${esc(s.kelas || '')}${s.peran ? ' · ' + esc(s.peran) : ''}</small></span>
+        ${H.kel.map(k => { const v = Number(s.kel?.[k.kode]) || 0; return `<span class="bk-sel${v ? ' ada' : ''}" role="cell" data-k="${ki.get(k.kode)}">${v ? angka(v) : '·'}</span>`; }).join('')}
+        <span class="bk-sel jumlah" role="cell">${totalSantri(s) ? angka(totalSantri(s)) : '·'}</span>
+        <span class="bk-sel sarana" role="cell">${mr.map(m => `<span title="${esc(`${namaBarang(m)}: ${m.masalah}`)}">${pikto(ikonBarang(m))}</span>`).join('') || '·'}</span>
+        ${semua.length ? `<div class="bk-butir">${rb.tampil.map(b => `<span class="bk-chip" data-k="${ki.get(b.kel) ?? 5}"><i class="bk-titik" aria-hidden="true"></i>${esc(b.kode)} · ${esc(b.nama)} ×${angka(b.n)}</span>`).join('')}${rb.sisa ? `<button type="button" class="bk-lain" data-sp="b-lain" data-nisn="${esc(s.nisn)}">+${angka(rb.sisa)} lainnya</button>` : ''}</div>` : ''}
+      </div>`;
+    };
+    const urut = (arr) => [...arr].sort((a, b) => (totalSantri(b) - totalSantri(a)) || String(a.nama).localeCompare(String(b.nama), 'id'));
+    const sarana = [...new Map([...r.buka, ...r.sebabWaspada].map(m => [m.id, m])).values()];
+    const ringkas = H.kel.filter(k => r.n[k.kode]).map(k => `<span class="bk-pil" data-k="${ki.get(k.kode)}"><i class="fa-solid ${esc(k.ikon || 'fa-circle')}"></i>${esc(k.nama)} <b>${angka(r.n[k.kode])}</b></span>`).join('');
+    return `<button type="button" class="bk-tirai" data-sp="b-tutup" aria-label="Tutup" tabindex="-1"></button>
+    <aside class="bk-panel" role="dialog" aria-modal="false" aria-labelledby="bkJudul" data-id="${esc(r.l.id)}">
+      <header class="bk-kepala">
+        <span class="pk-plakat besar"><span class="pk-nomor">${esc(r.l.nomor)}</span></span>
+        <div class="bk-judul"><h3 id="bkJudul" tabindex="-1">${esc(r.l.nama)}</h3>
+          <p>${esc(labelLantai(r.l.lantai))} · ${angka(r.inti.length)}${r.l.kapasitas ? ` dari ${angka(r.l.kapasitas)}` : ''} santri · ${esc(tglPendek(P.dari0))} – ${esc(tglPendek(P.sampai0))}</p>
+          ${r.dibahas ? '<span class="bk-tanda">Perlu dibahas</span>' : ''}</div>
+        <button type="button" class="bk-x" data-sp="b-tutup" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button>
+      </header>
+      ${P.ronda ? `<p class="bk-ronda"><span><i class="fa-solid fa-route"></i>Ronda <b>${angka(P.ronda.urut.filter(id => P.ditinjau.has(id)).length)}/${angka(P.ronda.urut.length)}</b> ditinjau</span>
+        <button type="button" class="btn btn-ghost btn-sm" data-sp="b-akhiri">Akhiri Ronda</button></p>` : ''}
+      ${ringkas ? `<div class="bk-pil-baris">${ringkas}</div>` : ''}
+      <div class="bk-isi">
+      ${r.santri.length ? `<div class="bk-gulir"><div class="bk-tabel" role="table" aria-label="Catatan per santri" style="--bk-kolom:${kolom};--bk-min:${lebarMin}px">
+          <div class="bk-baris kepala" role="row"><span role="columnheader">Santri</span>${H.kel.map((k, i) => `<span role="columnheader" data-k="${ki.get(k.kode)}" title="${esc(k.nama)}" aria-label="${esc(k.nama)}"><i class="fa-solid ${esc(k.ikon || 'fa-circle')}" aria-hidden="true"></i>${esc(sing[i])}</span>`).join('')}<span role="columnheader" title="Jumlah" aria-label="Jumlah">Σ</span><span role="columnheader" title="Barang rusak" aria-label="Barang rusak">Sarana</span></div>
+          ${urut(r.inti).map(baris).join('')}
+          ${r.luar.length ? `<p class="bk-sub">Peran ${esc(istilah('kamar').toLowerCase())} (terpisah)</p>${urut(r.luar).map(baris).join('')}` : ''}
+        </div></div>`
+        : `<p class="sp-kosong">Belum ada santri tercatat di ${esc(istilah('kamar').toLowerCase())} ini.</p>`}
+      ${r.kbr ? `<h4 class="bk-h4">Inspeksi terakhir</h4>
+        ${r.kbr.inspeksi ? `<div class="bk-inspeksi"><b class="bk-skor">${angka(r.kbr.inspeksi.skor)}</b><span>${esc(tglPendek(r.kbr.inspeksi.tanggal))}${r.kbr.inspeksi.oleh_nama ? ` · ${esc(r.kbr.inspeksi.oleh_nama)}` : ''}</span>
+          ${(r.kbr.inspeksi.gagal || []).length ? `<ul>${r.kbr.inspeksi.gagal.map(g => `<li>${esc(g)}</li>`).join('')}</ul>` : '<small>Semua standar sesuai.</small>'}</div>`
+          : '<p class="sp-kosong">Belum diperiksa.</p>'}
+        <h4 class="bk-h4">Sitaan</h4>
+        ${(r.kbr.sitaan || []).length ? `<ul class="bk-sarana">${r.kbr.sitaan.map(x => `<li><span class="bk-sarana-ikon"><i class="fa-solid fa-box-archive"></i></span><span><b>${esc(x.barang)}${Number(x.jumlah) > 1 ? ` ×${angka(x.jumlah)}` : ''}</b>
+            <small>${esc(x.nama ? `${x.nama} (${x.kelas || '-'})` : `Milik ${istilah('kamar').toLowerCase()}`)} · ${esc(x.status === 'permanen' ? 'sita permanen' : 'disita')} ${esc(tglPendek(tglJkt(x.disita_pada)))}</small></span></li>`).join('')}</ul>`
+          : '<p class="sp-kosong">Tidak ada sitaan aktif.</p>'}` : ''}
+      <h4 class="bk-h4">Sarana</h4>
+      ${sarana.length ? `<ul class="bk-sarana">${sarana.map(m => `<li><span class="bk-sarana-ikon">${pikto(ikonBarang(m))}</span><span><b>${esc(namaBarang(m))} · ${esc(m.masalah)}</b>
+          <small>${[m.pemilik_nama ? pemilikTeks(m) : '', namaPenyebab(m.penyebab), `sejak ${tglPendek(tglJkt(m.dilaporkan_pada))}`, terbukaPada(m, P.sampai0) ? '' : 'sudah baik'].filter(Boolean).map(esc).join(' · ')}</small></span></li>`).join('')}</ul>`
+        : '<p class="sp-kosong">Tidak ada masalah sarana pada periode ini.</p>'}
+      </div>
+      <footer class="bk-nav">
+        <button type="button" class="btn btn-ghost btn-sm" data-sp="b-mundur" aria-label="${esc(istilah('kamar'))} sebelumnya"><i class="fa-solid fa-chevron-left"></i></button>
+        ${H.baris.some(x => x.dibahas) ? `<button type="button" class="btn btn-ghost btn-sm" data-sp="b-bahas"><i class="fa-solid fa-flag"></i>Berikutnya yang perlu dibahas</button>` : '<span></span>'}
+        <button type="button" class="btn ${P.ronda ? 'btn-primary' : 'btn-ghost'} btn-sm" data-sp="b-lanjut" aria-label="${esc(istilah('kamar'))} berikutnya">${P.ronda ? 'Berikutnya' : ''}<i class="fa-solid fa-chevron-right"></i></button>
+      </footer>
+    </aside>`;
+  }
+  /** Pasang panel untuk UI.peta.buka (dipanggil sesudah denah digambar ulang atau saat kamar dibuka). */
+  function pasangBerkas(fokus, arah = 0) {
+    const P = UI.peta, slot = document.querySelector('.dh-berkas-slot'), akar = document.querySelector('.sp-peta');
+    if (!slot || !akar) return;
+    const H = hitungPeta(), r = H?.baris.find(x => x.l.id === P.buka);
+    if (!r) P.buka = null;
+    akar.classList.toggle('ada-berkas', !!r);
+    document.querySelectorAll('.dh-ruang.aktif').forEach(el => el.classList.remove('aktif'));
+    slot.innerHTML = r ? gambarBerkas(r, H) : '';
+    if (!r) return;
+    const panel = slot.querySelector('.bk-panel'); if (panel) { if (arah) panel.dataset.arah = String(arah); else panel.classList.add('baru'); }
+    document.querySelector(`.dh-ruang[data-id="${CSS.escape(r.l.id)}"]`)?.classList.add('aktif');
+    if (fokus) document.getElementById('bkJudul')?.focus({ preventScroll: true });
+  }
+  function bukaBerkas(id, o = {}) {
+    const P = UI.peta, sudahBuka = !!P.buka; P.buka = id;
+    if (P.ronda && !P.ditinjau.has(id)) { P.ditinjau.add(id); simpanDitinjau(); }
+    const pasang = () => { pasangBerkas(true, sudahBuka ? (o.arah || 1) : 0); segarkanRonda(); };
+    if (o.terbang && !sudahBuka) return gerakPeta(pasang, o.terbang.querySelector('.pk-plakat'));
+    pasang();
+  }
+  /* v2.78 · GERAK — hanya bila aman (pola penempatan.js): kurangi gerak, hemat, tenang mematikannya. */
+  const gerakPetaBoleh = () => {
+    const h = document.documentElement;
+    return (typeof bolehGerak !== 'function' || bolehGerak()) && !h.classList.contains('hemat') && !h.classList.contains('tenang')
+      && !document.hidden && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  };
+  let vtPeta = null;
+  /** Plakat ruang "terbang" ke kepala panel lewat View Transition; tanpa dukungan → langsung. */
+  function gerakPeta(perbarui, plakatAsal) {
+    if (!gerakPetaBoleh() || typeof document.startViewTransition !== 'function' || vtPeta || !plakatAsal) { perbarui(); return; }
+    const lepas = () => { document.querySelectorAll('[style*="view-transition-name"]').forEach(el => { el.style.viewTransitionName = ''; }); delete document.documentElement.dataset.dhVt; vtPeta = null; };
+    try {
+      plakatAsal.style.viewTransitionName = 'dh-plakat'; document.documentElement.dataset.dhVt = '1';
+      vtPeta = document.startViewTransition(() => {
+        plakatAsal.style.viewTransitionName = '';
+        perbarui();
+        const baru = document.querySelector('.bk-kepala .pk-plakat'); if (baru) baru.style.viewTransitionName = 'dh-plakat';
+      });
+      vtPeta.finished.then(lepas, lepas);
+    } catch (e) { lepas(); perbarui(); }
+  }
+  /** Angka ruang menghitung dari nilai lama ke nilai baru (≤ 600 ms); tanpa gerak → langsung final. */
+  function hitungNaik(lama) {
+    if (!gerakPetaBoleh()) return;
+    const el = [...document.querySelectorAll('.dh-ruang .dh-total')].map(b => ({ b, dari: lama.get(b.closest('.dh-ruang').dataset.id) || 0, ke: Number(b.dataset.nilai) || 0 })).filter(x => x.dari !== x.ke);
+    if (!el.length) return;
+    const t0 = performance.now(), dur = 560;
+    el.forEach(x => { x.b.textContent = angka(x.dari); });
+    const tik = (t) => {
+      const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+      el.forEach(x => { if (x.b.isConnected) x.b.textContent = angka(Math.round(x.dari + (x.ke - x.dari) * e)); });
+      if (p < 1) requestAnimationFrame(tik);
+    };
+    requestAnimationFrame(tik);
+  }
+  /* v2.78 · MODE RONDA — penanda "ditinjau" per unit & periode, disimpan di perangkat (bukan server). */
+  const kunciDitinjau = () => { const P = UI.peta; return `rq.peta.ditinjau.${P.unit}.${P.dari0}.${P.sampai0}`; };
+  function muatDitinjau() {
+    let isi = [];
+    try { isi = JSON.parse(localStorage.getItem(kunciDitinjau()) || '[]'); } catch (e) { isi = []; }
+    UI.peta.ditinjau = new Set(Array.isArray(isi) ? isi : []);
+  }
+  function simpanDitinjau() { try { localStorage.setItem(kunciDitinjau(), JSON.stringify([...UI.peta.ditinjau])); } catch (e) { /* penyimpanan perangkat penuh/terkunci: cukup di memori */ } }
+  function segarkanRonda() {
+    const P = UI.peta, H = hitungPeta(); if (!H) return;
+    document.querySelectorAll('.dh-ruang').forEach(el => {
+      const ya = P.ditinjau.has(el.dataset.id); el.classList.toggle('ditinjau', ya);
+      const c = el.querySelector('.dh-centang');
+      if (ya && !c) el.querySelector('.dh-kepala .pk-plakat')?.insertAdjacentHTML('afterend', '<i class="fa-solid fa-check dh-centang" aria-hidden="true"></i>');
+      if (!ya && c) c.remove();
+    });
+    const t = document.querySelector('.dh-ronda-teks');
+    if (t) { t.hidden = !P.ditinjau.size; t.textContent = `${angka(P.ditinjau.size)}/${angka(H.baris.length)} ditinjau`; }
+    const b = document.querySelector('[data-sp="p-ronda"]');
+    if (b) { const ikon = b.querySelector('i')?.outerHTML || ''; b.innerHTML = `${ikon}${P.ronda || P.ditinjau.size ? 'Lanjut Ronda' : 'Mulai Ronda'}`; }
+  }
+  function mulaiRonda() {
+    const P = UI.peta, H = hitungPeta(); if (!H?.baris.length) return;
+    P.ronda = { urut: urutRonda(H.baris).map(r => r.l.id) };
+    bukaBerkas(P.ronda.urut.find(id => !P.ditinjau.has(id)) || P.ronda.urut[0]);
+  }
+  function lanjutRonda() {
+    const P = UI.peta;
+    if (!P.ronda) return geserBerkas(1);
+    const i = P.ronda.urut.indexOf(P.buka);
+    const sisa = [...P.ronda.urut.slice(i + 1), ...P.ronda.urut.slice(0, Math.max(0, i))].find(id => !P.ditinjau.has(id));
+    if (sisa) return bukaBerkas(sisa, { arah: 1 });
+    P.ronda = null; pasangBerkas(false); segarkanRonda();
+    toast('success', 'Ronda selesai', { nada: 'akui', sub: `${angka(P.ditinjau.size)} ${istilah('kamar').toLowerCase()} ditinjau` });
+  }
+  function tutupBerkas() {
+    const id = UI.peta.buka; UI.peta.buka = null; pasangBerkas(false);
+    if (id) document.querySelector(`.dh-ruang[data-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+  }
+  function geserBerkas(arah) {
+    const daftar = urutDenah(hitungPeta()); if (!daftar.length) return;
+    const i = daftar.findIndex(r => r.l.id === UI.peta.buka);
+    bukaBerkas(daftar[(i + arah + daftar.length) % daftar.length].l.id, { arah });
+  }
+  function berkasBahas() {
+    const daftar = urutDenah(hitungPeta()); const i = daftar.findIndex(r => r.l.id === UI.peta.buka);
+    const lanjut = [...daftar.slice(i + 1), ...daftar.slice(0, i + 1)].find(r => r.dibahas);
+    if (lanjut) bukaBerkas(lanjut.l.id);
+  }
+  let tombolBerkasTerpasang = false;
+  function pasangTombolBerkas() {
+    if (tombolBerkasTerpasang) return; tombolBerkasTerpasang = true;
+    document.addEventListener('keydown', (e) => {
+      if (APP.view !== 'petakamar' || !UI.peta?.buka || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.target.closest?.('input, select, textarea, [contenteditable="true"]') || document.querySelector('.swal2-container')) return;
+      if (e.key === 'ArrowRight') { e.preventDefault(); geserBerkas(1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); geserBerkas(-1); }
+      else if (e.key === 'Escape') { e.preventDefault(); tutupBerkas(); }
+    });
+  }
+  /** v2.78: baris kedua sel santri di PDF — kode×jumlah (maks 4, sisanya +n). Tanda × ditulis "x" oleh teksPdf. */
+  const butirPdf = (butir) => { const b = butir || []; if (!b.length) return ''; const t = b.slice(0, 4).map(x => `${x.kode}x${x.n}`).join(', '); return `\n${t}${b.length > 4 ? ` +${b.length - 4}` : ''}`; };
   async function pdfPeta(btn) {
     const P = UI.peta, H = hitungPeta(); if (!H) return;
     btn.disabled = true;
@@ -1670,7 +1902,7 @@
           const atas = r.inti.filter(s => Object.values(s.kel || {}).some(Boolean))
             .sort((a, b) => Object.values(b.kel).reduce((x, y) => x + y, 0) - Object.values(a.kel).reduce((x, y) => x + y, 0)).slice(0, 6);
           M.tabel([{ judul: `${r.l.nama}${r.dibahas ? '  (perlu dibahas)' : ''}`, bobot: 2.4, tebal: true }, ...H.kel.map(k => ({ judul: k.nama, bobot: 1, rata: 'center' }))],
-            [...atas.map(s => ({ sel: [`${s.nama} (${s.kelas || '-'})`, ...H.kel.map(k => s.kel?.[k.kode] ? String(s.kel[k.kode]) : '')] })),
+            [...atas.map(s => ({ sel: [`${s.nama} (${s.kelas || '-'})${butirPdf(s.butir)}`, ...H.kel.map(k => s.kel?.[k.kode] ? String(s.kel[k.kode]) : '')] })),
              ...(r.buka.length || r.sebabWaspada.length ? [{ sel: [`Sarana: ${[...new Map([...r.buka, ...r.sebabWaspada].map(m => [m.id, m])).values()].map(m => `${namaBarang(m)} ${m.masalah.toLowerCase()}${m.penyebab ? ' (' + namaPenyebab(m.penyebab).toLowerCase() + ')' : ''}`).join('; ')}`, ...H.kel.map(() => '')], isi: [248, 244, 230] }] : [])], { fs: 7.3 });
         });
       }
@@ -1696,8 +1928,16 @@
         case 'p-unit': P.unit = d.id; return ulang();
         case 'p-periode': P.periode = d.v; if (d.v === 'bebas') return gambarPeta(akar); return ulang();
         case 'p-terap': P.dari = $('spPetaDari').value || P.dari; P.sampai = $('spPetaSampai').value || P.sampai; return ulang();
-        case 'p-sorot': P.sorot = d.v; return gambarPeta(akar);
-        case 'p-kamar': return detailKamar(d.id);
+        case 'p-sorot': P.sorot = d.v; return gambarPeta(akar, 'sorot');
+        case 'p-lapis': P.lapis = d.v; return gambarPeta(akar, 'sorot');
+        case 'p-kamar': return bukaBerkas(d.id, { terbang: b });
+        case 'b-tutup': return tutupBerkas();
+        case 'b-mundur': return geserBerkas(-1);
+        case 'b-lanjut': return lanjutRonda();
+        case 'p-ronda': return mulaiRonda();
+        case 'b-akhiri': P.ronda = null; pasangBerkas(false); return segarkanRonda();
+        case 'b-bahas': return berkasBahas();
+        case 'b-lain': (P.butirTerbuka || (P.butirTerbuka = new Set())).add(d.nisn); return pasangBerkas(false);
         case 'p-pdf': return pdfPeta(b);
         case 'p-ambang': {
           const lama = setelan('peta', {}) || {};
@@ -1720,5 +1960,6 @@
     SP.penem = null;
     db.rpc('sarpras_lokasi_saya').then(({ data, error }) => { if (!error) SP.milik = new Set(data || []); }).catch(() => {});
   }
-  window.RQSarpras = { lapor, atur, laporan, peta, pikto, istilah, galatTeks, rpc, sesudahPenempatan, _uji: { teksPdf, terbukaPada, jumlahStandar, tglJkt, selisih, isiLaporan: () => isiLaporan(), SP, UI } };
+  window.RQSarpras = { lapor, atur, laporan, peta, pikto, istilah, galatTeks, rpc, sesudahPenempatan, pdf: { baru: pdfBaru, mesin: mesinPdf, jamCetak }, _uji: { teksPdf, terbukaPada, jumlahStandar, tglJkt, selisih, isiLaporan: () => isiLaporan(), SP, UI,
+    sisiLorong, tangga, urutRonda, ringkasButir, hitungPeta } };
 })();

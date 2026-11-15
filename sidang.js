@@ -405,6 +405,8 @@
       if (Number(data.versi) < 268 && data.butir.length) throw new Error('Ruang Sidang v2.68 belum aktif di server. Admin perlu menerapkan migrasi v2.68 (antrean & banding).');
       S.data = data; S.galat = '';
       if (data.unit_terkunci) S.unit = data.unit;
+      await muatSitaan(data, t);   // v2.80: barang sitaan yang tertaut ke perkara (galat diabaikan)
+      if (t !== S.token) return;
       susun();
     } catch (e) {
       if (t !== S.token) return;
@@ -440,6 +442,25 @@
     }
   }
 
+  /* v2.80 · barang sitaan (mentor Kebersihan) yang tertaut ke perkara lewat pelanggaran sitaan. */
+  function tempelSitaan(butir, daftar) {
+    const peta = new Map();
+    (daftar || []).forEach(x => { if (!x || !x.id_pembinaan) return; if (!peta.has(x.id_pembinaan)) peta.set(x.id_pembinaan, []); peta.get(x.id_pembinaan).push(x); });
+    (butir || []).forEach(b => { const x = peta.get(b.id); if (x) b.sitaan = x; else delete b.sitaan; });
+    return butir;
+  }
+  async function muatSitaan(data, t) {
+    try {
+      const { data: d, error } = await A.db.rpc('sitaan_sidang', { p_unit: data.unit || S.unit || null });
+      if (error || t !== S.token) return;
+      tempelSitaan(data.butir, d);
+    } catch (e) { /* modul sitaan belum terpasang: berkas tetap jalan */ }
+  }
+  /** Sesudah putusan tersimpan: sitaan bertaut ikut tercatat diserahkan lewat sidang. Diam bila gagal. */
+  async function serahkanSitaan(ids) {
+    try { await A.db.rpc('sitaan_serahkan_sidang', { p_ids: ids }); } catch (e) { /* diam */ }
+  }
+
   /** Satu ketukan (putus | banding | lewati) untuk satu santri. */
   function rekam(s, aksi) {
     const ids = s.sesi.filter(b => !selesaiSesi(b)).map(b => b.id);
@@ -465,6 +486,7 @@
       langkah.panggilan = data?.panggilan || null;
       for (const b of s.semua) if (ids.includes(b.id)) { b.panggilan = langkah.panggilan; delete b._tunda; }
       if (aksi === 'putus') {
+        serahkanSitaan(ids);   // v2.80: tidak ditunggu
         // v2.69: ketukan pertama yang tersimpan → server mencatat apresiasi majelis
         if (S.data?.panitia?.lengkap && !S.data.panitia.kredit) { S.data.panitia.kredit = true; if (!S.antre) gambarIsi(); else capApresiasi(); }
         const pen = Array.isArray(data?.penerima) ? data.penerima : [];
@@ -991,6 +1013,7 @@
       <div class="sd-pk-atas"><b>${esc(b.pelanggaran)}</b><time>${esc(labelTgl(b.tanggal))}</time></div>
       <div class="sd-pk-bawah"><span class="sd-pk-kat">${esc(b.kategori)} · ke-${esc(b.tahap || '?')}</span><span class="sd-pk-bentuk">${esc(b.bentuk || '-')}</span></div>
       ${b.ket ? `<p class="sd-pk-ket">${esc(b.ket)}</p>` : ''}
+      ${b.sitaan?.length ? `<p class="sd-sitaan"><i class="fa-solid fa-box-archive"></i><span>Barang sitaan: ${b.sitaan.map(x => `${esc(x.barang)}${Number(x.jumlah) > 1 ? ` ×${esc(x.jumlah)}` : ''}`).join(', ')}${b.sitaan.some(x => x.status === 'disita') ? ' · diserahkan saat putusan' : ''}</span></p>` : ''}
       ${b.ucapan ? `<blockquote class="sd-ucapan"><span><i class="fa-solid fa-quote-left"></i>Alat bukti · ucapan tercatat</span>“${esc(b.ucapan)}”</blockquote>` : ''}
       <div class="sd-pk-tanda">${tandaPerkara(b)}</div>
       ${b.banding_alasan && !TAHAN.has(b.banding) ? `<p class="sd-pk-ket"><i class="fa-solid fa-quote-left"></i> ${esc(b.banding_alasan)}</p>` : ''}
@@ -1820,6 +1843,7 @@
       perkara: s.sesi.filter(b => !selesaiSesi(b)).map(b => ({
         pelanggaran: b.pelanggaran, tanggal: b.tanggal, kategori: b.kategori, tahap: b.tahap, bentuk: b.bentuk,
         ucapan: b.ucapan || null, kelompok: b.kelompok || [], diberikan: b.status === 'diberikan',
+        sitaan: (b.sitaan || []).map(x => `${x.barang}${Number(x.jumlah) > 1 ? ' x' + x.jumlah : ''}`),
         label: [b.baru ? 'baru' : '', b.status === 'diberikan' ? `baca ulang (pertama ${labelTgl(b.sesi)})` : '', b.status === 'dibacakan' ? 'belum diserahkan' : '',
           b.banding === 'ditolak' ? 'banding ditolak' : '', b.banding === 'dikembalikan' ? 'banding dikembalikan' : ''].filter(Boolean).join(', ')
       }))
@@ -1972,7 +1996,7 @@
           warna: WARNA_PDF[g.P],
           sel: ['#',
             [`${s.nama} [${KODE[s.P].k}]`, `${s.kelas}${s.kamar ? ` · Kamar ${s.kamar}` : ''}`, iz, s.tertahan ? `${s.tertahan} perkara lain dalam banding` : ''],
-            s.perkara.map(p => `${p.kategori} ke-${p.tahap || '?'}: ${p.pelanggaran} (${labelTgl(p.tanggal)}) -> ${p.bentuk}${p.label ? ` [${p.label}]` : ''}${p.ucapan ? ` · Ucapan tercatat: "${p.ucapan}"` : ''}`),
+            s.perkara.map(p => `${p.kategori} ke-${p.tahap || '?'}: ${p.pelanggaran} (${labelTgl(p.tanggal)}) -> ${p.bentuk}${p.label ? ` [${p.label}]` : ''}${p.ucapan ? ` · Ucapan tercatat: "${p.ucapan}"` : ''}${p.sitaan?.length ? ` · Barang sitaan: ${p.sitaan.join(', ')}` : ''}`),
             '', '', '']
         });
       });
@@ -2351,7 +2375,7 @@
   window.addEventListener('beforeunload', (e) => { if (S.tunda) { e.preventDefault(); e.returnValue = ''; } });
 
   window.RQSidang = { buka, tutup, terbuka: () => !!S.akar,
-    _uji: { S, susun, daftarAntre, urutSantri, hitungSesi, isiBerkas, gambarBerkasPdf, teksPdf, bukaAntre, pilihanCakupan, kini,
+    _uji: { S, susun, tempelSitaan, serahkanSitaan, htmlPerkara, daftarAntre, urutSantri, hitungSesi, isiBerkas, gambarBerkasPdf, teksPdf, bukaAntre, pilihanCakupan, kini,
             bukaMajelis, sahkan, siapSah, perluMajelis, namaMajelis,
             kursiMajelis, pelantikan, cariPendidik, muatPendidik, gambarBilah, aturBilah, lompatKe } };
 })();

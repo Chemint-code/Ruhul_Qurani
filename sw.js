@@ -49,7 +49,7 @@
    hapus singgahan versi lama, lalu beri tahu halaman yang terbuka.
    ===================================================================== */
 
-const VERSI = 'rq-v2.77';   // v2.77: Kop baku semua laporan (Administrasi Musyrif Pengasuhan, alamat dayah, Chemint App) + TTD penanggung jawab ber-QR keabsahan di laporan sarpras; v2.76: Penempatan kamar oleh musyrif (rekomendasi se-angkatan, denah, kamar baru) + Sarpras bergaya Denah; v2.75: Sarpras — barang milik santri (NISN), sarana umum Admin, lembar laporan; v2.74: Sarpras ramping — lapor masalah, Laporan Sarpras PDF/Excel, Peta Kamar; v2.73: Pengaturan Sarpras (sarpras.js); v2.71.1: laporan individu — tahap pembinaan per bulan, Penilaian Musyrif tulis tangan, tanpa teks penjelasan; v2.71: laporan ramping, motor izin, Catat lengkap, OSIM tanpa Para Pendidik; v2.70: Alur Mahkamah — Meja Majelis, bilah lengket, Pelantikan, gerak sidang; v2.69: majelis bernama, apresiasi keadilan, Disahkan OSDA (v2.68: antrean dan banding; v2.67: Peta Amanah)
+const VERSI = 'rq-v2.80';   // v2.80: Inspeksi kebersihan per kamar & koridor, sitaan barang (penyerahan di Sidang Ta'dib, hitungan berulang), lapisan Kebersihan di Peta Kamar; v2.79: Mode Mentor — sakelar Musyrif/Mentor, Meja Mentor (pelanggaran seluruh santri, agenda, standar), Pengaturan Mentor; v2.78: Peta Kamar "Denah Hidup" — lorong per lantai, panel Berkas Kamar dengan butir pelanggaran per santri, Mode Ronda, gerak denah; v2.77: Kop baku semua laporan (Administrasi Musyrif Pengasuhan, alamat dayah, Chemint App) + TTD penanggung jawab ber-QR keabsahan di laporan sarpras; v2.76: Penempatan kamar oleh musyrif (rekomendasi se-angkatan, denah, kamar baru) + Sarpras bergaya Denah; v2.75: Sarpras — barang milik santri (NISN), sarana umum Admin, lembar laporan; v2.74: Sarpras ramping — lapor masalah, Laporan Sarpras PDF/Excel, Peta Kamar; v2.73: Pengaturan Sarpras (sarpras.js); v2.71.1: laporan individu — tahap pembinaan per bulan, Penilaian Musyrif tulis tangan, tanpa teks penjelasan; v2.71: laporan ramping, motor izin, Catat lengkap, OSIM tanpa Para Pendidik; v2.70: Alur Mahkamah — Meja Majelis, bilah lengket, Pelantikan, gerak sidang; v2.69: majelis bernama, apresiasi keadilan, Disahkan OSDA (v2.68: antrean dan banding; v2.67: Peta Amanah)
 const CACHE_INTI  = `${VERSI}-inti`;
 const CACHE_ASET  = 'rq-aset-v1';   // nama tetap: bertahan melewati kenaikan VERSI
 
@@ -63,6 +63,7 @@ const INTI = [
   './sidang.js',        // v2.64: Ruang Sidang Ta'dib OSDA (dimuat lambat oleh app.js)
   './sarpras.js',       // v2.73: modul Sarpras Asrama (dimuat lambat oleh app.js)
   './penempatan.js',    // v2.76: penempatan kamar oleh musyrif (dimuat lambat oleh app.js)
+  './mentor.js',        // v2.79: Meja Mentor (dimuat lambat oleh app.js)
   './gaya.css',         // v2.62: seluruh gaya (dulu blok <style> di index.html)
   './ikon/fa-subset.css',            // v2.62: ikon swa-saji (pengganti cdnjs font-awesome)
   './ikon/fa-solid-subset.woff2',
@@ -78,7 +79,7 @@ const INTI = [
    isinya tidak pernah berubah) ikut cache-first. Pada berkas sumber apa adanya
    keduanya tidak ada, jadi pola ini tidak berpengaruh. Hasil build menambahkan
    './vendor.js' ke INTI secara otomatis (vite.config.mjs). */
-const POLA_INTI = /(?:^\/?$|\/$|index\.html$|app\.js$|showreel\.js$|panggung\.js$|sidang\.js$|sarpras\.js$|penempatan\.js$|vendor\.js$|gaya\.css$|\/ikon\/[^/]+$|\/pustaka\/[^/]+\.js$|manifest\.webmanifest$)/i;
+const POLA_INTI = /(?:^\/?$|\/$|index\.html$|app\.js$|showreel\.js$|panggung\.js$|sidang\.js$|sarpras\.js$|penempatan\.js$|mentor\.js$|vendor\.js$|gaya\.css$|\/ikon\/[^/]+$|\/pustaka\/[^/]+\.js$|manifest\.webmanifest$)/i;
 
 const CDN_DIIZINKAN = [
   'https://fonts.googleapis.com',

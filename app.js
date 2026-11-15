@@ -2741,6 +2741,8 @@ async function navigateTo(view) {
     else if (view === 'sarpras')     await viewSarpras('lapor');     // v2.74
     else if (view === 'sarpraslaporan') await viewSarpras('laporan'); // v2.74
     else if (view === 'petakamar')   await viewSarpras('peta');      // v2.74
+    else if (view === 'mentor')      await viewMentor('meja');       // v2.79
+    else if (view === 'mentoratur')  await viewMentor('atur');       // v2.79
     tandaiTabelBisaGeser();
   } catch (err) { fireError(err); }
   finally { loading(false); APP.navSibuk--; tutupTirai(); LayarMuat.tutupAwal(); }
@@ -35683,3 +35685,142 @@ function muatPenempatanJs() {
   return PENEMPATAN_JS.muat;
 }
 APP.versi = 'rq-v2.77';   // v2.77: Kop baku laporan + TTD ber-QR sarpras; v2.76: Penempatan kamar oleh musyrif, Sarpras bergaya Denah
+APP.versi = 'rq-v2.78';   // v2.78: Peta Kamar "Denah Hidup" — lorong per lantai, panel Berkas Kamar (butir per santri), Mode Ronda, gerak denah
+
+/* =====================================================================
+ * v2.79 · MODE MENTOR
+ * ---------------------------------------------------------------------
+ *  Rancangan: claude/rancangan-v2.79-v2.80-mentor-inspeksi-sitaan.md.
+ *  Musyrif yang ditetapkan super admin sebagai mentor bidang mendapat sakelar
+ *  mode Musyrif ⇄ Mentor. Mode Musyrif = keadaan semula (santri binaan).
+ *  Mode Mentor membuka Meja Mentor (mentor.js, dimuat lambat) dan merampingkan
+ *  menu. Hak data ada di RPC mentor_* (migrasi v2.79), bukan di klien.
+ * ===================================================================== */
+APP.versi = 'rq-v2.79';   // v2.79: Mode Mentor — penetapan mentor bidang, sakelar mode, Meja Mentor (pelanggaran seluruh santri, agenda, standar)
+
+MENU_ROLE.mentor = [];         // diisi aturMenuMentor() bila akun ini mentor
+MENU_ROLE.mentoratur = [];     // diisi bila super admin
+PA.NAMA.mentor = { nama: 'Meja Mentor', tab: 'Mentor', ket: 'Pelanggaran seluruh santri, agenda, dan standar bidang',
+  kata: 'mentor osda divisi bidang inspeksi agenda standar kebersihan sitaan' };
+PA.NAMA.mentoratur = { nama: 'Pengaturan Mentor', tab: 'Mentor', ket: 'Tetapkan musyrif sebagai mentor bidang',
+  kata: 'mentor musyrif bidang penetapan osda divisi pengaturan' };
+TAB_IKON.mentor = 'fa-compass';
+(function daftarkanMentor() {
+  if (!PA.GRUP.some(g => g.id === 'mentor')) PA.GRUP.splice(1, 0, { id: 'mentor', label: 'Mentor', ar: 'الإرشاد', views: ['mentor'] });
+  const k = PA.GRUP.find(g => g.id === 'kelola'); if (k && !k.views.includes('mentoratur')) k.views.push('mentoratur');
+  ['mentor', 'mentoratur'].forEach(v => { PA.TANPA_SARING.add(v); const g = grupDari(v); JUDUL[v] = { ar: v === 'mentor' ? 'مكتب المرشد' : 'إعداد المرشدين', teks: PA.NAMA[v].nama, lat: g ? g.label : '' }; });
+})();
+
+const MENTOR_JS = { muat: null };
+function muatMentorJs() {
+  if (window.RQMentor) return Promise.resolve(true);
+  if (!MENTOR_JS.muat) {
+    MENTOR_JS.muat = new Promise((ok) => {
+      const s = document.createElement('script');
+      s.src = 'mentor.js'; s.async = true;
+      s.onload = () => ok(!!window.RQMentor);
+      s.onerror = () => { MENTOR_JS.muat = null; ok(false); };   // boleh dicoba lagi
+      document.head.appendChild(s);
+    });
+  }
+  return MENTOR_JS.muat;
+}
+async function viewMentor(halaman) {
+  const v = APP.view;
+  $('viewRoot').innerHTML = `<div class="card sp-muat" style="padding:28px;text-align:center">
+    <i class="fa-solid fa-circle-notch fa-spin" style="color:var(--sea)"></i><p style="margin:10px 0 0">Membuka ${esc(PA.NAMA[v]?.nama || 'Meja Mentor')}…</p></div>`;
+  const ok = await muatMentorJs();
+  if (APP.view !== v) return;
+  if (!ok || typeof window.RQMentor?.[halaman] !== 'function') {
+    $('viewRoot').innerHTML = kartu(PA.NAMA[v]?.nama || 'Meja Mentor',
+      `<div class="card-body">${kosong('Halaman belum bisa dibuka', 'Berkas Meja Mentor gagal dimuat. Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark')}
+       <p style="text-align:center"><button class="btn btn-primary" id="mnUlang"><i class="fa-solid fa-rotate"></i>Coba lagi</button></p></div>`);
+    $('mnUlang')?.addEventListener('click', () => navigateTo(v));
+    return;
+  }
+  await window.RQMentor[halaman]($('viewRoot'));
+}
+
+/* ---- mode ---- */
+APP.mode = 'musyrif';
+const MODE_MENTOR_VIEW = new Set(['mentor', 'siswa', 'master']);   // menu yang tetap tampil di mode Mentor
+const kunciMode = () => `rq.mode.v1.${idSaya()}`;
+function bacaMode() { try { return localStorage.getItem(kunciMode()) === 'mentor' ? 'mentor' : 'musyrif'; } catch (e) { return 'musyrif'; } }
+function simpanMode(m) { try { localStorage.setItem(kunciMode(), m); } catch (e) {} }
+function terapkanMenuMode() {
+  const mentor = APP.mode === 'mentor';
+  document.documentElement.classList.toggle('mode-mentor', mentor);
+  document.querySelectorAll('#navMenu .nav-item[data-view]').forEach(b => b.classList.toggle('mode-sembunyi', mentor && !MODE_MENTOR_VIEW.has(b.dataset.view)));
+  document.querySelectorAll('#navMenu .nav-grup').forEach(g => {
+    const ada = [...g.querySelectorAll('.nav-item[data-view]')].some(b => !b.classList.contains('hidden') && !b.classList.contains('mode-sembunyi'));
+    g.classList.toggle('mode-sembunyi', mentor && !ada);
+  });
+  const c = $('chipMode');
+  if (c) {
+    const bid = (APP.mentor?.bidang || []).map(b => b.nama);
+    const nama = bid.length ? [...new Set(bid)].join(', ') : 'Semua bidang';
+    c.innerHTML = `<span class="cm-kartu" aria-hidden="true"><i class="fa-solid ${mentor ? 'fa-compass' : 'fa-user-tie'}"></i></span>
+      <span class="cm-teks"><b>${mentor ? 'Mentor' : 'Musyrif'}</b><small>${esc(mentor ? nama : 'Santri binaan')}</small></span>`;
+    c.setAttribute('aria-pressed', String(mentor));
+    c.title = mentor ? 'Kembali ke mode Musyrif' : 'Ganti ke mode Mentor';
+  }
+  try { aturTabPeran(); } catch (e) {}
+}
+function gantiMode(m, opsi = {}) {
+  if (m === 'mentor' && !APP.mentor?.mentor) m = 'musyrif';
+  APP.mode = m; simpanMode(m);
+  const c = $('chipMode');
+  if (c && opsi.gerak !== false && !modeHemat() && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    c.classList.remove('balik'); void c.offsetWidth; c.classList.add('balik');
+  }
+  terapkanMenuMode();
+  if (opsi.pindah !== false) navigateTo(m === 'mentor' ? 'mentor' : rumah());
+}
+(function bungkusTabMode() {
+  const asli = susunanTab;
+  susunanTab = function () { return APP.mode === 'mentor' ? ['mentor', 'siswa', 'MENU'] : asli.apply(this, arguments); };
+})();
+
+/** Sekali per akun saat masuk: siapa mentor, siapa super admin; pasang sakelar & menu. */
+async function aturMenuMentor() {
+  let m = null;
+  try { const { data, error } = await db.rpc('mentor_saya'); if (!error) m = data; } catch (e) {}
+  APP.mentor = m || { mentor: false, super: false, bidang: [] };
+  MENU_ROLE.mentor = APP.mentor.mentor ? [role()] : [];
+  MENU_ROLE.mentoratur = APP.mentor.super ? [role()] : [];
+  document.querySelectorAll('#navMenu [data-view="mentor"]').forEach(b => b.classList.toggle('hidden', !APP.mentor.mentor));
+  document.querySelectorAll('#navMenu [data-view="mentoratur"]').forEach(b => b.classList.toggle('hidden', !APP.mentor.super));
+  let c = $('chipMode');
+  if (APP.mentor.mentor && !c) {
+    const tempat = document.querySelector('#profileBar .pbar-acts');
+    if (tempat) {
+      c = document.createElement('button');
+      c.type = 'button'; c.id = 'chipMode'; c.className = 'pbar-btn chip-mode';
+      c.addEventListener('click', () => gantiMode(APP.mode === 'mentor' ? 'musyrif' : 'mentor'));
+      tempat.insertBefore(c, tempat.firstChild);
+    }
+  }
+  c?.classList.toggle('hidden', !APP.mentor.mentor);
+  const simpan = bacaMode();
+  APP.mode = APP.mentor.mentor ? simpan : 'musyrif';
+  terapkanMenuMode();
+  rapikanGrupNav(APP.view);
+  if (APP.mode === 'mentor' && APP.view === rumah()) navigateTo('mentor');
+}
+(function bungkusBadgePesanMentor() {
+  const asli = refreshBadgePesan;
+  let sudah = null;
+  refreshBadgePesan = function () {
+    const h = asli.apply(this, arguments);
+    try { const id = APP.profil?.id || null; if (id && sudah !== id) { sudah = id; aturMenuMentor(); } } catch (e) {}
+    return h;
+  };
+})();
+
+/* =====================================================================
+ *  v2.80 — Inspeksi kebersihan & sitaan
+ *  Tab Inspeksi/Sitaan di Meja Mentor (bidang Kebersihan), lapisan
+ *  Kebersihan di Peta Kamar, barang sitaan diserahkan saat putusan sidang.
+ *  Data & hak lewat RPC inspeksi_* / sitaan_* / peta_kebersihan (migrasi v2.80).
+ * ===================================================================== */
+APP.versi = 'rq-v2.80';   // v2.80: inspeksi kebersihan, sitaan barang, lapisan Kebersihan Peta Kamar
