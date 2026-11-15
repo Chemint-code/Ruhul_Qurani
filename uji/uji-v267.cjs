@@ -30,10 +30,10 @@ const tabBawah = (p) => p.evaluate(() => [...document.querySelectorAll('#tabBar 
   cek('A1 sw.js: VERSI rq-v2.67', /VERSI\s+=\s+'rq-v2\.(6[7-9]|[7-9]\d)(\.\d+)?'/.test(baca('sw.js')));
   const ih = baca('index.html');
   const grup = [...ih.matchAll(/data-grup="([a-z]+)"/g)].map(m => m[1]);
-  cek('A2 index.html: kelompok berbasis tugas, berurutan', JSON.stringify(grup) === JSON.stringify(['beranda', 'catat', 'tindak', 'santri', 'laporan', 'pedoman', 'kelola']), grup);
+  cek('A2 index.html: kelompok berbasis tugas, berurutan', JSON.stringify(grup.filter(g => g !== 'mentor')) === JSON.stringify(['beranda', 'catat', 'tindak', 'santri', 'laporan', 'pedoman', 'kelola']) && (!grup.includes('mentor') || grup.indexOf('mentor') === 1), grup);   // v2.79: + grup Mentor sesudah Beranda
   const nav = ih.slice(ih.indexOf('id="navMenu"'), ih.indexOf('</nav>', ih.indexOf('id="navMenu"')));
   const views = [...nav.matchAll(/data-view="([a-z]+)"/g)].map(m => m[1]);
-  cek('A3 setiap halaman tepat satu kali di menu (tanpa "Unit Operasional"/"Sistem")', new Set(views).size === views.length && views.length === 27 + (views.includes('banding') ? 1 : 0) + (views.includes('kelalaian') ? 1 : 0) + (views.includes('sarprasatur') ? 1 : 0) + ['sarpras', 'sarpraslaporan', 'petakamar'].filter(v => views.includes(v)).length && !/Unit Operasional|>Sistem</.test(nav), views.length);   // v2.68: + Eksekusi Banding · v2.69: + Kelalaian Pengesahan · v2.73: + Pengaturan Sarpras · v2.74: + Sarpras Asrama, Laporan Sarpras, Peta Kamar
+  cek('A3 setiap halaman tepat satu kali di menu (tanpa "Unit Operasional"/"Sistem")', new Set(views).size === views.length && views.length === 27 + (views.includes('banding') ? 1 : 0) + (views.includes('kelalaian') ? 1 : 0) + (views.includes('sarprasatur') ? 1 : 0) + ['sarpras', 'sarpraslaporan', 'petakamar', 'mentor', 'mentoratur'].filter(v => views.includes(v)).length && !/Unit Operasional|>Sistem</.test(nav), views.length);   // v2.68: + Eksekusi Banding · v2.69: + Kelalaian Pengesahan · v2.73: + Pengaturan Sarpras · v2.74: + Sarpras Asrama, Laporan Sarpras, Peta Kamar · v2.79: + Meja Mentor, Pengaturan Mentor
   const ikon = JSON.parse(baca('ikon', 'daftar.json'));
   cek('A4 ikon baru masuk subset (fa-house, fa-thumbtack)', ikon.ikon.includes('fa-house') && ikon.ikon.includes('fa-thumbtack') && !ikon.tak_dikenal.length);
   const app = baca('app.js');
