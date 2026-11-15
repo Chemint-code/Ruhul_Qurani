@@ -35759,8 +35759,15 @@ function terapkanMenuMode() {
   if (c) {
     const bid = (APP.mentor?.bidang || []).map(b => b.nama);
     const nama = bid.length ? [...new Set(bid)].join(', ') : 'Semua bidang';
-    c.innerHTML = `<span class="cm-kartu" aria-hidden="true"><i class="fa-solid ${mentor ? 'fa-compass' : 'fa-user-tie'}"></i></span>
-      <span class="cm-teks"><b>${mentor ? 'Mentor' : 'Musyrif'}</b><small>${esc(mentor ? nama : 'Santri binaan')}</small></span>`;
+    // v2.80.2: sakelar geser — kerangka dibuat sekali supaya kenop meluncur (bukan digambar ulang)
+    if (!c.querySelector('.cm-rel')) {
+      c.innerHTML = `<span class="cm-rel" aria-hidden="true"><i class="fa-solid fa-user-tie cm-a"></i><i class="fa-solid fa-compass cm-b"></i>
+        <span class="cm-kenop"><i class="fa-solid"></i></span></span><span class="cm-teks"><b></b><small></small></span>`;
+    }
+    c.querySelector('.cm-kenop i').className = `fa-solid ${mentor ? 'fa-compass' : 'fa-user-tie'}`;
+    c.querySelector('.cm-teks b').textContent = mentor ? 'Mentor' : 'Musyrif';
+    c.querySelector('.cm-teks small').textContent = mentor ? nama : 'Santri binaan';
+    c.dataset.mode = mentor ? 'mentor' : 'musyrif';
     c.setAttribute('aria-pressed', String(mentor));
     c.title = mentor ? 'Kembali ke mode Musyrif' : 'Ganti ke mode Mentor';
   }
@@ -35768,13 +35775,42 @@ function terapkanMenuMode() {
 }
 function gantiMode(m, opsi = {}) {
   if (m === 'mentor' && !APP.mentor?.mentor) m = 'musyrif';
-  APP.mode = m; simpanMode(m);
-  const c = $('chipMode');
-  if (c && opsi.gerak !== false && !modeHemat() && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    c.classList.remove('balik'); void c.offsetWidth; c.classList.add('balik');
-  }
-  terapkanMenuMode();
-  if (opsi.pindah !== false) navigateTo(m === 'mentor' ? 'mentor' : rumah());
+  const gerak = opsi.gerak !== false && opsi.pindah !== false && !modeHemat() && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const jalan = () => {
+    APP.mode = m; simpanMode(m);
+    terapkanMenuMode();
+    if (opsi.pindah !== false) return navigateTo(m === 'mentor' ? 'mentor' : rumah());
+  };
+  if (gerak) return tiraiMode(m, jalan);
+  return jalan();
+}
+/** v2.80.2 — pergantian mode: lingkaran tumbuh dari sakelar menutup layar, lambang mode tampil,
+ *  halaman berganti di baliknya, lalu tirai memudar. Hanya transform/opacity; tanpa gerak saat hemat. */
+let tiraiJalan = false;
+function tiraiMode(m, jalan) {
+  if (tiraiJalan) return;
+  tiraiJalan = true;
+  const c = $('chipMode'), r = c?.getBoundingClientRect();
+  const x = r ? r.left + r.width / 2 : innerWidth - 48, y = r ? r.top + r.height / 2 : 40;
+  const R = Math.ceil(Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y))) + 8;
+  const ke = m === 'mentor';
+  const bid = [...new Set((APP.mentor?.bidang || []).map(b => b.nama))].join(' · ');
+  const el = document.createElement('div');
+  el.className = `mode-iris ${ke ? 'ke-mentor' : 'ke-musyrif'}`;
+  el.setAttribute('aria-hidden', 'true');
+  el.innerHTML = `<span class="mi-lingkar" style="left:${x}px;top:${y}px;width:${2 * R}px;height:${2 * R}px"></span>
+    <span class="mi-lambang"><span class="mi-cincin"><i class="fa-solid ${ke ? 'fa-compass' : 'fa-user-tie'}"></i></span>
+      <small>${ke ? 'Mode' : 'Kembali ke mode'}</small><b>${ke ? 'Mentor' : 'Musyrif'}</b><em>${esc(ke ? (bid || 'Semua bidang') : 'Santri binaan')}</em></span>`;
+  document.body.appendChild(el);
+  c?.classList.add('berganti');
+  APP.mode = m; terapkanMenuMode();                       // kenop meluncur bersamaan dengan lingkaran
+  void el.offsetWidth; el.classList.add('tutup');
+  const tunggu = (ms) => new Promise(ok => setTimeout(ok, ms));
+  setTimeout(async () => {
+    try { await Promise.race([Promise.resolve(jalan()), tunggu(1200)]); } catch (e) {}
+    el.classList.add('buka');
+    setTimeout(() => { el.remove(); c?.classList.remove('berganti'); tiraiJalan = false; }, 620);
+  }, 520);
 }
 (function bungkusTabMode() {
   const asli = susunanTab;
@@ -35839,3 +35875,4 @@ async function aturMenuMentorInti() {
  * ===================================================================== */
 APP.versi = 'rq-v2.80';   // v2.80: inspeksi kebersihan, sitaan barang, lapisan Kebersihan Peta Kamar
 APP.versi = 'rq-v2.80.1';   // v2.80.1: alamat #mentor/#mentoratur menunggu status mentor sebelum memeriksa hak (tanpa notif palsu)
+APP.versi = 'rq-v2.80.2';   // v2.80.2: tampilan Mode Mentor, tirai antarmode, Berita Acara Sitaan, aksi tanpa penyegaran berulang

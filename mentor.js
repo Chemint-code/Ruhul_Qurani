@@ -90,6 +90,7 @@
       akar.innerHTML = kartu('Meja Mentor', `<div class="card-body">${kosong('Belum ada bidang', 'Super admin belum menetapkan Anda sebagai mentor bidang.', 'fa-compass')}</div>`);
       return;
     }
+    try { document.documentElement.style.setProperty('--mn-atas', (document.querySelector('.topbar')?.offsetHeight || 0) + 'px'); } catch (e) {}
     akar.innerHTML = `<div class="mn-akar">${kepalaHtml()}<nav class="mn-tab" role="tablist">${tabHtml()}</nav><section class="mn-isi" id="mnIsi" aria-live="polite"></section></div>`;
     onKlik(klikMeja);
     await gambarTab();
@@ -97,6 +98,7 @@
   function kepalaHtml() {
     const p = S.pilih, banyak = S.pilihan.length > 1;
     return `<header class="mn-kepala">
+      <span class="mn-lambang" aria-hidden="true"><i class="fa-solid fa-compass"></i></span>
       <div class="mn-identitas">
         <span class="mn-alis"><i class="fa-solid fa-compass"></i>Mentor · Unit ${esc(unitLabel(p.unit))}</span>
         <h2>${esc(p.nama)}</h2>
@@ -112,10 +114,15 @@
   }
   const tabHtml = () => tabDaftar().map(([v, l, i]) => `<button type="button" role="tab" aria-selected="${S.tab === v}" class="mn-tab-b${S.tab === v ? ' on' : ''}" data-mn="tab" data-v="${v}"><i class="fa-solid ${i}"></i>${esc(l)}</button>`).join('');
 
+  /** Tab baru → pemintal + animasi masuk. Tab yang sama (sesudah aksi, saring, pekan) → isi lama tetap
+   *  di tempat (redup sebentar), lalu diganti tanpa memutar ulang animasi masuk. */
   async function gambarTab() {
     const isi = $('mnIsi'); if (!isi) return;
-    isi.dataset.tab = S.tab;
-    isi.innerHTML = '<p class="mn-muat"><i class="fa-solid fa-circle-notch fa-spin"></i></p>';
+    const ulang = isi.dataset.tab === S.tab && isi.dataset.siap === '1';
+    isi.dataset.tab = S.tab; isi.dataset.siap = '';
+    isi.classList.toggle('ulang', ulang);
+    if (ulang) isi.classList.add('segar');
+    else isi.innerHTML = '<p class="mn-muat"><i class="fa-solid fa-circle-notch fa-spin"></i></p>';
     try {
       if (S.tab === 'ringkasan') await tabRingkasan(isi);
       else if (S.tab === 'pelanggaran') await tabPelanggaran(isi);
@@ -124,8 +131,12 @@
       else if (window.RQMentor?._gambarTambahan) await window.RQMentor._gambarTambahan(S, isi);
     } catch (e) {
       isi.innerHTML = `<div class="card"><div class="card-body">${kosong('Data belum bisa dimuat', galatTeks(e), 'fa-plug-circle-xmark')}</div></div>`;
+    } finally {
+      if (isi.dataset.tab === S.tab) { isi.dataset.siap = '1'; isi.classList.remove('segar'); }
     }
   }
+  /** Paksa gambar baru (pemandangan lain di tab yang sama, mis. denah ↔ lembar periksa). */
+  function gambarBaru() { const isi = $('mnIsi'); if (isi) isi.dataset.siap = ''; return gambarTab(); }
 
   /* -- Ringkasan: 7 hari terakhir -- */
   async function tabRingkasan(isi) {
@@ -344,7 +355,7 @@
     }));
   }
 
-  window.RQMentor = { meja, atur, _uji: { mingguDari, ringkas, geser, S }, _S: S, _rpc: rpc, _gambarTab: () => gambarTab(), _util: { tglPendek, labelPekan, galatTeks, geser, mingguDari, unitLabel } };
+  window.RQMentor = { meja, atur, _uji: { mingguDari, ringkas, geser, S }, _S: S, _rpc: rpc, _gambarTab: () => gambarTab(), _gambarBaru: () => gambarBaru(), _util: { tglPendek, labelPekan, galatTeks, geser, mingguDari, unitLabel } };
 })();
 
 /* =====================================================================
@@ -392,6 +403,27 @@
       I.master = { unit, rows: (data || []).filter(m => unit === 'putri' || String(m.unit_gender || 'putra').toLowerCase() === unit).sort((a, b) => String(a.kode_pelanggaran).localeCompare(String(b.kode_pelanggaran))) };
     }
     return I.master.rows;
+  }
+  const tglJ = (t) => { try { return new Date(t).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }); } catch (e) { return String(t || '').slice(0, 10); } };
+  /** Lembar "Berita Acara" untuk sita & tautkan: kop bercap, butir standar sebagai bukti, isian tebal. */
+  function lembarBas(o) {
+    return {
+      html: `<div class="mn-bas">
+          <header class="mn-bas-kop"><span class="mn-bas-cap" aria-hidden="true"><i class="fa-solid ${o.cap}"></i></span>
+            <span class="mn-bas-judul"><small>${esc(o.alis)}</small><b>${esc(o.judul)}</b></span><time>${esc(o.tgl || '')}</time></header>
+          ${o.std ? `<p class="mn-bas-std"><i class="fa-solid fa-triangle-exclamation"></i><span>${esc(o.std)}</span></p>` : ''}
+          <div class="mn-bas-isi">${o.isi}</div></div>`,
+      showCancelButton: true, cancelButtonText: 'Batal', confirmButtonText: `<i class="fa-solid ${o.ikonOk}"></i>${esc(o.ok)}`,
+      buttonsStyling: false, reverseButtons: true, focusConfirm: false,
+      customClass: { popup: 'mn-bas-pop', htmlContainer: 'mn-bas-html', actions: 'mn-bas-aksi', confirmButton: 'mn-bas-ok', cancelButton: 'mn-bas-batal', validationMessage: 'mn-bas-galat' },
+      didOpen: (pop) => {
+        pop.querySelectorAll('.mn-bas-stepper [data-j]').forEach(t => t.addEventListener('click', () => {
+          const i = pop.querySelector('#mnJumlah'); i.value = String(Math.min(99, Math.max(1, (Number(i.value) || 1) + Number(t.dataset.j))));
+        }));
+        pop.querySelector('.mn-bas-utama input, .mn-bas-utama select')?.focus();
+      },
+      preConfirm: o.preConfirm
+    };
   }
   const opsiPemilik = (daftar, lokasi) => `<option value="">${esc(lokasi?.zona === 'koridor' ? 'Milik koridor (tanpa pemilik)' : 'Milik kamar (tanpa pemilik)')}</option>`
     + daftar.map(s => `<option value="${esc(s.nisn)}">${esc(s.nama_siswa)} · ${esc(s.kelas || '')}</option>`).join('');
@@ -453,14 +485,17 @@
   async function sita(S, stdId) {
     const k = I.kamar.find(x => x.id === I.buka); const s = (I.std?.rows || []).find(x => x.id === stdId);
     const [daftar, master] = await Promise.all([k.zona === 'kamar' ? penghuni(k.nomor, S.pilih.unit) : [], masterKbr(S.pilih.unit)]);
-    const r = await Swal.fire({
-      title: 'Sita barang', showCancelButton: true, cancelButtonText: 'Batal', confirmButtonText: 'Sita', confirmButtonColor: '#8E1B32',
-      html: `<div class="mn-form"><p class="mn-form-std">${esc(s?.butir || '')}</p>
-        <label for="mnBarang">Barang</label><input id="mnBarang" class="swal2-input" maxlength="80" placeholder="mis. kardus air mineral">
-        <label for="mnJumlah">Jumlah</label><input id="mnJumlah" class="swal2-input" type="number" min="1" max="99" value="1">
-        <label for="mnPemilik">Pemilik</label><select id="mnPemilik" class="swal2-select">${opsiPemilik(daftar, k)}</select>
-        <label for="mnKode">Pelanggaran</label><select id="mnKode" class="swal2-select">${opsiKode(master)}</select>
-        <label for="mnKet">Keterangan</label><textarea id="mnKet" class="swal2-textarea" maxlength="300"></textarea></div>`,
+    const r = await Swal.fire(lembarBas({
+      cap: 'fa-box-archive', alis: `Berita acara sitaan · ${k.nama}`, judul: 'Sita barang', tgl: U.tglPendek(hariIni()), std: s?.butir || '', ok: 'Sita barang', ikonOk: 'fa-stamp',
+      isi: `<label class="mn-bas-f mn-bas-utama" for="mnBarang"><span>Barang</span>
+          <span class="mn-bas-in"><i class="fa-solid fa-box-archive"></i><input id="mnBarang" maxlength="80" autocomplete="off" placeholder="mis. kardus air mineral"></span></label>
+        <div class="mn-bas-dua">
+          <div class="mn-bas-f"><label for="mnJumlah">Jumlah</label>
+            <span class="mn-bas-stepper"><button type="button" data-j="-1" aria-label="Kurangi"><i class="fa-solid fa-minus"></i></button><input id="mnJumlah" type="number" min="1" max="99" value="1" inputmode="numeric"><button type="button" data-j="1" aria-label="Tambah"><i class="fa-solid fa-plus"></i></button></span></div>
+          <label class="mn-bas-f" for="mnPemilik"><span>Pemilik</span><span class="mn-bas-pilih"><i class="fa-solid fa-user"></i><select id="mnPemilik">${opsiPemilik(daftar, k)}</select></span></label>
+        </div>
+        <label class="mn-bas-f" for="mnKode"><span>Pelanggaran</span><span class="mn-bas-pilih"><i class="fa-solid fa-scale-balanced"></i><select id="mnKode">${opsiKode(master)}</select></span></label>
+        <label class="mn-bas-f" for="mnKet"><span>Keterangan</span><textarea id="mnKet" maxlength="300" rows="2" placeholder="mis. di bawah ranjang atas"></textarea></label>`,
       preConfirm: () => {
         const barang = $('mnBarang').value.trim(), jumlah = Number($('mnJumlah').value || 1), nisn = $('mnPemilik').value, kode = $('mnKode').value;
         if (!barang) { Swal.showValidationMessage('Nama barang wajib diisi.'); return false; }
@@ -468,7 +503,7 @@
         if (kode && !nisn) { Swal.showValidationMessage('Pelanggaran hanya untuk barang yang jelas pemiliknya.'); return false; }
         return { barang, jumlah, nisn: nisn || null, kode: kode || null, keterangan: $('mnKet').value.trim() || null };
       }
-    });
+    }));
     if (!r.isConfirmed) return;
     const h = await rpc('sitaan_catat', { p: { lokasi_id: k.id, standar_id: stdId, ...r.value } });
     const seg = I.segel.get(stdId) || []; seg.push({ barang: r.value.barang, jumlah: r.value.jumlah, ke: h?.ke || null }); I.segel.set(stdId, seg);
@@ -483,7 +518,7 @@
     const h = await rpc('inspeksi_simpan', { p: { lokasi_id: k.id, hasil, catatan: $('mnCatatanIns')?.value.trim() || null } });
     toast('success', `Inspeksi ${k.nama} tersimpan`, { sub: `Skor ${h?.skor ?? '-'}` });
     I.buka = null; I.hasil.clear(); I.segel.clear();
-    await RM._gambarTab();
+    await RM._gambarBaru();
   }
 
   /* ---------- tab sitaan ---------- */
@@ -514,13 +549,12 @@
   async function tautkan(S, id) {
     const b = (I.sita?.baris || []).find(x => String(x.id) === String(id)); if (!b) return;
     const [daftar, master] = await Promise.all([penghuni(b.nomor, S.pilih.unit), masterKbr(S.pilih.unit)]);
-    const r = await Swal.fire({
-      title: 'Tautkan ke santri', showCancelButton: true, cancelButtonText: 'Batal', confirmButtonText: 'Tautkan',
-      html: `<div class="mn-form"><p class="mn-form-std">${esc(b.barang)} · ${esc(b.lokasi || '')}</p>
-        <label for="mnPemilik">Santri</label><select id="mnPemilik" class="swal2-select"><option value="">Pilih santri</option>${daftar.map(s => `<option value="${esc(s.nisn)}">${esc(s.nama_siswa)} · ${esc(s.kelas || '')}</option>`).join('')}</select>
-        <label for="mnKode">Pelanggaran</label><select id="mnKode" class="swal2-select">${opsiKode(master)}</select></div>`,
+    const r = await Swal.fire(lembarBas({
+      cap: 'fa-user-check', alis: `Tautkan sitaan · ${b.lokasi || ''}`, judul: 'Tautkan ke santri', tgl: U.tglPendek(tglJ(b.disita_pada)), std: `${b.barang}${Number(b.jumlah) > 1 ? ' ×' + b.jumlah : ''}`, ok: 'Tautkan', ikonOk: 'fa-user-check',
+      isi: `<label class="mn-bas-f mn-bas-utama" for="mnPemilik"><span>Santri</span><span class="mn-bas-pilih"><i class="fa-solid fa-user"></i><select id="mnPemilik"><option value="">Pilih santri</option>${daftar.map(s => `<option value="${esc(s.nisn)}">${esc(s.nama_siswa)} · ${esc(s.kelas || '')}</option>`).join('')}</select></span></label>
+        <label class="mn-bas-f" for="mnKode"><span>Pelanggaran</span><span class="mn-bas-pilih"><i class="fa-solid fa-scale-balanced"></i><select id="mnKode">${opsiKode(master)}</select></span></label>`,
       preConfirm: () => { const nisn = $('mnPemilik').value; if (!nisn) { Swal.showValidationMessage('Pilih santri pemilik barang.'); return false; } return { nisn, kode: $('mnKode').value || null }; }
-    });
+    }));
     if (!r.isConfirmed) return;
     await rpc('sitaan_tautkan', { p_id: Number(b.id), p_nisn: r.value.nisn, p_kode: r.value.kode });
     toast('success', 'Sitaan ditautkan');
@@ -575,10 +609,11 @@
   RM._klikTambahan = async (S, b) => {
     const d = b.dataset;
     switch (d.mn) {
-      case 'lok': I.buka = d.id; I.hasil.clear(); I.segel.clear(); return RM._gambarTab();
-      case 'periksa-kembali': I.buka = null; return RM._gambarTab();
+      case 'lok': I.buka = d.id; I.hasil.clear(); I.segel.clear(); return RM._gambarBaru();
+      case 'periksa-kembali': I.buka = null; return RM._gambarBaru();
       case 'cek': {
         const isi = $('mnIsi'), y = window.scrollY;
+        isi.classList.add('ulang');                      // lembar yang sama: tanpa animasi masuk ulang
         I.hasil.set(d.std, d.v === '1');
         await gambarPeriksa(S, isi);                     // tanpa pemutar muat: lembar tetap di tempat
         window.scrollTo({ top: y });
