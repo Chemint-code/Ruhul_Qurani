@@ -35782,7 +35782,8 @@ function gantiMode(m, opsi = {}) {
 })();
 
 /** Sekali per akun saat masuk: siapa mentor, siapa super admin; pasang sakelar & menu. */
-async function aturMenuMentor() {
+function aturMenuMentor() { return (APP.janjiMentor = aturMenuMentorInti()); }
+async function aturMenuMentorInti() {
   let m = null;
   try { const { data, error } = await db.rpc('mentor_saya'); if (!error) m = data; } catch (e) {}
   APP.mentor = m || { mentor: false, super: false, bidang: [] };
@@ -35807,6 +35808,19 @@ async function aturMenuMentor() {
   rapikanGrupNav(APP.view);
   if (APP.mode === 'mentor' && APP.view === rumah()) navigateTo('mentor');
 }
+/* Halaman mentor dibuka dari alamat (#mentor, muat ulang, pintasan) sebelum mentor_saya selesai:
+ * tunggu dulu status mentornya, baru periksa hak. Tanpa hak → beranda, tanpa notif. */
+(function bungkusNavigasiMentor() {
+  const asli = navigateTo;
+  navigateTo = async function (view) {
+    if (view === 'mentor' || view === 'mentoratur') {
+      if (!APP.mentor) { try { await (APP.janjiMentor || aturMenuMentor()); } catch (e) {} }
+      if (!(MENU_ROLE[view] || []).includes(role())) view = rumah();
+      if (view === 'mentor' && APP.mode !== 'mentor') gantiMode('mentor', { pindah: false, gerak: false });
+    }
+    return asli.call(this, view);
+  };
+})();
 (function bungkusBadgePesanMentor() {
   const asli = refreshBadgePesan;
   let sudah = null;
@@ -35824,3 +35838,4 @@ async function aturMenuMentor() {
  *  Data & hak lewat RPC inspeksi_* / sitaan_* / peta_kebersihan (migrasi v2.80).
  * ===================================================================== */
 APP.versi = 'rq-v2.80';   // v2.80: inspeksi kebersihan, sitaan barang, lapisan Kebersihan Peta Kamar
+APP.versi = 'rq-v2.80.1';   // v2.80.1: alamat #mentor/#mentoratur menunggu status mentor sebelum memeriksa hak (tanpa notif palsu)
