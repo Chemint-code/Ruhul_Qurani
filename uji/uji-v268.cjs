@@ -315,7 +315,7 @@ const tunggu = (p, fn, arg) => p.waitForFunction(fn, arg, { timeout: 8000 });
       const s = await masuk(browser, URL_[v], { peran: 'Osis', korps: 'Osis Putra' });
       const p = s.page;
       await bukaSidang(p);
-      await p.click('.sd-atas [data-aksi="berkas"]');
+      await p.click('.sd-atas [data-aksi="berkas"]'); await p.click('[data-dok="pegangan"]');   // v2.81: Dokumen sidang → berkas pegangan
       await p.waitForSelector('.swal2-popup .sd-berkas-form');
       cek('B30 jendela berkas: cakupan semua + per kode', await p.evaluate(() => [...document.querySelectorAll('input[name="sdCakupan"]')].map(x => x.value).join(',') === 'semua,p1,p2,p3,p4'));
       await p.fill('#sdM-ketua', 'Muhammad Haikal');
@@ -329,7 +329,7 @@ const tunggu = (p, fn, arg) => p.waitForFunction(fn, arg, { timeout: 8000 });
       await unduh.saveAs(berkas);
       const T = (await p.evaluate(() => window.__TEKS)).join('\n');
       cek('B31 PDF: urut per kode, kolom Putus/Banding/Lewati, majelis', fs.readFileSync(berkas).slice(0, 4).toString() === '%PDF'
-        && ['I. DAFTAR PANGGIL & PERKARA', 'P1 - 1 perkara', 'P4+ - 4 perkara atau lebih', 'Putus', 'Banding', 'Lewati', 'II. MAJELIS SIDANG', 'Muhammad Haikal', 'Ahmad Fauzan [P1]', 'Izin Sakit s.d. 8 Nov'].every(x => T.includes(x)), T.slice(0, 600));
+        && ['I. DAFTAR PANGGIL & PERKARA', 'P1 - 1 perkara', 'P4+ - 4 perkara atau lebih', 'Putus', 'Banding', 'Lewati', 'II. SUSUNAN MAJELIS', 'Muhammad Haikal', 'Ahmad Fauzan [P1]', 'Izin Sakit s.d. 8 Nov'].every(x => T.includes(x)), T.slice(0, 600));
       cek('B32 PDF: santri yang sudah diputus pagi ini & yang seluruhnya banding tidak tercetak; teks Latin-1', !T.includes('Tigabelas') && !T.includes('Sebelas') && !/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/.test(T));
       if (POTRET && v === 'sumber') try { require('child_process').execFileSync('pdftoppm', ['-png', '-r', '70', '-f', '1', '-l', '2', berkas, path.join(KELUAR, 'v268-berkas-hal')]); } catch (e) {}
       cek('B33 tanpa galat halaman', s.galat.length === 0, s.galat.slice(0, 4));
@@ -429,7 +429,7 @@ const tunggu = (p, fn, arg) => p.waitForFunction(fn, arg, { timeout: 8000 });
       const s = await masuk(browser, URL_[v], { peran: 'Guru', kelas: ['VIII-D'] });
       const p = s.page;
       await bukaSidang(p);
-      cek('B53 pengamat: tanpa tab penasihat, mode lihat', await p.evaluate(() => document.getElementById('sdTab').hidden && /Lihat kartu santri/.test(document.querySelector('[data-aksi="mulai"]').textContent)));
+      cek('B53 pengamat: tanpa tab penasihat, mode lihat', await p.evaluate(() => !document.querySelector('#sdTab [data-nilai="penasihat"]') /* v2.81: pengamat bertab Berkas + Siaran */ && /Lihat kartu santri/.test(document.querySelector('[data-aksi="mulai"]').textContent)));
       await s.ctx.close();
     }
     { // super admin · Eksekusi Banding

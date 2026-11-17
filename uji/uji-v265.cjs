@@ -178,7 +178,7 @@ const bukaSidang = async (page) => {
 
       await bukaSidang(p);
       cek('B4 Ruang Sidang: tombol berkas di bilah atas & kartu rekap', (await p.$$('[data-aksi="berkas"]')).length === 2);
-      await p.click('.sd-atas [data-aksi="berkas"]');
+      await p.click('.sd-atas [data-aksi="berkas"]'); await p.click('[data-dok="pegangan"]');   // v2.81: Dokumen sidang → berkas pegangan
       await p.waitForSelector('.swal2-popup .sd-berkas-form');
       cek('B5 jendela berkas: 4 isian majelis, cakupan, kertas A4/F4', await p.evaluate(() =>
         document.querySelectorAll('.sd-majelis-isian input').length === 4 && document.querySelectorAll('input[name="sdCakupan"]').length >= 1
@@ -207,9 +207,9 @@ const bukaSidang = async (page) => {
       cek('B7 RPC sidang_majelis_simpan: nama dirapikan, sesi = sesi berkas', mj.length === 1 && mj[0][1].p_ketua === 'Muhammad Haikal' && mj[0][1].p_anggota2 === null && mj[0][1].p_sesi === '2026-11-01', mj[0] && mj[0][1]);
       const info = await p.evaluate(() => ({ hal: window.__PDF.pdf.internal.getNumberOfPages(), w: Math.round(window.__PDF.pdf.internal.pageSize.getWidth()), h: Math.round(window.__PDF.pdf.internal.pageSize.getHeight()), teks: window.__TEKS }));
       cek('B8 PDF terunduh: %PDF, kertas F4 215×330, ≥2 halaman, nama berkas', buf.slice(0, 4).toString() === '%PDF' && info.w === 215 && info.h === 330 && info.hal >= 2
-        && /^Berkas Sidang Tadib OSDA Putra 2026-11-01\.pdf$/.test(unduh.suggestedFilename()), { hal: info.hal, ukuran: buf.length, nama: unduh.suggestedFilename() });
+        && /^Berkas Pegangan Majelis OSDA Putra 2026-11-01\.pdf$/.test(unduh.suggestedFilename()), { hal: info.hal, ukuran: buf.length, nama: unduh.suggestedFilename() });
       const T = info.teks.join('\n');
-      cek('B9 isi PDF: kop, judul, dua bagian (v2.68), kolom putusan, majelis bernama', ['DAYAH RUHUL QURANI', "BERKAS PERKARA SIDANG TA'DIB", 'I. DAFTAR PANGGIL & PERKARA', 'II. MAJELIS SIDANG',
+      cek('B9 isi PDF: kop, judul, dua bagian (v2.68), kolom putusan, majelis bernama', ['DAYAH RUHUL QURANI', "BERKAS PEGANGAN MAJELIS TA'DIB", 'I. DAFTAR PANGGIL & PERKARA', 'II. SUSUNAN MAJELIS',
         'P1 - 1 perkara', 'Putus', 'Banding', 'Lewati', 'Hakim Ketua', 'Muhammad Haikal', 'Teuku Raihan', 'Zikri Alfarisi', 'VII-D'].every(x => T.includes(x)), T.slice(0, 400));
       cek('B10 teks PDF aman Latin-1 (tanda pisah/kutip lengkung dirapikan)', !/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/.test(T) && T.includes('Tidak ikut shalat berjamaah - "Subuh"'));
       const st = await p.evaluate(() => { const U = window.RQSidang._uji; const l = U.S.data.butir.filter(b => ['menunggu', 'dibacakan', 'diberikan'].includes(b.status));
@@ -231,7 +231,7 @@ const bukaSidang = async (page) => {
         && !!document.querySelector('.sd-atas [data-aksi="berkas"]')));
       cek('B15 persiapan: daftar bisa dilihat, antrean hanya mode lihat (tanpa tombol putus)', await p.evaluate(() =>
         document.querySelectorAll('.sd-baris').length > 0 && /Lihat/.test(document.querySelector('[data-aksi="mulai"]')?.textContent || '')));
-      await p.click('.sd-atas [data-aksi="berkas"]');
+      await p.click('.sd-atas [data-aksi="berkas"]'); await p.click('[data-dok="pegangan"]');   // v2.81: Dokumen sidang → berkas pegangan
       await p.waitForSelector('.swal2-popup .sd-berkas-form');
       cek('B16 jendela berkas menandai persiapan & sesi besok; cakupan semua & per kode tersedia', await p.evaluate(() =>
         /persiapan/i.test(document.querySelector('.sd-berkas-sesi').textContent) && /2 November/.test(document.querySelector('.sd-berkas-sesi').textContent)
@@ -244,7 +244,10 @@ const bukaSidang = async (page) => {
     { // OSDA · reses
       const s = await masuk(browser, URL_[v], { hp: true, peran: 'Osis', korps: 'Osis Putra', buka: false });
       await bukaSidang(s.page);
-      cek('B18 reses: tanpa tombol berkas', await s.page.evaluate(() => !!document.querySelector('.sd-reses') && !document.querySelector('[data-aksi="berkas"]')));
+      // v2.81: saat reses OSDA tetap punya pintu Dokumen sidang (berita acara sidang yang lalu); pengumuman & berkas pegangan nonaktif
+      await s.page.click('.sd-atas [data-aksi="berkas"]'); await s.page.waitForSelector('.sd-dok-daftar');
+      cek('B18 reses: Dokumen sidang hanya berita acara', await s.page.evaluate(() => !!document.querySelector('.sd-reses')
+        && document.querySelector('[data-dok="umum"]').disabled && document.querySelector('[data-dok="pegangan"]').disabled && !document.querySelector('[data-dok="bap"]').disabled));
       await s.ctx.close();
     }
     { // OSDA · Kritik & Saran

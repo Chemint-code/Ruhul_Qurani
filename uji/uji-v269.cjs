@@ -336,7 +336,7 @@ async function isiMajelisLengkap(p) {
       const s = await masuk(browser, URL_[v], { peran: 'Osis', korps: 'Osis Putra' });
       const p = s.page;
       await bukaSidang(p);
-      await p.click('.sd-atas [data-aksi="berkas"]');
+      await p.click('.sd-atas [data-aksi="berkas"]'); await p.click('[data-dok="pegangan"]');   // v2.81: Dokumen sidang → berkas pegangan
       await p.waitForSelector('.swal2-popup .sd-mj');
       cek('B20 unduh berkas → formulir majelis lebih dulu', await p.evaluate(() => /sebelum berkas diunduh/.test(document.querySelector('.sd-mj').textContent)));
       await isiMajelisLengkap(p);
@@ -352,7 +352,7 @@ async function isiMajelisLengkap(p) {
       const berkas = path.join(KELUAR, `v269-berkas-${v}.pdf`);
       await unduh.saveAs(berkas);
       const T = (await p.evaluate(() => window.__TEKS)).join('\n');
-      const harap22 = ['II. PENANGGUNG JAWAB EKSEKUSI', 'PJ Pembersihan: Hakim Uji 5', 'III. PERKARA SIAP DISAHKAN', 'Teuku Alif', 'IV. MAJELIS SIDANG', 'Penasihat', 'Hakim Uji 4', 'Ucapan tercatat: "aku mau ke kamar mandi dulu"', 'Pembimbing - Ust. Pembimbing Uji'];
+      const harap22 = ['II. PENANGGUNG JAWAB EKSEKUSI', 'PJ Pembersihan: Hakim Uji 5', 'III. PERKARA SIAP DISAHKAN', 'Teuku Alif', 'IV. SUSUNAN MAJELIS', 'Penasihat', 'Hakim Uji 4', 'Ucapan tercatat: "aku mau ke kamar mandi dulu"', 'Pembimbing: Ust. Pembimbing Uji'];
       cek('B22 PDF: II PJ eksekusi, III siap disahkan, IV majelis 5 kolom (Penasihat), ucapan tercatat', fs.readFileSync(berkas).slice(0, 4).toString() === '%PDF'
         && harap22.every(x => T.replace(/\n/g, ' ').includes(x)), harap22.filter(x => !T.replace(/\n/g, ' ').includes(x)));
       cek('B23 PDF tetap Latin-1', !/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/.test(T));

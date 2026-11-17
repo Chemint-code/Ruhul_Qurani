@@ -35876,3 +35876,86 @@ async function aturMenuMentorInti() {
 APP.versi = 'rq-v2.80';   // v2.80: inspeksi kebersihan, sitaan barang, lapisan Kebersihan Peta Kamar
 APP.versi = 'rq-v2.80.1';   // v2.80.1: alamat #mentor/#mentoratur menunggu status mentor sebelum memeriksa hak (tanpa notif palsu)
 APP.versi = 'rq-v2.80.2';   // v2.80.2: tampilan Mode Mentor, tirai antarmode, Berita Acara Sitaan, aksi tanpa penyegaran berulang
+
+/* =====================================================================
+ *  v2.81 — Siaran Mahkamah · Lembar Pengumuman · Berita Acara Persidangan
+ *  · sidang.js: layar Siaran langsung (semua akun), pengirim siaran di
+ *    perangkat majelis, Dokumen sidang (pengumuman mading, berkas pegangan,
+ *    BAP satu lembar A4 bernomor & ber-QR), tombol Tutup sidang.
+ *  · Di sini: kabar "Sidang sedang berlangsung" untuk akun selain OSDA,
+ *    lengkap dengan nomor panggil santri binaan. Data lewat RPC
+ *    sidang_siaran (migrasi v2.81); RLS & trigger lama tidak disentuh.
+ * ===================================================================== */
+APP.versi = 'rq-v2.81';   // v2.81: Siaran langsung sidang ta'dib, kabar sidang + nomor panggil binaan, lembar pengumuman, Berita Acara Persidangan, Ruang Sidang berwarna chemint
+const KABAR_SIDANG = { t: 0, el: null, data: null, tutup: '', mati: false, sesi: '' };
+function kabarSidangBoleh() {
+  const r = role();
+  return !!APP.profil && r && r !== 'Osis' && (MENU_ROLE.sidang || []).includes(r) && !KABAR_SIDANG.mati;
+}
+async function jagaKabarSidang() {
+  clearTimeout(KABAR_SIDANG.t);
+  let jeda = 90000;
+  try {
+    if (kabarSidangBoleh() && document.visibilityState === 'visible' && infoHariSidang().buka) {
+      const { data, error } = await db.rpc('sidang_siaran', { p_unit: null, p_ringkas: true });
+      if (error) throw error;
+      KABAR_SIDANG.data = data;
+      const aktif = (data?.siaran || []).filter(x => x.aktif);
+      gambarKabarSidang(aktif, data?.hari);
+      if (aktif.length) jeda = 20000;
+    } else gambarKabarSidang([]);
+  } catch (e) {
+    if (/sidang_siaran|does not exist|Could not find the function|PGRST202/i.test(String(e?.message || e))) KABAR_SIDANG.mati = true;
+    gambarKabarSidang([]);
+  }
+  KABAR_SIDANG.t = setTimeout(jagaKabarSidang, jeda);
+}
+function gambarKabarSidang(aktif, hari) {
+  let el = KABAR_SIDANG.el;
+  if (!aktif.length) { if (el) { el.classList.remove('tampak'); } return; }
+  const s = aktif[0];
+  const bn = (s.daftar || []).filter(x => x.binaan);
+  const kiniBn = bn.find(x => x.keadaan === 'kini');
+  const tunggu = bn.filter(x => x.keadaan === 'menunggu').sort((a, b) => (a.depan || 0) - (b.depan || 0));
+  const kunci = `${hari}|${s.unit}`;
+  // ditutup pengguna: tetap tersembunyi sampai santri binaannya dipanggil
+  if (KABAR_SIDANG.tutup === kunci && !kiniBn) { if (el) el.classList.remove('tampak'); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'kabarSidang'; el.className = 'kabar-sidang'; el.setAttribute('role', 'status');
+    document.body.appendChild(el);
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-kabar="tutup"]')) { KABAR_SIDANG.tutup = el.dataset.kunci || ''; el.classList.remove('tampak'); return; }
+      if (e.target.closest('[data-kabar="tonton"]')) { window.RQ_SIDANG.mintaSiaran = true; navigateTo('sidang'); }
+    });
+    KABAR_SIDANG.el = el;
+  }
+  const no = (n) => String(Number(n) || 0).padStart(2, '0');
+  const h = s.hitung || {};
+  const baris = kiniBn
+    ? `<b class="kabar-sidang-bn">${esc(kiniBn.nama)} sedang dipanggil</b><small>No. ${no(kiniBn.no)} dari ${no(h.total)} · ${esc(kiniBn.kelas)}</small>`
+    : tunggu.length
+      ? `<b>Ananda ${esc(tunggu[0].nama)} · No. ${no(tunggu[0].no)}</b><small>${tunggu[0].depan ? `${angka(tunggu[0].depan)} santri lagi` : 'dipanggil berikutnya'}${tunggu.length > 1 ? ` · ${angka(tunggu.length - 1)} santri binaan lain menunggu` : ''}</small>`
+      : `<b>Sidang Ta'dib sedang berlangsung</b><small>${s.kini ? `No. ${no(s.kini.no)} · ${esc(s.kini.nama)}` : 'Majelis memanggil santri'} · ${angka(h.putus)}/${angka(h.total)} diputus</small>`;
+  const baru = el.dataset.kunci !== kunci;
+  el.dataset.kunci = kunci;
+  el.classList.toggle('bn', !!kiniBn);
+  el.innerHTML = `<span class="kabar-sidang-palu" aria-hidden="true"><i class="fa-solid fa-gavel"></i></span>
+    <span class="kabar-sidang-isi"><span class="kabar-sidang-live"><i></i>Langsung · OSDA ${s.unit === 'putri' ? 'Putri' : s.unit === 'putra' ? 'Putra' : ''}</span>${baris}</span>
+    <button type="button" class="kabar-sidang-tonton" data-kabar="tonton">Tonton</button>
+    <button type="button" class="kabar-sidang-x" data-kabar="tutup" aria-label="Sembunyikan"><i class="fa-solid fa-xmark"></i></button>`;
+  if (baru) { el.classList.remove('tampak'); void el.offsetWidth; }
+  el.classList.add('tampak');
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { clearTimeout(KABAR_SIDANG.t); KABAR_SIDANG.t = setTimeout(jagaKabarSidang, 800); } });
+setTimeout(jagaKabarSidang, 4000);
+(function bungkusBadgeKabarSidang() {
+  // Kabar sidang menyala begitu akun masuk (bukan menunggu putaran 90 detik).
+  const asli = refreshBadgePesan;
+  let sudah = null;
+  refreshBadgePesan = function () {
+    const h = asli.apply(this, arguments);
+    try { const id = APP.profil?.id || null; if (id && sudah !== id) { sudah = id; clearTimeout(KABAR_SIDANG.t); KABAR_SIDANG.t = setTimeout(jagaKabarSidang, 1500); } } catch (e) {}
+    return h;
+  };
+})();
