@@ -5921,10 +5921,11 @@
 
   html.hemat .swal2-container.lembar:not(:has(.swal2-toast)) .swal2-popup.swal2-show,
   html.hemat .swal2-container.lembar:not(:has(.swal2-toast)) .swal2-popup.swal2-hide { animation-duration:.01s !important; }
-  @media (prefers-reduced-motion: reduce) {
-    .swal2-container.lembar:not(:has(.swal2-toast)) .swal2-popup.swal2-show,
-    .swal2-container.lembar:not(:has(.swal2-toast)) .swal2-popup.swal2-hide { animation:none !important; }
-  }
+  /* v2.82: aturan "animation:none" untuk prefers-reduced-motion dihapus. Lapisan dasar sudah
+     membuat semua animasi .001ms (!important di lapisan awal menang), sehingga animation:none
+     menyisakan durasi .001ms tanpa nama animasi: SweetAlert menunggu animationend yang tidak
+     pernah datang, dialog tertahan "menutup" dan menghalangi seluruh klik. Dengan animasi
+     lembar tetap terpasang, durasinya .001ms — tampak instan, dan animationend tetap datang. */
   }
 
   @keyframes lembarNaik  { from { transform:translateY(100%); } }
@@ -12001,3 +12002,6 @@ button.mk-am:focus-visible { outline: none; box-shadow: inset var(--ring); }
 .lembar-kop { margin-bottom: 14px; }
 @media (max-width: 760px) { .lembar-sapa h2 { font-size: 22px; } .lembar-kop { margin-bottom: 10px; } }
 .pita-hari.kini-kosong .pita-isi { display: none; }
+.rg-sembunyi[hidden] { display: none !important; }
+.grid-2:not(:has(> :not([hidden]) ~ :not([hidden]))) { grid-template-columns: minmax(0, 1fr); }
+.dh-cakupan { display: block; margin-top: 2px; font-size: 12px; font-weight: 500; color: var(--text-2); }

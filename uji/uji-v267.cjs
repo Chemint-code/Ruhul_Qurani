@@ -33,7 +33,7 @@ const tabBawah = (p) => p.evaluate(() => [...document.querySelectorAll('#tabBar 
   cek('A2 index.html: kelompok berbasis tugas, berurutan', JSON.stringify(grup.filter(g => g !== 'mentor')) === JSON.stringify(['beranda', 'catat', 'tindak', 'santri', 'laporan', 'pedoman', 'kelola']) && (!grup.includes('mentor') || grup.indexOf('mentor') === 1), grup);   // v2.79: + grup Mentor sesudah Beranda
   const nav = ih.slice(ih.indexOf('id="navMenu"'), ih.indexOf('</nav>', ih.indexOf('id="navMenu"')));
   const views = [...nav.matchAll(/data-view="([a-z]+)"/g)].map(m => m[1]);
-  cek('A3 setiap halaman tepat satu kali di menu (tanpa "Unit Operasional"/"Sistem")', new Set(views).size === views.length && views.length === 27 + (views.includes('banding') ? 1 : 0) + (views.includes('kelalaian') ? 1 : 0) + (views.includes('sarprasatur') ? 1 : 0) + ['sarpras', 'sarpraslaporan', 'petakamar', 'mentor', 'mentoratur'].filter(v => views.includes(v)).length && !/Unit Operasional|>Sistem</.test(nav), views.length);   // v2.68: + Eksekusi Banding · v2.69: + Kelalaian Pengesahan · v2.73: + Pengaturan Sarpras · v2.74: + Sarpras Asrama, Laporan Sarpras, Peta Kamar · v2.79: + Meja Mentor, Pengaturan Mentor
+  cek('A3 setiap halaman tepat satu kali di menu (tanpa "Unit Operasional"/"Sistem")', new Set(views).size === views.length && views.length === 27 + (views.includes('banding') ? 1 : 0) + (views.includes('kelalaian') ? 1 : 0) + (views.includes('sarprasatur') ? 1 : 0) + ['sarpras', 'sarpraslaporan', 'petakamar', 'mentor', 'mentoratur', 'keputusan'].filter(v => views.includes(v)).length && !/Unit Operasional|>Sistem</.test(nav), views.length);   // v2.68: + Eksekusi Banding · v2.69: + Kelalaian Pengesahan · v2.73: + Pengaturan Sarpras · v2.74: + Sarpras Asrama, Laporan Sarpras, Peta Kamar · v2.79: + Meja Mentor, Pengaturan Mentor · v2.82: + Meja Keputusan
   const ikon = JSON.parse(baca('ikon', 'daftar.json'));
   cek('A4 ikon baru masuk subset (fa-house, fa-thumbtack)', ikon.ikon.includes('fa-house') && ikon.ikon.includes('fa-thumbtack') && !ikon.tak_dikenal.length);
   const app = baca('app.js');
@@ -176,7 +176,8 @@ const tabBawah = (p) => p.evaluate(() => [...document.querySelectorAll('#tabBar 
       await t.ctx.close();
     }
     { // ------------------------- Gerak: tipe View Transition -------------------------
-      const s = await masuk(browser, URL_[v], { peran: 'Admin', super: true, gerak: true }), p = s.page;
+      // v2.82: super admin memakai susunan menu sendiri (Meja Keputusan) — gerak antarkelompok diuji pada susunan bawaan.
+      const s = await masuk(browser, URL_[v], { peran: 'Admin', super: false, gerak: true }), p = s.page;
       await p.evaluate(() => { try { terapkanHemat(false); } catch (e) {} document.documentElement.classList.remove('hemat'); MULUS.kurangGerak = false; });
       const tipe = async (x) => p.evaluate(async (x) => { const j = navigateTo(x); const t = VT.jalan ? [...VT.jalan.types] : null; await j; await new Promise(r => setTimeout(r, 450)); return t; }, x);
       const t1 = await tipe('rekapbina');   // Beranda → Laporan: naik
@@ -191,8 +192,10 @@ const tabBawah = (p) => p.evaluate(() => [...document.querySelectorAll('#tabBar 
     { // ------------------------- 1180 px: bawaan tidak tersemat -------------------------
       const s = await masuk(browser, URL_[v], { peran: 'Admin', super: true, vp: { width: 1180, height: 860 } });
       cek(`B31 ${v}: 1180 px → bawaan rel ramping (tidak tersemat)`, await s.page.evaluate(() => !document.getElementById('sidebar').classList.contains('tersemat')));
-      cek(`B32 ${v}: Admin — 7 kelompok, Kotak Saran OSDA tampil untuk super admin`, await s.page.evaluate(() =>
-        document.querySelectorAll('#navMenu .nav-grup:not(.hidden)').length === 7 && !document.querySelector('#navMenu [data-view="kotaksaran"]').classList.contains('hidden')));
+      // v2.82: super admin → 8 kelompok (Beranda, Amanah Saya, Kebijakan, Laporan, Santri & Asatidz, Lapangan, Pengelolaan, Riset).
+      await s.page.waitForFunction(() => KEP.menuSusun, null, { timeout: 8000 }).catch(() => {});
+      cek(`B32 ${v}: super admin — 8 kelompok, Kotak Saran OSDA tampil`, await s.page.evaluate(() =>
+        document.querySelectorAll('#navMenu .nav-grup:not(.hidden)').length === 8 && !document.querySelector('#navMenu [data-view="kotaksaran"]').classList.contains('hidden')));
       await s.ctx.close();
     }
     { // ------------------------- HP · Guru -------------------------

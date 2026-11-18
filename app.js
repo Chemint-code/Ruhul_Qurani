@@ -35994,7 +35994,7 @@ setTimeout(jagaKabarSidang, 4000);
 APP.versi = 'rq-v2.82';   // v2.82: Meja Keputusan, Ringkasan satu bulan, menu super admin
 
 /* ---------- 0 · Pendaftaran halaman --------------------------------- */
-MENU_ROLE.keputusan = ['Admin', 'Pimpinan'];
+MENU_ROLE.keputusan = ['Admin'];   // Pimpinan tetap di Kabar Dayah
 PA.NAMA.keputusan = { nama: 'Meja Keputusan', tab: 'Keputusan',
   ket: 'Kondisi dayah bulan ini, yang menunggu keputusan, dan amanah yang tertahan',
   kata: 'keputusan kebijakan rapat agenda musyawarah beranda super admin pimpinan meja' };
@@ -36308,8 +36308,8 @@ async function viewKeputusan() {
       if (bk) {
         if (ipp) {
           const pct = nSantri ? Math.round(ipp.tier3 / nSantri * 100) : 0;
-          Object.assign(bk, { n: ipp.tier3, nada: pct >= 10 ? 'bad' : ipp.tier3 ? 'warn' : 'ok',
-            teks: 'santri tier 3 menunggu pendampingan', kecil: `${pct}% dari ${angka(nSantri)} santri · ${angka(ipp.tier2)} tier 2 dipantau wali kelas${pct >= 10 ? ' · ambang tier dibawa ke musyawarah' : ''}` });
+          Object.assign(bk, { n: ipp.tier3, nada: ipp.tier3 ? 'warn' : 'ok',
+            teks: 'santri tier 3 menunggu pendampingan', kecil: `${pct}% dari ${angka(nSantri)} santri (kuota tier 3 ${Math.round(IPP_KUOTA_T3 * 100)}%) · ${angka(ipp.tier2)} tier 2 dipantau wali kelas` });
         } else Object.assign(bk, { n: null, nada: 'netral', teks: 'tingkat peringatan belum bisa dihitung', kecil: kalimatGagal(b.gagal, 'ipp') || '' });
         const el = document.querySelector('[data-mk-amanah="bk"]');
         if (el) { el.outerHTML = htmlAmanahKep(bk); hitungNaikKep(); }
@@ -36747,3 +36747,72 @@ function periodeBawaanLaporan() {
 }
 viewRekap = (function (asli) { return async function () { periodeBawaanLaporan(); return asli.apply(this, arguments); }; })(viewRekap);
 viewRekapPembinaan = (function (asli) { return async function () { periodeBawaanLaporan(); return asli.apply(this, arguments); }; })(viewRekapPembinaan);
+
+/* =====================================================================
+ * 6 · KUOTA TIER 3 (usulan C) · GRAFIK TANPA BULAN LALU
+ * ---------------------------------------------------------------------
+ *  C · Tier 3 = "perlu pendampingan khusus". Pada 19 Nov 2026 kriteria
+ *      tetap menandai 103 dari 734 santri (14%) — BK tidak mungkin
+ *      memanggil semuanya, dan label "khusus" kehilangan makna. Kriteria
+ *      lama TIDAK diubah; yang memenuhi kriteria tier 3 dibatasi kuota 5%
+ *      santri dalam lingkup (urut beban, alpa, ikatan — urutan lama).
+ *      Sisanya turun ke tier 2 dengan keterangan "di luar kuota tier 3".
+ *      Laboratorium bisa menguji kuota lain lewat aturan { kuotaT3 }.
+ *  Grafik (Analisis) · tanpa pembanding bulan lalu: angka di kartu
+ *      tanpa "naik/turun dari bulan lalu", Cermin per Santri dihapus;
+ *      blok yang tidak dipakai untuk keputusan (Proporsi Kategori,
+ *      Setoran Tahfiz, Target Hafalan) disembunyikan.
+ *      Cermin Muhasabah tetap sebagai riwayat lembar.
+ * ===================================================================== */
+APP.versi = 'rq-v2.82.1';   // v2.82.1: kuota tier 3 (5%), Grafik tanpa bulan lalu, cakupan Peta Kamar, dialog tidak tertahan saat gerak dikurangi
+const IPP_KUOTA_T3 = 0.05;
+(function bungkusKuotaTier3() {
+  const asli = terapkanAturanIpp;
+  terapkanAturanIpp = function (unsur, aturanIn) {
+    const h = asli.apply(this, arguments);
+    try {
+      const kuota = aturanIn && aturanIn.kuotaT3 !== undefined ? Number(aturanIn.kuotaT3) : IPP_KUOTA_T3;
+      if (!kuota || !h || !Array.isArray(h.daftar) || !h.daftar.length) return h;
+      const batas = Math.max(1, Math.ceil(h.daftar.length * kuota));
+      h.kuotaT3 = batas;
+      const t3 = h.daftar.filter(x => x.tingkat === 3);   // sudah terurut: beban → alpa → ikatan
+      if (t3.length <= batas) return h;
+      t3.slice(batas).forEach(x => { x.tingkat = 2; x.diLuarKuota = true; x.sebab = `${x.sebab} · di luar kuota tier 3`; });
+      h.daftar.sort((a, b) => (b.tingkat - a.tingkat) || (b.beban - a.beban) || (b.alpa - a.alpa) || (a.ikatan - b.ikatan));
+      h.tier3 = h.daftar.filter(x => x.tingkat === 3).length;
+      h.tier2 = h.daftar.filter(x => x.tingkat === 2).length;
+      h.tier1 = h.daftar.length - h.tier3 - h.tier2;
+    } catch (e) { console.warn('[kuota tier 3]', e.message); }
+    return h;
+  };
+})();
+
+const GRAFIK_SEMBUNYI = /^(Cermin per Santri|Proporsi Kategori|Setoran Tahfiz|Target Hafalan)$/;
+function rampingkanGrafik() {
+  const root = $('viewRoot'); if (!root || APP.view !== 'analisis') return;
+  root.querySelectorAll('.stats .rb-tren').forEach(el => el.remove());
+  root.querySelectorAll('.stats .rb-tren-ket').forEach(el => { if (/^vs\b/i.test(el.textContent.trim())) el.remove(); });
+  root.querySelectorAll('.rb-periode').forEach(el => {
+    const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) if (/·\s*dibanding/.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(/\s*·\s*dibanding.*$/, '');
+    el.querySelectorAll('*').forEach(x => { if (/^\s*·?\s*dibanding/.test(x.textContent) && !x.children.length) x.remove(); });
+  });
+  root.querySelectorAll('h3').forEach(h => {
+    if (!GRAFIK_SEMBUNYI.test(h.textContent.trim())) return;
+    const kartuEl = h.closest('.card, section'); if (kartuEl && !kartuEl.hidden) { kartuEl.hidden = true; kartuEl.classList.add('rg-sembunyi'); }
+  });
+}
+(function bungkusGrafikRamping() {
+  const asli = viewAnalisis;
+  let pengamat = null;
+  viewAnalisis = async function () {
+    const h = await asli.apply(this, arguments);
+    try {
+      rampingkanGrafik();
+      if (pengamat) pengamat.disconnect();
+      pengamat = new MutationObserver(() => { if (APP.view !== 'analisis') { pengamat.disconnect(); pengamat = null; return; } rampingkanGrafik(); });
+      pengamat.observe($('viewRoot'), { childList: true, subtree: true });
+    } catch (e) { console.warn('[grafik ramping]', e.message); }
+    return h;
+  };
+})();

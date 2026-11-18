@@ -1641,6 +1641,9 @@
     const PER = [['bulan', 'Bulan ini'], ['lalu', 'Bulan lalu'], ['30', '30 hari'], ['semester', 'Semester ini'], ['bebas', 'Rentang…']];
     const grup = new Map(); (H?.baris || []).forEach(r => { const k = r.l.lantai || null; if (!grup.has(k)) grup.set(k, []); grup.get(k).push(r); });
     const nBerkamar = (H?.baris || []).reduce((a, r) => a + r.santri.length, 0);
+    // v2.82: cakupan data — statistik kamar hanya mewakili santri yang sudah berkamar.
+    const nPutra = ((typeof CACHE !== 'undefined' && CACHE.siswa && CACHE.siswa.v) || [])
+      .filter(s => typeof UNIT_PUTRA !== 'undefined' && String(s.unit_gender || '').toLowerCase() === UNIT_PUTRA && !['nonaktif', 'inactive', 'archived'].includes(String(s.status_santri || 'Aktif').trim().toLowerCase())).length;
     const nDibahas = (H?.baris || []).filter(r => r.dibahas).length;
     const kelSorot = H?.kel.find(k => k.kode === P.sorot);
     let nomorRuang = 0;
@@ -1661,7 +1664,7 @@
           ${H.kel.map((k, ki) => `<div class="sp-stat dh-stat${P.sorot === k.kode ? ' sorot' : ''}" data-k="${ki % 6}"><b>${angka(H.totalKel[k.kode])}</b><span>${esc(k.nama)}</span></div>`).join('')}
           <div class="sp-stat${nDibahas ? ' merah' : ''}"><b>${angka(nDibahas)}</b><span>perlu dibahas</span></div>
         </div>
-        <div class="sp-lap-aksi card dh-aksi"><div><b>${angka(H.baris.length)} ${esc(istilah('kamar').toLowerCase())} · ${angka(nBerkamar)} santri berkamar</b>
+        <div class="sp-lap-aksi card dh-aksi"><div><b>${angka(H.baris.length)} ${esc(istilah('kamar').toLowerCase())} · ${angka(nBerkamar)}${nPutra > nBerkamar ? ` dari ${angka(nPutra)}` : ''} santri berkamar</b>${nPutra > nBerkamar ? `<small class="dh-cakupan">${angka(nPutra - nBerkamar)} santri belum ditempatkan; tidak terhitung di peta ini</small>` : ''}
             <small class="dh-ronda-teks"${P.ditinjau?.size ? '' : ' hidden'}>${angka(P.ditinjau?.size || 0)}/${angka(H.baris.length)} ditinjau</small></div>
           <span class="sp-lap-tombol">${H.baris.length ? tombol('p-ronda', P.ronda || P.ditinjau?.size ? 'Lanjut Ronda' : 'Mulai Ronda', 'fa-route', {}, 'btn-primary dh-ronda-b') : ''}
             ${pengelola() ? tombol('p-ambang', `Ambang ${H.ambang}`, 'fa-sliders') : ''}

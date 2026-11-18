@@ -119,12 +119,15 @@ const ikonKosong = (page) => page.evaluate(() => [...document.querySelectorAll('
       const s = await masuk(browser, URL_[v], { hp: true });
       const p = s.page;
       const pita = await p.evaluate(() => ({ ada: !!document.getElementById('pitaLembar'), sebelumTab: document.getElementById('pitaLembar')?.nextElementSibling?.classList.contains('lembar-tabs') }));
-      cek(`C1 ${v}: pita Lembar Baru di Ringkasan, di atas tab bulan (bukan toast)`, pita.ada && pita.sebelumTab && !(await p.$('.swal2-toast')), pita);
+      // v2.82: pita Lembar Baru hanya tanggal 1–3; sesudahnya tidak tampil sama sekali.
+      const awalBulan = new Date().getDate() <= 3;
+      cek(`C1 ${v}: pita Lembar Baru ${awalBulan ? 'di Ringkasan, di atas tab bulan (bukan toast)' : 'tidak tampil sesudah tanggal 3 (v2.82)'}`,
+        awalBulan ? (pita.ada && pita.sebelumTab && !(await p.$('.swal2-toast'))) : !pita.ada, pita);
       await p.screenshot({ path: path.join(KELUAR, `v262-${v}-hp-ringkasan.png`) });
-      await p.click('#pitaLembar .pita-tutup');
+      if (awalBulan) await p.click('#pitaLembar .pita-tutup');
       await p.evaluate(() => navigateTo('siswa')); await p.waitForTimeout(400);
       await p.evaluate(() => navigateTo('dashboard')); await p.waitForTimeout(800);
-      cek(`C2 ${v}: pita ditutup → tidak muncul lagi bulan ini`, !(await p.$('#pitaLembar')) && await p.evaluate(() => localStorage.getItem('rq_lembar_umum') === bulanIni()));
+      cek(`C2 ${v}: pita ditutup → tidak muncul lagi bulan ini`, !(await p.$('#pitaLembar')) && (!awalBulan || await p.evaluate(() => localStorage.getItem('rq_lembar_umum') === bulanIni())));
 
       const bar = await p.evaluate(() => ({ tinggi: Math.round(document.querySelector('.topbar').getBoundingClientRect().height),
         tombol: !!document.getElementById('btnSaring').getClientRects().length, teks: document.querySelector('#btnSaring .sr-teks').textContent,
