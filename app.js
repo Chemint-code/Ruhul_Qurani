@@ -2708,6 +2708,7 @@ async function navigateTo(view) {
   const tutupTirai = LayarMuat.tiraiUntuk(j);
   try {
     if (view === 'dashboard')        await viewDashboard();
+    else if (view === 'keputusan')   await viewKeputusan();    // v2.82
     else if (view === 'analisis')    await viewAnalisis();     // v2.55
     else if (view === 'radar')       await viewRadar();
     else if (view === 'pimpinan')    await viewPimpinan();
@@ -35959,3 +35960,790 @@ setTimeout(jagaKabarSidang, 4000);
     return h;
   };
 })();
+
+
+/* =====================================================================
+ * v2.82 — MEJA KEPUTUSAN · RINGKASAN SATU BULAN · MENU SUPER ADMIN
+ * ---------------------------------------------------------------------
+ *  Rancangan: claude/evaluasi-v2.82-meja-keputusan.md, disetujui pemilik
+ *  19 Nov 2026 (A, B, D, E) dengan dua catatan pemilik:
+ *    · bulan yang sudah Tutup Buku tidak dibahas lagi di Ringkasan;
+ *      bahan bulan lalu diambil dari Tutup Buku;
+ *    · catatan yang menurun dalam bulan berjalan = kondisi asrama yang
+ *      memang makin terjaga.
+ *
+ *  1 · MEJA KEPUTUSAN (#keputusan) — beranda super admin. Hanya bulan
+ *      berjalan: irama catatan per pekan menurut pencatat, santri bersih,
+ *      pembinaan tuntas, pencatat aktif, butir yang menunggu keputusan,
+ *      amanah yang tertahan per pihak, dan "Salin agenda rapat".
+ *  2 · RINGKASAN tanpa bulan lalu: tanpa tab bulan, tanpa "Sisa bulan
+ *      sebelumnya", tanpa angka pembanding, tanpa tahfiz; "Santri yang
+ *      paling berubah" → "Poin tertinggi bulan ini"; hari ini tidak lagi
+ *      disebut "tanpa catatan"; pita Lembar baru hanya tanggal 1–3;
+ *      hujan monster tidak turun di meja kerja (keputusan v2.53).
+ *  3 · KABAR DAYAH pada lembar berjalan tidak lagi membandingkan dengan
+ *      bulan lalu; kalimat utamanya membaca irama pekan bulan ini.
+ *  4 · MENU SUPER ADMIN disusun ulang menurut pekerjaan seorang pengambil
+ *      kebijakan; halaman catat & tindak lanjut dilipat di Kerja Lapangan.
+ *  5 · Perbaikan: Keterlibatan (nama akun kembar, Guru BK tidak dihitung
+ *      pencatat), Rekap dibuka pada bulan berjalan.
+ *
+ *  Tidak ada perubahan skema, RPC, trigger, maupun RLS. Fungsi lama tidak
+ *  ditimpa isinya — dibungkus, atau diganti lewat pengikatan global.
+ * ===================================================================== */
+APP.versi = 'rq-v2.82';   // v2.82: Meja Keputusan, Ringkasan satu bulan, menu super admin
+
+/* ---------- 0 · Pendaftaran halaman --------------------------------- */
+MENU_ROLE.keputusan = ['Admin', 'Pimpinan'];
+PA.NAMA.keputusan = { nama: 'Meja Keputusan', tab: 'Keputusan',
+  ket: 'Kondisi dayah bulan ini, yang menunggu keputusan, dan amanah yang tertahan',
+  kata: 'keputusan kebijakan rapat agenda musyawarah beranda super admin pimpinan meja' };
+TAB_IKON.keputusan = 'fa-stamp';
+(function daftarkanMejaKeputusan() {
+  const g = PA.GRUP.find(x => x.id === 'beranda');
+  if (g && !g.views.includes('keputusan')) g.views.unshift('keputusan');
+  JUDUL.keputusan = { ar: 'مكتب القرار', teks: 'Meja Keputusan', lat: g ? g.label : 'Beranda' };
+})();
+
+const KEP = { gen: 0, data: null, nav: 0, diingatSaatMasuk: null, menuSusun: false };
+
+/* ---------- 0b · Rumah super admin ---------------------------------- *
+ * Super admin hanya diketahui dari database (adalah_super_admin). Supaya
+ * tidak ada lompatan halaman pada setiap masuk, jawabannya diingat per
+ * akun di perangkat; jawaban database tetap yang menentukan.            */
+const kunciSuperKep = () => `rq.super.v1.${APP.profil?.id || ''}`;
+function superDiingat() {
+  if (APP.superAdmin) return true;
+  try { return !!APP.profil?.id && localStorage.getItem(kunciSuperKep()) === '1'; } catch (e) { return false; }
+}
+Object.defineProperty(RUMAH_ROLE, 'Admin', {
+  configurable: true, enumerable: true,
+  get() { return superDiingat() ? 'keputusan' : undefined; }
+});
+
+(function bungkusNavigasiKep() {
+  const asli = navigateTo;
+  navigateTo = function (view) {
+    if (KEP.nav === 0) KEP.diingatSaatMasuk = superDiingat();
+    KEP.nav++;
+    return asli.apply(this, arguments);
+  };
+})();
+
+(function bungkusSuperKep() {
+  const asli = periksaSuperAdmin;
+  periksaSuperAdmin = async function () {
+    const h = await asli.apply(this, arguments);
+    try {
+      if (APP.profil?.id) {
+        if (APP.superAdmin) localStorage.setItem(kunciSuperKep(), '1');
+        else localStorage.removeItem(kunciSuperKep());
+      }
+    } catch (e) {}
+    try {
+      if (APP.superAdmin) {
+        susunMenuSuper();
+        try { aturTabPeran(); } catch (e) {}
+        // Masuk pertama kali (belum diingat): pindah sekali ke Meja Keputusan.
+        if (!KEP.diingatSaatMasuk && KEP.nav <= 1 && APP.view === 'dashboard') {
+          PA.gantiRiwayat = true;
+          navigateTo('keputusan');
+        }
+      }
+    } catch (e) { console.warn('[v2.82 super]', e); }
+    return h;
+  };
+})();
+
+/* ---------- 0c · Alat bantu bulan berjalan --------------------------- */
+const ROMAWI_PEKAN = ['I', 'II', 'III', 'IV', 'V'];
+const fmtDesimal = (x) => (Math.round(x * 10) / 10).toLocaleString('id-ID');
+
+/**
+ * Irama catatan per pekan dalam satu bulan. `perHari` = jumlah per tanggal
+ * (indeks 0 = tanggal 1). Rata-rata pekan dihitung dari hari yang SUDAH
+ * GENAP (hari ini belum selesai, jadi tidak ikut dirata-ratakan).
+ * Mengembalikan pekan[] dan, bila cukup, perbandingan pekan pertama yang
+ * genap dengan pekan terakhir yang punya hari genap.
+ */
+function iramaPekanBulan(perHari, hariBulan, batas, berjalan) {
+  const genap = berjalan ? batas - 1 : hariBulan;
+  const pekan = [];
+  for (let i = 0; i * 7 < hariBulan; i++) {
+    const a = i * 7 + 1, z = Math.min(hariBulan, a + 6);
+    if (berjalan && a > batas) break;
+    const zGenap = Math.min(z, genap);
+    const hariGenap = Math.max(0, zGenap - a + 1);
+    let jml = 0, jmlGenap = 0;
+    for (let d = a; d <= Math.min(z, berjalan ? batas : z); d++) {
+      const n = perHari[d - 1] || 0; jml += n; if (d <= zGenap) jmlGenap += n;
+    }
+    pekan.push({ ke: i + 1, nama: `Pekan ${ROMAWI_PEKAN[i] || i + 1}`, a, z, jml, hariGenap,
+      rata: hariGenap ? jmlGenap / hariGenap : null, kini: berjalan && batas >= a && batas <= z });
+  }
+  const sah = pekan.filter(p => p.rata !== null && p.hariGenap >= 3);
+  const awal = sah[0] || null, akhir = sah.length > 1 ? sah[sah.length - 1] : null;
+  let arah = null;
+  if (awal && akhir && awal.rata > 0) {
+    const r = akhir.rata / awal.rata;
+    arah = r <= 0.8 ? 'turun' : r >= 1.2 ? 'naik' : 'stabil';
+  }
+  return { pekan, awal, akhir, arah };
+}
+
+const namaPekanKecil = (p) => p.nama.replace(/^Pekan/, 'pekan');
+/** Irama (bulan berjalan saja) → { judul, rinci }; null bila belum cukup hari. */
+function teksIrama(ir) {
+  if (!ir.awal || !ir.akhir || !ir.arah) return null;
+  const a = fmtDesimal(ir.awal.rata), b = fmtDesimal(ir.akhir.rata);
+  const pAw = namaPekanKecil(ir.awal), pAk = ir.akhir.kini ? 'pekan ini' : namaPekanKecil(ir.akhir);
+  if (ir.arah === 'turun') return { judul: 'Asrama makin terjaga.', rinci: `Catatan harian turun dari ${a} pada ${pAw} menjadi ${b} pada ${pAk}.` };
+  if (ir.arah === 'naik') return { judul: 'Catatan harian sedang naik.', rinci: `Dari ${a} pada ${pAw} menjadi ${b} pada ${pAk}.` };
+  return { judul: 'Irama catatan stabil.', rinci: `Sekitar ${b} catatan sehari pada ${pAk}.` };
+}
+/** Kalimat irama satu baris. '' bila belum cukup hari. */
+function kalimatIrama(ir) { const t = teksIrama(ir); return t ? `${t.judul} ${t.rinci}` : ''; }
+
+function salinKeClipboard(teks, pesanOk) {
+  const ok = () => toast('success', pesanOk || 'Tersalin.');
+  const gagal = () => {
+    try {
+      const t = document.createElement('textarea'); t.value = teks; t.setAttribute('readonly', '');
+      t.style.position = 'absolute'; t.style.left = '-9999px'; document.body.appendChild(t); t.select();
+      const b = document.execCommand('copy'); t.remove(); b ? ok() : toast('error', 'Peramban menolak menyalin.');
+    } catch (e) { toast('error', 'Peramban menolak menyalin.'); }
+  };
+  try { (navigator.clipboard ? navigator.clipboard.writeText(teks) : Promise.reject()).then(ok, gagal); } catch (e) { gagal(); }
+}
+
+const gerakKepBoleh = () => !(MULUS.kurangGerak || matchMedia('(prefers-reduced-motion: reduce)').matches || modeHemat());
+
+/* =====================================================================
+ * 1 · MEJA KEPUTUSAN
+ * ===================================================================== */
+const PEMBINA_ROLE_KEP = ['Guru', 'Walas', 'Admin', 'Ustadz GEN-Z'];
+const ALASAN_TUNGGU = { input_mundur: 'catatan diinput terlambat', ulang_lewat_tangga: 'pengulangan di luar tangga instrumen' };
+
+async function viewKeputusan() {
+  const gen = ++KEP.gen;
+  const tujuh = kunciTgl(tambahHari(new Date(), -7));
+  const dari30 = kunciTgl(tambahHari(new Date(), -29));
+  const [siswaAll, detailAll, izinAll, pembinaanAll, guru, kt] = await Promise.all([
+    amanKosong(muatSiswa, 'santri'), amanKosong(muatDetail, 'pelanggaran'),
+    amanKosong(muatIzin, 'perizinan'), amanKosong(muatPembinaan, 'pembinaan'),
+    muatGuruAktif().catch(() => []),
+    q(db.rpc('dashboard_kinerja_guru_rpc', { p_dari: dari30, p_sampai: hariIni(), p_role: null, p_jenjang: 'Semua', p_cari: null }), 'keterlibatan')
+      .then(r => r.data || {}).catch(() => null)
+  ]);
+  if (gen !== KEP.gen || APP.view !== 'keputusan') return;
+
+  const L = lingkupDasbor({ siswaAll, detailAll, izinAll, pembinaanAll });
+  const kini = new Date(), bulan = bulanIni();
+  const [th, bl] = bulan.split('-').map(Number);
+  const hariBulan = new Date(th, bl, 0).getDate(), batas = kini.getDate();
+  const siswa = L.siswa;
+  const nisnBoleh = new Set(siswa.map(s => String(s.nisn)));
+  const kelasDari = Object.fromEntries(siswa.map(s => [String(s.nisn), s.kelas]));
+  const dalamBulan = (k) => bulanDari(k) === bulan;
+
+  // ---- pelanggaran bulan ini ----
+  const rows = (L.detailTr || []).filter(r => nisnBoleh.has(String(r.nisn)) && dalamBulan(kunciTgl(r.tanggal)));
+  const namaOsda = new Set((guru || []).filter(g => g.role === 'Osis').map(g => String(g.nama || '').trim()));
+  (kt?.ranking || []).filter(g => g.role === 'Osis').forEach(g => namaOsda.add(String(g.nama || '').trim()));
+  const sumberDari = (r) => String(r.sumber || '') === 'Madrasah' ? 'madrasah'
+    : (namaOsda.has(String(r.penindak || '').trim()) || /\bOSDA\b|\bOSIM\b/i.test(String(r.penindak || ''))) ? 'osda' : 'musyrif';
+  const perHari = Array.from({ length: hariBulan }, () => 0);
+  const perHariSumber = { osda: perHari.slice(), musyrif: perHari.slice(), madrasah: perHari.slice() };
+  const santriTercatat = new Set();
+  const jenis = new Map(), angkatan = {}, beratRows = [];
+  rows.forEach(r => {
+    const d = Number(kunciTgl(r.tanggal).slice(8, 10));
+    if (d >= 1 && d <= hariBulan) { perHari[d - 1]++; perHariSumber[sumberDari(r)][d - 1]++; }
+    santriTercatat.add(String(r.nisn));
+    const j = String(r.nama_pelanggaran || r.kode_pelanggaran || '-').trim();
+    const jj = jenis.get(j) || { nama: j, kode: r.kode_pelanggaran || '', n: 0, osda: 0, kelas: {} };
+    jj.n++; if (sumberDari(r) === 'osda') jj.osda++;
+    const kls = kelasDari[String(r.nisn)] || r.kelas || '-';
+    jj.kelas[kls] = (jj.kelas[kls] || 0) + 1;
+    jenis.set(j, jj);
+    const a = angkatanDariKelas(kls);
+    if (a) { angkatan[a] = angkatan[a] || { kasus: 0, kelas: {} }; angkatan[a].kasus++; angkatan[a].kelas[kls] = (angkatan[a].kelas[kls] || 0) + 1; }
+    if (r.kategori === 'Berat') beratRows.push(r);
+  });
+  const ir = iramaPekanBulan(perHari, hariBulan, batas, true);
+  const irSumber = Object.fromEntries(Object.entries(perHariSumber).map(([k, arr]) => [k, iramaPekanBulan(arr, hariBulan, batas, true)]));
+
+  // ---- pembinaan bulan ini ----
+  const bina = (L.pembinaanSemua || []).filter(p => nisnBoleh.has(String(p.nisn)) && dalamBulan(kunciTgl(p.tanggal_pembinaan)));
+  const binaSelesai = bina.filter(p => String(p.status_pembinaan) === 'Selesai').length;
+  const binaTerbuka = bina.filter(p => String(p.status_pembinaan) !== 'Selesai');
+  const tunggu = binaTerbuka.filter(p => p.menunggu_alasan);
+  const lama = binaTerbuka.filter(p => !p.menunggu_alasan && kunciTgl(p.tanggal_pembinaan) < tujuh);
+  const tuntasPct = bina.length ? Math.round(binaSelesai / bina.length * 100) : null;
+
+  // ---- izin yang lewat batas, belum ditandai kembali ----
+  const izinLewat = (L.izinSemua || []).filter(z => String(z.status_persetujuan) === 'Pending'
+    && kunciTgl(z.tanggal_selesai) && kunciTgl(z.tanggal_selesai) < hariIni() && nisnBoleh.has(String(z.nisn)));
+
+  // ---- pencatat (30 hari; Guru BK bukan pencatat) ----
+  let pencatat = null;
+  if (kt) {
+    const semua = [...new Map((kt.ranking || []).filter(g => g.aktif !== false && PENCATAT.includes(g.role) && g.role !== 'Guru BK')
+      .map(g => [g.guru_id || g.username || g.nama, g])).values()];
+    const aktif = semua.filter(g => Number(g.total_aktivitas) && String(g.aktivitas_terakhir || '') >= tujuh);
+    const diam = semua.filter(g => !Number(g.total_aktivitas));
+    const kelasAda = [...new Set(siswa.map(s => s.kelas).filter(Boolean))].sort();
+    const buta = kelasAda.filter(k => !semua.some(g => (g.kelas_binaan || []).includes(k) && aktif.includes(g)));
+    pencatat = { semua, aktif, diam, buta };
+  }
+
+  // ---- kamar (hanya unit putra yang memakai denah kamar) ----
+  const putra = siswa.filter(s => String(s.unit_gender || '').toLowerCase() === UNIT_PUTRA);
+  const putraKamar = putra.filter(s => s.nomor_kamar !== null && s.nomor_kamar !== undefined && s.nomor_kamar !== '').length;
+
+  const nSantri = siswa.length, nTercatat = [...santriTercatat].filter(n => nisnBoleh.has(n)).length;
+  const bersih = Math.max(0, nSantri - nTercatat);
+
+  // ---- menunggu keputusan ----
+  const agenda = [];
+  if (tunggu.length) {
+    const alasan = {}; tunggu.forEach(p => { const a = ALASAN_TUNGGU[p.menunggu_alasan] || String(p.menunggu_alasan); alasan[a] = (alasan[a] || 0) + 1; });
+    agenda.push({ kode: 'musyawarah', tingkat: 'bad', skor: 90,
+      judul: `${angka(tunggu.length)} pembinaan menunggu musyawarah`,
+      kecil: Object.entries(alasan).map(([a, n]) => `${angka(n)} karena ${a}`).join(' · ') + '. Tahap dan bentuknya diputuskan majelis.',
+      salin: `${angka(tunggu.length)} pembinaan menunggu musyawarah (${Object.entries(alasan).map(([a, n]) => `${angka(n)} ${a}`).join(', ')}).`,
+      aksi: { label: 'Buka daftarnya', kerja: 'bina-tunggu' } });
+  }
+  const top = [...jenis.values()].sort((a, b) => b.n - a.n)[0];
+  if (top && rows.length >= 40 && top.n / rows.length >= 0.25) {
+    const pct = Math.round(top.n / rows.length * 100), pOsda = Math.round(top.osda / top.n * 100);
+    const kls = Object.entries(top.kelas).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
+    agenda.push({ kode: 'aturan', tingkat: pct >= 40 ? 'bad' : 'warn', skor: 60 + pct / 2,
+      judul: `${top.kode ? top.kode + ' · ' : ''}${top.nama}: ${pct}% dari seluruh catatan bulan ini`,
+      kecil: `${angka(top.n)} catatan${top.osda ? `, ${pOsda}% oleh OSDA` : ''}${kls.length ? ` · terbanyak di ${kls.join(', ')}` : ''}. Satu butir menyerap sebanyak ini: tinjau jadwal, sarana, atau bobotnya.`,
+      salin: `${top.kode ? top.kode + ' ' : ''}${top.nama} = ${pct}% catatan bulan ini (${angka(top.n)}${top.osda ? `, ${pOsda}% oleh OSDA` : ''}); terbanyak di ${kls.join(', ')}.`,
+      aksi: { label: 'Evaluasi bidang', kerja: 'nav', arg: 'bidang' } });
+  }
+  const URUT = ['VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+  const santriAng = {}; siswa.forEach(s => { const a = angkatanDariKelas(s.kelas); if (a) santriAng[a] = (santriAng[a] || 0) + 1; });
+  const per100 = (x, n) => (n ? Math.round(x / n * 1000) / 10 : 0);
+  const rata = per100(rows.length, nSantri);
+  const angUrut = URUT.map(a => ({ a, santri: santriAng[a] || 0, kasus: angkatan[a]?.kasus || 0, kelas: angkatan[a]?.kelas || {}, p: per100(angkatan[a]?.kasus || 0, santriAng[a] || 0) }));
+  const kand = angUrut.filter(x => x.santri >= 10 && x.kasus >= 10).sort((a, b) => b.p - a.p)[0];
+  if (kand && rata > 0 && kand.p / rata >= 1.5) {
+    const kali = Math.round(kand.p / rata * 10) / 10;
+    const kls = Object.entries(kand.kelas).sort((a, b) => b[1] - a[1])[0];
+    agenda.push({ kode: 'angkatan', tingkat: kali >= 2 ? 'bad' : 'warn', skor: 50 + kali * 10,
+      judul: `Angkatan ${kand.a}: ${String(kali).replace('.', ',')}× rata-rata dayah`,
+      kecil: `${fmtDesimal(kand.p)} catatan per 100 santri (dayah ${fmtDesimal(rata)})${kls ? ` · kelas terbanyak ${kls[0]} (${angka(kls[1])})` : ''}.`,
+      salin: `Angkatan ${kand.a}: ${fmtDesimal(kand.p)} catatan per 100 santri, ${String(kali).replace('.', ',')}× rata-rata dayah${kls ? `; kelas terbanyak ${kls[0]}` : ''}.`,
+      aksi: { label: 'Peta kamar', kerja: 'nav', arg: bolehHal('petakamar') ? 'petakamar' : 'radar' } });
+  }
+  if (beratRows.length) {
+    const nS = new Set(beratRows.map(r => String(r.nisn))).size;
+    agenda.push({ kode: 'berat', tingkat: 'bad', skor: 40 + beratRows.length,
+      judul: `${angka(beratRows.length)} pelanggaran berat oleh ${angka(nS)} santri`,
+      kecil: 'Pastikan setiap kasus berat sudah dibicarakan dengan wali santri.',
+      salin: `${angka(beratRows.length)} pelanggaran berat oleh ${angka(nS)} santri; pastikan wali sudah dikabari.`,
+      aksi: { label: 'Lihat kasusnya', kerja: 'berat' } });
+  }
+  agenda.sort((a, b) => b.skor - a.skor);
+
+  // ---- amanah yang tertahan (per pihak) ----
+  const pembinaKelas = (k) => (guru || []).filter(g => PEMBINA_ROLE_KEP.includes(g.role) && (g.kelas_binaan || []).includes(k)).map(g => sapaanPendek(g.nama));
+  const lamaKelas = {}; lama.forEach(p => { const k = kelasDari[String(p.nisn)] || p.kelas || '-'; lamaKelas[k] = (lamaKelas[k] || 0) + 1; });
+  const lamaTop = Object.entries(lamaKelas).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const amanah = [];
+  amanah.push({ kode: 'musyrif', ikon: 'fa-hands-praying', pihak: 'Musyrif', n: lama.length, nada: lama.length >= 20 ? 'bad' : lama.length ? 'warn' : 'ok',
+    teks: lama.length ? `pembinaan berjalan lebih dari 7 hari` : 'tidak ada pembinaan yang tertahan lebih dari 7 hari',
+    kecil: lamaTop.map(([k, n]) => { const p = pembinaKelas(k); return `${k} ${angka(n)}${p.length ? ` (${p.join(', ')})` : ''}`; }).join(' · '),
+    aksi: lama.length ? { kerja: 'bina-lama' } : null });
+  amanah.push({ kode: 'izin', ikon: 'fa-door-open', pihak: 'Perizinan', n: izinLewat.length, nada: izinLewat.length ? 'warn' : 'ok',
+    teks: izinLewat.length ? 'izin lewat tanggal selesai, belum ditandai kembali' : 'semua izin yang lewat batas sudah ditandai',
+    kecil: izinLewat.slice(0, 3).map(z => z.siswa?.nama_siswa || siswa.find(s => String(s.nisn) === String(z.nisn))?.nama_siswa || z.nisn).join(' · ') + (izinLewat.length > 3 ? ` · ${angka(izinLewat.length - 3)} lainnya` : ''),
+    aksi: izinLewat.length ? { kerja: 'izin' } : null });
+  amanah.push({ kode: 'bk', ikon: 'fa-user-shield', pihak: 'Guru BK', n: null, nada: 'muat', teks: 'menghitung santri tier 3…', kecil: '', aksi: { kerja: 'nav', arg: 'bk' } });
+  if (pencatat) amanah.push({ kode: 'pencatat', ikon: 'fa-user-clock', pihak: 'Pencatat', n: pencatat.buta.length,
+    nada: pencatat.buta.length ? 'warn' : 'ok',
+    teks: pencatat.buta.length ? 'kelas tanpa pencatat aktif pekan ini' : 'setiap kelas punya pencatat aktif pekan ini',
+    kecil: [pencatat.buta.length ? pencatat.buta.slice(0, 8).join(', ') + (pencatat.buta.length > 8 ? ', …' : '') : '',
+      pencatat.diam.length ? `${angka(pencatat.diam.length)} akun tanpa catatan 30 hari` : ''].filter(Boolean).join(' · '),
+    aksi: { kerja: 'nav', arg: 'keterlibatan' } });
+  if (putra.length && putraKamar < putra.length) amanah.push({ kode: 'kamar', ikon: 'fa-bed', pihak: 'Data kamar', n: putra.length - putraKamar,
+    nada: 'warn', teks: 'santri putra belum ditempatkan di kamar',
+    kecil: `${angka(putraKamar)} dari ${angka(putra.length)} sudah berkamar · statistik kamar hanya mewakili yang berkamar`,
+    aksi: { kerja: 'nav', arg: 'siswa' } });
+
+  const ti = teksIrama(ir);
+  const verdict = ti ? ti.judul : rows.length
+    ? `${angka(rows.length)} catatan dalam ${angka(batas)} hari pertama.`
+    : `Belum ada catatan pelanggaran pada ${labelBulan(bulan)}.`;
+  const verdictRinci = ti ? ti.rinci : rows.length ? 'Irama pekan terbaca setelah tiga hari genap.' : '';
+  const nadaVerdict = ir.arah === 'turun' ? 'baik' : ir.arah === 'naik' ? 'waspada' : 'netral';
+
+  const D = KEP.data = { bulan, hariBulan, batas, rows, ir, irSumber, nSantri, nTercatat, bersih, bina, binaSelesai, binaTerbuka,
+    tuntasPct, tunggu, lama, izinLewat, pencatat, agenda, amanah, verdict, verdictRinci, nadaVerdict, beratRows, siswa, L };
+
+  $('viewRoot').innerHTML = htmlMejaKeputusan(D);
+  if (gerakKepBoleh() && !APP.segarSama) requestAnimationFrame(() => $('mkPapan')?.classList.add('mk-gerak'));
+  else $('mkPapan')?.classList.add('mk-diam');
+  hitungNaikKep();
+
+  onKlik((e) => {
+    const a = e.target.closest('[data-mk]');
+    if (a) return aksiKeputusan(a.dataset.mk, a.dataset.arg);
+    const n = e.target.closest('[data-nav]');
+    if (n) return navigateTo(n.dataset.nav);
+    const d = e.target.closest('[data-detail]');
+    if (d) return bukaDetailSantri(d.dataset.detail);
+  });
+
+  // IPP (berat: memuat presensi & data positif) — menyusul tanpa menahan meja.
+  if (bisa('radar.lihat')) {
+    try {
+      const b = await bahanIpp({ siswa, detail: L.detailTr, izin: L.izinSemua, pembinaan: L.pembinaan, gagal: L.gagal });
+      if (gen !== KEP.gen || APP.view !== 'keputusan') return;
+      const ipp = ippDariBahan(siswa, b, perLembar(bulan));
+      const bk = D.amanah.find(x => x.kode === 'bk');
+      if (bk) {
+        if (ipp) {
+          const pct = nSantri ? Math.round(ipp.tier3 / nSantri * 100) : 0;
+          Object.assign(bk, { n: ipp.tier3, nada: pct >= 10 ? 'bad' : ipp.tier3 ? 'warn' : 'ok',
+            teks: 'santri tier 3 menunggu pendampingan', kecil: `${pct}% dari ${angka(nSantri)} santri · ${angka(ipp.tier2)} tier 2 dipantau wali kelas${pct >= 10 ? ' · ambang tier dibawa ke musyawarah' : ''}` });
+        } else Object.assign(bk, { n: null, nada: 'netral', teks: 'tingkat peringatan belum bisa dihitung', kecil: kalimatGagal(b.gagal, 'ipp') || '' });
+        const el = document.querySelector('[data-mk-amanah="bk"]');
+        if (el) { el.outerHTML = htmlAmanahKep(bk); hitungNaikKep(); }
+      }
+    } catch (e) { console.warn('[meja keputusan · ipp]', e.message); }
+  } else {
+    const el = document.querySelector('[data-mk-amanah="bk"]'); if (el) el.remove();
+    D.amanah = D.amanah.filter(x => x.kode !== 'bk');
+  }
+}
+
+function sapaanPendek(nama) {
+  return String(nama || '').split(',')[0].replace(/^(Ust\.?|Ustz\.?|Ustadz|Ustazah|Ustadzah)\s+/i, '').trim().split(/\s+/).slice(0, 2).join(' ');
+}
+
+function htmlAmanahKep(x) {
+  const angkaTampil = x.n === null || x.n === undefined
+    ? `<b class="mk-am-n muat"><i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i></b>`
+    : `<b class="mk-am-n" data-mk-angka="${x.n}">${angka(x.n)}</b>`;
+  const isi = `<span class="mk-am-ikon" aria-hidden="true"><i class="fa-solid ${x.ikon}"></i></span>
+      <span class="mk-am-pihak">${esc(x.pihak)}</span>
+      ${angkaTampil}
+      <span class="mk-am-teks"><span>${esc(x.teks)}</span>${x.kecil ? `<small>${esc(x.kecil)}</small>` : ''}</span>
+      ${x.aksi ? '<i class="fa-solid fa-chevron-right mk-am-panah" aria-hidden="true"></i>' : ''}`;
+  return x.aksi
+    ? `<button type="button" class="mk-am ${x.nada}" data-mk-amanah="${x.kode}" data-mk="${esc(x.aksi.kerja)}" data-arg="${esc(x.aksi.arg || '')}">${isi}</button>`
+    : `<div class="mk-am ${x.nada}" data-mk-amanah="${x.kode}">${isi}</div>`;
+}
+
+function htmlMejaKeputusan(D) {
+  const { ir, irSumber, bulan, batas, hariBulan } = D;
+  const hij = (() => { try { return bulanHijriah(bulan); } catch (e) { return ''; } })();
+  const maks = Math.max(1, ...ir.pekan.map(p => p.rata ?? (p.kini ? p.jml : 0)));
+  const SUMBER = [['osda', 'OSDA'], ['musyrif', 'Musyrif & asatidz'], ['madrasah', 'Madrasah']];
+  const adaSumber = SUMBER.filter(([k]) => irSumber[k].pekan.some(p => p.jml));
+  const baris = ir.pekan.map((p, i) => {
+    const nilai = p.rata;
+    const seg = adaSumber.map(([k]) => {
+      const ps = irSumber[k].pekan[i];
+      const v = nilai !== null ? (ps?.rata || 0) : (ps?.jml || 0);
+      return `<i class="mk-seg mk-seg-${k}" style="--w:${(v / maks * 100).toFixed(2)}%"></i>`;
+    }).join('');
+    const label = nilai !== null ? `${fmtDesimal(nilai)}<small>/hari</small>` : `${angka(p.jml)}<small> hari ini</small>`;
+    return `<div class="mk-pekan${p.kini ? ' kini' : ''}" style="--i:${i}">
+      <span class="mk-pekan-nama">${esc(p.nama)}<small>${p.a}–${p.z}</small></span>
+      <span class="mk-pekan-jalur" role="img" aria-label="${esc(p.nama)}: ${nilai !== null ? fmtDesimal(nilai) + ' catatan per hari' : angka(p.jml) + ' catatan hari ini'}">${seg}</span>
+      <b class="mk-pekan-nilai">${label}</b></div>`;
+  }).join('');
+  const legenda = adaSumber.map(([k, n]) => `<span><i class="mk-seg-${k}"></i>${esc(n)}</span>`).join('');
+
+  const vital = (judul, nilai, sub, nada = '') => `<div class="mk-vital ${nada}"><small>${esc(judul)}</small><b>${nilai}</b><span>${esc(sub)}</span></div>`;
+  const pctBersih = D.nSantri ? Math.round(D.bersih / D.nSantri * 100) : 0;
+  const pekanKini = ir.pekan.find(p => p.kini);
+  const vitals = [
+    vital('Santri bersih bulan ini', `<em data-mk-angka="${D.bersih}">${angka(D.bersih)}</em>`, `${pctBersih}% dari ${angka(D.nSantri)} santri tanpa catatan`, pctBersih >= 50 ? 'baik' : ''),
+    vital('Catatan bulan ini', `<em data-mk-angka="${D.rows.length}">${angka(D.rows.length)}</em>`,
+      pekanKini && pekanKini.rata !== null ? `${fmtDesimal(pekanKini.rata)} per hari pada pekan ini` : `sejak tanggal 1`,
+      D.nadaVerdict === 'waspada' ? 'waspada' : ''),
+    vital('Pembinaan tuntas', D.tuntasPct === null ? '—' : `<em data-mk-angka="${D.tuntasPct}">${D.tuntasPct}</em>%`,
+      D.tuntasPct === null ? 'belum ada pembinaan' : `${angka(D.binaSelesai)} dari ${angka(D.bina.length)} · ${angka(D.binaTerbuka.length)} berjalan`,
+      D.tuntasPct !== null && D.tuntasPct < 60 ? 'waspada' : ''),
+    D.pencatat ? vital('Pencatat aktif pekan ini', `<em data-mk-angka="${D.pencatat.aktif.length}">${angka(D.pencatat.aktif.length)}</em><small>/${angka(D.pencatat.semua.length)}</small>`,
+      'Guru BK tidak dihitung', D.pencatat.aktif.length / Math.max(1, D.pencatat.semua.length) < 0.6 ? 'waspada' : '') : ''
+  ].join('');
+
+  const agenda = D.agenda.length
+    ? D.agenda.map((k, i) => `<li class="mk-ag ${k.tingkat}" style="--i:${i}">
+        <span class="mk-ag-no" aria-hidden="true">${String(i + 1).padStart(2, '0')}</span>
+        <div class="mk-ag-isi"><p>${esc(k.judul)}</p><small>${esc(k.kecil)}</small></div>
+        ${k.aksi ? `<button type="button" class="btn btn-ghost btn-sm mk-ag-aksi" data-mk="${esc(k.aksi.kerja)}" data-arg="${esc(k.aksi.arg || '')}">${esc(k.aksi.label)}<i class="fa-solid fa-arrow-right"></i></button>` : ''}
+      </li>`).join('')
+    : `<li class="mk-ag ok"><span class="mk-ag-no" aria-hidden="true"><i class="fa-solid fa-circle-check"></i></span>
+        <div class="mk-ag-isi"><p>Tidak ada yang menunggu keputusan Anda bulan ini.</p>
+        <small>Butir muncul sendiri bila ada musyawarah tertunda, satu aturan menyerap terlalu banyak catatan, angkatan menjauh dari rata-rata, atau kasus berat.</small></div></li>`;
+
+  const pctBulan = Math.round(batas / hariBulan * 100);
+  return `
+  <section class="mk-papan mk-${D.nadaVerdict}" id="mkPapan">
+    <div class="mk-papan-kiri">
+      <div class="mk-kop"><span class="ar" lang="ar">مكتب القرار</span>
+        <span class="mk-tgl">${esc(labelBulan(bulan))}${hij ? ` · ${esc(hij)}` : ''}</span></div>
+      <h2 class="mk-vonis">${esc(D.verdict)}</h2>
+      ${D.verdictRinci ? `<p class="mk-rinci">${esc(D.verdictRinci)}</p>` : ''}
+      <div class="mk-hari" style="--p:${pctBulan}%"><span class="mk-hari-jalur"><i></i></span>
+        <span>Hari ke-${angka(batas)} dari ${angka(hariBulan)} · ${angka(D.rows.length)} catatan sejak tanggal 1</span></div>
+      <svg class="mk-benang" viewBox="0 0 600 24" preserveAspectRatio="none" aria-hidden="true"><path d="M0 18 C 120 4, 220 22, 330 12 S 520 2, 600 10"/></svg>
+    </div>
+    <figure class="mk-irama">
+      <figcaption><b>Irama pekan</b><span>rata-rata catatan per hari genap, menurut pencatat</span></figcaption>
+      <div class="mk-pekan-daftar">${baris || '<p class="mk-kosong">Belum ada catatan bulan ini.</p>'}</div>
+      ${legenda ? `<div class="mk-legenda">${legenda}</div>` : ''}
+    </figure>
+  </section>
+
+  <div class="mk-vitals">${vitals}</div>
+
+  <div class="mk-grid">
+    <section class="mk-blok mk-agenda">
+      <header><h3><i class="fa-solid fa-stamp" aria-hidden="true"></i>Menunggu keputusan Anda</h3>
+        <button type="button" class="btn btn-primary btn-sm" data-mk="salin"><i class="fa-solid fa-copy"></i>Salin agenda rapat</button></header>
+      <ol class="mk-ag-daftar">${agenda}</ol>
+    </section>
+    <section class="mk-blok mk-amanah">
+      <header><h3><i class="fa-solid fa-hourglass-half" aria-hidden="true"></i>Amanah yang tertahan</h3></header>
+      <div class="mk-am-daftar">${D.amanah.map(htmlAmanahKep).join('')}</div>
+    </section>
+  </div>
+
+  <nav class="mk-bahan" aria-label="Bahan rinci">
+    <span>Bahan rinci</span>
+    ${[['bidang', 'fa-diagram-project'], ['keterlibatan', 'fa-user-clock'], ['petakamar', 'fa-table-cells'], ['pimpinan', 'fa-landmark'], ['tutupbuku', 'fa-book-bookmark']]
+      .filter(([v]) => bolehHal(v)).map(([v, i]) => `<button type="button" data-nav="${v}"><i class="fa-solid ${i}" aria-hidden="true"></i>${esc(namaHal(v))}</button>`).join('')}
+  </nav>`;
+}
+
+/** Angka bergulir sekali (≤ 0,9 dtk). Tanpa gerak → nilai akhir langsung. */
+function hitungNaikKep() {
+  const els = [...document.querySelectorAll('#viewRoot [data-mk-angka]:not([data-mk-sudah])')];
+  els.forEach(el => el.setAttribute('data-mk-sudah', '1'));
+  if (!gerakKepBoleh() || APP.segarSama) return;
+  const t0 = performance.now(), DUR = 900;
+  const akhir = els.map(el => Number(el.dataset.mkAngka) || 0);
+  const langkah = (t) => {
+    const p = Math.min(1, (t - t0) / DUR), e = 1 - Math.pow(1 - p, 3);
+    els.forEach((el, i) => { el.textContent = angka(Math.round(akhir[i] * e)); });
+    if (p < 1 && APP.view === 'keputusan') requestAnimationFrame(langkah);
+    else els.forEach((el, i) => { el.textContent = angka(akhir[i]); });
+  };
+  requestAnimationFrame(langkah);
+}
+
+function teksAgendaRapat(D) {
+  const garis = [];
+  const tglJam = new Date().toLocaleString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  garis.push(`AGENDA RAPAT — ${labelBulan(D.bulan).toUpperCase()}`);
+  garis.push(`Dayah Ruhul Qurani · hari ke-${D.batas} dari ${D.hariBulan}`);
+  garis.push('');
+  garis.push(`Kondisi: ${D.verdict}${D.verdictRinci ? ' ' + D.verdictRinci : ''}`);
+  garis.push(`• Santri bersih: ${angka(D.bersih)} dari ${angka(D.nSantri)} (${D.nSantri ? Math.round(D.bersih / D.nSantri * 100) : 0}%).`);
+  if (D.tuntasPct !== null) garis.push(`• Pembinaan tuntas: ${D.tuntasPct}% (${angka(D.binaSelesai)} dari ${angka(D.bina.length)}).`);
+  if (D.pencatat) garis.push(`• Pencatat aktif pekan ini: ${angka(D.pencatat.aktif.length)} dari ${angka(D.pencatat.semua.length)}.`);
+  garis.push('');
+  garis.push('Menunggu keputusan:');
+  if (!D.agenda.length) garis.push('—');
+  D.agenda.forEach((k, i) => garis.push(`${i + 1}. ${k.salin}`));
+  garis.push('');
+  garis.push('Amanah yang tertahan:');
+  D.amanah.filter(x => x.n).forEach(x => garis.push(`• ${x.pihak}: ${angka(x.n)} ${x.teks}${x.kecil ? ` (${x.kecil})` : ''}.`));
+  garis.push('');
+  garis.push(`Disusun dari chemint, ${tglJam} WIB.`);
+  return garis.join('\n');
+}
+
+function aksiKeputusan(kerja, arg) {
+  const D = KEP.data; if (!D) return;
+  if (kerja === 'nav') return navigateTo(arg);
+  if (kerja === 'salin') return salinKeClipboard(teksAgendaRapat(D), 'Agenda rapat tersalin. Tempel di WhatsApp atau notulen.');
+  if (kerja === 'bina-tunggu') {
+    stBina.saringBerikut = { bulan: D.bulan, status: 'Menunggu Musyawarah', wali: '',
+      asal: { judul: `${angka(D.tunggu.length)} pembinaan menunggu musyawarah`, sub: 'Dibuka dari Meja Keputusan. Tersaring: bulan ini, menunggu musyawarah.' } };
+    return navigateTo('pembinaan');
+  }
+  if (kerja === 'bina-lama') {
+    stBina.saringBerikut = { bulan: D.bulan, status: 'terbuka', wali: '',
+      asal: { judul: `${angka(D.lama.length)} pembinaan berjalan lebih dari 7 hari`, sub: 'Dibuka dari Meja Keputusan. Tersaring: bulan ini, belum selesai.' } };
+    return navigateTo('pembinaan');
+  }
+  if (kerja === 'izin') { stIzin.filter = 'Pending'; stIzin.page = 1; stIzin.cari = ''; return navigateTo('perizinan'); }
+  if (kerja === 'berat') {
+    const per = new Map();
+    D.beratRows.forEach(r => { const k = String(r.nisn); const x = per.get(k) || { nisn: k, nama: r.nama_siswa, kelas: r.kelas, n: 0, butir: new Set() }; x.n++; x.butir.add(r.nama_pelanggaran || r.kode_pelanggaran); per.set(k, x); });
+    const daftar = [...per.values()].sort((a, b) => b.n - a.n);
+    return Swal.fire({ title: 'Pelanggaran berat bulan ini', width: 620, confirmButtonText: 'Tutup', confirmButtonColor: '#14618B',
+      html: `<div class="mk-berat">${daftar.map(x => `<button type="button" class="mk-berat-baris" data-mk-santri="${esc(x.nisn)}">
+          <span><b>${esc(x.nama || x.nisn)}</b><small>${esc(x.kelas || '')} · ${esc([...x.butir].join('; '))}</small></span><em>${angka(x.n)}</em></button>`).join('')}</div>`,
+      didOpen: (el) => el.querySelectorAll('[data-mk-santri]').forEach(b => b.addEventListener('click', () => { Swal.close(); bukaDetailSantri(b.dataset.mkSantri); })) });
+  }
+}
+
+/* =====================================================================
+ * 2 · RINGKASAN: SATU BULAN, TANPA BULAN LALU
+ * ===================================================================== */
+const RK2 = { B: null };
+
+tabLembar = function () { return []; };
+
+(function bungkusAmanahTanpaSisa() {
+  const asli = amanahLembar;
+  amanahLembar = function () { const h = asli.apply(this, arguments); return { kini: h.kini, sisa: [] }; };
+})();
+
+(function bungkusRingkasanBulan() {
+  const asli = ringkasanBulan;
+  ringkasanBulan = function (L) {
+    const h = asli.apply(this, arguments);
+    try { h.nSantri = (L && L.siswa || []).length; if (APP.view === 'dashboard') RK2.B = h; } catch (e) {}
+    return h;
+  };
+})();
+
+(function bungkusPitaHariIni() {
+  // Hari ini belum selesai: tanggalnya tidak disebut "tanpa catatan".
+  const asli = pitaBulan;
+  pitaBulan = function () {
+    const p = asli.apply(this, arguments);
+    p.hari.forEach(h => { if (h.kini && h.jenis === 'kosong') h.jenis = 'kini-kosong'; });
+    p.kosong = p.hari.filter(h => h.jenis === 'kosong').map(h => h.d);
+    return p;
+  };
+})();
+
+kalimatLembar = function (per, n, nLalu, pita) {
+  if (!n) return per.berjalan ? `Belum ada catatan pelanggaran pada ${per.label}.` : `Tidak ada catatan pelanggaran sepanjang ${per.label}.`;
+  const rentang = per.berjalan ? (per.batas === 1 ? 'pada hari pertama' : `dalam ${per.batas} hari pertama`) : `sepanjang ${per.label}`;
+  const ir = iramaPekanBulan(pita.hari.map(h => h.n), per.hariBulan, per.batas, per.berjalan);
+  const irama = kalimatIrama(ir);
+  return `${angka(n)} catatan pelanggaran ${rentang}.${irama ? ' ' + irama : ''}`;
+};
+
+htmlAngkaLembar = function (B, per) {
+  const poin = B.detail.ini.reduce((a, r) => a + (Number(r.bobot_pelanggaran) || 0), 0);
+  const tercatat = new Set(B.detail.ini.map(r => String(r.nisn))).size;
+  const n = Number(B.nSantri) || 0, bersih = Math.max(0, n - tercatat);
+  const selesai = B.bina.ini.filter(p => String(p.status_pembinaan) === 'Selesai').length;
+  const tuntas = B.bina.ini.length ? Math.round(selesai / B.bina.ini.length * 100) : null;
+  const diLuar = B.izin.ini.filter(z => String(z.status_persetujuan) === 'Pending').length;
+  const k = [
+    { nama: 'Catatan pelanggaran', nilai: angka(B.detail.ini.length), ket: `${angka(poin)} poin` },
+    { nama: 'Santri bersih', nilai: n ? angka(bersih) : '—', ket: n ? `${Math.round(bersih / n * 100)}% dari ${angka(n)} santri` : '', nada: n && bersih / n >= 0.5 ? 'baik' : '' },
+    { nama: 'Pembinaan tuntas', nilai: tuntas === null ? '—' : `${tuntas}%`, ket: `${angka(selesai)} dari ${angka(B.bina.ini.length)}`, nada: tuntas !== null && tuntas < 60 ? 'waspada' : '' },
+    { nama: 'Izin keluar', nilai: angka(B.izin.ini.length), ket: diLuar ? `${angka(diLuar)} belum kembali` : 'semua sudah kembali' }
+  ];
+  return `<dl class="lb-angka">${k.map(x => `<div>
+    <dt>${esc(x.nama)}</dt><dd class="lb-nilai">${x.nilai}</dd>
+    <dd class="lb-banding${x.nada ? ' ' + x.nada : ''}">${esc(x.ket)}</dd>
+  </div>`).join('')}</dl>`;
+};
+
+htmlSantriBerubah = function (c, per) {
+  const B = RK2.B; if (!B) return '';
+  const peta = new Map();
+  B.detail.ini.forEach(r => {
+    const k = String(r.nisn); const x = peta.get(k) || { nisn: k, nama: r.nama_siswa, kelas: r.kelas, poin: 0, n: 0 };
+    x.poin += Number(r.bobot_pelanggaran) || 0; x.n++; peta.set(k, x);
+  });
+  const urut = [...peta.values()].sort((a, b) => b.poin - a.poin || b.n - a.n).slice(0, 6);
+  if (!urut.length) return '';
+  const baris = (x) => `<button type="button" class="lb-santri" data-detail="${esc(x.nisn)}">
+      <span><b>${esc(x.nama || x.nisn)}</b> <small>${esc(x.kelas || '')}</small></span><span class="lb-poin waspada">${angka(x.poin)} poin · ${angka(x.n)}×</span></button>`;
+  const kiri = urut.slice(0, 3), kanan = urut.slice(3);
+  return `<div class="lb-berubah">
+    <h3>Poin tertinggi bulan ini</h3>
+    <div class="lb-berubah-kisi">
+      <div>${kiri.map(baris).join('')}</div>
+      <div>${kanan.map(baris).join('')}</div>
+    </div>
+  </div>`;
+};
+
+(function bungkusPitaLembarBaru() {
+  // Pita "Lembar baru" hanya pada tanggal 1–3.
+  const asli = umumkanLembarBaru;
+  umumkanLembarBaru = function () { if (new Date().getDate() > 3) return; return asli.apply(this, arguments); };
+})();
+
+(function bungkusHujanMejaKerja() {
+  // Keputusan v2.53: tokoh tidak turun di meja kerja (Ringkasan, Meja Keputusan).
+  const asli = hujanMonster;
+  hujanMonster = function () {
+    if (['dashboard', 'keputusan'].includes(APP.view)) { try { hentikanHujan(); } catch (e) {} return; }
+    return asli.apply(this, arguments);
+  };
+})();
+
+/* =====================================================================
+ * 3 · KABAR DAYAH: lembar berjalan tanpa pembanding bulan lalu
+ * ===================================================================== */
+(function bungkusKabarDayahBulanIni() {
+  const asli = htmlMejaPimpinan;
+  htmlMejaPimpinan = function (M) {
+    let irama = '';
+    try {
+      if (M && M.berjalan) {
+        M.trenSah = false; M.ubah = null;
+        M.keputusan = susunKeputusan(M);
+        const [th, bl] = M.bulan.split('-').map(Number);
+        const hariBulan = new Date(th, bl, 0).getDate();
+        const perHari = Array.from({ length: hariBulan }, () => 0);
+        const nis = new Set((M.siswa || []).map(s => String(s.nisn)));
+        (M.detail || []).forEach(d => { const k = kunciTgl(d.tanggal); if (bulanDari(k) === M.bulan && nis.has(String(d.nisn))) { const h = Number(k.slice(8, 10)); if (h >= 1 && h <= hariBulan) perHari[h - 1]++; } });
+        const ir = iramaPekanBulan(perHari, hariBulan, M.batas, true);
+        irama = kalimatIrama(ir);
+        const v = vonisMizan(M);
+        const awalan = 'Lembar berjalan, pembandingnya belum tersedia.';
+        if (irama && v.kalimat.startsWith(awalan)) v.kalimat = irama + v.kalimat.slice(awalan.length);
+        if (ir.arah === 'turun' && v.kode === 'danger' && !(M.keputusan[0] && M.keputusan[0].tingkat === 'bad' && M.keputusan.length >= 2)) { v.kode = 'warn'; v.label = 'Perlu penguatan'; }
+        M.vonis = v;
+        M.iramaKep = ir;
+      }
+    } catch (e) { console.warn('[v2.82 kabar dayah]', e.message); }
+    let html = asli.apply(this, arguments);
+    if (M && M.berjalan) {
+      html = html.replace(/<button type="button" class="mz-pita" data-mz="lembar"[\s\S]*?<\/button>/, '');
+      const ir = M.iramaKep, kini = ir && (ir.pekan.find(p => p.kini && p.rata !== null) || ir.akhir);
+      html = html.replace(/<span class="mz-st baru">Pembanding belum ada<\/span>(<em>[^<]*<\/em>)?/,
+        kini ? `<span class="mz-st ${ir.arah === 'turun' ? 'ok' : ir.arah === 'naik' ? 'warn' : 'netral'}">${esc(fmtDesimal(kini.rata))} catatan/hari</span><em>${esc(kini.kini ? 'pekan ini' : namaPekanKecil(kini))}${ir.awal && ir.awal !== kini ? ` · ${esc(namaPekanKecil(ir.awal))}: ${esc(fmtDesimal(ir.awal.rata))}` : ''}</em>`
+          : `<span class="mz-st netral">Lembar berjalan</span><em>hari ke-${M.batas}</em>`);
+    }
+    return html;
+  };
+})();
+
+/* =====================================================================
+ * 4 · MENU SUPER ADMIN: disusun menurut pekerjaan pengambil kebijakan
+ * ===================================================================== */
+const SUSUN_SUPER = [
+  { id: 'beranda',   label: 'Beranda',          ar: 'الرئيسية',          ikon: 'fa-house',            buka: true,  views: ['keputusan', 'dashboard', 'pimpinan', 'bk'] },
+  { id: 'amanahku',  label: 'Amanah Saya',      ar: 'أماناتي',           ikon: 'fa-stamp',            buka: true,  views: ['banding', 'pesan', 'kotaksaran'] },
+  { id: 'kebijakan', label: 'Kebijakan',  ar: 'مواد السياسة',      ikon: 'fa-gauge-high',       buka: true,  views: ['bidang', 'keterlibatan', 'kelalaian', 'petakamar', 'radar', 'analisis'] },
+  { id: 'laporan',   label: 'Laporan',  ar: 'التقارير',          ikon: 'fa-chart-pie',        buka: false, views: ['rekapbina', 'rekap', 'sarpraslaporan', 'tutupbuku'] },
+  { id: 'santri',    label: 'Santri & Asatidz', ar: 'الطلاب والأساتذة',  ikon: 'fa-users',            buka: false, views: ['siswa', 'asatidz', 'pendidik'] },
+  { id: 'lapangan',  label: 'Lapangan',   ar: 'العمل الميداني',    ikon: 'fa-feather-pointed',  buka: false, views: ['mentor', 'pengasuhan', 'madrasah', 'prestasi', 'tahfiz', 'perizinan', 'pelanggaran', 'sarpras', 'pembinaan', 'sidang'] },
+  { id: 'kelola',    label: 'Pengelolaan',      ar: 'الإدارة',           ikon: 'fa-sliders',          buka: false, views: ['pengguna', 'master', 'audit', 'sarprasatur', 'mentoratur', 'saran'] },
+  { id: 'riset',     label: 'Riset',            ar: 'البحث',             ikon: 'fa-flask',            buka: false, views: ['lab'] }
+];
+
+function susunMenuSuper() {
+  const nav = $('navMenu'); if (!nav || !APP.superAdmin) return;
+  const semuaView = new Set(PA.GRUP.flatMap(g => g.views));
+  const ditata = new Set(SUSUN_SUPER.flatMap(g => g.views));
+  const sisa = [...semuaView].filter(v => !ditata.has(v));
+  const susun = SUSUN_SUPER.map(g => ({ ...g, views: g.id === 'lapangan' ? [...g.views, ...sisa] : [...g.views] }));
+
+  // DOM: kelompok dipindah/dibuat, tombol dipindah ke kelompok barunya.
+  susun.forEach(g => {
+    let d = nav.querySelector(`.nav-grup[data-grup="${g.id}"]`);
+    if (!d) {
+      d = document.createElement('details'); d.className = 'nav-grup'; d.dataset.grup = g.id;
+      d.innerHTML = `<summary class="sb-group"><i class="fa-solid ${g.ikon}"></i><span>${esc(g.label)}</span><i class="fa-solid fa-chevron-down tanda"></i></summary><div class="nav-isi"></div>`;
+    } else {
+      const s = d.querySelector('summary span'); if (s) s.textContent = g.label;
+      const ik = d.querySelector('summary > i:first-child'); if (ik) ik.className = `fa-solid ${g.ikon}`;
+    }
+    const isi = d.querySelector('.nav-isi');
+    g.views.forEach(v => { const b = nav.querySelector(`.nav-item[data-view="${v}"]`); if (b) isi.appendChild(b); });
+    nav.appendChild(d);
+  });
+  // Kelompok lama yang kini kosong tetap ada (disembunyikan rapikanGrupNav).
+
+  // PA.GRUP: eyebrow judul, jejak kelompok, Lentera, gerak antarlantai.
+  PA.GRUP.splice(0, PA.GRUP.length, ...susun.map(({ id, label, ar, views }) => ({ id, label, ar, views })));
+  PA.GRUP.forEach(g => g.views.forEach(v => { if (JUDUL[v]) JUDUL[v].lat = g.label; }));
+
+  // Kelompok yang dibuka: pilihan tersimpan bila ada, bila tidak bawaan susunan.
+  let simpan = null;
+  try { simpan = JSON.parse(bacaLS(kunciPA('grup')) || 'null'); } catch (e) {}
+  const kenal = Array.isArray(simpan) && simpan.some(id => ['kebijakan', 'amanahku', 'lapangan', 'riset'].includes(id));
+  PA.memulihkanGrup = true;
+  susun.forEach(g => {
+    const d = nav.querySelector(`.nav-grup[data-grup="${g.id}"]`); if (!d) return;
+    d.open = (kenal ? simpan.includes(g.id) : g.buka) || !!d.querySelector('.nav-item.active');
+  });
+  setTimeout(() => { PA.memulihkanGrup = false; }, 0);
+  PA.grupDibuka = true;
+  KEP.menuSusun = true;
+  rapikanGrupNav(APP.view);
+  try { const j = JUDUL[APP.view]; if (j) $('pageEyebrow').querySelector('.lat').textContent = j.lat; } catch (e) {}
+}
+
+/* =====================================================================
+ * 5 · PERBAIKAN
+ * ===================================================================== */
+
+/* 5a · Keterlibatan: nama akun kembar dibedakan; Guru BK bukan pencatat. */
+viewKeterlibatan = async function () {
+  const sampai = hariIni(), dari = kunciTgl(tambahHari(new Date(), -(KT.hari - 1)));
+  let data;
+  try {
+    const r = await q(db.rpc('dashboard_kinerja_guru_rpc', { p_dari: dari, p_sampai: sampai, p_role: null, p_jenjang: 'Semua', p_cari: null }), 'keterlibatan');
+    data = r.data || {};
+  } catch (err) {
+    $('viewRoot').innerHTML = kartu('Keterlibatan Pencatat', `<div class="card-note"><i class="fa-solid fa-triangle-exclamation"></i>
+      Data keterlibatan tidak dapat dimuat: <b>${esc(err?.message || String(err))}</b></div>`);
+    return;
+  }
+  const siswa = filterBinaanUnit((await amanKosong(muatSiswa, 'santri')).filter(aktifSantri), 'kelas');
+  const semua = [...new Map((data.ranking || []).filter(g => g.aktif !== false && PENCATAT.includes(g.role) && g.role !== 'Guru BK')
+    .map(g => [g.guru_id || g.username || g.nama, g])).values()];
+  const kembar = new Map(); semua.forEach(g => kembar.set(g.nama, (kembar.get(g.nama) || 0) + 1));
+  const nama = (g) => kembar.get(g.nama) > 1 && g.username ? `${g.nama} · @${g.username}` : g.nama;
+  const tujuh = kunciTgl(tambahHari(new Date(), -7));
+  const diam = semua.filter(g => !Number(g.total_aktivitas));
+  const renggang = semua.filter(g => Number(g.total_aktivitas) && String(g.aktivitas_terakhir || '') < tujuh);
+  const aktif = semua.filter(g => Number(g.total_aktivitas) && String(g.aktivitas_terakhir || '') >= tujuh);
+
+  const kelasAda = [...new Set(siswa.map(s => s.kelas).filter(Boolean))].sort();
+  const pembinaKelas = (k) => semua.filter(g => (g.kelas_binaan || []).includes(k));
+  const buta = kelasAda.filter(k => { const p = pembinaKelas(k); return !p.length || p.every(g => !aktif.includes(g)); })
+    .map(k => ({ k, p: pembinaKelas(k) }));
+
+  const orang = (g, ket) => `<div class="kt-orang">
+      <b>${esc(nama(g))}</b><small>${esc(g.role)}${(g.kelas_binaan || []).length ? ' · ' + esc(g.kelas_binaan.join(', ')) : ''}</small>
+      <span>${esc(ket)}</span></div>`;
+  const kelompok = (judul, kelas, isi, kosongTeks) => `<section class="kt-kel ${kelas}">
+      <header><h3>${esc(judul)}</h3><em>${angka(isi.length)}</em></header>
+      <div class="kt-daftar">${isi.join('') || `<p class="mj-kosong">${esc(kosongTeks)}</p>`}</div></section>`;
+
+  $('viewRoot').innerHTML = `
+    <section class="mz-surat mz-${diam.length ? 'warn' : 'ok'}">
+      <div class="mz-kop"><span class="ar">مشاركة المعلمين</span><span class="mz-tgl">Keterlibatan pencatat · ${KT.hari} hari terakhir · ${tgl(dari)} – ${tgl(sampai)}</span></div>
+      <h2 class="mz-vonis">${diam.length
+        ? `${angka(diam.length)} dari ${angka(semua.length)} pencatat belum mencatat apa pun dalam ${KT.hari} hari terakhir.`
+        : `Semua ${angka(semua.length)} pencatat mencatat dalam ${KT.hari} hari terakhir.`}</h2>
+      <div class="mz-kop-bawah"><span class="mz-meta">Jumlah catatan bukan ukuran mutu pembinaan. Guru BK tidak dihitung sebagai pencatat.</span></div>
+    </section>
+    ${buta.length ? `<section class="card kt-buta"><div class="card-head"><div><h3>Kelas tanpa pencatat aktif pekan ini</h3>
+        <p class="sub">Semua pembina kelasnya belum mencatat dalam 7 hari terakhir, atau kelasnya belum punya pembina.</p></div></div>
+      <div class="card-body kt-chips">${buta.map(({ k, p }) => `<span class="tag ${p.length ? 'tag-sedang' : 'tag-berat'}" title="${esc(p.map(g => g.nama).join(', ') || 'Belum ada pembina')}">${esc(k)}</span>`).join('')}</div></section>` : ''}
+    <div class="kt-grid">
+      ${kelompok('Belum mencatat', 'diam', diam.map(g => orang(g, 'Tidak ada catatan')), 'Tidak ada.')}
+      ${kelompok('Terakhir mencatat lebih dari 7 hari lalu', 'renggang', renggang.map(g => orang(g, `Terakhir ${tgl(g.aktivitas_terakhir)}`)), 'Tidak ada.')}
+      ${kelompok('Mencatat pekan ini', 'aktif', aktif.map(g => orang(g, `${angka(g.hari_aktif)} hari aktif · terakhir ${tgl(g.aktivitas_terakhir)}`)), 'Belum ada.')}
+    </div>`;
+};
+
+/* 5b · Rekap dibuka pada lembar bulan berjalan (bukan "Semua Periode"),
+ *      kecuali periode sudah dipilih sendiri pada sesi ini. */
+function periodeBawaanLaporan() {
+  let raw = null;
+  try { raw = sessionStorage.getItem('rq_periode'); } catch (e) {}
+  if (raw || APP.periode.aktif) return;
+  APP.periode = { aktif: true, bulan: bulanIni(), basis: APP.periode.basis || 'kejadian' };
+  try { sessionStorage.setItem('rq_periode', JSON.stringify(APP.periode)); } catch (e) {}
+  try { gambarBadgePeriode(); } catch (e) {}
+}
+viewRekap = (function (asli) { return async function () { periodeBawaanLaporan(); return asli.apply(this, arguments); }; })(viewRekap);
+viewRekapPembinaan = (function (asli) { return async function () { periodeBawaanLaporan(); return asli.apply(this, arguments); }; })(viewRekapPembinaan);
