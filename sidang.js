@@ -739,7 +739,6 @@
     }).join('');
     const bdg = S.diBanding.length ? `<section class="sd-kertas sd-tertahan">
         <h3><i class="fa-solid fa-scale-balanced"></i>Seluruh perkaranya dalam banding</h3>
-        <p class="sd-kecil">Santri berikut tidak dipanggil sampai Penasihat Hukum memutus bandingnya.</p>
         <ul>${S.diBanding.map(s => `<li><b>${esc(s.nama)}</b> <span>${esc(s.kelas)}</span> <em>${s.tertahan.map(b => esc(LABEL_BANDING[b.banding] || '')).filter((x, i, a) => a.indexOf(x) === i).join(' · ')}</em></li>`).join('')}</ul>
       </section>` : '';
     const pita = `<p class="sd-pita-rekap" aria-hidden="true"><span><b>${angka(c.total)}</b> antrean</span><span><b>${angka(c.dipanggil)}</b> menunggu</span>
@@ -839,7 +838,6 @@
       <i class="fa-solid fa-calendar-day"></i>
       <b>Majelis sedang reses</b>
       <p>Ruang Sidang dibuka pada ${esc(jadwalTeks())}. Sidang berikutnya <strong>${esc(labelHari(d.berikut, true))}</strong>.</p>
-      <p class="sd-kecil">Perkara yang masuk sampai saat itu otomatis tersusun di berkas. Mulai pukul 19.00 malam sebelum hari sidang, berkasnya sudah bisa diunduh dan dicetak. Tab Penasihat Hukum tetap bisa dibuka setiap hari.</p>
     </div>`;
   }
 
@@ -856,7 +854,7 @@
         <div><dt><i class="fa-solid fa-forward"></i> Dilewati</dt><dd>${angka(c.lewati)}</dd></div>
       </dl>
       ${bolehBerkas() || majelis() ? `<button type="button" class="sd-btn sd-btn-emas sd-btn-berkas" data-aksi="berkas"><i class="fa-solid fa-file-pdf"></i>Dokumen sidang</button>
-        <p class="sd-kecil">Lembar pengumuman untuk mading, berkas pegangan majelis, dan berita acara persidangan.</p>` : ''}
+        ` : ''}
       ${bolehTutupSidang(c) ? `<button type="button" class="sd-btn sd-btn-tutup" data-aksi="tutup-sidang"><i class="fa-solid fa-gavel"></i>Tutup sidang hari ini</button>` : ''}
       ${c.putus || c.banding || c.lewati ? `<button type="button" class="sd-btn sd-btn-tipis" data-aksi="berita-acara"><i class="fa-solid fa-copy"></i>Salin ringkasan untuk grup</button>` : ''}
       <div class="sd-papan" aria-hidden="true">
@@ -1336,7 +1334,6 @@
           <li><b>Diputus penasihat</b><span>Kabulkan (beralasan) atau tolak, per pasal.</span></li>
           <li><b>Dieksekusi super admin</b><span>Pelanggaran diarsipkan; tahap sesudahnya turun satu, musyrif diberi koreksi.</span></li>
         </ol>
-        <p class="sd-kecil">Pasal yang ditolak atau dikembalikan super admin kembali ke antrean sidang berikutnya dengan keterangannya.</p>
       </aside>`;
   }
 
@@ -1407,7 +1404,7 @@
       html: `<div class="sd-swal sd-manual">
         <p>Untuk perkara yang sudah dibacakan sebelum antrean v2.68, yang sudah di tangan musyrif, atau yang tuntas tetapi salah catat. Cari santri, centang pasal yang disanggah, lalu tulis pokok keberatannya.</p>
         <label class="sd-cari sd-cari-penuh"><i class="fa-solid fa-magnifying-glass"></i><input type="search" id="sdMCari" placeholder="Ketik nama santri (paling sedikit 3 huruf)" autocomplete="off"></label>
-        <div id="sdMHasil" class="sd-manual-hasil"><p class="sd-kecil">Hasil pencarian tampil di sini.</p></div>
+        <div id="sdMHasil" class="sd-manual-hasil"></div>
         <label for="sdMPokok">Pokok keberatan santri <span class="sd-wajib">wajib</span></label>
         <textarea id="sdMPokok" rows="3" maxlength="500" placeholder="Contoh: ananda menyatakan sedang di klinik pada 3 November; nama tertukar dengan teman sekamar."></textarea>
       </div>`,
@@ -1471,8 +1468,12 @@
   /** v2.70: kursi majelis — inti (selalu wajib) + PJ per kelompok bentuk yang ada di berkas. */
   function kursiMajelis() {
     const p = S.data?.panitia || {}, w = p.wajib || {};
-    return [...JABATAN_INTI.map(([k, l]) => ({ id: k, label: l, isi: p.isi?.[k], wajib: true, poin: k === 'ketua' ? 15 : 10 })),
-      ...kelompokTampil().map(k => ({ id: 'pj-' + k, pj: k, label: `PJ ${KELOMPOK[k]}`, isi: p.isi?.pj?.[k], wajib: !!w[k], poin: 10, nPk: Number(w[k]) || 0 }))];
+    // v2.83: poin = yang benar-benar dicatat server (batas 20/bulan); sebelum dikreditkan tidak ada angka.
+    //        Sebelum palu: 'perkiraan' dari server = min(bobot jabatan, sisa jatah bulan). Bobot jabatan untuk baris kosong.
+    const poin = (x) => (x?.kredit ? Number(x.poin) || 0 : x?.perkiraan != null ? Number(x.perkiraan) || 0 : null);
+    const bobot = (k) => Number(p.bobot?.[k === 'ketua' ? 'ketua' : 'lain']) || null;
+    return [...JABATAN_INTI.map(([k, l]) => ({ id: k, label: l, isi: p.isi?.[k], wajib: true, poin: poin(p.isi?.[k]), bobot: bobot(k) })),
+      ...kelompokTampil().map(k => ({ id: 'pj-' + k, pj: k, label: `PJ ${KELOMPOK[k]}`, isi: p.isi?.pj?.[k], wajib: !!w[k], poin: poin(p.isi?.pj?.[k]), bobot: bobot('pj'), nPk: Number(w[k]) || 0 }))];
   }
   const kursiTerisi = () => { const l = kursiMajelis().filter(k => k.wajib); return { n: l.filter(k => k.isi?.nama).length, dari: l.length }; };
   /** Inisial dua huruf untuk medali kursi ("Muhammad" & gelar dilompati). */
@@ -1537,7 +1538,7 @@
       ${!p.lengkap && bisa && !S.data.super ? '<p class="sd-mejamj-pesan"><i class="fa-solid fa-hand-pointer"></i>Klik kursi bertanda + untuk mengisinya. Majelis wajib lengkap sebelum palu pertama dan unduh berkas.</p>' : ''}
       <ol class="sd-mjk-daftar">${kursiMajelis().map(kursi).join('')}</ol>
       ${p.pembimbing ? `<p class="sd-mejamj-pembimbing">${fotoGuruHtml(p.pembimbing)}<span><small>Pembimbing</small><b>${esc(p.pembimbing)}</b></span></p>` : ''}
-      ${S.data.super && !p.lengkap ? '<p class="sd-kecil">Super admin boleh bersidang tanpa susunan majelis; apresiasi hanya tercatat bila susunan diisi.</p>' : ''}
+      
     </section>`;
   }
 
@@ -1548,7 +1549,8 @@
     const pilih = {};
     muatPendidik();
     const baris = kursiMajelis().map(k => ({ ...k,
-      ket: k.pj ? (k.wajib ? `${angka(k.nPk)} perkara · 10 poin` : 'tidak ada perkara · boleh dikosongkan') : `${k.poin} poin` }));
+      ket: [k.pj ? (k.wajib ? `${angka(k.nPk)} perkara` : 'tidak ada perkara · boleh dikosongkan') : '',
+            k.pj && !k.wajib ? '' : k.isi?.nama ? (k.poin ? `+${k.poin} poin` : '') : (k.bobot ? `${k.bobot} poin` : '')].filter(Boolean).join(' · ') }));
     const JUDUL_GRUP = { ketua: ['fa-gavel', 'Majelis hakim'], panitera: ['fa-feather-pointed', 'Panitera & Penasihat'] };
     const pjPertama = baris.find(b => b.pj)?.id;
     const judulGrup = (b) => { const g = JUDUL_GRUP[b.id] || (b.id === pjPertama ? ['fa-user-check', 'Penanggung jawab eksekusi'] : null);
@@ -1564,7 +1566,6 @@
         <p class="sd-berkas-sesi"><i class="fa-solid fa-scale-balanced"></i><span>Sidang <b>${esc(labelHari(sesiBerkas(), true))}</b> · OSDA ${esc(unitBerkas())}${ket ? ` · <em>${esc(ket)}</em>` : ''}</span></p>
         <p class="sd-mj-hitung" aria-live="polite"><span class="sd-mj-hitung-bilah"><i style="--isi:0%"></i></span><span><b id="sdMjN">0</b>/${angka(nWajib)} kursi wajib terisi</span></p>
         ${!p.lengkap && (p.kurang || []).length ? `<p class="sd-mj-kurang"><i class="fa-solid fa-circle-exclamation"></i><span>Belum lengkap: <b>${esc(p.kurang.join(', '))}</b></span></p>` : ''}
-        <p class="sd-kecil">Pilih dari santri angkatan XI${unitBerkas() !== 'Putra & Putri' ? ` ${esc(unitBerkas().toLowerCase())}` : ''}; satu santri satu jabatan. Nilai tanggung jawab keadilan menjadi apresiasi otomatis saat palu pertama diketuk: Hakim Ketua 15 poin, lainnya 10 poin. Jumlah PJ mengikuti bentuk pembinaan yang ada di berkas.</p>
         <ol class="sd-mj-daftar">${baris.map(b => `${judulGrup(b)}<li class="sd-mj-baris${b.pj ? ' pj pj-' + b.pj : ''}">
           <label for="sdMj-${b.id}">${esc(b.label)}${b.wajib ? ' <span class="sd-wajib">wajib</span>' : ''}<small>${esc(b.ket)}</small></label>
           <div class="sd-mj-isi"><input type="text" id="sdMj-${b.id}" data-mj="${b.id}" autocomplete="off" maxlength="60" placeholder="Ketik nama santri XI…" value="${esc(b.isi?.nama || '')}"${b.isi?.kunci ? ' data-ok="1"' : ''}>
@@ -1704,7 +1705,7 @@
     const kata = (nama) => String(nama).split(/\s+/).map((w, j) => `<span class="kk"><span class="kk-i" style="--j:${j}">${esc(w)}</span></span>`).join(' ');
     const kursi = (x) => `<li class="sd-lt-kursi${x.id === 'ketua' ? ' ketua' : ''}${x.pj ? ' pj' : ''}" data-id="${esc(x.id)}" style="--u:${urut.indexOf(x.id)}">
         <span class="sd-lt-medali"><span>${esc(inisial(x.isi.nama))}</span></span>
-        <small>${esc(x.label)}</small><b>${kata(x.isi.nama)}</b>${x.isi.kelas ? `<i>${esc(x.isi.kelas)}</i>` : ''}<em>+${x.poin}</em></li>`;
+        <small>${esc(x.label)}</small><b>${kata(x.isi.nama)}</b>${x.isi.kelas ? `<i>${esc(x.isi.kelas)}</i>` : ''}${x.poin ? `<em>+${x.poin}</em>` : ''}</li>`;
     const pb = S.data.panitia.pembimbing;
     const el = document.createElement('div');
     el.className = `sd-lantik${diam ? ' diam' : ''}`;
@@ -1787,7 +1788,7 @@
       confirmButtonText: '<i class="fa-solid fa-stamp"></i> Sahkan yang dicentang', cancelButtonText: 'Batal', confirmButtonColor: '#3730A3',
       showLoaderOnConfirm: true, allowOutsideClick: () => !A.Swal.isLoading(),
       html: `<div class="sd-swal sd-sah">
-        <p class="sd-kecil">Ananda <b>${esc(s.nama)}</b> · ${esc(s.kelas)}. Centang pembinaan yang <b>benar-benar sudah dijalankan</b> sejak dibacakan, sesuai kesaksian penanggung jawab eksekusi. Pembinaan tercatat <b>Disahkan OSDA</b>; musyrif menerima pesan dan boleh menyanggah dalam 3 hari.</p>
+        <p class="sd-kecil">Ananda <b>${esc(s.nama)}</b> · ${esc(s.kelas)} · centang pembinaan yang sudah dijalankan.</p>
         <ul class="sd-sah-daftar">${l.map(b => `<li><label><input type="checkbox" value="${esc(b.id)}">
           <span><b>${esc(b.pelanggaran)}</b><small>${esc(b.kategori)} ke-${esc(b.tahap || '?')} · ${esc(b.bentuk || '-')}</small>
           <small>Diserahkan ${esc(labelTgl(b.sesi))}${b.penerima ? ` kepada ${esc(b.penerima.join(', '))}` : ''}${Array.isArray(b.pj) && b.pj.length ? ` · saksi PJ ${esc(b.pj.join(', '))}` : ''}</small></span></label></li>`).join('')}</ul></div>`,
@@ -2104,11 +2105,10 @@
         ${isiMajelis ? `<fieldset><legend>Majelis sidang</legend>
           <div class="sd-majelis-isian">${JABATAN.map(([k, l]) => `<label>${esc(l)}${k === 'ketua' ? ' <span class="sd-wajib">wajib</span>' : ''}
             <input type="text" id="sdM-${k}" maxlength="80" autocomplete="off" value="${esc(m[k] || '')}" placeholder="${k === 'panitera' ? 'Pencatat sidang' : 'Nama lengkap'}"></label>`).join('')}</div>
-          <p class="sd-kecil">Nama tercetak pada susunan majelis. Tanda tangan dibubuhkan pada berita acara persidangan.</p>
         </fieldset>` : adaPanitia() ? `<fieldset><legend>Majelis sidang</legend><p class="sd-kecil sd-mj-baca">${(() => { const n = namaMajelis();
             const l = [...JABATAN_INTI.map(([k, lb]) => n[k] ? `${lb} <b>${esc(n[k])}</b>` : ''), ...URUT_KELOMPOK.map(k => n.pj[k] ? `PJ ${KELOMPOK[k]} <b>${esc(n.pj[k])}</b>` : ''), n.pembimbing ? `Pembimbing <b>${esc(n.pembimbing)}</b>` : ''].filter(Boolean);
             return l.length ? l.join(' · ') : 'Belum diisi.'; })()}</p>
-            <p class="sd-kecil">Untuk mengubah, tutup jendela ini lalu tekan <b>Susunan majelis</b>.</p></fieldset>`
+            </fieldset>`
           : `<p class="sd-kecil">Majelis: ${m.ketua ? esc(JABATAN.map(([k, l]) => m[k] ? `${l} ${m[k]}` : '').filter(Boolean).join(' · ')) : 'belum diisi OSDA.'}</p>`}
         <fieldset><legend>Isi berkas</legend>
           <div class="sd-opsi-daftar">${ops.map((o, i) => radio('sdCakupan', o.k, o.label, `${angka(o.list.length)} santri · ${angka(o.list.reduce((a, s) => a + s.sesi.filter(b => !selesaiSesi(b)).length, 0))} perkara`, i === 0)).join('')}</div>
@@ -2649,7 +2649,6 @@
     const res = await A.Swal.fire({
       title: 'Berita acara persidangan', width: 600, showConfirmButton: false, showCancelButton: true, cancelButtonText: 'Tutup',
       html: `<div class="sd-swal sd-bap-daftar">
-        <p class="sd-kecil">Berita acara terbit setelah sidang ditutup majelis, susunan majelis lengkap, dan semua banding sidang itu diputus Penasihat Hukum. Nomor surat dihitung dari sidang pertama.</p>
         <ol>${l.map(x => `<li><button type="button" data-sesi="${esc(x.sesi)}" class="sd-bap-sesi${x.terbit ? ' terbit' : ''}">
           <span class="sd-bap-no">${esc(String(x.nomor).padStart(3, '0'))}</span>
           <span class="sd-bap-isi"><b>${esc(labelHari(x.sesi, true))}</b><small>${angka(x.santri)} santri dipanggil${Number(x.menunggu_banding) ? ` · <em>${angka(x.menunggu_banding)} banding belum diputus</em>` : ''}</small></span>
@@ -2670,7 +2669,7 @@
       await A.Swal.fire({ icon: 'info', title: 'Berita acara belum bisa terbit', width: 560, confirmButtonText: 'Mengerti', confirmButtonColor: '#0B2B45',
         html: `<div class="sd-swal"><p class="sd-kecil">Sidang <b>${esc(labelHari(sesi, true))}</b> · nomor ${esc(b.nomor_surat || '')}</p>
           <ul class="sd-bap-kurang">${(b.kurang || []).map(k => `<li><i class="fa-solid fa-circle-exclamation"></i>${esc(k)}</li>`).join('')}</ul>
-          <p class="sd-kecil">Datanya terisi otomatis dari jalannya sidang. Begitu syarat di atas terpenuhi, berita acara langsung bisa diunduh.</p></div>` });
+          </div>` });
       return;
     }
     if (!b.terbit && b.konsep) {

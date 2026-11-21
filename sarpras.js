@@ -214,16 +214,37 @@
       $('spUlang')?.addEventListener('click', () => navigateTo(view));
     }
   }
-  const tabNav = (daftar, aktif, label) => `<nav class="sp-tab" role="tablist" aria-label="${esc(label)}">
-    ${daftar.map(([k, l, i, n]) => `<button type="button" role="tab" class="sp-tab-b" data-sp-tab="${esc(k)}" aria-selected="${k === aktif}">
-      <i class="fa-solid ${i}"></i><span>${esc(l)}</span>${n ? `<b class="sp-tab-n">${angka(n)}</b>` : ''}</button>`).join('')}</nav>`;
+  /** v2.83: tab bergaris bersama (RQKb.tab). Butir ke-5 = lencana merah (masalah terbuka). */
+  const tabNav = (daftar, aktif, label) => window.RQKb.tab(daftar, aktif, 'data-sp-tab', label);
+  const K = () => window.RQKb;
+  /** v2.83 · urutan daftar lokasi: nomor (bawaan) atau masalah terbanyak dulu. */
+  function urutLokasi(daftar, mode) {
+    const n = (l) => statusLokasi(l).buka.length;
+    const dasar = (a, b) => urutLantai(lantaiDari(a), lantaiDari(b)) || jalur(a).localeCompare(jalur(b), 'id', { numeric: true });
+    return [...daftar].sort(mode === 'masalah' ? (a, b) => (n(b) - n(a)) || dasar(a, b) : dasar);
+  }
+  /** v2.83 · nama View Transition hanya dipasang selama perpindahan kartu ⇄ rincian (bukan pada semua kartu). */
+  const namaiTransisi = (el, pasang = true) => { if (!el) return; el.style.viewTransitionName = pasang ? 'sp-terpilih' : ''; el.style.viewTransitionClass = pasang ? 'sp-kartu' : ''; };
+  const modeUrut = () => { try { return localStorage.getItem('rq:sp-urut') === 'masalah' ? 'masalah' : 'nomor'; } catch (e) { return 'nomor'; } };
 
   /* =====================================================================
    * 1 · SARPRAS ASRAMA — input musyrif
    * ===================================================================== */
+  /* v2.83 · "Sudah baik" yang masih dalam jeda Urungkan disimpan di perangkat (per akun), supaya tidak hilang
+   *  bila halaman dimuat ulang / ditutup sebelum terkirim; sisanya dikirim saat Sarpras dibuka lagi. */
+  const TUNDA = 'rq:sp-tunda';
+  const bacaTunda = () => { try { const v = JSON.parse(localStorage.getItem(TUNDA) || 'null'); return v && v.u === APP.uid && Array.isArray(v.ids) ? v.ids.map(Number).filter(Number.isFinite) : []; } catch (e) { return []; } };
+  const tulisTunda = (ids) => { try { ids.length ? localStorage.setItem(TUNDA, JSON.stringify({ u: APP.uid, ids })) : localStorage.removeItem(TUNDA); } catch (e) { /* penyimpanan tertutup */ } };
+  async function kirimSisaTunda() {
+    const ids = bacaTunda(); if (!ids.length) return;
+    tulisTunda([]);   // diambil dulu: pembukaan halaman berikutnya tidak mengirim ulang yang sama
+    try { await rpc('sarpras_masalah_baik', { p_ids: ids }); }
+    catch (e) { tulisTunda([...new Set([...bacaTunda(), ...ids])]); console.warn('[sarpras] sisa "Sudah baik" belum terkirim', e); }
+  }
   async function lapor(akar) {
     await bukaHalaman(akar, 'sarpras', 'Sarpras Asrama', async () => {
       await muat();
+      await kirimSisaTunda();
       await Promise.all([muatMasalah(), muatCek(), muatPenempatan()]);
       if (APP.view !== 'sarpras') return;
       gambarLapor(akar);
@@ -263,13 +284,12 @@
     const penem = bolehPenempatan();
     const modul = pengelola() || SP.saya.aktif === true;
     if (!modul && !penem) {
-      akar.innerHTML = kartu('Sarpras Asrama', `<div class="card-body">${kosong('Belum dibuka', 'Pengelola sarpras sedang menyiapkan data kamar dan barang. Halaman ini terbuka setelah modul diaktifkan.', 'fa-lock')}</div>`);
+      akar.innerHTML = kartu('Sarpras Asrama', `<div class="card-body">${kosong('Belum dibuka', '', 'fa-lock')}</div>`);
       return;
     }
     const milik = modul ? lokasiSaya() : [];
     if (modul && !milik.length && !penem) {
-      akar.innerHTML = kartu('Sarpras Asrama', `<div class="card-body">${kosong('Belum ada lokasi amanah',
-        `${istilah('kamar')} santri binaan Anda tampil di sini setelah nomor ${istilah('kamar').toLowerCase()} mereka tercatat. Asrama umum dan ${istilah('kamar').toLowerCase()} ${istilah('musyrif').toLowerCase()} mengikuti penunjukan pengelola.`, 'fa-bed')}</div>`);
+      akar.innerHTML = kartu('Sarpras Asrama', `<div class="card-body">${kosong('Belum ada lokasi amanah', '', 'fa-bed')}</div>`);
       return;
     }
     const zs = milik.length ? zonaSaya() : [];
@@ -279,21 +299,18 @@
     if (!L.tab || !tabAda(L.tab)) L.tab = penem && (nBelum > 0 || !zs.length) ? 'penempatan' : (zs[0]?.kode || (milik.length ? 'riwayat' : 'penempatan'));
     const nBuka = SP.masalah.filter(m => terbuka(m) && SP.milik.has(m.lokasi_id)).length;
     const nLewat = milik.filter(l => statusLokasi(l).lewat).length;
+    const namaUnit = (milik[0] && unit(milik[0].unit_id)?.nama) || istilah('asrama');
     akar.innerHTML = `<div class="sp-lapor">
-      <header class="sp-hero card">
-        ${modul ? `<div class="sp-hero-teks"><span class="ar">المرافق</span><h3>Amanah sarana</h3>
-          <p>${angka(milik.length)} lokasi · <b class="${nBuka ? 'sp-merah' : ''}">${angka(nBuka)} masalah terbuka</b>${nLewat ? ` · ${angka(nLewat)} perlu dicek` : ''}</p></div>
-        <p class="sp-hero-ket">Laporkan yang bermasalah saja. Yang tidak dilaporkan terhitung baik.</p>`
-        : `<div class="sp-hero-teks"><span class="ar">المرافق</span><h3>Penempatan ${esc(istilah('kamar').toLowerCase())}</h3>
-          <p><b class="${nBelum ? 'sp-merah' : ''}">${angka(nBelum)} santri binaan belum berkamar</b></p></div>
-        <p class="sp-hero-ket">Pilih ${esc(istilah('kamar').toLowerCase())}, lalu ketuk santri yang tidur di sana.</p>`}
-      </header>
+      ${K().kepala(modul
+        ? { alis: namaUnit, judul: 'Sarpras', angka: [{ n: milik.length, l: 'lokasi' }, { n: nBuka, l: 'masalah terbuka', merah: nBuka > 0 }, { n: nLewat, l: 'perlu dicek' }] }
+        : { alis: namaUnit, judul: `Penempatan ${istilah('kamar').toLowerCase()}`, angka: [{ n: nBelum, l: 'belum berkamar', merah: nBelum > 0 }] })}
       ${tabNav([...(penem && nBelum > 0 ? [tabPenem] : []),
-                ...zs.map(z => [z.kode, z.nama, z.ikon || 'fa-layer-group', SP.masalah.filter(m => terbuka(m) && SP.milik.has(m.lokasi_id) && lok(m.lokasi_id)?.zona === z.kode).length]),
+                ...zs.map(z => [z.kode, z.nama, z.ikon || 'fa-layer-group', SP.masalah.filter(m => terbuka(m) && SP.milik.has(m.lokasi_id) && lok(m.lokasi_id)?.zona === z.kode).length, true]),
                 ...(penem && nBelum === 0 ? [tabPenem] : []),
                 ...(milik.length ? [['riwayat', 'Riwayat', 'fa-clock-rotate-left', 0]] : [])], L.tab, 'Bagian sarpras')}
       <div id="spPanel" class="sp-panel" role="tabpanel"></div>
     </div>`;
+    K().angkaNaik(akar);
     gambarPanelLapor();
   }
   function gambarPanelLapor() {
@@ -318,30 +335,37 @@
     const ok = await muatPenempatanJs();
     if (UI.lapor.tab !== 'penempatan' || !$('spPanel')) return;
     if (!ok) {
-      panel.innerHTML = kosong('Penempatan belum bisa dibuka', 'Berkas penempatan gagal dimuat. Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark');
+      panel.innerHTML = kosong('Penempatan belum bisa dibuka', 'Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark');
       return;
     }
     panel.innerHTML = '';
     await window.RQPenempatan.buka(panel, { data });
   }
   function panelDaftarLokasi(panel, kode) {
-    const daftar = lokasiSaya().filter(l => l.zona === kode)
-      .sort((a, b) => urutLantai(lantaiDari(a), lantaiDari(b)) || jalur(a).localeCompare(jalur(b), 'id', { numeric: true }));
+    const mode = modeUrut();
+    const semua = lokasiSaya().filter(l => l.zona === kode);
+    const daftar = urutLokasi(semua, mode);
     const grup = new Map();
     daftar.forEach(l => { const k = lantaiDari(l); if (!grup.has(k)) grup.set(k, []); grup.get(k).push(l); });
-    panel.innerHTML = [...grup.entries()].map(([lt, isi]) => `<section class="sp-lantai">
+    let i = 0;
+    const adaMasalah = semua.some(l => statusLokasi(l).buka.length);
+    panel.innerHTML = `${adaMasalah ? `<div class="sp-alat"><button type="button" class="kb-urut" data-sp="urut" aria-pressed="${mode === 'masalah'}">
+        <i class="fa-solid fa-list-ol" aria-hidden="true"></i>Terbanyak dulu</button></div>` : ''}
+      ${[...grup.entries()].map(([lt, isi]) => `<section class="sp-lantai">
       ${grup.size > 1 || lt ? `<h4 class="sp-lantai-j">${esc(labelLantai(lt))}</h4>` : ''}
       <div class="sp-lk-kisi">${isi.map(l => {
         const s = statusLokasi(l), d = kedalaman(l);
+        const t = s.buka.length ? K().tingkatMasalah(s.buka.length) : s.lewat ? 'belum' : 0;
         const ket = s.buka.length ? `${angka(s.buka.length)} masalah` : s.terakhir ? `Aman · ${relatif(s.terakhir)}` : 'Belum dicek';
-        return `<button type="button" class="sp-lk${s.buka.length ? ' rusak' : s.lewat ? ' lewat' : ' aman'}${d ? ' anak' : ''}" data-sp="buka" data-id="${esc(l.id)}">
-          ${!d && l.nomor != null ? `<span class="pk-plakat sp-lk-plakat" aria-hidden="true"><span class="pk-nomor">${esc(l.nomor)}</span></span>` : ''}
-          <span class="sp-lk-nama">${esc(d ? l.nama : jalur(l))}</span>
+        return `<button type="button" class="sp-lk kb-kamar${s.buka.length ? ' rusak' : s.lewat ? ' lewat' : ' aman'}${d ? ' anak' : ''}" data-sp="buka" data-id="${esc(l.id)}" data-tingkat="${t}"
+            style="--i:${i++}">
+          ${!d && l.nomor != null ? `<span class="kb-kamar-no">${esc(l.nomor)}</span>` : ''}
+          <span class="kb-kamar-nama">${esc(d ? l.nama : (l.nomor != null ? jalur(l) : l.nama || jalur(l)))}</span>
           ${d ? `<span class="sp-lk-induk">${esc(lok(l.induk_id)?.nama || '')}</span>` : ''}
-          <span class="sp-lk-ket"><i class="sp-lk-titik"></i>${esc(ket)}</span>
-          ${s.buka.length ? `<span class="sp-lk-ikon">${s.buka.slice(0, 4).map(m => pikto(ikonBarang(m))).join('')}</span>` : ''}
+          <span class="kb-kamar-status">${esc(ket)}</span>
+          ${s.buka.length ? `<span class="kb-kamar-ikon">${s.buka.slice(0, 4).map(m => pikto(ikonBarang(m))).join('')}</span>` : ''}
         </button>`;
-      }).join('')}</div></section>`).join('');
+      }).join('')}</div></section>`).join('')}`;
   }
 
   function panelDetail(panel, l) {
@@ -354,7 +378,7 @@
       <header class="sp-detail-kepala">
         <button type="button" class="sp-kembali" data-sp="kembali" aria-label="Kembali ke daftar"><i class="fa-solid fa-chevron-left"></i></button>
         <div class="sp-detail-judul"><h3>${esc(jalur(l))}</h3><small>${esc(sub)}</small></div>
-        <button type="button" class="btn btn-ghost btn-sm sp-aman" data-sp="aman" data-id="${esc(l.id)}"><i class="fa-solid fa-circle-check"></i>Sudah dicek, aman</button>
+        <button type="button" class="btn btn-primary btn-sm sp-aman" data-sp="aman" data-id="${esc(l.id)}"><i class="fa-solid fa-circle-check"></i>Sudah dicek, aman</button>
       </header>
       ${s.terakhir ? `<p class="sp-detail-cek"><i class="fa-solid fa-clipboard-check"></i>Terakhir dicek ${esc(relatif(s.terakhir))}</p>` : ''}
       ${s.buka.length ? `<section class="sp-buka"><h4>Masih rusak <b>${angka(s.buka.length)}</b></h4>
@@ -401,7 +425,9 @@
     const umur = selisih(lapor, tutup || hariIni());
     const ket = [m.jumlah > 1 || pasang ? `${angka(m.jumlah)}${pasang ? ` dari ${angka(pasang)}` : ''} rusak` : '', namaPenyebab(m.penyebab), m.catatan || ''].filter(Boolean);
     const status = m.batal ? '<span class="sp-st batal">dibatalkan</span>' : tutup ? `<span class="sp-st baik">sudah baik ${esc(tglPendek(tutup))}</span>` : '';
-    return `<li class="sp-msl${terbuka(m) ? '' : ' tutup'}" data-msl="${m.id}">
+    const lain = terbuka(m) ? [bolehCatatPelanggaran(m) ? `<button type="button" data-sp="pelanggaran" data-msl="${m.id}"><i class="fa-solid fa-scale-balanced"></i>Catat pelanggaran</button>` : '',
+      bolehBatal(m) ? `<button type="button" data-sp="batal" data-msl="${m.id}"><i class="fa-solid fa-xmark"></i>Batal (salah input)</button>` : ''].filter(Boolean).join('') : '';
+    return `<li class="sp-msl${terbuka(m) ? ' kb-baris' : ' tutup'}" data-msl="${m.id}">
       ${opsi.pilih && terbuka(m) ? `<label class="sp-msl-pilih"><input type="checkbox" data-sp-pilih="${m.id}" ${UI.lapor.pilih.has(m.id) ? 'checked' : ''} aria-label="Pilih"></label>` : ''}
       <span class="sp-msl-ikon">${pikto(ikonBarang(m))}</span>
       <div class="sp-msl-isi">
@@ -411,10 +437,9 @@
         ${ket.length ? `<span class="sp-msl-ket">${esc(ket.join(' · '))}</span>` : ''}
         <small>sejak ${esc(tglPendek(lapor))} · ${angka(umur)} hari · ${esc(m.pelapor_nama || '')} ${status}</small>
       </div>
-      ${terbuka(m) ? `<span class="sp-msl-aksi">
-        <button type="button" class="btn btn-sm sp-baik" data-sp="baik" data-msl="${m.id}"><i class="fa-solid fa-check"></i>Sudah baik</button>
-        ${bolehCatatPelanggaran(m) ? `<button type="button" class="btn btn-ghost btn-sm sp-plg" data-sp="pelanggaran" data-msl="${m.id}"><i class="fa-solid fa-scale-balanced"></i>Catat pelanggaran</button>` : ''}
-        ${bolehBatal(m) ? `<button type="button" class="btn btn-ghost btn-sm" data-sp="batal" data-msl="${m.id}" title="Salah input">Batal</button>` : ''}
+      ${terbuka(m) ? `<span class="kb-aksi sp-msl-aksi">
+        <button type="button" class="kb-aksi-ikon" data-sp="baik" data-msl="${m.id}" aria-label="Sudah baik" title="Sudah baik"><i class="fa-solid fa-check"></i></button>
+        ${lain ? `<details class="kb-menu"><summary aria-label="Lainnya" title="Lainnya"><span aria-hidden="true">⋯</span></summary><div class="kb-menu-isi">${lain}</div></details>` : ''}
       </span>` : ''}
     </li>`;
   }
@@ -559,8 +584,19 @@
     const b = e.target.closest('[data-sp]'); if (!b || b.disabled) return;
     const d = b.dataset;
     try {
-      if (d.sp === 'buka') { UI.lapor.lokasi = d.id; gambarPanelLapor(); return window.scrollTo({ top: 0, behavior: 'smooth' }); }
-      if (d.sp === 'kembali') { UI.lapor.lokasi = null; return gambarPanelLapor(); }
+      if (d.sp === 'buka') {
+        UI.lapor.lokasi = d.id; namaiTransisi(b);
+        await K().transisi(() => { gambarPanelLapor(); namaiTransisi(document.querySelector('.sp-detail')); });
+        namaiTransisi(document.querySelector('.sp-detail'), false);
+        return window.scrollTo({ top: 0, behavior: K().hemat() ? 'auto' : 'smooth' });
+      }
+      if (d.sp === 'kembali') {
+        const asal = UI.lapor.lokasi; UI.lapor.lokasi = null; namaiTransisi(document.querySelector('.sp-detail'));
+        const kartu = () => [...document.querySelectorAll('.sp-lk[data-id]')].find(x => x.dataset.id === String(asal));
+        await K().transisi(() => { gambarPanelLapor(); namaiTransisi(kartu()); });
+        return namaiTransisi(kartu(), false);
+      }
+      if (d.sp === 'urut') { try { localStorage.setItem('rq:sp-urut', modeUrut() === 'masalah' ? 'nomor' : 'masalah'); } catch (er) { /* tanpa penyimpanan */ } return gambarPanelLapor(); }
       if (d.sp === 'ubin') return formLapor(lok(d.id), d.butir ? butir(d.butir) : null, d.nisn || null);
       if (d.sp === 'pelanggaran') {
         const m = SP.masalah.find(x => x.id === Number(d.msl)); if (!m) return;
@@ -568,11 +604,17 @@
         return modalCatatPelanggaran({ nisn: m.nisn, labelSantri: pemilikTeks(m), kode, labelKode: kode || '',
           catatan: `${namaBarang(m)}: ${m.masalah} (${lok(m.lokasi_id)?.nama || 'sarpras'}, dilaporkan ${tglPendek(tglJkt(m.dilaporkan_pada))})` });
       }
-      if (d.sp === 'baik') { b.disabled = true; return tandaiBaik([Number(d.msl)]); }
+      if (d.sp === 'baik') {
+        const li = b.closest('li'), id = Number(d.msl); b.disabled = true; li?.classList.add('pergi'); b.closest('details')?.removeAttribute('open');
+        tulisTunda([...new Set([...bacaTunda(), id])]);
+        return K().urung({ teks: 'Sudah baik',
+          kirim: async () => { await tandaiBaik([id]); tulisTunda(bacaTunda().filter(x => x !== id)); },
+          batal: () => { tulisTunda(bacaTunda().filter(x => x !== id)); li?.classList.remove('pergi'); b.disabled = false; } });
+      }
       if (d.sp === 'baik-pilih') { b.disabled = true; return tandaiBaik([...UI.lapor.pilih]); }
       if (d.sp === 'batal') {
         const m = SP.masalah.find(x => x.id === Number(d.msl)); if (!m) return;
-        const ok = await Swal.fire({ title: 'Batalkan laporan ini?', html: `<p>${esc(namaBarang(m))} · ${esc(m.masalah)}</p><p class="hint">Untuk salah input. Laporan tetap tercatat sebagai dibatalkan.</p>`,
+        const ok = await Swal.fire({ title: 'Batalkan laporan ini?', html: `<p>${esc(namaBarang(m))} · ${esc(m.masalah)}</p>`,
           icon: 'question', showCancelButton: true, confirmButtonText: 'Batalkan laporan', cancelButtonText: 'Kembali', confirmButtonColor: MERAH });
         if (!ok.isConfirmed) return;
         await rpc('sarpras_masalah_batal', { p_id: m.id });
@@ -834,7 +876,7 @@
   function kamarDiZona(unitId, kode) { return SP.data.lokasi.filter(l => l.unit_id === unitId && l.zona === kode && !l.induk_id); }
   async function pilihRentang(unitId, kode) {
     const r = await Swal.fire({ ...swalDasar, showLoaderOnConfirm: false, title: 'Pilih rentang nomor', confirmButtonText: 'Pilih',
-      html: `<p class="hint">Contoh: <b>1-15</b>, atau <b>1-10, 14, 20-24</b></p><input id="spRentang" class="input" placeholder="1-15" autocomplete="off">`,
+      html: `<input id="spRentang" class="input" placeholder="mis. 1-10, 14, 20-24" autocomplete="off">`,
       didOpen: () => setTimeout(() => $('spRentang')?.focus(), 60),
       preConfirm: () => {
         const nomor = new Set();
@@ -869,7 +911,7 @@
     const kap = ids.map(id => lok(id)?.kapasitas).filter(Boolean);
     const r = await Swal.fire({ ...swalDasar, showLoaderOnConfirm: false, title: `Kapasitas ${angka(ids.length)} ${istilah('kamar').toLowerCase()}`, input: 'number',
       inputValue: kap.length && kap.every(k => k === kap[0]) ? kap[0] : '', inputAttributes: { min: 1, max: 999, step: 1 }, confirmButtonText: 'Terapkan',
-      html: `<p class="hint">Jumlah ${esc(istilah('penghuni').toLowerCase())}. Dipakai barang yang dihitung per ${esc(istilah('penghuni').toLowerCase())} (ranjang, lemari, laci).</p>`,
+      html: ``,
       inputValidator: (x) => (!/^\d{1,3}$/.test(String(x)) || Number(x) < 1) ? 'Isi angka 1–999.' : null });
     if (!r.isConfirmed) return;
     const h = await rpc('sarpras_kapasitas_atur', { p_lokasi: ids, p_kapasitas: Number(r.value) });
@@ -886,7 +928,7 @@
     const contoh = lks.length === 1 ? lks[0] : null;
     const r = await Swal.fire({
       ...swalDasar, width: 620, title: `Isi khusus · ${lks.length === 1 ? esc(lks[0].nama) : `${angka(lks.length)} lokasi`}`, confirmButtonText: 'Simpan',
-      html: `<p class="hint">Kosongkan untuk mengikuti aturan katalog. Isi angka bila lokasi ini berbeda, mis. ${esc(istilah('kamar').toLowerCase())} besar ber-AC 3, atau jumlah kloset tiap sayap.</p>
+      html: `
         <div class="sp-isi-daftar">${daftar.map(b => {
           const v = awal.get(b.id);
           return `<label class="sp-isi-baris">${pikto(b.ikon)}<span><b>${esc(b.nama)}</b><small>aturan: ${esc(aturanTeks(b, contoh))}</small></span>
@@ -1945,7 +1987,7 @@
         case 'p-ambang': {
           const lama = setelan('peta', {}) || {};
           const r = await Swal.fire({ ...swalDasar, title: 'Ambang "Perlu dibahas"', input: 'number', inputValue: lama.ambang_perusakan || 2, inputAttributes: { min: 1, max: 99 },
-            html: '<p class="hint">Jumlah catatan perusakan dalam periode, ditambah ada kerusakan sarana karena kelalaian atau perusakan.</p>', confirmButtonText: 'Simpan',
+            html: '<p class="hint">Jumlah catatan perusakan dalam periode.</p>', confirmButtonText: 'Simpan',
             inputValidator: (x) => (!/^\d{1,2}$/.test(String(x)) || Number(x) < 1) ? 'Isi angka 1–99.' : null });
           if (!r.isConfirmed) return;
           await rpc('sarpras_setelan_simpan', { p_kunci: 'peta', p_nilai: { ...lama, ambang_perusakan: Number(r.value) } });
@@ -1963,6 +2005,6 @@
     SP.penem = null;
     db.rpc('sarpras_lokasi_saya').then(({ data, error }) => { if (!error) SP.milik = new Set(data || []); }).catch(() => {});
   }
-  window.RQSarpras = { lapor, atur, laporan, peta, pikto, istilah, galatTeks, rpc, sesudahPenempatan, pdf: { baru: pdfBaru, mesin: mesinPdf, jamCetak }, _uji: { teksPdf, terbukaPada, jumlahStandar, tglJkt, selisih, isiLaporan: () => isiLaporan(), SP, UI,
+  window.RQSarpras = { lapor, atur, laporan, peta, pikto, istilah, galatTeks, rpc, sesudahPenempatan, pdf: { baru: pdfBaru, mesin: mesinPdf, jamCetak }, _uji: { urutLokasi, teksPdf, terbukaPada, jumlahStandar, tglJkt, selisih, isiLaporan: () => isiLaporan(), SP, UI,
     sisiLorong, tangga, urutRonda, ringkasButir, hitungPeta } };
 })();

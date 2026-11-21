@@ -1,0 +1,58 @@
+{
+  "app.js": [
+    "${KAMAR_MIN}",
+    "Mudabbir hanya dari kelas",
+    "Harus lebih akhir dari",
+    "Tidak ada pelanggaran yang bisa diisi",
+    "Pilih santri terlebih dahulu",
+    "Unit aktif:",
+    "Master Bidang masih kosong",
+    "Guru, Guru BK, dan Walas wajib",
+    "Belum ada jenis pelanggaran dipilih",
+    "Belum ada jenis dipilih",
+    "Satuan JP",
+    "Memproses",
+    "Kelas ${esc(s.kelas",
+    "Kelas ${esc(tunggal",
+    "Master prestasi belum diisi",
+    "Memuat…",
+    "${esc(labelPeriode())}",
+    "8 pekan terakhir",
+    "Setara ±",
+    "Kuning = berubah",
+    "${arah(",
+    "halaman bulan ini",
+    "${esc(u.unsur)}",
+    "Porsi tier 3",
+    "Menampilkan 30 dari",
+    "Belum dijalankan",
+    "${esc(labRingkasAturan",
+    "Aturan berubah",
+    "Data santri",
+    "Garis emas",
+    "${esc(labelBulan",
+    "${angka(semua.length)} pendidik",
+    "Izin yang disarankan klinik"
+  ],
+  "sidang.js": [
+    "Tidak ditemukan santri",
+    "Tidak ada pasal",
+    "Ketik paling sedikit 3 huruf",
+    "Ananda",
+    "Majelis:",
+    "Sidang",
+    "Berita acara ini belum memenuhi syarat",
+    "${angka(c.dipanggil)}",
+    "${x ?"
+  ],
+  "sarpras.js": [
+    "${esc(u.nama)}",
+    "${esc(unit(l.unit_id)",
+    "Posisi per",
+    "Peran ${esc(istilah('kamar')",
+    "Jumlah catatan perusakan dalam periode."
+  ],
+  "index.html": [
+    "Dayah Ruhul Qurani"
+  ]
+}

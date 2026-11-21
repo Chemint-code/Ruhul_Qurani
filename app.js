@@ -3342,7 +3342,7 @@ async function viewAnalisis() {
     const kotak = $('blokSebaran');
     usaiRangkaSebaran();
     if (kotak) kotak.innerHTML = kosong('Peta perkembangan belum dapat dimuat.',
-      'Data pendukungnya sedang tidak terbaca. Muat ulang halaman untuk mencoba lagi.',
+      'Muat ulang halaman untuk mencoba lagi.',
       'fa-triangle-exclamation');
   }
 }
@@ -4080,7 +4080,7 @@ async function viewPimpinanLama(opsi = {}) {   // v2.52: diganti Lembar Mizan (l
     const kotak = $('blokSebaran');
     usaiRangkaSebaran();
     if (kotak) kotak.innerHTML = kosong('Peta perkembangan belum dapat dimuat.',
-      'Data pendukungnya sedang tidak terbaca. Muat ulang halaman untuk mencoba lagi.',
+      'Muat ulang halaman untuk mencoba lagi.',
       'fa-triangle-exclamation');
   }
 
@@ -4563,25 +4563,13 @@ async function modalAturKamar(nisn, s) {
       <label class="label" for="kmNomor">Nomor kamar</label>
       <input id="kmNomor" class="input" inputmode="numeric" autocomplete="off"
              placeholder="mis. 21" value="${kini === null ? '' : kini}">
-      <p class="hint" style="margin:6px 2px 14px">
-        Bilangan ${KAMAR_MIN}–${KAMAR_MAKS}. Nomor kamar berlaku <b>dalam unit
-        ${esc(labelUnit)}</b>. Kamar 21 putra dan Kamar 21 putri adalah dua
-        kamar yang berbeda. Kosongkan untuk menghapus data kamar santri ini.
-      </p>
+      <p class="hint" style="margin:6px 2px 14px">${KAMAR_MIN}–${KAMAR_MAKS} · kosongkan untuk menghapus</p>
 
       <label class="switch-row" for="kmMud" ${bolehMudabbir ? '' : 'style="opacity:.55"'}>
         <input type="checkbox" id="kmMud" ${mudKini ? 'checked' : ''} ${bolehMudabbir ? '' : 'disabled'}>
         <span>Bertugas sebagai <b>mudabbir</b> (penjaga kamar)</span>
       </label>
-      <p class="hint" style="margin:6px 2px 0">
-        ${bolehMudabbir
-          ? `Mudabbir dipilih musyrif asrama dari kelas ${ANGKATAN_MUDABBIR}
-             untuk menjaga kamar angkatan ${ANGKATAN_DIJAGA.join(' dan ')}.
-             Catatan pelanggaran dan prestasi mudabbir <b>tidak dihitung</b>
-             untuk kamar yang ia jaga. Catatannya dilaporkan terpisah.`
-          : `Hanya santri kelas ${ANGKATAN_MUDABBIR} yang dapat ditugaskan
-             sebagai mudabbir. Santri ini angkatan ${esc(angk || 'tidak dikenali')}.`}
-      </p>
+      ${bolehMudabbir ? '' : `<p class="hint" style="margin:6px 2px 0">Mudabbir hanya dari kelas ${ANGKATAN_MUDABBIR}.</p>`}
 
       <div id="kmMasalah" class="pra-peringatan" style="display:none;margin-top:14px"></div>
     </div>`,
@@ -4928,7 +4916,6 @@ async function modalCatatPelanggaran(prefill) {
         <label class="label">Santri</label>
         <input id="fNisn" class="input" autocomplete="off"
                placeholder="Ketik nama atau NISN (min. 2 huruf)…" value="${esc(p.labelSantri||'')}">
-        <p class="hint">Pilih dari daftar saran agar NISN terbaca dengan benar.</p>
       </div>
       <div class="field">
         <label class="label">Jenis Pelanggaran</label>
@@ -5337,7 +5324,7 @@ async function modalAjukanIzin() {
     html:`<div class="stack">
       <div class="field"><label class="label">Santri</label>
         <input id="zNisn" class="input" autocomplete="off" placeholder="Ketik nama atau NISN…">
-        <p class="hint">Pilih dari daftar saran agar NISN terbaca dengan benar.</p></div>
+        </div>
       <div class="duo">
         <div class="field"><label class="label">Tanggal Mulai</label>
           <input id="zMulai" type="date" class="input" value="${hariIni()}"></div>
@@ -5856,8 +5843,6 @@ async function modalBinaManual(idLog) {
     confirmButtonText: 'Simpan Hasil Musyawarah', cancelButtonText: 'Batal', confirmButtonColor: '#14618B',
     showLoaderOnConfirm: true, allowOutsideClick: () => !Swal.isLoading(),
     html: `<div class="stack" style="text-align:left">
-      <p class="hint" style="margin:0">Untuk pengulangan yang melewati instrumen (mis. ke-16 dst.) atau pelanggaran
-        yang diinput terlambat. Hukuman diisi sesuai hasil musyawarah.</p>
       <div class="field"><label class="label">Santri</label>
         <input id="pmSantri" class="input" autocomplete="off" placeholder="Ketik nama atau NISN…"
           value="${awal ? esc(`${awal.nisn} - ${awal.nama_siswa}`) : ''}">
@@ -6839,8 +6824,6 @@ function kartuUnggahCsv() {
       </div>
     </div>
     <b class="brk-nm">Unggah Berkas CSV</b>
-    <p class="brk-sub">Pengisian data asrama putri sekaligus. Setiap berkas
-       diperiksa dulu sebelum disimpan.</p>
     <div class="unggah-list">
       ${Object.entries(SKEMA_CSV).map(([jenis, s]) => `
         <div class="unggah-item">
@@ -6857,9 +6840,6 @@ function kartuUnggahCsv() {
           </div>
         </div>`).join('')}
     </div>
-    <p class="hint" style="margin:10px 2px 0">
-      Kolom <b>unit_gender</b> tidak perlu ada di berkas. Sistem mengisinya
-      <b>putri</b> secara otomatis saat dikirim.</p>
     <input type="file" id="csvInput" accept=".csv,text/csv,text/plain" class="hidden">
   </div>`;
 }
@@ -7177,7 +7157,6 @@ function kartuBrankasBidang(list) {
       </div>
     </div>
     <b class="brk-nm">Master Bidang</b>
-    <p class="brk-sub">Dasar pengelompokan seluruh laporan per divisi.</p>
     <div class="brk-angka">
       <span class="brk-v">${angka(rows.length)}</span>
       <span class="brk-k">bidang terdaftar</span>
@@ -7477,12 +7456,11 @@ async function modalMaster(existing) {
             .map(([v,t]) => `<option value="${v}" ${
               v === (normalUnit(m.unit_gender) || unitAktif() || UNIT_PUTRA) ? 'selected' : ''
             }>${t}</option>`).join('')}</select>
-        <p class="hint">Katalog putra dan putri berdiri sendiri. Kode pelanggaran
-           tidak boleh sama antar unit karena kode adalah kunci utama tabel.</p></div>
+        </div>
       <div class="field"><label class="label">Bidang</label>
         <input id="mBidang" class="input" autocomplete="off" value="${esc(m.bidang||'')}"
                placeholder="Ketik: ubu, bahasa, atribut…">
-        <p class="hint">Dipilih dari Master Bidang. ${bidang.length ? '' : 'Master Bidang masih kosong. Isi terlebih dahulu.'}</p></div>
+        ${bidang.length ? '' : '<p class="hint">Master Bidang masih kosong.</p>'}</div>
       <label class="ket-sakelar"><input id="mKet" type="checkbox" ${m.tampil_keterangan ? 'checked' : ''}>
         <span><b>Tampilkan keterangan di laporan individu</b><br>
         <small>Catatan/ucapan pencatat dicetak di bawah nama pelanggaran dan wajib diisi saat mencatat.</small></span></label>
@@ -7548,7 +7526,7 @@ async function modalBidang(existing) {
         <textarea id="bDesk" class="input" rows="2">${esc(b.deskripsi||'')}</textarea></div>
       <div class="field"><label class="label">Kata Kunci</label>
         <input id="bKunci" class="input" value="${esc(b.kata_kunci||'')}" placeholder="ubu,ubud,ibadah,shalat">
-        <p class="hint">Dipisah koma. Membantu pencarian cepat saat mengisi Master Pelanggaran.</p></div>
+        </div>
       <div class="trio">
         <div class="field"><label class="label">Sumber</label>
           <select id="bSumber" class="input">${['Pengasuhan','Madrasah']
@@ -7688,11 +7666,7 @@ async function modalPengguna(u) {
           return opsi.map(x => `<option value="${esc(x)}" ${x === kini ? 'selected' : ''}>${
             x || '(Tidak tergabung)'}</option>`).join('');
         })()}</select>
-        <p class="hint">Menentukan lambang korps pada bilah profil, layar masuk,
-           dan lembar cetak. Untuk akun <b>tanpa kelas binaan</b>, misalnya Osis,
-           pilihan ini juga menentukan asrama yang boleh dilihat, karena Osis putra
-           dan Osis putri punya susunan sendiri. Akun yang punya kelas binaan
-           selalu mengikuti unit kelasnya.</p></div>
+        </div>
       <div class="trio">
         <div class="field"><label class="label">Unit Akses</label>
           <select id="uUnit" class="input">${['Semua','Pengasuhan','Madrasah']
@@ -10990,7 +10964,7 @@ function mdPanelAtribut() {
       <div class="field"><label class="label">Cari Santri</label>
         <input id="atrSantri" class="input" autocomplete="off"
                placeholder="Nama atau NISN (min. 2 huruf)…">
-        <p class="hint">Pilih dari daftar saran agar NISN terbaca dengan benar.</p></div>
+        </div>
     </div>
 
     <div class="pick" id="atrPick">${kartuPick('Santri Terpilih','Belum ada santri dipilih')}</div>
@@ -11084,7 +11058,6 @@ function mdPanelPelanggaran() {
         <textarea id="mpCatatan" class="input" rows="3" maxlength="500"
           placeholder="Contoh: santri terlambat masuk kelas setelah jam istirahat."></textarea>
         <div style="display:flex;justify-content:space-between;gap:10px">
-          <span class="hint">Poin mengikuti Master Pelanggaran.</span>
           <span class="hint mono" id="mpHitung">0 / 500</span>
         </div></div>
     </div>
@@ -12734,7 +12707,7 @@ function pgsPanelCatat() {
       <div class="field"><label class="label">Cari Santri</label>
         <input id="pgSantri" class="input" autocomplete="off"
                placeholder="Nama atau NISN (min. 2 huruf)…">
-        <p class="hint">Pilih dari daftar saran agar NISN terbaca dengan benar.</p></div>
+        </div>
     </div>
 
     <div class="pgs-pick" id="pgPick">
@@ -12750,7 +12723,7 @@ function pgsPanelCatat() {
       <div class="field wide"><label class="label">Catatan Kejadian</label>
         <textarea id="pgCatatan" class="input" rows="3" maxlength="500"
           placeholder="Contoh: tidak ikut shalat berjamaah subuh tanpa keterangan."></textarea>
-        <div class="pgs-meter"><span class="hint">Boleh dikosongkan. Catatan membantu wali kelas memahami kejadiannya.</span>
+        <div class="pgs-meter">
           <span class="hint mono" id="pgHitung">0 / 500</span></div></div>
     </div>
 
@@ -13067,7 +13040,7 @@ async function pgsModalIzin() {
     html: `<div class="stack">
       <div class="field"><label class="label">Santri</label>
         <input id="pzNisn" class="input" autocomplete="off" placeholder="Ketik nama atau NISN…">
-        <p class="hint">Pilih dari daftar saran agar NISN terbaca dengan benar.</p></div>
+        </div>
       <div class="duo">
         <div class="field"><label class="label">Tanggal Mulai</label>
           <input id="pzMulai" type="date" class="input" value="${hariIni()}"></div>
@@ -13697,7 +13670,7 @@ async function modalMassalPelanggaran({ pilih = [] } = {}) {
         <label class="label">Tambah Santri</label>
         <input id="msSantri" class="input" autocomplete="off"
                placeholder="Ketik nama atau NISN (min. 2 huruf), pilih dari saran…">
-        <div class="ms-head"><span class="hint">Klik tanda silang untuk mengeluarkan santri.</span>
+        <div class="ms-head">
           <span class="hint mono" id="msHitung">0 / ${AI_AMBANG.maksSantri} santri</span></div>
         <div class="mchips" id="msChips"></div>
       </div>
@@ -14540,7 +14513,6 @@ function kartuBrankasPrioritas() {
         <span class="lat">Prioritas</span></div>
     </div>
     <b class="brk-nm">Santri Membutuhkan Perhatian</b>
-    <p class="brk-sub">Ranking indikator, bukan keputusan hukuman otomatis.</p>
     <div class="brk-angka">
       <span class="brk-v">${angka(n)}</span>
       <span class="brk-k">santri pada indikator</span>
@@ -15530,9 +15502,7 @@ async function modalPesanBk(nisn) {
           ${opsi(pembina, `Pembina kelas ${s.kelas || '-'}`)}
           ${opsi(lain, 'Guru lain')}
         </select>
-        <p class="hint">${pembina.length
-          ? `Terisi otomatis dengan pembina kelas ${esc(s.kelas || '-')} — boleh diganti.`
-          : `Kelas ${esc(s.kelas || '-')} belum punya guru pembina terdaftar. Silakan pilih guru sendiri.`}</p>
+        ${pembina.length ? '' : `<p class="hint">Kelas ${esc(s.kelas || '-')} belum punya guru pembina terdaftar.</p>`}
       </div>
       ${pembina.length > 1 ? `<label class="ctx-note" style="cursor:pointer">
         <input type="checkbox" id="pbSemua" style="accent-color:var(--sea)">
@@ -15540,7 +15510,6 @@ async function modalPesanBk(nisn) {
       </label>` : ''}
       <div class="field"><label class="label">Isi Pesan</label>
         <textarea id="pbIsi" class="input" rows="11">${esc(templatePesanBk(s))}</textarea>
-        <p class="hint">Inti pesan: guru diminta menyuruh ananda menemui Guru BK.</p>
       </div>
     </div>`,
     didOpen: () => { if (pembina.length) $('pbGuru').value = pembina[0].id; },
@@ -15996,9 +15965,7 @@ async function modalLaporBina(ids) {
           ${opsi(tunggal.pengesah, `Guru kelas binaan ${tunggal.r.kelas || '-'}`)}
           ${opsi(admin, 'Admin')}
         </select>
-        <p class="hint">${tunggal.pengesah.length
-          ? `Terisi otomatis dengan guru kelas binaan ${esc(tunggal.r.kelas || '-')}.`
-          : `Kelas ${esc(tunggal.r.kelas || '-')} belum punya guru kelas binaan, jadi laporan dikirim ke Admin.`}</p>
+        ${tunggal.pengesah.length ? '' : `<p class="hint">Kelas ${esc(tunggal.r.kelas || '-')} belum punya guru kelas binaan; laporan dikirim ke Admin.</p>`}
       </div>
       ${tunggal.pengesah.length > 1 ? `<label class="ctx-note" style="cursor:pointer">
         <input type="checkbox" id="lbSemua" checked style="accent-color:var(--sea)">
@@ -16032,7 +15999,6 @@ async function modalLaporBina(ids) {
       <div class="field"><label class="label">Catatan Pelaksanaan</label>
         <textarea id="lbCatatan" class="input" rows="4"
           placeholder="Contoh: pembinaan dilaksanakan ba'da Isya di mushalla asrama; ananda mengakui kesalahan dan berjanji memperbaiki."></textarea>
-        <p class="hint">Tuliskan singkat bagaimana pembinaan dijalankan dan bagaimana tanggapan ananda. Ini menjadi bahan guru sebelum mengesahkan.</p>
       </div>
     </div>`,
     didOpen: () => { if (tunggal) $('lbGuru').value = (tunggal.pengesah[0] || admin[0] || {}).id || ''; },
@@ -16439,7 +16405,7 @@ async function viewPrestasi() {
         <section class="card" id="prsKartuCatat">
           <div class="card-head">
             <div><h3>Catat Apresiasi</h3>
-              <p class="sub">Pilih santri, tentukan bentuk apresiasi, simpan.</p></div>
+              </div>
           </div>
           <div class="prs-quick" id="prsQuick">
             <span class="lbl"><i class="fa-solid fa-bolt"></i>Pintasan</span>
@@ -16524,19 +16490,19 @@ async function viewPrestasi() {
       <div>
         <section class="card">
           <div class="card-head"><div><h3>Santri Teladan</h3>
-            <p class="sub">Peringkat poin apresiasi pada periode aktif.</p></div></div>
+            </div></div>
           <div class="prs-board" id="prsBoard"></div>
         </section>
 
         <section class="card">
           <div class="card-head"><div><h3>Neraca Poin Unit</h3>
-            <p class="sub">Perbandingan beban pelanggaran dan apresiasi.</p></div></div>
+            </div></div>
           <div class="neraca" id="prsNeraca"></div>
         </section>
 
         <section class="card">
           <div class="card-head"><div><h3>Sebaran Bidang Apresiasi</h3>
-            <p class="sub">Bidang mana yang paling sering diapresiasi.</p></div></div>
+            </div></div>
           ${chartBox('chPrsBidang')}
         </section>
       </div>
@@ -16869,8 +16835,7 @@ async function viewTahfiz() {
     <section class="card thf-juara">
       <div class="card-head">
         <div><h3><i class="fa-solid fa-ranking-star"></i>Peringkat Hafalan</h3>
-          <p class="sub">Sepuluh penyetor terbanyak pada ${esc(labelPeriode())},
-             dihitung dari jumlah halaman.</p></div>
+          <p class="sub">${esc(labelPeriode())}</p></div>
         <span class="tag tag-emas"><i class="fa-solid fa-book-quran"></i>1 juz ≈ ${HALAMAN_PER_JUZ} halaman</span>
       </div>
       <div class="prs-board thf-board" id="thfBoard"></div>
@@ -16882,7 +16847,7 @@ async function viewTahfiz() {
         <section class="card">
           <div class="card-head">
             <div><h3>Catat Setoran</h3>
-              <p class="sub">Ziyadah untuk hafalan baru, murajaah untuk pengulangan.</p></div>
+              </div>
           </div>
           <div class="pgs-pick" id="thfPick">
             <div class="ico"><i class="fa-solid fa-user-graduate"></i></div>
@@ -16971,7 +16936,7 @@ async function viewTahfiz() {
       <div>
         <section class="card">
           <div class="card-head">
-            <div><h3>Target Bulanan</h3><p class="sub">Pilih santri untuk melihat capaiannya.</p></div>
+            <div><h3>Target Bulanan</h3></div>
           </div>
           <div class="card-body" style="padding-bottom:0">
             <div class="field ac-wrap" style="margin:0">
@@ -16984,7 +16949,7 @@ async function viewTahfiz() {
 
         <section class="card">
           <div class="card-head"><div><h3>Ritme Setoran</h3>
-            <p class="sub">Halaman per pekan pada 8 pekan terakhir.</p></div></div>
+            <p class="sub">8 pekan terakhir</p></div></div>
           ${chartBox('chThfRitme')}
         </section>
       </div>
@@ -17194,7 +17159,7 @@ async function thfGambarTarget() {
   const box = $('thfTargetBox'); if (!box) return;
   if (!stThf.nisn) {
     box.innerHTML = kosong('Belum ada santri dipilih.',
-      'Ketik nama santri di atas untuk melihat capaian dan targetnya.', 'fa-bullseye');
+      '', 'fa-bullseye');
     return;
   }
   const [semua, targets] = await Promise.all([muatTahfiz(), muatTargetTahfiz()]);
@@ -17571,7 +17536,7 @@ async function audModalRincian(id) {
         <section><h5>Sesudah</h5><div class="isi">${
           r.data_baru ? kolom(baru, 'baru') : '<i>(baris dihapus)</i>'}</div></section>
       </div>
-      <p class="hint" style="margin-top:12px">Baris bertanda kuning adalah kolom yang berubah.</p>
+      <p class="hint" style="margin-top:12px">Kuning = berubah</p>
     </div>`
   });
 }
@@ -18108,7 +18073,6 @@ function kartuBrankasPrestasi(list) {
           <span class="brk-nm">Master Prestasi</span>
         </div>
       </div>
-      <p class="brk-sub">Daftar bentuk apresiasi beserta bobot poin positifnya.</p>
       <div class="brk-angka"><span class="brk-v">${angka(rows.length)}</span>
         <span class="brk-k">Jenis apresiasi</span></div>
       <div class="brk-chips">
@@ -19491,7 +19455,7 @@ function panelIpp(ipp, { batas = 10 } = {}) {
       ${htmlUnsurIpp(x, ipp)}
       <span class="tag ${x.tingkat === 3 ? 'tag-berat' : 'tag-sedang'}">Tier ${x.tingkat}</span>
     </div>`).join('') || kosong('Tidak ada santri pada tier 2 atau 3.',
-      'Seluruh santri berada pada dukungan umum sepanjang jendela ini.', 'fa-circle-check');
+      '', 'fa-circle-check');
 
   const catatanIkatan = ipp.ikatanAktif
     ? `Kriteria <b>Ikatan nol</b> aktif. Santri yang belum punya catatan baik sama sekali ikut ditandai.`
@@ -21017,7 +20981,7 @@ async function viewTutupBuku() {
     <section class="card">
       <div class="card-head">
         <div><h3>Buku yang Sudah Ditutup</h3>
-          <p class="sub">Tanda <b>berubah</b> berarti ada catatan bulan itu yang diubah setelah rekap disusun.</p></div>
+          </div>
         ${admin ? `<div class="actions"><button class="btn btn-danger btn-sm" id="tbHapusPermanen">
           <i class="fa-solid fa-dumpster-fire"></i>Hapus permanen audit ≥ 30 hari</button></div>` : ''}
       </div>
@@ -25693,8 +25657,7 @@ function kartuIngatkanMusyrif() {
     <div class="ing-kartu-isi">
       <span class="ing-kartu-ikon" aria-hidden="true"><i class="fa-solid fa-paper-plane"></i></span>
       <div><h3>Verifikasi data sebelum cetak laporan</h3>
-        <p class="sub">Kirim pengingat personal via WhatsApp kepada setiap musyrif, berisi ringkasan
-          kelas binaannya: pelanggaran, pembinaan belum selesai, izin, presensi, target, dan tahfiz.</p></div>
+        </div>
       <button type="button" class="btn btn-primary ing-tombol" data-ingatkan-musyrif>
         <i class="fa-solid fa-paper-plane"></i><span>Ingatkan Musyrif Kelas Binaan</span></button>
     </div></section>`;
@@ -29948,7 +29911,7 @@ function htmlMejaPimpinan(M) {
   <div class="mz-grid">
     <section class="card mz-timbang" id="mzKartu">
       <div class="card-head"><div><h3>Timbangan lembar ini</h3>
-        <p class="sub">Catatan kebaikan (apresiasi + setoran) dan catatan pelanggaran</p></div>
+        </div>
         <div class="actions"><button type="button" class="btn btn-ghost btn-sm mz-ulang" data-mz="ulang" title="Putar ulang gerak timbangan">
           <i class="fa-solid fa-play"></i><span>Putar</span></button></div></div>
       <div class="mz-svg-wrap" id="mzSvg">${svgMizan(kiri, kanan)}</div>
@@ -29967,7 +29930,7 @@ function htmlMejaPimpinan(M) {
   <div class="mz-grid mz-grid-b">
     <section class="card mz-angkatan" id="mzAngkatan">
       <div class="card-head"><div><h3>Kasus per 100 santri, per angkatan</h3>
-        <p class="sub">Garis putus emas = rata-rata dayah (${angka(L.per100)}). Ketuk batang untuk rincian kelas.</p></div></div>
+        <p class="sub">Garis emas = rata-rata dayah (${angka(L.per100)})</p></div></div>
       <div class="mz-ang-wrap" style="--rata:${posRata}%">${batang}</div>
     </section>
     <section class="card mz-santri">
@@ -30413,13 +30376,12 @@ modalPesanBk = async function (nisn) {
           <div class="secondary">${esc(s.nisn)} · ${esc(s.kelas || '-')} · Tier ${esc(s.tingkat)} · ${esc(s.sebab || '')}</div></div></div>
       <div class="field"><label class="label">Guru Penerima</label>
         <select id="pbGuru" class="input">${opsi(pembina, `Pembina kelas ${s.kelas || '-'}`)}${opsi(lain, 'Guru lain')}</select>
-        <p class="hint">${pembina.length ? `Terisi otomatis dengan pembina kelas ${esc(s.kelas || '-')} — boleh diganti.`
-          : `Kelas ${esc(s.kelas || '-')} belum punya guru pembina terdaftar. Silakan pilih guru sendiri.`}</p></div>
+        ${pembina.length ? '' : `<p class="hint">Kelas ${esc(s.kelas || '-')} belum punya guru pembina terdaftar.</p>`}</div>
       ${pembina.length > 1 ? `<label class="ctx-note" style="cursor:pointer"><input type="checkbox" id="pbSemua" style="accent-color:var(--sea)">
         Kirim sekaligus ke semua pembina kelas ${esc(s.kelas || '-')} (${pembina.length} guru)</label>` : ''}
       <div class="field"><label class="label">Isi Pesan</label>
         <textarea id="pbIsi" class="input" rows="11">${esc(templatePesanBk(s))}</textarea>
-        <p class="hint">Inti pesan: guru diminta menyuruh ananda menemui Guru BK.</p></div></div>`,
+        </div></div>`,
     didOpen: () => { if (pembina.length) $('pbGuru').value = pembina[0].id; },
     preConfirm: async () => {
       const isi = $('pbIsi').value.trim();
@@ -30489,7 +30451,7 @@ async function viewKeterlibatan() {
       <div class="mz-kop-bawah"><span class="mz-meta">Halaman ini tidak membuat peringkat. Jumlah catatan bukan ukuran mutu pembinaan.</span></div>
     </section>
     ${buta.length ? `<section class="card kt-buta"><div class="card-head"><div><h3>Kelas tanpa pencatat aktif pekan ini</h3>
-        <p class="sub">Semua pembina kelasnya belum mencatat dalam 7 hari terakhir, atau kelasnya belum punya pembina.</p></div></div>
+        </div></div>
       <div class="card-body kt-chips">${buta.map(({ k, p }) => `<span class="tag ${p.length ? 'tag-sedang' : 'tag-berat'}" title="${esc(p.map(g => g.nama).join(', ') || 'Belum ada pembina')}">${esc(k)}</span>`).join('')}</div></section>` : ''}
     <div class="kt-grid">
       ${kelompok('Belum mencatat', 'diam', diam.map(g => orang(g, 'Tidak ada catatan')), 'Tidak ada.')}
@@ -31691,8 +31653,7 @@ async function viewAsatidz() {
         <span class="ar as-kop-ar" aria-hidden="true">الأساتذة</span>
         <h2 class="as-judul" id="asJudul">Para Pendidik</h2>
         <i class="as-benang" aria-hidden="true"></i>
-        <p class="as-lede">${angka(semua.length)} pendidik mendampingi ${angka(data.santri_aktif || 0)} santri.
-          Ketuk wajahnya untuk melihat kelas yang ia dampingi dan jejak catatannya.</p>
+        <p class="as-lede">${angka(semua.length)} pendidik · ${angka(data.santri_aktif || 0)} santri</p>
       </div>
       <div class="as-alat">
         <div class="as-saring" role="group" aria-label="Saring kelompok">
@@ -32411,7 +32372,7 @@ function htmlPanelSaranKlinik(d) {
     <summary class="card-head" style="cursor:pointer;list-style:none">
       <div><h3><i class="fa-solid fa-kit-medical" style="color:var(--maroon);margin-right:8px"></i>Saran dari Klinik
         <span class="tag tag-berat" style="margin-left:6px">${ringkas}</span></h3>
-        <p class="sub">Dicatat otomatis dari laporan petugas klinik di grup WhatsApp. Periksa dulu sebelum memutuskan.</p></div>
+        </div>
       <div class="actions"><i class="fa-solid fa-chevron-down sk-panah"></i></div>
     </summary>
     ${nIzin ? `<div class="sk-sub">Izin yang disarankan klinik</div>
@@ -32478,7 +32439,6 @@ async function skBuatIzin(id) {
         <div class="field"><label class="label">Tanggal Selesai</label>
           <input id="skSelesai" type="date" class="input" value="${mulai}"></div>
       </div>
-      <p class="hint" style="margin:-4px 2px 4px">Tentukan tanggal selesai sesuai kesepakatan dengan wali atau klinik.</p>
       <div class="field"><label class="label">Jenis Izin</label>
         <select id="skJenis" class="input">${['Sakit', 'Keperluan', 'Pemberitahuan'].map(o => `<option>${o}</option>`).join('')}</select></div>
       <div class="field"><label class="label">Alasan</label>
@@ -32886,7 +32846,7 @@ async function pasangKalenderSebaran() {
   const tag = `<span class="tag tag-sea">${esc(labelJendela(D.lembar))}</span>`;
   blok.insertAdjacentHTML('beforebegin', `<section class="card kal-kartu" id="kalKartu">
     <div class="card-head">
-      <div><h3>Kalender Sebaran Pelanggaran</h3><p class="sub">Satu kotak satu hari; makin pekat makin banyak catatan. Arahkan atau ketuk kotak untuk rinciannya.</p></div>
+      <div><h3>Kalender Sebaran Pelanggaran</h3></div>
       <div class="actions">${tag}</div>
     </div>
     <div class="card-body">
@@ -33136,7 +33096,7 @@ async function viewSidang() {
   if (APP.view !== 'sidang') return;
   if (!ok) {
     $('viewRoot').innerHTML = kartu("Ruang Sidang Ta'dib",
-      `<div class="card-body">${kosong('Ruang Sidang belum bisa dibuka', 'Berkas halaman sidang gagal dimuat. Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark')}
+      `<div class="card-body">${kosong('Ruang Sidang belum bisa dibuka', 'Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark')}
        <p style="text-align:center"><button class="btn btn-primary" id="sdUlang"><i class="fa-solid fa-rotate"></i>Coba lagi</button></p></div>`);
     $('sdUlang')?.addEventListener('click', () => navigateTo('sidang'));
     return;
@@ -33402,7 +33362,7 @@ async function viewSaran() {
         </form></div>`)}
       ${kartu('Riwayat kiriman', `<div class="card-body">${riwayat.length
           ? `<ul class="saran-daftar">${riwayat.map(butir).join('')}</ul>`
-          : kosong('Belum ada kiriman', 'Kritik dan saran yang antum kirim akan tampil di sini beserta statusnya.', 'fa-comment-dots')}</div>`,
+          : kosong('Belum ada kiriman', '', 'fa-comment-dots')}</div>`,
         '', 'Terkirim → Sudah dibaca → Dijawab')}
     </div>`;
   const isi = $('saranIsi'), hit = $('saranHitung');
@@ -33506,7 +33466,7 @@ function gambarKotakSaran(galat) {
           <p class="saran-catatan">Pesan tampil sebagai gelembung di Ringkasan OSDA sampai masa tampilnya habis atau antum menariknya.</p>
         </div>`)}
         ${kartu('Pesan terkirim', `<div class="card-body">${pesan.length ? `<ul class="saran-daftar">${pesan.map(butirPesan).join('')}</ul>`
-          : kosong('Belum ada pesan', 'Pesan yang antum kirim ke OSDA tampil di sini.', 'fa-comment-dots')}</div>`)}
+          : kosong('Belum ada pesan', '', 'fa-comment-dots')}</div>`)}
       </div>
     </div>`;
 
@@ -34759,7 +34719,7 @@ async function viewBanding() {
   if (!APP.superAdmin) await periksaSuperAdmin();
   if (APP.view !== 'banding') return;
   if (!APP.superAdmin) {
-    $('viewRoot').innerHTML = kartu('Eksekusi Banding', `<div class="card-body">${kosong('Khusus super admin', 'Banding yang dikabulkan Penasihat Hukum OSDA hanya dieksekusi super admin chemint.', 'fa-user-shield')}</div>`);
+    $('viewRoot').innerHTML = kartu('Eksekusi Banding', `<div class="card-body">${kosong('Khusus super admin', '', 'fa-user-shield')}</div>`);
     return;
   }
   let d = { antre: [], riwayat: [], diajukan: 0 }, galat = '';
@@ -34944,7 +34904,7 @@ async function viewKelalaian() {
   if (!APP.superAdmin) await periksaSuperAdmin();
   if (APP.view !== 'kelalaian') return;
   if (!APP.superAdmin) {
-    $('viewRoot').innerHTML = kartu('Kelalaian Pengesahan', `<div class="card-body">${kosong('Khusus super admin', 'Rekap kelalaian pengesahan musyrif hanya dibuka super admin chemint.', 'fa-user-shield')}</div>`);
+    $('viewRoot').innerHTML = kartu('Kelalaian Pengesahan', `<div class="card-body">${kosong('Khusus super admin', '', 'fa-user-shield')}</div>`);
     return;
   }
   let d = null, galat = '';
@@ -34992,7 +34952,7 @@ function gambarKelalaian(galat) {
           <tbody>${M.map((x, i) => `<tr class="kl-${nada(x)}" style="--r:${Math.min(i, 12)}"><td><b>${esc(x.nama || '-')}</b></td><td class="num">${angka(x.diterima)}</td><td><span class="kl-bilah-baris">${bilah(x)}${gembok(x)}</span></td>
             <td class="num">${angka(x.osda)}</td><td class="num">${angka(x.disanggah)}</td><td class="num">${angka(x.belum)}</td><td class="num">${angka(x.terkunci)}</td>
             <td class="num">${x.rata_hari != null ? `${String(x.rata_hari).replace('.', ',')} hari` : '-'}</td><td class="num">${x.tertua_hari != null ? `${angka(x.tertua_hari)} hari` : '-'}</td></tr>`).join('')}</tbody></table></div>`
-          : kosong('Belum ada putusan', 'Putusan sidang yang diserahkan ke musyrif akan terekap di sini.', 'fa-gavel')}</div>`, '', 'diurutkan dari yang paling banyak belum/terlambat disahkan')}
+          : kosong('Belum ada putusan', '', 'fa-gavel')}</div>`, '', 'diurutkan dari yang paling banyak belum/terlambat disahkan')}
     </div></div>`;
   // gerak hanya sekali per kunjungan: kelas dilepas sesudah selesai, render ulang tidak memutar lagi
   setTimeout(() => document.querySelector('#viewRoot .kl-gerak')?.classList.remove('kl-gerak'), 2200);
@@ -35584,7 +35544,7 @@ async function viewSarprasAtur() {
   if (APP.view !== 'sarprasatur') return;
   if (!ok) {
     $('viewRoot').innerHTML = kartu('Pengaturan Sarpras',
-      `<div class="card-body">${kosong('Halaman belum bisa dibuka', 'Berkas halaman sarpras gagal dimuat. Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark')}
+      `<div class="card-body">${kosong('Halaman belum bisa dibuka', 'Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark')}
        <p style="text-align:center"><button class="btn btn-primary" id="spUlang"><i class="fa-solid fa-rotate"></i>Coba lagi</button></p></div>`);
     $('spUlang')?.addEventListener('click', () => navigateTo('sarprasatur'));
     return;
@@ -35632,7 +35592,7 @@ async function viewSarpras(halaman) {
   if (APP.view !== v) return;
   if (!ok || typeof window.RQSarpras?.[halaman] !== 'function') {
     $('viewRoot').innerHTML = kartu(PA.NAMA[v]?.nama || 'Sarpras',
-      `<div class="card-body">${kosong('Halaman belum bisa dibuka', 'Berkas halaman sarpras gagal dimuat. Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark')}
+      `<div class="card-body">${kosong('Halaman belum bisa dibuka', 'Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark')}
        <p style="text-align:center"><button class="btn btn-primary" id="spUlang"><i class="fa-solid fa-rotate"></i>Coba lagi</button></p></div>`);
     $('spUlang')?.addEventListener('click', () => navigateTo(v));
     return;
@@ -35734,7 +35694,7 @@ async function viewMentor(halaman) {
   if (APP.view !== v) return;
   if (!ok || typeof window.RQMentor?.[halaman] !== 'function') {
     $('viewRoot').innerHTML = kartu(PA.NAMA[v]?.nama || 'Meja Mentor',
-      `<div class="card-body">${kosong('Halaman belum bisa dibuka', 'Berkas Meja Mentor gagal dimuat. Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark')}
+      `<div class="card-body">${kosong('Halaman belum bisa dibuka', 'Periksa sambungan internet, lalu coba lagi.', 'fa-plug-circle-xmark')}
        <p style="text-align:center"><button class="btn btn-primary" id="mnUlang"><i class="fa-solid fa-rotate"></i>Coba lagi</button></p></div>`);
     $('mnUlang')?.addEventListener('click', () => navigateTo(v));
     return;
@@ -36726,7 +36686,7 @@ viewKeterlibatan = async function () {
       <div class="mz-kop-bawah"><span class="mz-meta">Jumlah catatan bukan ukuran mutu pembinaan. Guru BK tidak dihitung sebagai pencatat.</span></div>
     </section>
     ${buta.length ? `<section class="card kt-buta"><div class="card-head"><div><h3>Kelas tanpa pencatat aktif pekan ini</h3>
-        <p class="sub">Semua pembina kelasnya belum mencatat dalam 7 hari terakhir, atau kelasnya belum punya pembina.</p></div></div>
+        </div></div>
       <div class="card-body kt-chips">${buta.map(({ k, p }) => `<span class="tag ${p.length ? 'tag-sedang' : 'tag-berat'}" title="${esc(p.map(g => g.nama).join(', ') || 'Belum ada pembina')}">${esc(k)}</span>`).join('')}</div></section>` : ''}
     <div class="kt-grid">
       ${kelompok('Belum mencatat', 'diam', diam.map(g => orang(g, 'Tidak ada catatan')), 'Tidak ada.')}
@@ -36815,4 +36775,179 @@ function rampingkanGrafik() {
     } catch (e) { console.warn('[grafik ramping]', e.message); }
     return h;
   };
+})();
+
+APP.versi = 'rq-v2.83';   // v2.83: Satu Bahasa — komponen kb-, Mentor & Sarpras baru, teks penjelasan dipangkas
+/* =====================================================================
+ * v2.83 · SATU BAHASA — komponen bersama kb- (window.RQKb)
+ * Dipakai mentor.js & sarpras.js. Murni HTML-string + pemasang kecil;
+ * gerak hanya transform/opacity dan patuh html.hemat / reduced-motion.
+ * ===================================================================== */
+window.RQKb = (function () {
+  'use strict';
+  const hemat = () => {
+    const k = document.documentElement.classList;
+    return k.contains('hemat') || k.contains('tenang') || !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  };
+  const tingkatMasalah = (n) => { n = Number(n) || 0; return n <= 0 ? 0 : n <= 3 ? 1 : n <= 8 ? 2 : n <= 14 ? 3 : 4; };
+  const tingkatSkor = (s) => {
+    if (s == null || s === '' || !isFinite(Number(s))) return 'belum';
+    s = Number(s); return s >= 90 ? 0 : s >= 80 ? 1 : s >= 70 ? 2 : s >= 50 ? 3 : 4;
+  };
+
+  function kepala(o) {
+    const ang = (o.angka || []).map(a => {
+      const bil = typeof a.n === 'number' && isFinite(a.n);
+      return `<span class="kb-angka${a.merah ? ' merah' : ''}"><b${bil ? ` data-kb-n="${a.n}"` : ''}>${esc(bil ? angka(a.n) : a.n)}</b><small>${esc(a.l)}</small></span>`;
+    }).join('');
+    return `<header class="kb-kepala">
+      <div class="kb-kepala-teks">
+        <span class="kb-alis">${esc(o.alis || '')}${o.alis2 ? `<i aria-hidden="true">·</i><span class="kb-alis2">${esc(o.alis2)}</span>` : ''}</span>
+        <div class="kb-judul-baris"><h2>${esc(o.judul || '')}</h2>${o.sisip || ''}</div>
+      </div>
+      ${ang ? `<div class="kb-angka-deret">${ang}</div>` : ''}
+    </header>`;
+  }
+
+  /** daftar: [kunci, label, ikonFa, n?, merah?]; atribut: 'data-sp-tab' → data-sp-tab="k", 'data-mn="tab"' → data-mn="tab" data-v="k". */
+  function tab(daftar, aktif, atribut, label) {
+    const attr = (k) => (/=/.test(atribut) ? `${atribut} data-v="${esc(k)}"` : `${atribut}="${esc(k)}"`);
+    return `<nav class="kb-tab" role="tablist" aria-label="${esc(label || '')}">${(daftar || []).map(([k, l, i, n, merah]) =>
+      `<button type="button" role="tab" class="kb-tab-b" ${attr(k)} aria-selected="${k === aktif}"><i class="fa-solid ${esc(i || 'fa-circle')}" aria-hidden="true"></i><span>${esc(l)}</span>${n ? `<b class="kb-tab-n${merah ? ' merah' : ''}">${angka(n)}</b>` : ''}</button>`).join('')}<i class="kb-tab-garis" aria-hidden="true"></i></nav>`;
+  }
+  function geserGaris(nav) {
+    if (!nav || !nav.isConnected) return;
+    const b = nav.querySelector('[aria-selected="true"]'), g = nav.querySelector('.kb-tab-garis');
+    if (!g) return;
+    if (!b) { g.style.width = '0px'; return; }
+    g.style.width = b.offsetWidth + 'px';
+    g.style.transform = `translateX(${b.offsetLeft}px)`;
+    if (!nav.classList.contains('siap')) requestAnimationFrame(() => nav.classList.add('siap'));
+    if (nav.scrollWidth > nav.clientWidth) {
+      const kiri = b.offsetLeft - nav.scrollLeft, kanan = kiri + b.offsetWidth;
+      if (kiri < 0 || kanan > nav.clientWidth) nav.scrollTo({ left: b.offsetLeft - 24, behavior: hemat() ? 'auto' : 'smooth' });
+    }
+  }
+  const segarTab = (akar) => (akar || document).querySelectorAll('.kb-tab').forEach(geserGaris);
+  // satu pengamat: setiap kb-tab yang baru tergambar / berganti pilihan → garis menyesuaikan
+  let jadwal = 0;
+  const jadwalkan = () => { if (jadwal) return; jadwal = requestAnimationFrame(() => { jadwal = 0; segarTab(); }); };
+  try {
+    new MutationObserver((ms) => { if (ms.some(m => m.type === 'childList' || (m.target.classList && m.target.classList.contains('kb-tab-b')))) jadwalkan(); })
+      .observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected'] });
+    window.addEventListener('resize', jadwalkan, { passive: true });
+  } catch (e) { /* pengamat tidak tersedia */ }
+
+  /* ---- sakelar (popover; lembar bawah di layar < 600 px) ---- */
+  const SAKELAR = new Map();
+  function sakelar(o) {
+    SAKELAR.set(o.id, o);
+    const seg = (o.segmen || []).find(s => s.on)?.v || '';
+    const mati = (it) => seg && it.ada && it.ada.length && !it.ada.includes(seg);
+    return `<div class="kb-sakelar" id="${esc(o.id)}" data-seg="${esc(seg)}">
+      <button type="button" class="kb-sakelar-b" aria-haspopup="dialog" aria-expanded="false"><span>${esc(o.label)}</span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
+      <div class="kb-sakelar-panel" role="dialog" aria-label="${esc(o.label)}" hidden>
+        ${(o.segmen || []).length > 1 ? `<div class="kb-segmen" role="group">${o.segmen.map(s => `<button type="button" data-kb-seg="${esc(s.v)}" aria-pressed="${!!s.on}">${esc(s.l)}</button>`).join('')}</div>` : ''}
+        ${(o.grup || []).map(g => `<div class="kb-sakelar-grup">${g.judul ? `<h5>${esc(g.judul)}</h5>` : ''}${g.item.map(it =>
+          `<button type="button" class="kb-sakelar-i${it.on ? ' on' : ''}" data-kb-v="${esc(it.v)}" data-ada="${esc((it.ada || []).join(' '))}"${mati(it) ? ' disabled' : ''}><span>${esc(it.l)}</span>${it.on ? '<i class="fa-solid fa-check" aria-hidden="true"></i>' : ''}</button>`).join('')}</div>`).join('')}
+      </div></div>`;
+  }
+  function pasangSakelar(id) {
+    const akar = document.getElementById(id), o = SAKELAR.get(id);
+    if (!akar || !o || akar.dataset.terpasang) return;
+    akar.dataset.terpasang = '1';
+    const tombol = akar.querySelector('.kb-sakelar-b'), panel = akar.querySelector('.kb-sakelar-panel');
+    let tirai = null;
+    const tutup = () => {
+      if (panel.hidden) return;
+      panel.hidden = true; tombol.setAttribute('aria-expanded', 'false');
+      if (tirai) { tirai.remove(); tirai = null; }
+      document.removeEventListener('pointerdown', luar, true); document.removeEventListener('keydown', esc_, true);
+    };
+    const luar = (e) => { if (!akar.contains(e.target) && !(tirai && e.target === tirai)) tutup(); };
+    const esc_ = (e) => { if (e.key === 'Escape') { e.stopPropagation(); tutup(); tombol.focus(); } };
+    tombol.addEventListener('click', () => {
+      if (!panel.hidden) return tutup();
+      const lembar = window.innerWidth < 600;
+      panel.classList.toggle('kb-sakelar-lembar', lembar);
+      if (lembar) { tirai = document.createElement('div'); tirai.className = 'kb-tirai'; tirai.addEventListener('click', tutup); document.body.appendChild(tirai); }
+      panel.hidden = false; tombol.setAttribute('aria-expanded', 'true');
+      (panel.querySelector('.kb-sakelar-i.on') || panel.querySelector('button'))?.focus({ preventScroll: true });
+      document.addEventListener('keydown', esc_, true);
+      setTimeout(() => document.addEventListener('pointerdown', luar, true));   // klik pembuka tidak langsung menutup
+    });
+    panel.addEventListener('click', (e) => {
+      const s = e.target.closest('[data-kb-seg]');
+      if (s) {
+        akar.dataset.seg = s.dataset.kbSeg;
+        panel.querySelectorAll('[data-kb-seg]').forEach(b => b.setAttribute('aria-pressed', String(b === s)));
+        panel.querySelectorAll('.kb-sakelar-i').forEach(b => { const ada = b.dataset.ada ? b.dataset.ada.split(' ') : []; b.disabled = !!(ada.length && !ada.includes(s.dataset.kbSeg)); });
+        return;
+      }
+      const it = e.target.closest('.kb-sakelar-i');
+      if (!it || it.disabled) return;
+      tutup();
+      try { o.onPilih(it.dataset.kbV, akar.dataset.seg || undefined); } catch (err) { console.error(err); }
+    });
+  }
+
+  /* ---- angka naik: sekali per alamat per sesi ---- */
+  function angkaNaik(akar) {
+    if (!akar) return;
+    const els = [...akar.querySelectorAll('[data-kb-n]')];
+    if (!els.length) return;
+    const kunci = 'rq:kb-n:' + (location.hash || '#');
+    let sudah = false;
+    try { sudah = sessionStorage.getItem(kunci) === '1'; sessionStorage.setItem(kunci, '1'); } catch (e) { /* penyimpanan tertutup */ }
+    if (sudah || hemat()) return;
+    els.forEach(el => {
+      const akhir = Number(el.dataset.kbN); if (!(akhir > 0)) return;
+      const t0 = performance.now(), dur = 460;
+      el.textContent = '0';
+      const langkah = (t) => { const p = Math.min(1, (t - t0) / dur); el.textContent = angka(Math.round(akhir * (1 - Math.pow(1 - p, 3)))); if (p < 1) requestAnimationFrame(langkah); };
+      requestAnimationFrame(langkah);
+    });
+  }
+
+  /* ---- transisi tampilan (View Transitions bila ada & tidak hemat) ---- */
+  async function transisi(fn) {
+    if (hemat() || typeof document.startViewTransition !== 'function') return fn();
+    const vt = document.startViewTransition(() => fn());
+    try { await vt.updateCallbackDone; await vt.finished; } catch (e) { /* tetap lanjut */ }
+  }
+
+  /* ---- urungkan: aksi ditunda; terkirim saat waktu habis / pindah halaman ---- */
+  let antre = null;
+  function urung(o) {
+    if (antre) antre();   // yang sebelumnya dikirim dulu
+    const el = document.createElement('div');
+    el.className = 'kb-urung'; el.setAttribute('role', 'status');
+    el.innerHTML = `<span>${esc(o.teks || 'Tersimpan')}</span><button type="button">Urungkan</button>`;
+    document.body.appendChild(el);
+    let selesai = false, t = 0;
+    const bersih = () => {
+      clearTimeout(t);
+      window.removeEventListener('pagehide', kirim); window.removeEventListener('hashchange', kirim);
+      document.removeEventListener('visibilitychange', sembunyi);
+      el.classList.add('pergi'); setTimeout(() => el.remove(), 260);
+      if (antre === kirim) antre = null;
+    };
+    const kirim = () => { if (selesai) return; selesai = true; bersih(); Promise.resolve().then(o.kirim).catch(e => (typeof fireError === 'function' ? fireError(e) : console.error(e))); };
+    const sembunyi = () => { if (document.visibilityState === 'hidden') kirim(); };
+    el.querySelector('button').addEventListener('click', () => { if (selesai) return; selesai = true; bersih(); try { o.batal && o.batal(); } catch (e) { console.error(e); } });
+    t = setTimeout(kirim, o.ms ?? 4500);
+    window.addEventListener('pagehide', kirim); window.addEventListener('hashchange', kirim);
+    document.addEventListener('visibilitychange', sembunyi);
+    antre = kirim;
+  }
+
+  /** Kirim aksi yang sedang menunggu "Urungkan" sekarang juga (dipakai sebelum pindah halaman). */
+  const kirimTertunda = () => { if (antre) antre(); };
+  return { hemat, tingkatMasalah, tingkatSkor, kepala, tab, geserGaris, segarTab, sakelar, pasangSakelar, angkaNaik, transisi, urung, kirimTertunda };
+})();
+/* v2.83 · navigasi memakai pushState (tanpa hashchange): aksi tertunda dikirim sebelum halaman berganti. */
+(function bungkusNavigasiUrung() {
+  const asli = navigateTo;
+  navigateTo = async function () { try { window.RQKb.kirimTertunda(); } catch (e) { /* tetap berpindah */ } return asli.apply(this, arguments); };
+  window.addEventListener('popstate', () => { try { window.RQKb.kirimTertunda(); } catch (e) { /* abaikan */ } });
 })();

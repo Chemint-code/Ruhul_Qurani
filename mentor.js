@@ -91,28 +91,50 @@
       return;
     }
     try { document.documentElement.style.setProperty('--mn-atas', (document.querySelector('.topbar')?.offsetHeight || 0) + 'px'); } catch (e) {}
-    akar.innerHTML = `<div class="mn-akar">${kepalaHtml()}<nav class="mn-tab" role="tablist">${tabHtml()}</nav><section class="mn-isi" id="mnIsi" aria-live="polite"></section></div>`;
+    if (!tabDaftar().some(([v]) => v === S.tab)) S.tab = 'ringkasan';
+    akar.innerHTML = `<div class="mn-akar">${kepalaHtml()}${K().tab(tabDaftar(), S.tab, 'data-mn="tab"', 'Bagian mentor')}<section class="mn-isi" id="mnIsi" aria-live="polite"></section></div>`;
+    K().pasangSakelar('mnSakelar');
     onKlik(klikMeja);
     await gambarTab();
   }
+  /* v2.83 · kepala ringkas (kb-kepala) + satu sakelar bidang × unit */
+  const K = () => window.RQKb;
+  function sakelarHtml() {
+    const p = S.pilih;
+    const bidang = [...new Map(S.pilihan.map(x => [x.id_bidang, x.nama])).entries()];
+    const unit = [...new Set(S.pilihan.map(x => x.unit))];
+    return K().sakelar({
+      id: 'mnSakelar', label: `${p.nama} · ${unitLabel(p.unit)}`,
+      grup: [{ item: bidang.map(([id, nama]) => ({ v: id, l: nama, on: id === p.id_bidang, ada: S.pilihan.filter(x => x.id_bidang === id).map(x => x.unit) })) }],
+      segmen: unit.length > 1 ? unit.map(u => ({ v: u, l: unitLabel(u), on: u === p.unit })) : null,
+      onPilih: (id, unitPilih) => pilihBidang(id, unitPilih || p.unit)
+    });
+  }
   function kepalaHtml() {
-    const p = S.pilih, banyak = S.pilihan.length > 1;
-    return `<header class="mn-kepala">
-      <span class="mn-lambang" aria-hidden="true"><i class="fa-solid fa-compass"></i></span>
-      <div class="mn-identitas">
-        <span class="mn-alis"><i class="fa-solid fa-compass"></i>Mentor · Unit ${esc(unitLabel(p.unit))}</span>
-        <h2>${esc(p.nama)}</h2>
-        <span class="mn-pekan-label">${esc(labelPekan(S.minggu || mingguDari(hariIni())))}</span>
-      </div>
-      ${banyak ? `<div class="mn-pilih" role="group" aria-label="Pilih bidang">${S.pilihan.map(x => `<button type="button" class="mn-pil${x.id_bidang === p.id_bidang && x.unit === p.unit ? ' on' : ''}"
-          data-mn="bidang" data-id="${esc(x.id_bidang)}" data-unit="${esc(x.unit)}">${esc(x.nama)}${S.pilihan.some(y => y.id_bidang === x.id_bidang && y.unit !== x.unit) ? ` · ${esc(unitLabel(x.unit))}` : ''}</button>`).join('')}</div>` : ''}
-    </header>`;
+    const p = S.pilih;
+    return K().kepala({ alis: `Mentor · ${unitLabel(p.unit)}`, alis2: labelPekan(S.minggu || mingguDari(hariIni())), judul: p.nama,
+      sisip: S.pilihan.length > 1 ? sakelarHtml() : '', angka: S.angka || [] });
+  }
+  function pilihBidang(id, unit) {
+    S.pilih = S.pilihan.find(x => x.id_bidang === id && x.unit === unit) || S.pilihan.find(x => x.id_bidang === id) || S.pilih;
+    S.pel.bidang = S.pilih.id_bidang; S.rowsKunci = ''; S.angka = null;
+    return meja($('viewRoot'));
+  }
+  /** Angka kunci kepala: catatan 7 hari · agenda x/y · rata-rata skor kamar (Kebersihan). */
+  function isiAngka(a) {
+    S.angka = a;
+    const kp = document.querySelector('.mn-akar .kb-kepala'); if (!kp) return;
+    const baru = document.createElement('div'); baru.innerHTML = K().kepala({ judul: '', angka: a });
+    const deret = baru.querySelector('.kb-angka-deret'), lama = kp.querySelector('.kb-angka-deret');
+    if (!deret) return;
+    if (lama) lama.replaceWith(deret); else kp.appendChild(deret);
+    K().angkaNaik(kp);
   }
   function tabDaftar() {
     return [['ringkasan', 'Ringkasan', 'fa-layer-group'], ['pelanggaran', 'Pelanggaran', 'fa-scale-balanced'], ['agenda', 'Agenda', 'fa-calendar-days'], ['standar', 'Standar', 'fa-list-check'],
       ...(window.RQMentor?._tabTambahan ? window.RQMentor._tabTambahan(S) : [])];
   }
-  const tabHtml = () => tabDaftar().map(([v, l, i]) => `<button type="button" role="tab" aria-selected="${S.tab === v}" class="mn-tab-b${S.tab === v ? ' on' : ''}" data-mn="tab" data-v="${v}"><i class="fa-solid ${i}"></i>${esc(l)}</button>`).join('');
+  const tabHtml = () => K().tab(tabDaftar(), S.tab, 'data-mn="tab"', 'Bagian mentor');
 
   /** Tab baru → pemintal + animasi masuk. Tab yang sama (sesudah aksi, saring, pekan) → isi lama tetap
    *  di tempat (redup sebentar), lalu diganti tanpa memutar ulang animasi masuk. */
@@ -122,7 +144,7 @@
     isi.dataset.tab = S.tab; isi.dataset.siap = '';
     isi.classList.toggle('ulang', ulang);
     if (ulang) isi.classList.add('segar');
-    else isi.innerHTML = '<p class="mn-muat"><i class="fa-solid fa-circle-notch fa-spin"></i></p>';
+    else isi.innerHTML = '<div class="kb-muat" role="status" aria-label="Memuat"><i></i><i></i><i></i><i></i></div>';
     try {
       if (S.tab === 'ringkasan') await tabRingkasan(isi);
       else if (S.tab === 'pelanggaran') await tabPelanggaran(isi);
@@ -141,17 +163,22 @@
   /* -- Ringkasan: 7 hari terakhir -- */
   async function tabRingkasan(isi) {
     const t = hariIni(), dari = geser(t, -6);
-    const [rows, agenda] = await Promise.all([
+    const kbr = S.pilih.id_bidang === 'BDG-KBR';
+    const [rows, agenda, kamar] = await Promise.all([
       rpc('mentor_pelanggaran', { p_dari: dari, p_sampai: t, p_bidang: S.pilih.id_bidang, p_unit: S.pilih.unit }),
-      rpc('bidang_agenda_daftar', { p_bidang: S.pilih.id_bidang, p_unit: S.pilih.unit, p_minggu: mingguDari(t) }).catch(() => [])
+      rpc('bidang_agenda_daftar', { p_bidang: S.pilih.id_bidang, p_unit: S.pilih.unit, p_minggu: mingguDari(t) }).catch(() => []),
+      kbr ? rpc('mentor_kamar', { p_unit: S.pilih.unit }).catch(() => []) : null
     ]);
     if (S.tab !== 'ringkasan') return;
     const R = ringkas(rows || []), maks = Math.max(1, ...Object.values(R.perAngkatan));
     const total = (rows || []).length, beres = (agenda || []).filter(a => a.terlaksana).length;
+    const skor = (kamar || []).map(k => k?.inspeksi?.skor).filter(v => v != null);
+    isiAngka([{ n: total, l: 'catatan 7 hari' }, { n: `${angka(beres)}/${angka((agenda || []).length)}`, l: 'agenda' },
+      ...(kbr ? [{ n: skor.length ? Math.round(skor.reduce((a, b) => a + Number(b), 0) / skor.length) : '—', l: 'skor kamar', merah: skor.length && skor.reduce((a, b) => a + Number(b), 0) / skor.length < 70 }] : [])]);
     isi.innerHTML = `<div class="mn-ringkas">
       <section class="mn-kartu mn-angkatan-kartu">
         <header><h3>Catatan ${esc(S.pilih.nama)}</h3><span>${esc(tglPendek(dari))} – ${esc(tglPendek(t))} · ${angka(total)} catatan</span></header>
-        <div class="mn-angkatan">${ANGKATAN.map((a, i) => `<div class="mn-ang" data-angkatan="${a}" style="--i:${i};--h:${Math.round(100 * R.perAngkatan[a] / maks)}%">
+        <div class="mn-angkatan">${ANGKATAN.map((a, i) => `<div class="mn-ang${R.perAngkatan[a] ? '' : ' kosong'}" data-angkatan="${a}" style="--i:${i};--h:${Math.round(100 * R.perAngkatan[a] / maks)}%">
             <span class="mn-batang" aria-hidden="true"><i></i></span><b>${angka(R.perAngkatan[a])}</b><small>${a}</small></div>`).join('')}</div>
       </section>
       <section class="mn-kartu">
@@ -160,7 +187,7 @@
           : '<p class="mn-kosong">Belum ada catatan pada rentang ini.</p>'}
       </section>
       <section class="mn-kartu mn-berulang">
-        <header><h3>Santri berulang</h3><span>tiga catatan atau lebih</span></header>
+        <header><h3>Santri berulang</h3><span class="kb-lencana" title="tiga catatan atau lebih">≥3</span></header>
         ${R.berulang.length ? `<ul>${R.berulang.map(s => `<li><span><b>${esc(s.nama)}</b><small>${esc(s.kelas || '')}</small></span><em>${angka(s.n)}×</em></li>`).join('')}</ul>`
           : '<p class="mn-kosong">Tidak ada.</p>'}
       </section>
@@ -295,12 +322,11 @@
     const d = b.dataset;
     try {
       switch (d.mn) {
-        case 'tab': S.tab = d.v; document.querySelectorAll('.mn-tab-b').forEach(x => { const on = x.dataset.v === d.v; x.classList.toggle('on', on); x.setAttribute('aria-selected', String(on)); }); return gambarTab();
-        case 'bidang': S.pilih = S.pilihan.find(x => x.id_bidang === d.id && x.unit === d.unit) || S.pilih; S.pel.bidang = S.pilih.id_bidang; S.rowsKunci = '';
-          return meja($('viewRoot'));
+        case 'tab': S.tab = d.v; document.querySelectorAll('.mn-akar .kb-tab-b').forEach(x => x.setAttribute('aria-selected', String(x.dataset.v === d.v))); return gambarTab();
+        case 'bidang': return pilihBidang(d.id, d.unit);
         case 'periode': S.pel.periode = d.v; return gambarTab();
         case 'angkatan': S.pel.angkatan = d.v; document.querySelectorAll('[data-mn="angkatan"]').forEach(x => x.classList.toggle('on', x.dataset.v === d.v)); return gambarTabelPel();
-        case 'pekan': S.minggu = geser(S.minggu, 7 * Number(d.v)); document.querySelector('.mn-pekan-label')?.replaceChildren(document.createTextNode(labelPekan(S.minggu))); return gambarTab();
+        case 'pekan': S.minggu = geser(S.minggu, 7 * Number(d.v)); document.querySelector('.mn-akar .kb-alis2')?.replaceChildren(document.createTextNode(labelPekan(S.minggu))); return gambarTab();
         case 'agenda-tambah': return tambahAgenda(Number(d.hari));
         case 'agenda-centang': {
           const a = S.agenda.find(x => String(x.id) === d.id); if (!a) return;
@@ -324,7 +350,7 @@
   /* ---------------- PENGATURAN MENTOR (super admin) ---------------- */
   const A = { unit: 'putra', data: null };
   async function atur(akar) {
-    akar.innerHTML = '<div class="mn-akar mn-atur"><p class="mn-muat"><i class="fa-solid fa-circle-notch fa-spin"></i></p></div>';
+    akar.innerHTML = '<div class="mn-akar mn-atur"><div class="kb-muat" role="status" aria-label="Memuat"><i></i><i></i><i></i><i></i></div></div>';
     try { A.data = await rpc('mentor_daftar'); }
     catch (e) { akar.innerHTML = kartu('Pengaturan Mentor', `<div class="card-body">${kosong('Tidak bisa dibuka', galatTeks(e), 'fa-lock')}</div>`); return; }
     if (APP_().view !== 'mentoratur') return;
@@ -437,14 +463,15 @@
     I.kamar.forEach(k => { const lt = k.lantai || ''; if (!grup.has(lt)) grup.set(lt, []); grup.get(lt).push(k); });
     const lantai = [...grup.keys()].sort((a, b) => (a === '') - (b === '') || String(a).localeCompare(String(b), 'id', { numeric: true }));
     let i = 0;
+    const legenda = `<span class="kb-legenda" aria-label="Skor inspeksi">${[['0', '≥90'], ['1', '80'], ['2', '70'], ['3', '50'], ['4', '<50']].map(([t, l]) => `<span data-tingkat="${t}"><i></i>${esc(l)}</span>`).join('')}</span>`;
     isi.innerHTML = I.kamar.length ? `<section class="mn-denah">
-        <p class="mn-legenda"><span><i class="mn-sw tinggi"></i>≥ 90</span><span><i class="mn-sw sedang"></i>70–89</span><span><i class="mn-sw rendah"></i>&lt; 70</span><span><i class="mn-sw belum"></i>Belum diperiksa</span></p>
-        ${lantai.map(lt => `<div class="mn-lantai" data-lantai="${esc(lt)}"><h4>${lt ? `Lantai ${esc(lt)}` : 'Belum berlantai'}</h4>
+        ${lantai.map((lt, li) => `<div class="mn-lantai" data-lantai="${esc(lt)}"><h4><span>${lt ? `Lantai ${esc(lt)}` : 'Belum berlantai'}</span>${li === 0 ? legenda : ''}</h4>
           <div class="mn-lok-kisi">${grup.get(lt).sort((a, b) => (a.zona === 'koridor') - (b.zona === 'koridor') || (a.nomor ?? 999) - (b.nomor ?? 999)).map(k => `
-            <button type="button" class="mn-lok${k.zona === 'koridor' ? ' koridor' : ''}" data-mn="lok" data-id="${esc(k.id)}" data-tingkat="${tingkat(k)}" style="--i:${i++}">
-              <span class="mn-lok-nama">${k.zona === 'koridor' ? '<i class="fa-solid fa-stairs" aria-hidden="true"></i>Koridor' : `<span class="pk-plakat kecil"><span class="pk-nomor">${esc(k.nomor)}</span></span>`}</span>
-              <b class="mn-lok-skor">${k.inspeksi ? angka(k.inspeksi.skor) : '—'}</b>
-              <small>${k.inspeksi ? esc(U.tglPendek(k.inspeksi.tanggal)) : 'belum'}${k.zona === 'kamar' ? ` · ${angka(k.penghuni)} santri` : ''}</small>
+            <button type="button" class="mn-lok kb-kamar${k.zona === 'koridor' ? ' koridor' : ''}" data-mn="lok" data-id="${esc(k.id)}" data-tingkat="${window.RQKb.tingkatSkor(k.inspeksi?.skor)}" style="--i:${i++}">
+              <span class="mn-lok-atas">${k.zona === 'koridor' ? '<span class="kb-kamar-no kb-kamar-kor"><i class="fa-solid fa-stairs" aria-hidden="true"></i></span>' : `<span class="kb-kamar-no">${esc(k.nomor)}</span>`}
+                <b class="mn-lok-skor">${k.inspeksi ? angka(k.inspeksi.skor) : '—'}</b></span>
+              <span class="kb-kamar-nama">${esc(k.zona === 'koridor' ? 'Koridor' : k.nama || `Kamar ${k.nomor}`)}${k.zona === 'kamar' ? ` · ${angka(k.penghuni)} santri` : ''}</span>
+              <span class="kb-kamar-status">${k.inspeksi ? esc(U.tglPendek(k.inspeksi.tanggal)) : 'Belum diperiksa'}</span>
               ${Number(k.sitaan_aktif) ? `<span class="mn-lok-sita" title="Sitaan aktif"><i class="fa-solid fa-box-archive" aria-hidden="true"></i>${angka(k.sitaan_aktif)}</span>` : ''}
             </button>`).join('')}</div></div>`).join('')}
       </section>`

@@ -100,7 +100,7 @@ function pasangRpc() {
   const statusPanitia = (P) => { const w = wajibKini(); const kurang = [...Object.keys(LBL).filter(k => !P.isi[k]).map(k => LBL[k]), ...Object.keys(w).filter(k => !P.isi.pj[k]).map(k => 'PJ ' + KLBL[k])];
     return { ...P, wajib: w, lengkap: !kurang.length, kurang }; };
   const S = window.__V269 = { butir, panggil: [], pid: 1000, snap: {}, banding, gerbang: window.__GERBANG !== false,
-    panitia: { sesi: '2026-11-06', unit: 'putra', isi: { pj: {} }, pembimbing: null, kredit: false } };
+    panitia: { sesi: '2026-11-06', unit: 'putra', isi: { pj: {} }, pembimbing: null, kredit: false, bobot: { ketua: 15, lain: 10 } } };   // v2.83: bobot jabatan
   const r = (data) => ({ data, error: null });
   const salah = (m) => ({ data: null, error: { message: m } });
   const gagalkan = (n) => window.__GAGAL === n;
@@ -139,9 +139,9 @@ function pasangRpc() {
       const isi = a.p_isi || {}; const nisn = [...Object.keys(LBL).map(k => isi[k]), ...Object.values(isi.pj || {})].filter(Boolean);
       if (new Set(nisn).size !== nisn.length) return salah('Hakim Uji 0 sudah memegang jabatan lain. Satu santri satu jabatan dalam satu sidang.');
       const nm = (k) => CALON.find(c => c.kunci === k);
-      const P = { sesi: a.p_sesi, unit: 'putra', isi: { pj: {} }, pembimbing: isi.pembimbing || null, kredit: S.panitia.kredit };
-      Object.keys(LBL).forEach(k => { if (isi[k]) P.isi[k] = { ...nm(isi[k]), poin: k === 'ketua' ? 15 : 10, kredit: P.kredit }; });
-      Object.entries(isi.pj || {}).forEach(([k, v]) => { P.isi.pj[k] = { ...nm(v), poin: 10, kredit: P.kredit }; });
+      const P = { sesi: a.p_sesi, unit: 'putra', isi: { pj: {} }, pembimbing: isi.pembimbing || null, kredit: S.panitia.kredit, bobot: { ketua: 15, lain: 10 } };
+      Object.keys(LBL).forEach(k => { if (isi[k]) P.isi[k] = { ...nm(isi[k]), poin: k === 'ketua' ? 15 : 10, perkiraan: k === 'ketua' ? 15 : 10, kredit: P.kredit }; });
+      Object.entries(isi.pj || {}).forEach(([k, v]) => { P.isi.pj[k] = { ...nm(v), poin: 10, perkiraan: 10, kredit: P.kredit }; });
       const st = statusPanitia(P); if (!st.lengkap) return salah('Susunan majelis belum lengkap: ' + st.kurang.join(', ') + '.');
       S.panitia = P; return r(st); },
     sidang_sahkan_osda: (a) => { S.panggil.push(['sahkan', a]); let n = 0;
